@@ -28,7 +28,7 @@ export function createChatSendHandler(d: ChatSendDependencies) {
                 if (!body.thread)
                     throw new AiHttpError(422, 'chat_thread_invalid');
                 const bridgeSourceId = z.uuid().parse(await d.bridgeSourceId(hash));
-                const origin = chatOriginSchema.parse(await chatRpc(d.rpc, hash, 'chat_outbox', { idempotencyKey: key, bridgeSourceId, sourceEventId: source, spaceKey: body.space, threadName: body.thread, text: body.text }));
+                const origin = chatOriginSchema.parse(await chatRpc(d.rpc, hash, 'chat_outbox', { idempotencyKey: key, bridgeSourceId, sourceEventId: source, spaceKey: body.space, threadName: body.thread, text: body.text, ...(body.clientMessageId === undefined ? {} : { clientMessageId: body.clientMessageId }) }));
                 outbox = origin.outbox;
                 matchChatBody(outbox, body);
                 if (outbox.purpose !== 'bridge_reply' || outbox.bridgeSourceId !== bridgeSourceId || outbox.sourceEventId !== source)

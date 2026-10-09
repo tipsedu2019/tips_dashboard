@@ -1,5 +1,7 @@
 # AI 에이전트 활성화·수용 packet
 
+> Pending extension: [Internal Chat thread replies](chat-thread-replies.md) defines the separately reviewed multi-reply and Chat-only-key contract. It does not authorize or activate sending; historical single-room/completion packets below retain their original scope.
+
 작성일: 2026-10-03 · 갱신일: 2026-10-04. 상태: **로컬 구현 수용 / 최종 통합 gate 진행 / 운영 활성화·실제 발송 미실행**.
 
 2026-10-04 현재 상태: Tasks 1–5 로컬 구현은 accepted feature `471312763dd7c430c845504cd1fa85493d9e69e5`에 수용되었다. 통합 base는 `0bbc7593`, CI 소유자의 scoped 수락 HEAD는 `737dfd72f875008265dc98f2909924494bec3c11`이다. 아래 C20 시작점·계획 체크박스·당시 수치는 역사적 기록이며 현재 미구현 상태를 뜻하지 않는다. 현재 통합 QA와 마지막 수정의 검증은 별도로 기록하며, full DB·strict consumer·whole-branch 및 운영 수용을 완료했다고 선언하지 않는다. 운영 SQL 설치·설정·발급·scheduler·provider 증거는 별도 gate다.

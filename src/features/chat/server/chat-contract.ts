@@ -9,12 +9,12 @@ export const chatThreadSchema = z.string().max(500).regex(/^spaces\/[A-Za-z0-9_-
 export const chatMessageSchema = z.string().max(200).regex(/^spaces\/[A-Za-z0-9_-]+\/messages\/[A-Za-z0-9_.-]+$/);
 const text = z.string().refine(v => v.trim().length > 0 && [...v].length <= 20000);
 export const chatPayloadSchema = z.strictObject({ text, thread: z.strictObject({ name: chatThreadSchema }).optional() });
-export const chatSendBodySchema = z.strictObject({ space: chatSpaceSchema, thread: chatThreadSchema.optional(), text });
+export const chatSendBodySchema = z.strictObject({ space: chatSpaceSchema, thread: chatThreadSchema.optional(), text, clientMessageId: uuid.transform(v => v.toLowerCase()).optional() });
 export const chatStateSchema = z.enum(['pending', 'sending', 'sent', 'retry_wait', 'failed', 'delivery_unknown', 'cancelled', 'incident']);
 export const chatOutboxSchema = z.strictObject({
-    id: uuid, requestId: uuid.nullable(), completionEventId: uuid.nullable(), bridgeSourceId: uuid.nullable(), sourceEventId: chatMessageSchema.nullable(), purpose: z.enum(['ai_completion', 'bridge_reply']), spaceKey: chatSpaceSchema, expectedSpace: chatSpaceResourceSchema.nullable(), threadName: chatThreadSchema.nullable(), payload: chatPayloadSchema, payloadHash: z.string().regex(/^[a-f0-9]{64}$/), upstreamRequestId: uuid, state: chatStateSchema, revision: decimal, reason: z.string().max(200).nullable(), attemptCount: z.number().int().min(0).max(5), activeAttemptId: uuid.nullable(), leaseExpiresAt: timestamp.nullable(), readyAt: timestamp, createdAt: timestamp, updatedAt: timestamp,
+    id: uuid, clientMessageId: uuid.optional(), requestId: uuid.nullable(), completionEventId: uuid.nullable(), bridgeSourceId: uuid.nullable(), sourceEventId: chatMessageSchema.nullable(), purpose: z.enum(['ai_completion', 'bridge_reply']), spaceKey: chatSpaceSchema, expectedSpace: chatSpaceResourceSchema.nullable(), threadName: chatThreadSchema.nullable(), payload: chatPayloadSchema, payloadHash: z.string().regex(/^[a-f0-9]{64}$/), upstreamRequestId: uuid, state: chatStateSchema, revision: decimal, reason: z.string().max(200).nullable(), attemptCount: z.number().int().min(0).max(5), activeAttemptId: uuid.nullable(), leaseExpiresAt: timestamp.nullable(), readyAt: timestamp, createdAt: timestamp, updatedAt: timestamp,
 }).superRefine((o, ctx) => {
-    const valid = o.purpose === 'bridge_reply' ? o.requestId === null && o.completionEventId === null && o.bridgeSourceId !== null && o.sourceEventId !== null && o.threadName !== null && o.payload.thread?.name === o.threadName : o.requestId !== null && o.completionEventId !== null && o.bridgeSourceId === null && o.sourceEventId === null && o.threadName === null && o.payload.thread === undefined;
+    const valid = o.purpose === 'bridge_reply' ? o.requestId === null && o.completionEventId === null && o.bridgeSourceId !== null && o.sourceEventId !== null && o.threadName !== null && o.payload.thread?.name === o.threadName : o.clientMessageId === undefined && o.requestId !== null && o.completionEventId !== null && o.bridgeSourceId === null && o.sourceEventId === null && o.threadName === null && o.payload.thread === undefined;
     if (!valid)
         ctx.addIssue({ code: 'custom', message: 'Invalid intent identity' });
 });
@@ -49,11 +49,11 @@ export async function chatRpc(rpc: AiRpc, tokenHash: string, operation: ChatOper
 }
 // Compare fields, never the PostgreSQL jsonb::text hash with JSON.stringify bytes.
 export function matchChatBody(o: ChatIntent, body: ChatSendBody) {
-    if (o.spaceKey !== body.space || (o.threadName ?? undefined) !== body.thread || o.payload.text !== body.text || (o.payload.thread?.name ?? undefined) !== body.thread)
+    if (o.clientMessageId !== body.clientMessageId || o.spaceKey !== body.space || (o.threadName ?? undefined) !== body.thread || o.payload.text !== body.text || (o.payload.thread?.name ?? undefined) !== body.thread)
         throw new AiHttpError(409, 'ai_agent_idempotency_conflict');
 }
 export function sameChatIdentity(a: ChatIntent, b: ChatIntent) {
-    return ['id', 'requestId', 'completionEventId', 'bridgeSourceId', 'sourceEventId', 'purpose', 'spaceKey', 'expectedSpace', 'threadName', 'payloadHash', 'upstreamRequestId'].every(k => a[k as keyof ChatIntent] === b[k as keyof ChatIntent]) && a.payload.text === b.payload.text && a.payload.thread?.name === b.payload.thread?.name;
+    return ['id', 'clientMessageId', 'requestId', 'completionEventId', 'bridgeSourceId', 'sourceEventId', 'purpose', 'spaceKey', 'expectedSpace', 'threadName', 'payloadHash', 'upstreamRequestId'].every(k => a[k as keyof ChatIntent] === b[k as keyof ChatIntent]) && a.payload.text === b.payload.text && a.payload.thread?.name === b.payload.thread?.name;
 }
 export function validateChatCompletion(o: ChatIntent, origin: string | undefined) {
     if (o.purpose !== 'ai_completion')

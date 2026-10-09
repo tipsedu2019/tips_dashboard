@@ -32,8 +32,12 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261006091000_withdrawal_future_roster_boundary.sql',
  'supabase/migrations/20261007141548_withdrawal_completion_without_settlement.sql',
  'supabase/migrations/20261008113322_withdrawal_completion_optional_request_snapshot.sql',
+ 'supabase/migrations/20261008140556_ai_agent_thread_replies.sql',
+ 'supabase/tests/ai_agent_thread_replies_test.sql',
  'tests/probe-ai-agent-http-producer.mjs',
  'tests/probe-ai-agent-chat-runtime-concurrency.mjs',
+ 'tests/probe-ai-agent-thread-replies-concurrency.mjs',
+ 'src/features/chat/server/chat-outbox.ts',
  ...AI_CONSUMERS,
  'tests/ai-agent-http-producer-assertions.mjs',
  'tests/ai-agent-chat-runtime-assertions.mjs',
@@ -78,13 +82,15 @@ export const ACCEPTED_AI_MIGRATIONS=Object.freeze([
 // Current reviewed source pins. The authorized pre-install Squawk correction
 // and intermediate-issuance ACL correction supersede uninstalled SQL snapshots;
 // prior receipts remain historical.
+export const THREAD_REPLY_MIGRATION=Object.freeze({"fileName":"20261008140556_ai_agent_thread_replies.sql","sha256":"2b618a4944c4e5bdf573b1335cd146a4eb989fff451ca585f4e55a8c348682c1","status":"final"});
 export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  {"fileName": "20261004030228_ai_agent_request_notification_optin.sql", "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01", "status": "final"},
  {"fileName": "20261007062153_ai_agent_personal_owner.sql", "sha256": "3ba31674ad33d258e70e39a2048ad1d28508cde3473bc7e61d5f9cc6213a1fad", "status": "final"},
  {"fileName": "20261007062159_agent_personal_dashboard_read.sql", "sha256": "28a40477e01001d664d716ab4ab8be550db295ea2300822bb3ff009531341954", "status": "final"},
+ THREAD_REPLY_MIGRATION,
 ]);
 // Preserve the reviewed ac84 inventory and exact main addition.
-// Only the five reviewed withdrawal migrations may extend that inventory.
+// Only the five reviewed withdrawal migrations and pinned thread-reply migration extend it.
 // A future migration requires an explicit review of these source-owned pins.
 const REVIEWED_MANIFEST_PREFIX_SHA256='80a6a4d06fe190ef65e9c926392cf187995c07ce1a25c275ac07dc9d72df79c2';
 const MAIN_MIGRATION=Object.freeze({fileName:'20261007135140_textbook_latest_count_read_aggregation.sql',status:'final',sha256:'1491b4b824c343e23dc24b83e1be41214f5fda197813dca012c252a9b541cb23'});
@@ -123,12 +129,12 @@ export async function snapshotAiSource(root=ROOT){
  }
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
  const withdrawalNames=CURRENT_WITHDRAWAL_MIGRATIONS.map(m=>m.fileName);
- const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName));
+ const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName);
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,161,'AI canonical manifest inventory');
- const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
+ assert.equal(manifest.orderedNewMigrations.length,162,'AI canonical manifest inventory');
+ const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');
  for(const m of CURRENT_WITHDRAWAL_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed withdrawal migration source drift');
@@ -286,6 +292,7 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_space_policy_test.sql",
   "supabase/tests/ai_agent_personal_owner_test.sql",
   "supabase/tests/agent_personal_dashboard_read_test.sql",
+  "supabase/tests/ai_agent_thread_replies_test.sql",
 ]);
 
 export const AI_PROBES = Object.freeze([
@@ -308,4 +315,5 @@ export const AI_PROBES = Object.freeze([
   "tests/probe-ai-agent-chat-runtime-concurrency.mjs",
   "tests/probe-ai-agent-http-producer.mjs",
   "tests/probe-ai-agent-personal-integration.mjs",
+  "tests/probe-ai-agent-thread-replies-concurrency.mjs",
 ]);

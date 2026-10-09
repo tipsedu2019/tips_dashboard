@@ -2,13 +2,13 @@ import test from 'node:test';import assert from 'node:assert/strict';import {JSD
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const userId='10000000-0000-4000-8000-000000000001',id='20000000-0000-4000-8000-000000000001';
 const credential={id,label:'synthetic',scopes:['ai-agent:requests:read'],grant:{queues:['employee_requests'],actions:['read']},expiresAt:'2026-10-04T00:00:00Z',token:'tips_agent_'+'a'.repeat(64)};
-async function mount(t,{support=true,renderFixture}={}){
+async function mount(t,{support=true,configuredCount=1,renderFixture}={}){
  const dom=new JSDOM('<div id="root"></div>',{url:'https://test.invalid/admin/settings/agent-access'});globalThis.window=dom.window;globalThis.document=dom.window.document;globalThis.self=dom.window;
  for(const key of ['HTMLElement','HTMLInputElement','HTMLTextAreaElement','Element','DocumentFragment','MutationObserver','CustomEvent','Event','MouseEvent','KeyboardEvent','Node','NodeFilter','DOMRect','getComputedStyle'])globalThis[key]=dom.window[key];
  globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};globalThis.requestAnimationFrame=window.requestAnimationFrame=cb=>window.setTimeout(cb,0);globalThis.cancelAnimationFrame=window.cancelAnimationFrame=window.clearTimeout;window.HTMLElement.prototype.scrollIntoView=()=>{};window.HTMLElement.prototype.getClientRects=function(){return this.hidden?[]:[{width:32,height:32}];};
  let auth={user:{id:userId,isFallbackRole:false,name:'합성 관리자'},role:'admin',loading:false,session:{user:{id:userId},access_token:'fixture'}};
  const oldFetch=globalThis.fetch,oldUrl=process.env.NEXT_PUBLIC_SUPABASE_URL;process.env.NEXT_PUBLIC_SUPABASE_URL='https://test.invalid';const writes=[];
- globalThis.fetch=async(url,init)=>{if(url.includes('/spaces'))return Response.json({data:{items:Array.from({length:7},(_,i)=>({key:`space_${i+1}`,label:`공간 ${i+1}`,configured:i===0,selectable:i===0,reason:i?'space_not_configured':null,revision:'1'}))},error:null});const args=JSON.parse(init.body);if(args.p_action==='list')return Response.json({items:[],total:0,supportEnabled:support});const pending=Promise.withResolvers();writes.push({...pending,args});return pending.promise;};
+ globalThis.fetch=async(url,init)=>{if(url.includes('/spaces'))return Response.json({data:{items:Array.from({length:7},(_,i)=>({key:`space_${i+1}`,label:`공간 ${i+1}`,configured:i<configuredCount,selectable:i<configuredCount,reason:i>=configuredCount?'space_not_configured':null,revision:'1'}))},error:null});const args=JSON.parse(init.body);if(args.p_action==='list')return Response.json({items:[],total:0,supportEnabled:support});const pending=Promise.withResolvers();writes.push({...pending,args});return pending.promise;};
  const {AiAgentCredentialWorkspace}=loadNotificationComponent('src/features/ai-agent/ai-agent-credential-issue-dialog.tsx',new Map([['@/providers/auth-provider',{useAuth:()=>auth}],['@/lib/supabase',{supabase:{auth:{getSession:async()=>({data:{session:auth.session},error:null})}}}]]));
  const Component=renderFixture?renderFixture(loadNotificationComponent):AiAgentCredentialWorkspace;
  const {createRoot}=await import('react-dom/client');let root=createRoot(document.getElementById('root'));const flush=async fn=>{await act(async()=>{fn?.();await new Promise(r=>setTimeout(r,0));});};await flush(()=>root.render(createElement(Component)));
@@ -19,7 +19,7 @@ async function mount(t,{support=true,renderFixture}={}){
 test('off support presents inventory and disables issuance independently of legacy flag',async t=>{const ui=await mount(t,{support:false});assert.equal(ui.button('AI 요청 키 발급').disabled,true);assert.ok(document.body.textContent.includes('AI 요청 키 발급 준비 중'));assert.equal(ui.writes.length,0);});
 test('first issuance defaults read-only one day and has no Chat/domain grants; raw secret cleared on role boundary',async t=>{const ui=await mount(t);await ui.flush(()=>ui.button('AI 요청 키 발급').click());await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));assert.equal(ui.writes.length,1);const payload=ui.writes[0].args.p_input;assert.deepEqual(payload.scopes,['ai-agent:requests:read']);assert.deepEqual(payload.grant,{queues:['employee_requests'],actions:['read']});assert.ok(new Date(payload.expiresAt)-Date.now()>23*3600000);await ui.flush(()=>ui.writes[0].resolve(Response.json(credential)));assert.equal(document.querySelector('input[aria-label="발급된 AI 요청 키"]').value,credential.token);await ui.switch({role:'viewer'});assert.equal(document.body.textContent.includes(credential.token),false);assert.equal(document.querySelector('input[aria-label="발급된 AI 요청 키"]'),null);});
 test('dialog dismissal and late account-switch issue response never reveal old raw key',async t=>{const ui=await mount(t);await ui.flush(()=>ui.button('AI 요청 키 발급').click());await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));await ui.flush(()=>document.querySelector('[data-slot="dialog-close"]').click());await ui.flush(()=>ui.writes[0].resolve(Response.json(credential)));assert.equal(document.querySelector('input[aria-label="발급된 AI 요청 키"]'),null);await ui.flush(()=>ui.button('AI 요청 키 발급').click());await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));await ui.switch({user:{id:'10000000-0000-4000-8000-000000000002',isFallbackRole:false}});await ui.flush(()=>ui.writes[1].resolve(Response.json(credential)));assert.equal(document.querySelector('input[aria-label="발급된 AI 요청 키"]'),null);});
-test('ambiguous create survives remount and reuses exact key/payload; metadata-only replay has no secret',async t=>{const ui=await mount(t);await ui.flush(()=>ui.button('AI 요청 키 발급').click());await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));const first=ui.writes[0];await ui.flush(()=>first.reject(new Error('uncertain')));await ui.remount();await ui.flush(()=>ui.button('발급 결과 확인').click());await ui.edit('newer draft');await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));assert.deepEqual(ui.writes[1].args,first.args);await ui.flush(()=>ui.writes[1].resolve(Response.json({...credential,token:null})));assert.equal(document.querySelector('input[aria-label="발급된 AI 요청 키"]'),null);assert.ok(document.body.textContent.includes('원문 키는 다시 표시할 수 없습니다'));});
+test('ambiguous create survives remount and reuses exact key/payload; metadata-only replay has no secret',async t=>{const ui=await mount(t);await ui.flush(()=>ui.button('AI 요청 키 발급').click());await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));const first=ui.writes[0];await ui.flush(()=>first.reject(new Error('uncertain')));await ui.remount();await ui.flush(()=>ui.button('발급 결과 확인').click());assert.equal(document.querySelector('#ai-credential-preset'),null);assert.equal(document.querySelector('#ai-credential-label'),null);assert.ok(document.querySelector('[aria-label="확인 중인 발급 권한"]').textContent.includes('읽기 · 직원 전체 요청'));await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));assert.deepEqual(ui.writes[1].args,first.args);await ui.flush(()=>ui.writes[1].resolve(Response.json({...credential,token:null})));assert.equal(document.querySelector('input[aria-label="발급된 AI 요청 키"]'),null);assert.ok(document.body.textContent.includes('원문 키는 다시 표시할 수 없습니다'));});
 for(const dismissal of ['Close','Escape']){
  test(`first-token dialog ${dismissal} restores focus to the issuance control`,async t=>{
   const ui=await mount(t);const opener=ui.button('AI 요청 키 발급');
@@ -48,3 +48,38 @@ for(const dismissal of ['Close','Escape']){
   assert.equal(document.activeElement===opener,true,'default sibling opener restoration must remain intact');
  });
 }
+
+test('Chat-only issuance selects explicit rooms and never inherits employee read or completion grants',async t=>{
+ const ui=await mount(t,{configuredCount:2});await ui.flush(()=>ui.button('AI 요청 키 발급').click());
+ const choose=async value=>ui.flush(()=>{const select=document.querySelector('#ai-credential-preset');select.value=value;select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+ await choose('worker');await choose('chat_reply');
+ assert.ok(document.querySelector('[role="dialog"]').textContent.includes('선택한 Chat 공간의 기존 대화'));
+ assert.equal([...document.querySelectorAll('label')].some(el=>el.textContent==='완료 알림'),false);
+ const checkbox=label=>[...document.querySelectorAll('label')].find(el=>el.textContent===label)?.querySelector('button');
+ await ui.flush(()=>{checkbox('공간 1').click();checkbox('공간 2').click();});
+ const unavailable=[...document.querySelectorAll('label')].find(el=>el.textContent.startsWith('공간 3')).querySelector('button');assert.equal(unavailable.disabled,true);
+ await ui.flush(()=>{const input=document.querySelector('#ai-credential-source');Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,id);input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+ await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+ assert.equal(ui.writes.length,1);const payload=ui.writes[0].args.p_input;
+ assert.deepEqual(payload.scopes,['chat:outbox:read','chat:send']);assert.deepEqual(payload.grant,{spaceKeys:['space_1','space_2'],purposes:['bridge_reply'],bridgeSourceId:id});
+ assert.ok(new Date(payload.expiresAt)-Date.now()>23*3600000);
+ await ui.flush(()=>ui.writes[0].resolve(Response.json({...credential,scopes:payload.scopes,grant:payload.grant})));
+});
+test('Chat-only issuance with no explicit room does not issue any credential',async t=>{
+ const ui=await mount(t);await ui.flush(()=>ui.button('AI 요청 키 발급').click());
+ await ui.flush(()=>{const select=document.querySelector('#ai-credential-preset');select.value='chat_reply';select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+ await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+ assert.equal(ui.writes.length,0);assert.ok(document.body.textContent.includes('발급하지 못했습니다'));
+});
+
+test('ambiguous worker issuance recovery cannot be presented as Chat-only after remount',async t=>{
+ const ui=await mount(t);await ui.flush(()=>ui.button('AI 요청 키 발급').click());
+ await ui.flush(()=>{const select=document.querySelector('#ai-credential-preset');select.value='worker';select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+ await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+ const first=ui.writes[0];await ui.flush(()=>first.reject(new Error('uncertain')));await ui.remount();await ui.flush(()=>ui.button('발급 결과 확인').click());
+ assert.equal(document.querySelector('#ai-credential-preset'),null);assert.equal(document.querySelector('#ai-credential-source'),null);
+ const summary=document.querySelector('[aria-label="확인 중인 발급 권한"]');assert.ok(summary.textContent.includes('요청 처리 · 직원 전체 요청'));assert.ok(!summary.textContent.includes('Chat 전용'));
+ await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+ assert.deepEqual(ui.writes[1].args,first.args);await ui.flush(()=>ui.writes[1].resolve(Response.json({...credential,scopes:first.args.p_input.scopes,grant:first.args.p_input.grant,token:null})));
+ assert.equal(document.querySelector('input[aria-label="발급된 AI 요청 키"]'),null);
+});

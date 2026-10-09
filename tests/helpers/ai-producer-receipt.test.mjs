@@ -7,7 +7,7 @@ test('capture protocol preserves JSON bytes and rejects missing, duplicate, unkn
  for(const output of ['', 'AI_HTTP_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_UNKNOWN_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_HTTP_CAPTURE:{\n'])assert.throws(()=>extractAiCapture(output,'http'));
 });
 
-import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
@@ -31,8 +31,8 @@ function parityArguments({tests,probes}){
   ...tests.flatMap(path=>['--test',path]),...probes.flatMap(path=>['--probe',path])];
 }
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
- assert.equal(AI_SQL_TESTS.length,94);
- assert.equal(AI_PROBES.length,19);
+ assert.equal(AI_SQL_TESTS.length,95);
+ assert.equal(AI_PROBES.length,20);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
  for(const name of isolatedWorkflows){
@@ -89,7 +89,7 @@ test('actual root consumers fail without a current capture and receipt; no optio
 test('source snapshot rejects undeclared local imports, missing source and canonical migration drift',async()=>{
  const root=await mkdtemp(join(tmpdir(),'ai-receipt-negative-'));
  try{
-  // Only the source allowlist and nine AI migrations, no dependency/app copy.
+  // Only the source allowlist and ten AI migrations, no dependency/app copy.
   const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
   for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
    await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
@@ -141,7 +141,7 @@ test('source closure rejects a side-effect import separated by a line comment',a
 
 test('current migration identity preserves the six accepted pins and rejects canonical/source drift',async()=>{
  assert.equal(ACCEPTED_AI_MIGRATIONS.length,6);
- assert.equal(CURRENT_AI_MIGRATIONS.length,9);
+ assert.equal(CURRENT_AI_MIGRATIONS.length,10);
  assert.deepEqual(CURRENT_AI_MIGRATIONS.slice(0,6),ACCEPTED_AI_MIGRATIONS);
  const root=await mkdtemp(join(tmpdir(),'ai-receipt-migration-drift-'));
  try{
@@ -151,8 +151,8 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,161);
-  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName));
+  assert.equal(original.orderedNewMigrations.length,162);
+  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
   assert.equal(reviewedLegacy.at(-1).fileName,mainFileName);
@@ -160,6 +160,9 @@ test('current migration identity preserves the six accepted pins and rejects can
    m=>m.orderedNewMigrations.splice(m.orderedNewMigrations.findIndex(row=>row.fileName===mainFileName),1),
    m=>m.orderedNewMigrations.push({...CURRENT_AI_MIGRATIONS[6],fileName:'20990101000000_ai_agent_unreviewed.sql'}),
    m=>m.orderedNewMigrations.find(row=>row.fileName===mainFileName).sha256='0'.repeat(64),
+   m=>m.orderedNewMigrations.find(row=>row.fileName===THREAD_REPLY_MIGRATION.fileName).sha256='0'.repeat(64),
+   m=>m.orderedNewMigrations.find(row=>row.fileName===THREAD_REPLY_MIGRATION.fileName).status='draft',
+   m=>m.orderedNewMigrations.splice(m.orderedNewMigrations.findIndex(row=>row.fileName===THREAD_REPLY_MIGRATION.fileName),1),
    m=>m.orderedNewMigrations.find(row=>row.fileName===mainFileName).status='draft',
    m=>m.orderedNewMigrations.find(row=>row.fileName===mainFileName).fileName='20990101000000_unreviewed.sql',
    m=>m.orderedNewMigrations[0].sha256='0'.repeat(64),
@@ -178,6 +181,15 @@ test('current migration identity preserves the six accepted pins and rejects can
   await assert.rejects(snapshotAiSource(root),/reviewed main migration source drift/);
   await rm(mainMigration);await assert.rejects(snapshotAiSource(root),/ENOENT/);
   await writeFile(mainMigration,mainSource);
+  const replyPath=join(root,'supabase/migrations/'+THREAD_REPLY_MIGRATION.fileName),replyBytes=await readFile(replyPath);
+  const alteredReply=Buffer.concat([replyBytes,Buffer.from('\n-- drift\n')]);
+  await writeFile(replyPath,alteredReply);
+  await assert.rejects(snapshotAiSource(root),/accepted migration source drift/);
+  const alteredManifest=structuredClone(original);alteredManifest.orderedNewMigrations.find(row=>row.fileName===THREAD_REPLY_MIGRATION.fileName).sha256=hash(alteredReply);
+  await writeFile(manifestPath,JSON.stringify(alteredManifest));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(manifestPath,JSON.stringify(original));await rm(replyPath);
+  await assert.rejects(snapshotAiSource(root),/ENOENT/);await writeFile(replyPath,replyBytes);
   const newest=join(root,'supabase/migrations/'+CURRENT_AI_MIGRATIONS[6].fileName);
   await writeFile(newest,(await readFile(newest))+'\n-- drift\n');
   await assert.rejects(snapshotAiSource(root),/accepted migration source drift/);

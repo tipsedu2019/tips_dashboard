@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = new Set()
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "26436a34d7ffad142488cc56086a4e05ed6067eabdb4bdaa276200459b5a4196"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "3a43b95cbae4efa613a652d1c39e161181d5079d14b7e8d44578c52d4178c3a1"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -145,6 +145,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_space_policy_test.sql",
   "supabase/tests/ai_agent_personal_owner_test.sql",
   "supabase/tests/agent_personal_dashboard_read_test.sql",
+  "supabase/tests/ai_agent_thread_replies_test.sql",
 ])
 const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
@@ -166,6 +167,7 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-ai-agent-chat-runtime-concurrency.mjs",
   "tests/probe-ai-agent-http-producer.mjs",
   "tests/probe-ai-agent-personal-integration.mjs",
+  "tests/probe-ai-agent-thread-replies-concurrency.mjs",
 ])
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
@@ -1415,7 +1417,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "c2e5894259a2edf257e21ff5f8779f8daaadc0e57fc5f07b3dbc78acb62e2478"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "91e34376ae83031736f52520c0c19616b9e8172a3fb63f5e697cfff2fec6abe6"],
+    ["supabase-sql-review.yml", "93ddea75d10a55fba386d421b6734a1a6469d5af82264395d016aa533fc8e252"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2357,7 +2359,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 })
 
-test("isolated main·PR는 동일한 SQL 94개·probe 19개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 동일한 SQL 95개·probe 20개와 필수 PR 검사 이름을 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
