@@ -36,6 +36,8 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/tests/ai_agent_thread_replies_test.sql',
  'supabase/tests/ai_agent_nonexpiring_chat_test.sql',
  'supabase/migrations/20261009065500_ai_agent_nonexpiring_chat_credentials.sql',
+ 'supabase/migrations/20261009065550_transfer_completion_preexcluded_rosters.sql',
+ 'supabase/migrations/20261009082000_ops_legacy_dispatch_actor_null_guard.sql',
  'tests/probe-ai-agent-nonexpiring-concurrency.mjs',
  'tests/probe-ai-agent-http-producer.mjs',
  'tests/probe-ai-agent-chat-runtime-concurrency.mjs',
@@ -95,10 +97,14 @@ export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  NONEXPIRING_CHAT_MIGRATION,
 ]);
 // Preserve the reviewed ac84 inventory and exact main addition.
-// Only the five reviewed withdrawal migrations and pinned thread-reply migration extend it.
+// Only explicitly pinned withdrawal, Chat and integrated PR126 migrations extend it.
 // A future migration requires an explicit review of these source-owned pins.
 const REVIEWED_MANIFEST_PREFIX_SHA256='80a6a4d06fe190ef65e9c926392cf187995c07ce1a25c275ac07dc9d72df79c2';
 const MAIN_MIGRATION=Object.freeze({fileName:'20261007135140_textbook_latest_count_read_aggregation.sql',status:'final',sha256:'1491b4b824c343e23dc24b83e1be41214f5fda197813dca012c252a9b541cb23'});
+export const CURRENT_PR126_MIGRATIONS=Object.freeze([
+ Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
+ Object.freeze({fileName:'20261009082000_ops_legacy_dispatch_actor_null_guard.sql',status:'final',sha256:'191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3'}),
+]);
 export const CURRENT_WITHDRAWAL_MIGRATIONS=Object.freeze([
  Object.freeze({"fileName":"20261006080000_withdrawal_chat_last_lesson_wording.sql","status":"final","sha256":"b33601339abe5ef2f96d553ce0dc1423981225f308be45394a2b81206ce6a30d"}),
  Object.freeze({"fileName":"20261006090000_withdrawal_last_lesson_release.sql","status":"final","sha256":"4f73f75bbf0aa8f457eb3b1c070281ae3f94dcbf79e20b119f8fb79f0de3e921"}),
@@ -134,15 +140,17 @@ export async function snapshotAiSource(root=ROOT){
  }
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
  const withdrawalNames=CURRENT_WITHDRAWAL_MIGRATIONS.map(m=>m.fileName);
- const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName);
+ const integratedNames=CURRENT_PR126_MIGRATIONS.map(m=>m.fileName);
+ const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && !integratedNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName);
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,163,'AI canonical manifest inventory');
- const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
+ assert.equal(manifest.orderedNewMigrations.length,165,'AI canonical manifest inventory');
+ const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');
  for(const m of CURRENT_WITHDRAWAL_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed withdrawal migration source drift');
+ for(const m of CURRENT_PR126_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed PR126 migration source drift');
  assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
  for(const m of CURRENT_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
  const sourceHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}}).trim();
