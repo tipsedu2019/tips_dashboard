@@ -75,6 +75,7 @@ export function assertRegistrationCustomerMessageContactUse(input: Readonly<{
 }>) {
   const policyKind = registrationContactPolicyKind(input.fence.messageKind)
   if ((policyKind === "level_test_booking" && input.fence.canonicalAppointmentKind !== "level_test")
+    || (policyKind === "admission_application" && input.fence.canonicalAppointmentKind !== null)
     || (["observation_booking", "observation_reminder"].includes(policyKind)
       && input.fence.canonicalAppointmentKind !== "observation_class")) {
     throw new Error("registration_customer_message_contact_use_not_allowed")

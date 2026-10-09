@@ -1,7 +1,6 @@
 import type { LucideIcon } from "lucide-react"
 import {
   BookOpen,
-  Bot,
   CalendarDays,
   CalendarClock,
   ExternalLink,
@@ -54,7 +53,7 @@ const workspaceMetaEntries: Array<{
   match: string
   meta: AdminWorkspaceMeta
 }> = [
-  { match: "/admin/ai-agent", meta: { section: "운영", title: "AI 에이전트", summary: "요청과 답변, 처리 이력을 확인합니다." } },
+  { match: "/admin/ai-agent", meta: { section: "설정", title: "이전 요청 이력", summary: "기존 요청과 처리 결과를 조회합니다." } },
   {
     match: "/admin/public-content",
     meta: { section: "관리", title: "홈페이지 관리", summary: "선생님 소개, 공개 후기와 성적을 관리합니다." },
@@ -121,7 +120,7 @@ const workspaceMetaEntries: Array<{
   },
   {
     match: "/admin/settings/agent-access",
-    meta: { section: "설정", title: "AI 연결", summary: "AI에 허용할 수업과 작업 범위를 관리합니다." },
+    meta: { section: "설정", title: "API", summary: "지원 기능과 연결 권한을 확인합니다." },
   },
   {
     match: "/admin/settings",
@@ -298,7 +297,6 @@ export function buildAdminNavGroups({
   canEditCurriculumPlanning,
   canUseAssistantOperations = false,
   isAdmin = false,
-  canUseAiAgentRequests = false,
 }: {
   canManageAll: boolean
   canEditCurriculumPlanning: boolean
@@ -340,7 +338,6 @@ export function buildAdminNavGroups({
     items: canUseAssistantOperations ? assistantOverviewItems : fullOverviewItems,
   }
 
-  if (canUseAiAgentRequests) overview.items = [...overview.items, { title: "AI 에이전트", url: "/admin/ai-agent", icon: Bot }]
 
   const managementItems: NavItem[] = []
 
@@ -412,7 +409,7 @@ export function buildAdminNavGroups({
             { title: "강의실 설정", url: "/admin/settings/classrooms" },
             { title: "교재 설정", url: "/admin/settings/textbook-suppliers" },
             { title: "알림 설정", url: "/admin/settings/notifications" },
-            ...(isAdmin ? [{ title: "AI 연결", url: "/admin/settings/agent-access" }] : []),
+            ...(isAdmin ? [{ title: "API", url: "/admin/settings/agent-access" }] : []),
           ],
         },
       ],

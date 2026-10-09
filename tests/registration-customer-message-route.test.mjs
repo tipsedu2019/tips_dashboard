@@ -289,6 +289,138 @@ function contactGrantFor(target = TARGET) {
   return { version: 1, action: "attempt", linearization: "registration_contact_case_lock_v1",
     messageId: IDS.message, dispatchToken: IDS.dispatch, contactFence: contactFenceFor(target) }
 }
+
+function createAdmissionProductionHarness({ fenceChanges = {}, sourceError = null, rawChanges = {}, role = "staff" } = {}) {
+  const target = { messageKind: "admission_application", sourceId: IDS.task }
+  const calls = { rpc: [], controls: [], provider: 0, authorizedTaskIds: [] }
+  const trackId = "00000000-0000-4000-8000-000000000010"
+  const raw = {
+    ...target, taskId: IDS.task, trackId: null, appointmentId: null, sourceRevision: 9,
+    studentName: "합성 학생", parentPhoneDigits: "01000000001", subjects: ["영어"],
+    tracks: [{ trackId, subject: "영어", workflowStatus: "enrollment_requested", workflowRevision: 3, pipelineStatus: "enrollment_decided" }],
+    enrollmentPlans: [{ enrollmentId: "00000000-0000-4000-8000-000000000011", trackId, subject: "영어", sortOrder: 0,
+      workflowStatus: "enrollment_requested", workflowRevision: 3, enrollmentUpdatedAt: "2026-10-09T00:00:00.000000Z",
+      classId: "00000000-0000-4000-8000-000000000012", classSubject: "영어", className: "합성 영어반",
+      classUpdatedAt: "2026-10-09T00:00:01.000000Z", textbookId: null, textbookName: null, textbookUpdatedAt: null,
+      runtimeVersion: 0, storageMode: "legacy", authority: "legacy", scheduleRevision: 4, scheduleHash: "a".repeat(64),
+      slots: [{ slotId: null, weekday: 1, startTime: "18:00", endTime: "20:00", teacherName: "합성 교사",
+        classroomName: "본관 301호", sortOrder: 0, updatedAt: null }],
+      firstLesson: { sessionId: null, sessionKey: "2030-01-07:1", sessionDate: "2030-01-07", scheduleState: "active",
+        startTime: "18:00", endTime: "20:00", revision: null, updatedAt: null } }],
+    ...rawChanges,
+  }
+  const serviceClient = {
+    rpc(name, args) {
+      calls.rpc.push({ name, args: structuredClone(args) })
+      if (name === "read_registration_contact_message_fence_v1") {
+        assert.deepEqual(args, { p_actor_profile_id: IDS.actor, p_message_kind: target.messageKind, p_source_id: IDS.task })
+        let signal
+        return {
+          abortSignal(value) { assert.ok(value instanceof AbortSignal); signal = value; calls.controls.push("abortSignal"); return this },
+          retry(value) {
+            assert.equal(value, false); assert.ok(signal); calls.controls.push("retry:false")
+            return Promise.resolve({ data: { version: 1, ...target, taskId: IDS.task, contactPhase: "open", contactGeneration: "1",
+              allPhasesClosed: false, sourcePhaseOpen: true, canonicalAppointmentKind: null, ...fenceChanges }, error: null })
+          },
+        }
+      }
+      if (name === "resolve_registration_customer_message_source_v1") {
+        assert.deepEqual(args, { p_actor_profile_id: IDS.actor, p_message_kind: target.messageKind, p_source_id: IDS.task })
+        return { data: sourceError ? null : structuredClone(raw), error: sourceError }
+      }
+      if (name === "get_registration_customer_solapi_readiness_v1") {
+        assert.equal(args.p_actor_profile_id, IDS.actor)
+        assert.equal(args.p_message_kind, target.messageKind)
+        assert.equal(args.p_source_id, IDS.task)
+        return { data: { ...ACTIVE_READINESS, activationMode: "off", activationEligible: false, sendAllowed: false, blockers: ["activation_off"] }, error: null }
+      }
+      if (name === "list_registration_customer_messages_v1") {
+        assert.deepEqual(args, { p_actor_profile_id: IDS.actor, p_message_kind: target.messageKind, p_source_id: IDS.task, p_limit: 1 })
+        return { data: [], error: null }
+      }
+      throw new Error(`unexpected synthetic admission RPC: ${name}`)
+    },
+  }
+  return {
+    target, calls,
+    handlers: createProductionRegistrationCustomerMessageRouteHandlers({
+      environment: PRODUCTION_HISTORY_ENV,
+      auth: {
+        async authenticate() { return { actorProfileId: IDS.actor, role, actorClient: {}, serviceClient } },
+        async authorizeTask(_context, taskId) { assert.equal(taskId, IDS.task); calls.authorizedTaskIds.push(taskId); return true },
+      },
+      async providerFetch() { calls.provider += 1; throw new Error("synthetic_preview_must_not_call_provider") },
+    }),
+  }
+}
+
+test("production registration guidance preview uses canonical saved plans and the case UUID without activating sends", async (context) => {
+  const deadlines = []
+  const timeout = AbortSignal.timeout.bind(AbortSignal)
+  context.mock.method(AbortSignal, "timeout", (ms) => { deadlines.push(ms); return timeout(ms) })
+  const harness = createAdmissionProductionHarness()
+  const response = await harness.handlers.preview(request("/preview", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(harness.target),
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.messageKind, "admission_application")
+  assert.equal(body.studentName, "합성 학생")
+  assert.equal(body.recipientLast4, "0001")
+  assert.equal(body.previewId, null)
+  assert.equal(body.readiness.sendAllowed, false)
+  assert.deepEqual(harness.calls.authorizedTaskIds, [IDS.task])
+  assert.deepEqual(harness.calls.rpc.map(({ name }) => name), ["read_registration_contact_message_fence_v1",
+    "resolve_registration_customer_message_source_v1", "get_registration_customer_solapi_readiness_v1", "list_registration_customer_messages_v1"])
+  assert.deepEqual(harness.calls.controls, ["abortSignal", "retry:false"])
+  assert.deepEqual(deadlines, [8_000])
+  assert.equal(harness.calls.provider, 0)
+  assert.doesNotMatch(JSON.stringify(body), /01000000001|parentPhoneDigits|recipientHash|sourceFingerprint|local-api-secret/u)
+})
+
+test("production registration guidance closed or canonically ineligible sources stop before the private resolver", async () => {
+  for (const fenceChanges of [{ contactPhase: "closed" }, { allPhasesClosed: true }, { sourcePhaseOpen: false }]) {
+    const harness = createAdmissionProductionHarness({ fenceChanges })
+    const response = await harness.handlers.preview(request("/preview", { method: "POST", body: JSON.stringify(harness.target) }))
+    assert.equal(response.status, 409)
+    assert.deepEqual(harness.calls.rpc.map(({ name }) => name), ["read_registration_contact_message_fence_v1"])
+    assert.equal(harness.calls.provider, 0)
+  }
+})
+
+test("production registration guidance rejects a forged appointment kind and another task's fence", async () => {
+  for (const [fenceChanges, status, expectedRpcs] of [
+    [{ canonicalAppointmentKind: "level_test" }, 409, ["read_registration_contact_message_fence_v1"]],
+    [{ taskId: IDS.source }, 503, ["read_registration_contact_message_fence_v1", "resolve_registration_customer_message_source_v1"]],
+  ]) {
+    const harness = createAdmissionProductionHarness({ fenceChanges })
+    const response = await harness.handlers.preview(request("/preview", { method: "POST", body: JSON.stringify(harness.target) }))
+    assert.equal(response.status, status)
+    assert.deepEqual(harness.calls.rpc.map(({ name }) => name), expectedRpcs)
+    assert.equal(harness.calls.provider, 0)
+    assert.doesNotMatch(JSON.stringify(await response.json()), /01000000001|parentPhoneDigits/u)
+  }
+})
+
+test("production registration guidance missing saved schedules fails without readiness, preview, or provider fallback", async () => {
+  for (const options of [{ rawChanges: { enrollmentPlans: [] } },
+    { sourceError: { code: "22023", message: "registration_customer_message_source_ineligible: synthetic private details" } }]) {
+    const harness = createAdmissionProductionHarness(options)
+    const response = await harness.handlers.preview(request("/preview", { method: "POST", body: JSON.stringify(harness.target) }))
+    assert.equal(response.status, 422)
+    assert.deepEqual(harness.calls.rpc.map(({ name }) => name), ["read_registration_contact_message_fence_v1", "resolve_registration_customer_message_source_v1"])
+    assert.equal(harness.calls.provider, 0)
+    assert.doesNotMatch(JSON.stringify(await response.json()), /synthetic private details|01000000001/u)
+  }
+})
+
+test("production registration guidance keeps unauthorized roles outside the contact reader", async () => {
+  const harness = createAdmissionProductionHarness({ role: "teacher" })
+  const response = await harness.handlers.preview(request("/preview", { method: "POST", body: JSON.stringify(harness.target) }))
+  assert.equal(response.status, 403)
+  assert.deepEqual(harness.calls.rpc, [])
+  assert.equal(harness.calls.provider, 0)
+})
 function safeContactContract(sourceContract = PRIVATE_SOURCE.previewContract) {
   const { parentPhoneDigits, ...checksums } = sourceContract
   return { ...checksums, version: 1, contactGeneration: "1", recipientLast4: parentPhoneDigits.slice(-4), requestDigest: CONTACT_DIGEST }

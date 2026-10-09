@@ -79,16 +79,47 @@ test("a reminder's label cannot grant a purpose without canonical appointment fa
   }
 })
 
-test("admission_application remains an explicit registration candidate and fails closed", () => {
+test("the existing admission application is the authorized registration guidance purpose", () => {
   assert.deepEqual(resolveRegistrationContactMessagePurpose("admission_application"), {
-    decision: "candidate", messageKind: "admission_application", label: "입학신청서",
-    purpose: "registration", reasonCode: "registration_mapping_requires_review",
+    decision: "allowed", messageKind: "admission_application", label: "입학신청서",
+    purpose: "registration", reasonCode: "allowed_purpose",
   })
   for (const action of ["preview", "claim", "attempt", "retry"]) {
-    const result = evaluateRegistrationContactMessageGate(gateInput({ action, messageKind: "admission_application", dispatchState: state() }))
-    assert.equal(result.decision, "deny")
-    assert.equal(result.reasonCode, "registration_mapping_requires_review")
+    const result = evaluateRegistrationContactMessageGate(gateInput({ action, messageKind: "admission_application",
+      canonicalAppointmentKind: null, dispatchState: state() }))
+    assert.equal(result.decision, "allow")
+    assert.equal(result.purpose, "registration")
+    assert.equal(result.canStartProviderAttempt, action === "attempt")
   }
+})
+
+test("registration guidance cannot extend a closed source, stale generation or attempted delivery", () => {
+  for (const [overrides, reason] of [
+    [{ contactPhase: "closed" }, "all_phases_closed"],
+    [{ allPhasesClosed: true }, "all_phases_closed"],
+    [{ sourcePhaseOpen: false }, "source_phase_closed"],
+    [{ currentContactGeneration: "8" }, "contact_generation_changed"],
+    [{ dispatchState: state("accepted", false, true) }, "terminal_result_no_retry"],
+    [{ dispatchState: state("unknown", false, true) }, "terminal_result_no_retry"],
+    [{ dispatchState: state("pending", true, true) }, "provider_attempt_already_started"],
+  ]) {
+    const result = evaluateRegistrationContactMessageGate(gateInput({ action: "attempt",
+      messageKind: "admission_application", canonicalAppointmentKind: null, dispatchState: state(), ...overrides }))
+    assert.equal(result.reasonCode, reason)
+    assert.equal(result.decision, "deny")
+    assert.equal(result.canStartProviderAttempt, false)
+  }
+})
+
+test("an exact registration result replay after closure cannot read or dispatch a recipient", () => {
+  const result = evaluateRegistrationContactMessageGate(gateInput({ action: "replay",
+    messageKind: "admission_application", canonicalAppointmentKind: null,
+    contactPhase: "closed", allPhasesClosed: true, sourcePhaseOpen: false,
+    currentContactGeneration: "8", replayReceipt: replayReceipt("unknown") }))
+  assert.equal(result.decision, "replay")
+  assert.equal(result.purpose, "registration")
+  assert.equal(result.canStartProviderAttempt, false)
+  assert.deepEqual(result.replayResult, replayReceipt("unknown").result)
 })
 
 test("visit and waiting features remain discoverable candidates without contact-use permission", () => {

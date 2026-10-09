@@ -71,7 +71,8 @@ end $$;
 revoke all on function dashboard_private.retire_registration_contact_dispatch_v1(uuid,bigint) from public,anon,authenticated,service_role;
 
 -- Every successful bundle constituent is current, scoped and purpose eligible.
--- No visit/admission/waiting purpose is enabled by this candidate.
+-- Bundles do not enable visit/admission/waiting purposes. The existing
+-- task-scoped admission_application is guarded separately below.
 create function dashboard_private.assert_registration_contact_bundle_candidate_v1(p_task_id uuid,p_reservation_kind text,p_delivery_kind text,p_service_date date,p_now timestamptz,p_items jsonb)
 returns void language plpgsql volatile security definer set search_path='' as $$
 declare item jsonb; appointment_ids uuid[]; activity_ids uuid[]; observation_ids uuid[]; state jsonb;
@@ -302,6 +303,19 @@ begin
       join public.ops_registration_appointments a on a.id=o.appointment_id and a.task_id=o.task_id
       join public.ops_registration_subject_tracks t on t.id=o.track_id and t.task_id=o.task_id
       where o.id=p_source and o.task_id=v_task_id;
+    elsif p_kind='admission_application' then
+      -- The existing guide selects saved planned/unbatched enrollments, not a
+      -- manual workflow label or legacy pipeline stage. Match that canonical
+      -- track set without changing its business arrays. Every selected subject
+      -- must still be current and open; a mixed terminal set fails as a whole.
+      -- The original resolver still validates schedules/plans and duplicate
+      -- admission messages before any provider attempt can be granted.
+      select pg_catalog.count(*)>0 and coalesce(pg_catalog.bool_and(
+        t.workflow_status not in ('registered','not_registered','inquiry_only')),false)
+      into source_open from public.ops_registration_subject_tracks t
+      where t.task_id=v_task_id and t.archived_at is null and not t.migration_review_required
+        and exists(select 1 from public.ops_registration_enrollments e
+          where e.track_id=t.id and e.status='planned' and e.admission_batch_id is null);
     end if;
   end if;
   snapshot := dashboard_private.registration_case_contact_snapshot_v1(v_task_id,false);
@@ -327,8 +341,10 @@ begin
       and fence->>'canonicalAppointmentKind'='level_test'
       or p_kind='appointment_reminder' and fence->>'canonicalAppointmentKind'='level_test'
       or p_kind in ('observation_booking','observation_reminder','observation_booking_bundle','observation_reminder_bundle')
-        and fence->>'canonicalAppointmentKind'='observation_class') then
-    -- admission_application remains a reviewed candidate, never an HTTP approval.
+        and fence->>'canonicalAppointmentKind'='observation_class'
+      or p_kind='admission_application' and fence->>'canonicalAppointmentKind' is null) then
+    -- Purpose is fixed by the server kind and canonical task source; caller
+    -- flags, labels or a browser digest never authorize contact use.
     raise exception 'registration_contact_use_not_allowed' using errcode='23514';
   end if;
   return fence;

@@ -258,13 +258,15 @@ function transactionStatements(statements) {
   return statements.filter(({ normalized }) => TRANSACTION_CONTROL_PATTERN.test(normalized))
 }
 
-function stripMigrationTransaction(source) {
+export function stripMigrationTransaction(source, { requireOuter = false } = {}) {
   const sql = String(source)
   const statements = sqlStatements(sql)
   const controls = transactionStatements(statements)
   const first = statements[0]
   const last = statements.at(-1)
   const hasOuterTransaction = first?.normalized === "begin" && last?.normalized === "commit"
+
+  if (requireOuter && !hasOuterTransaction) fail("transactional_preflight_outer_transaction_required")
 
   if (hasOuterTransaction) {
     if (controls.length !== 2 || controls[0] !== first || controls[1] !== last) {

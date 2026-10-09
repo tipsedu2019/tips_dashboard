@@ -1,3 +1,5 @@
+> 역사 검증 자료: 당시 Chat 키 발급 UI와 아래 브라우저 실행 도구는 API 설정 통합으로 제거되었습니다. 현재 UI 검증은 `scripts/qa/ai-agent-requests-browser.mjs`의 API 설정·읽기 전용 이력 검사를 사용합니다. 당시 결과를 현재 배포 완료 증거로 재사용하지 않습니다.
+
 # Chat thread replies: preparation evidence
 
 Base: `3ad5a6f032dba817cca35afb8b5142b7331d3f23`. PR121/122/123 are retained. No deployment, production SQL mutation, credential/grant creation, runtime configuration change or provider send was performed for this extension. The [activation packet](../../operations/chat-thread-replies.md) records the remaining room/secret/approval boundaries.

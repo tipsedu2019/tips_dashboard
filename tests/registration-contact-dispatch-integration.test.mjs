@@ -35,7 +35,12 @@ function routeHarness(options = {}) {
   const calls = []
   let fenceReads = 0
   const kind = options.kind ?? "level_test_booking"
-  const source = { taskId: ids.task, sourceId: ids.source, messageKind: kind, sourceRevision: 1,
+  const sourceId = kind === "admission_application" ? ids.task : ids.source
+  const defaultFence = fence({ messageKind: kind, sourceId,
+    canonicalAppointmentKind: kind === "admission_application" ? null : "level_test" })
+  const scopedPrivateSource = { ...privateSource,
+    previewContract: { ...privateSource.previewContract, templateKey: kind } }
+  const source = { taskId: ids.task, sourceId, messageKind: kind, sourceRevision: 1,
     studentName: "합성 학생", recipientLast4: "0001", facts: {}, body: "합성 레벨테스트 안내", buttons: [] }
   const deps = {
     now: () => new Date("2026-10-09T00:00:00.000Z"),
@@ -43,27 +48,27 @@ function routeHarness(options = {}) {
     authorizeTask: async () => true,
     readContactFence: async () => {
       calls.push("fence")
-      const current = options.fences?.[fenceReads++] ?? options.fence ?? fence()
+      const current = options.fences?.[fenceReads++] ?? options.fence ?? defaultFence
       return { ...current, messageKind: kind }
     },
     createRequestDigest: () => digest,
     readRequestReplay: async () => { calls.push("replay"); return options.replay ?? null },
     resolveTaskId: async () => ids.task,
     resolveSource: async () => { calls.push("source"); return source },
-    readPrivateSource: () => privateSource,
+    readPrivateSource: () => scopedPrivateSource,
     getReadiness: async () => ({ runtimeReady: true, activationMode: "live", activationEligible: true,
       credentialsConfigured: true, pfConfigured: true, templateConfigured: true, templateVerified: true,
       verifiedAt: "2026-10-09T00:00:00.000Z", sourceValid: true, sendAllowed: true, blockers: [] }),
     listHistory: async () => [],
     createPreview: async ({ contract }) => { calls.push("preview"); assertNoRawContract(contract)
       return { previewId: ids.preview, expiresAt: "2026-10-09T00:10:00.000Z", messageKind: kind, recipientLast4: "0001" } },
-    readPreviewTarget: async () => ({ taskId: ids.task, sourceId: ids.source, messageKind: kind, contactGeneration: "1" }),
+    readPreviewTarget: async () => ({ taskId: ids.task, sourceId, messageKind: kind, contactGeneration: "1" }),
     claimMessage: async ({ contract }) => { calls.push("claim"); assertNoRawContract(contract)
       return result({ messageKind: kind, owner: true, claimToken: ids.claim, dispatchToken: ids.dispatch }) },
     releasePreSendClaim: async () => { calls.push("release"); if (options.releaseFails) throw new Error("synthetic uncertainty") },
     markAttemptStarted: async ({ contract }) => { calls.push("marker"); assertNoRawContract(contract)
       return { allowed: true, messageId: ids.message, currentStatus: "pending", dispatchToken: ids.dispatch,
-        ...(options.omitGrant ? {} : { contactGrant: options.grant ?? grant(fence({ messageKind: kind })) }) } },
+        ...(options.omitGrant ? {} : { contactGrant: options.grant ?? grant(defaultFence) }) } },
     sendProvider: async () => { calls.push("provider"); if (options.providerFails) throw new Error("synthetic transport failure")
       return { outcome: "accepted", providerPayloadChecksum: "a".repeat(64), evidence: {
         providerMessageId: "synthetic-provider-id", statusCode: "2000",
@@ -103,11 +108,45 @@ test("closed and all-terminal cases reject before private source, preview or pro
     assert.deepEqual(harness.calls, ["fence"])
   }
 })
-test("outside-purpose and admission candidate cannot create previews or call private source", async () => {
-  for (const kind of ["waiting_notice", "visit_consultation_booking", "admission_application"]) {
+test("outside-purpose notices cannot create previews or call private source", async () => {
+  for (const kind of ["waiting_notice", "visit_consultation_booking"]) {
     const harness = routeHarness({ kind })
     assert.equal((await invoke(harness.handlers.preview, { messageKind: kind, sourceId: ids.source })).status, 409)
     assert.deepEqual(harness.calls, ["fence"])
+  }
+})
+test("registration guidance uses the case UUID and reaches provider only with a current locked grant", async () => {
+  const harness = routeHarness({ kind: "admission_application" })
+  const preview = await invoke(harness.handlers.preview, { messageKind: "admission_application", sourceId: ids.task })
+  assert.equal(preview.status, 200)
+  assert.equal(preview.body.messageKind, "admission_application")
+  assert.deepEqual(harness.calls, ["fence", "source", "preview"])
+  assert.equal((await send(harness)).body.currentStatus, "accepted")
+  assert.equal(harness.calls.filter((item) => item === "provider").length, 1)
+  assert.equal(harness.calls.filter((item) => item === "marker").length, 1)
+  assert.doesNotMatch(JSON.stringify(preview.body), /01000000001|parentPhoneDigits|requestDigest/u)
+})
+test("registration guidance rejects closed purpose and a generation changed after claim", async () => {
+  const admissionFence = (changes = {}) => fence({ messageKind: "admission_application", sourceId: ids.task,
+    canonicalAppointmentKind: null, ...changes })
+  for (const changes of [{ contactPhase: "closed" }, { allPhasesClosed: true }, { sourcePhaseOpen: false }]) {
+    const harness = routeHarness({ kind: "admission_application", fence: admissionFence(changes) })
+    assert.equal((await invoke(harness.handlers.preview, { messageKind: "admission_application", sourceId: ids.task })).status, 409)
+    assert.deepEqual(harness.calls, ["fence"])
+  }
+  const stale = routeHarness({ kind: "admission_application", fences: [admissionFence(), admissionFence({ contactGeneration: "2" })] })
+  assert.equal((await send(stale)).status, 503)
+  assert.equal(stale.calls.includes("marker"), false)
+  assert.equal(stale.calls.includes("provider"), false)
+  assert.equal(stale.calls.at(-1), "release")
+})
+test("registration guidance never treats an allowed boolean or another case's grant as permission to send", async () => {
+  const admissionFence = fence({ messageKind: "admission_application", sourceId: ids.task, canonicalAppointmentKind: null })
+  for (const options of [{ omitGrant: true }, { grant: grant({ ...admissionFence, taskId: id(20) }) },
+    { grant: grant({ ...admissionFence, contactGeneration: "2" }) }]) {
+    const harness = routeHarness({ kind: "admission_application", releaseFails: true, ...options })
+    assert.equal((await send(harness)).body.currentStatus, "unknown")
+    assert.equal(harness.calls.includes("provider"), false)
   }
 })
 test("appointment reminder requires canonical level test and cannot use a consultation phone", async () => {

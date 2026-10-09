@@ -6,14 +6,14 @@ import { loadNotificationComponent } from './helpers/notification-component-load
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const userId='10000000-0000-4000-8000-000000000001';
 const row={id:'20000000-0000-4000-8000-000000000001',requesterId:userId,requesterName:'합성 요청자',title:'이전 계정 요청',body:'본문',status:'pending',version:'1',createdAt:'2026-10-03T00:00:00Z',updatedAt:'2026-10-04T02:30:00Z',readyAt:'2026-10-03T00:00:00Z',openQuestionId:null,result:null,notifyOnDone:false,notificationSpace:null};
-async function mount(t,{policy=false,configured=false,strict=false}={}){
+async function mount(t,{configured=false,strict=false}={}){
  const dom=new JSDOM('<div id="root"></div>',{url:'https://test.invalid/admin/ai-agent'});globalThis.window=dom.window;globalThis.document=dom.window.document;globalThis.self=dom.window;
  for(const key of ['HTMLElement','HTMLInputElement','HTMLTextAreaElement','Element','DocumentFragment','MutationObserver','CustomEvent','Event','MouseEvent','KeyboardEvent','Node','NodeFilter','DOMRect','getComputedStyle'])globalThis[key]=dom.window[key];
  globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};globalThis.requestAnimationFrame=window.requestAnimationFrame=cb=>window.setTimeout(cb,0);globalThis.cancelAnimationFrame=window.cancelAnimationFrame=window.clearTimeout;window.HTMLElement.prototype.scrollIntoView=()=>{};window.HTMLElement.prototype.getClientRects=function(){return this.hidden?[]:[{width:32,height:32}];};
  let auth={user:{id:userId,name:'합성 요청자',isFallbackRole:false},role:'admin',loading:false,session:{user:{id:userId},access_token:'synthetic'}};
  const reads=[],writes=[];const fetcher=async(url,init)=>{if(url.includes('/spaces'))return new Response(JSON.stringify({data:{items:Array.from({length:7},(_,i)=>({key:`space_${i+1}`,label:['경영팀','관리팀','조교팀','영어팀','전체 공지','수학팀','과학팀'][i],configured:configured && i===0,selectable:configured && i===0,reason:configured && i===0?null:'space_not_configured',revision:'1'}))},error:null}));const pending={...Promise.withResolvers(),url,init};(['POST','PATCH'].includes(init.method)?writes:reads).push(pending);return pending.promise;};
  const routes=[];const router={push:href=>routes.push(href)};
- const Component=loadNotificationComponent(policy?'src/features/ai-agent/ai-agent-space-policy-settings.tsx':'src/features/ai-agent/ai-agent-request-workspace.tsx',new Map([['@/providers/auth-provider',{useAuth:()=>auth}],['@/lib/supabase',{supabase:{auth:{getSession:async()=>({data:{session:auth.session}})},from(){const query={then:cb=>Promise.resolve(cb({data:[{id:userId,name:'합성 요청자',role:'admin'},{id:'10000000-0000-4000-8000-000000000003',name:'권한 없는 직원',role:'viewer'}],error:null}))};for(const method of ['select','order','abortSignal','retry'])query[method]=()=>query;return query;}}}],['next/navigation',{useRouter:()=>router}],['next/link',{__esModule:true,default:({href,children,prefetch,...props})=>createElement('a',{href,...props,'data-prefetch':String(prefetch)},children)}],['@/hooks/use-data-table-page-size',{useDataTablePageSize:()=>({pageSize:10,ready:true,setPreference:()=>{}})}]] ))[policy?'AiAgentSpacePolicySettings':'AiAgentRequestWorkspace'];
+ const Component=loadNotificationComponent('src/features/ai-agent/ai-agent-request-workspace.tsx',new Map([['@/providers/auth-provider',{useAuth:()=>auth}],['@/lib/supabase',{supabase:{auth:{getSession:async()=>({data:{session:auth.session}})},from(){const query={then:cb=>Promise.resolve(cb({data:[{id:userId,name:'합성 요청자',role:'admin'},{id:'10000000-0000-4000-8000-000000000003',name:'권한 없는 직원',role:'viewer'}],error:null}))};for(const method of ['select','order','abortSignal','retry'])query[method]=()=>query;return query;}}}],['next/navigation',{useRouter:()=>router}],['next/link',{__esModule:true,default:({href,children,prefetch,...props})=>createElement('a',{href,...props,'data-prefetch':String(prefetch)},children)}],['@/hooks/use-data-table-page-size',{useDataTablePageSize:()=>({pageSize:10,ready:true,setPreference:()=>{}})}]] )).AiAgentRequestWorkspace;
  const previousFetch=globalThis.fetch;globalThis.fetch=fetcher;const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root'));
  const renderComponent=()=>strict?createElement(StrictMode,null,createElement(Component)):createElement(Component);
  const flush=async(cb)=>act(async()=>{cb?.();await new Promise(resolve=>setTimeout(resolve,30));});await flush(()=>root.render(renderComponent()));
@@ -24,33 +24,6 @@ async function mount(t,{policy=false,configured=false,strict=false}={}){
  return {reads,writes,flush,edit,button,accept,remount:async()=>{await flush(()=>root.render(null));await flush(()=>root.render(renderComponent()));},switch:async(next)=>flush(()=>{auth={...auth,...next};root.render(renderComponent());}),routes};
 }
 test('account/role changes synchronously hide accepted and deferred old rows/errors',async t=>{const ui=await mount(t);await ui.accept(0);assert.match(document.body.textContent,/이전 계정 요청/);await ui.switch({role:'teacher'});assert.doesNotMatch(document.body.textContent,/이전 계정 요청/);assert.equal(ui.reads.length,2);await ui.switch({role:'viewer'});await ui.flush(()=>ui.reads[1].reject(new Error('old error')));assert.doesNotMatch(document.body.textContent,/이전 계정 요청|결과를 확인하지|다시 시도/);assert.equal(ui.button('요청 작성'),undefined);});
-test('create preserves close draft, notification off, requester readonly and later input on receipt',async t=>{const ui=await mount(t);await ui.accept(0);await ui.flush(()=>ui.button('요청 작성').click());assert.equal(document.querySelector('input[name="requester"]').readOnly,true);assert.equal(document.querySelector('button[role="checkbox"]').getAttribute('aria-checked'),'false');await ui.edit('title','제출 제목');await ui.edit('body','제출 본문');await ui.flush(()=>ui.button('취소').click());assert.equal(document.querySelector('[role="dialog"]'),null);await ui.flush(()=>ui.button('요청 작성').click());assert.equal(document.querySelector('input[name="title"]').value,'제출 제목');await ui.flush(()=>ui.button('요청 저장').click());assert.equal(ui.writes.length,1);assert.deepEqual(JSON.parse(ui.writes[0].init.body),{title:'제출 제목',body:'제출 본문',notifyOnDone:false});await ui.edit('title','새로운 제목');await ui.flush(()=>ui.writes[0].resolve(new Response(JSON.stringify({data:row,error:null}))));assert.equal(document.querySelector('input[name="title"]').value,'새로운 제목');assert.equal(document.querySelector('textarea[name="body"]').value,'제출 본문');});
-test('late mutation receipt after account change cannot show success or clear new actor draft',async t=>{const ui=await mount(t);await ui.accept(0);await ui.flush(()=>ui.button('요청 작성').click());await ui.edit('title','old');await ui.edit('body','old body');await ui.flush(()=>ui.button('요청 저장').click());await ui.switch({user:{id:'10000000-0000-4000-8000-000000000002',name:'새 요청자',isFallbackRole:false},session:{user:{id:'10000000-0000-4000-8000-000000000002'},access_token:'new'}});await ui.accept(1);await ui.flush(()=>ui.button('요청 작성').click());await ui.edit('title','새 계정 초안');await ui.flush(()=>ui.writes[0].resolve(new Response(JSON.stringify({data:row,error:null}))));assert.equal(document.querySelector('input[name="title"]').value,'새 계정 초안');assert.doesNotMatch(document.body.textContent,/요청을 저장했습니다/);});
-test('real admin policy allows symbolic unconfigured preassignment with revision0 and downgraded cleanup',async t=>{const ui=await mount(t,{policy:true});await ui.flush(()=>ui.reads[0].resolve(new Response(JSON.stringify({data:{userId,spaceKeys:[],revision:'0',updatedAt:null},error:null}))));const box=document.querySelector('#ai-policy-space_1');assert.equal(box.disabled,false);await ui.flush(()=>box.click());await ui.flush(()=>ui.button('변경 저장').click());assert.equal(ui.writes[0].init.headers['If-Match'],'"r0"');assert.deepEqual(JSON.parse(ui.writes[0].init.body),{spaceKeys:['space_1']});await ui.flush(()=>ui.writes[0].resolve(new Response(JSON.stringify({data:{userId,spaceKeys:['space_1'],revision:'1',updatedAt:row.updatedAt},error:null}))));await ui.flush(()=>{const field=document.querySelector('#ai-policy-person');field.value='10000000-0000-4000-8000-000000000003';field.dispatchEvent(new window.Event('change',{bubbles:true}));});await ui.flush(()=>ui.reads[1].resolve(new Response(JSON.stringify({data:{userId:'10000000-0000-4000-8000-000000000003',spaceKeys:['space_1'],revision:'1',updatedAt:row.updatedAt},error:null}))));await ui.flush(()=>document.querySelector('#ai-policy-space_1').click());await ui.flush(()=>ui.button('변경 저장').click());assert.deepEqual(JSON.parse(ui.writes[1].init.body),{spaceKeys:[]});assert.match(ui.writes[1].url,/000000000003$/);});
-
-test('uncertain create keeps submitted payload and key across same-actor route remount',async t=>{
- const ui=await mount(t);await ui.accept(0);await ui.flush(()=>ui.button('요청 작성').click());await ui.edit('title','미확정 제목');await ui.edit('body','미확정 본문');await ui.flush(()=>ui.button('요청 저장').click());
- const original=ui.writes[0];await ui.flush(()=>original.reject(new Error('lost response')));await ui.remount();await ui.accept(1);await ui.flush(()=>ui.button('요청 작성').click());assert.equal(document.querySelector('input[name="title"]').value,'미확정 제목');await ui.edit('title','나중에 쓴 제목');await ui.flush(()=>ui.button('저장 결과 확인').click());
- assert.equal(ui.writes[1].init.headers['Idempotency-Key'],original.init.headers['Idempotency-Key']);assert.equal(ui.writes[1].init.body,original.init.body);await ui.flush(()=>ui.writes[1].resolve(new Response(JSON.stringify({data:row,error:null}))));assert.equal(document.querySelector('input[name="title"]').value,'나중에 쓴 제목');
-});
-test('departed account or authorization never restores create draft or uncertain intent',async t=>{
- const ui=await mount(t);await ui.accept(0);await ui.flush(()=>ui.button('요청 작성').click());await ui.edit('title','폐기할 제목');await ui.edit('body','폐기할 본문');await ui.flush(()=>ui.button('요청 저장').click());const original=ui.writes[0];await ui.flush(()=>original.reject(new Error('lost response')));
- await ui.switch({role:'viewer'});await ui.switch({role:'admin'});await ui.accept(1);await ui.flush(()=>ui.button('요청 작성').click());assert.equal(document.querySelector('input[name="title"]').value,'');await ui.edit('title','새 제목');await ui.edit('body','새 본문');await ui.flush(()=>ui.button('요청 저장').click());assert.notEqual(ui.writes[1].init.headers['Idempotency-Key'],original.init.headers['Idempotency-Key']);
-});
-test('uncertain policy keeps exact target payload revision and key through same-actor remount',async t=>{
- const ui=await mount(t,{policy:true});const policy={userId,spaceKeys:[],revision:'0',updatedAt:null};await ui.flush(()=>ui.reads[0].resolve(new Response(JSON.stringify({data:policy,error:null}))));await ui.flush(()=>document.querySelector('#ai-policy-space_1').click());await ui.flush(()=>ui.button('변경 저장').click());const original=ui.writes[0];await ui.flush(()=>original.reject(new Error('lost policy response')));await ui.remount();await ui.flush(()=>ui.reads[1].resolve(new Response(JSON.stringify({data:policy,error:null}))));assert.equal(document.querySelector('#ai-policy-space_1').getAttribute('aria-checked'),'true');await ui.flush(()=>document.querySelector('#ai-policy-space_2').click());await ui.flush(()=>ui.button('저장 결과 확인').click());assert.equal(ui.writes[1].init.body,original.init.body);assert.equal(ui.writes[1].init.headers['If-Match'],original.init.headers['If-Match']);assert.equal(ui.writes[1].init.headers['Idempotency-Key'],original.init.headers['Idempotency-Key']);
-});
-test('departing admin policy scope discards old selection and pending receipt intent',async t=>{
- const ui=await mount(t,{policy:true});const policy={userId,spaceKeys:[],revision:'0',updatedAt:null};await ui.flush(()=>ui.reads[0].resolve(new Response(JSON.stringify({data:policy,error:null}))));await ui.flush(()=>document.querySelector('#ai-policy-space_1').click());await ui.flush(()=>ui.button('변경 저장').click());const original=ui.writes[0];await ui.flush(()=>original.reject(new Error('lost policy response')));await ui.switch({role:'viewer'});await ui.switch({role:'admin'});await ui.flush(()=>ui.reads[1].resolve(new Response(JSON.stringify({data:policy,error:null}))));assert.equal(document.querySelector('#ai-policy-space_1').getAttribute('aria-checked'),'false');await ui.flush(()=>document.querySelector('#ai-policy-space_2').click());await ui.flush(()=>ui.button('변경 저장').click());assert.notEqual(ui.writes[1].init.headers['Idempotency-Key'],original.init.headers['Idempotency-Key']);
-});
-
-test('in-flight create survives remount without a second dispatch and unlocks for receipt recovery',async t=>{
- const ui=await mount(t);await ui.accept(0);await ui.flush(()=>ui.button('요청 작성').click());await ui.edit('title','진행 중 제목');await ui.edit('body','진행 중 본문');await ui.flush(()=>ui.button('요청 저장').click());const original=ui.writes[0];await ui.remount();await ui.accept(1);await ui.flush(()=>ui.button('요청 작성').click());assert.equal(document.querySelector('form button[type="submit"]').disabled,true);assert.equal(ui.writes.length,1);await ui.flush(()=>original.resolve(new Response(JSON.stringify({data:row,error:null}))));assert.equal(ui.button('저장 결과 확인').disabled,false);await ui.flush(()=>ui.button('저장 결과 확인').click());assert.equal(ui.writes.length,2);assert.equal(ui.writes[1].init.headers['Idempotency-Key'],original.init.headers['Idempotency-Key']);assert.equal(ui.writes[1].init.body,original.init.body);
-});
-test('policy result confirmation remains available when reread already includes the committed mutation',async t=>{
- const ui=await mount(t,{policy:true});await ui.flush(()=>ui.reads[0].resolve(new Response(JSON.stringify({data:{userId,spaceKeys:[],revision:'0',updatedAt:null},error:null}))));await ui.flush(()=>document.querySelector('#ai-policy-space_1').click());await ui.flush(()=>ui.button('변경 저장').click());const original=ui.writes[0];await ui.flush(()=>original.reject(new Error('lost committed response')));await ui.remount();await ui.flush(()=>ui.reads[1].resolve(new Response(JSON.stringify({data:{userId,spaceKeys:['space_1'],revision:'1',updatedAt:row.updatedAt},error:null}))));assert.equal(ui.button('저장 결과 확인').disabled,false);await ui.flush(()=>ui.button('저장 결과 확인').click());assert.equal(ui.writes[1].init.body,original.init.body);assert.equal(ui.writes[1].init.headers['If-Match'],'"r0"');assert.equal(ui.writes[1].init.headers['Idempotency-Key'],original.init.headers['Idempotency-Key']);
-});
-
 test('desktop and mobile lists distinguish accepted creation and update timestamps',async t=>{
  const ui=await mount(t);await ui.accept(0);
  assert.equal(document.querySelector('input[aria-label="AI 요청 검색"]').placeholder,'제목 검색');
@@ -65,22 +38,25 @@ test('desktop and mobile lists distinguish accepted creation and update timestam
  assert.equal(ui.writes.length,0);
 });
 
-for (const strict of [false, true]) test(`configured notification spaces survive full workspace mount/remount and actor commits (StrictMode=${strict})`, async t => {
- const ui=await mount(t,{configured:true,strict});
- const assertAvailable=async()=>{
-  await ui.flush(()=>ui.button('요청 작성').click());
-  const checkbox=document.querySelector('button[role="checkbox"]');
-  assert.equal(checkbox.disabled,false);
-  assert.doesNotMatch(document.body.textContent,/선택할 수 있는 알림 공간이 없습니다/);
-  await ui.flush(()=>checkbox.click());
-  assert.ok(document.querySelector('[role="combobox"]'));
-  await ui.flush(()=>ui.button('취소').click());
- };
- await assertAvailable();
- await ui.remount(); await assertAvailable();
- const nextId='10000000-0000-4000-8000-000000000002';
- await ui.switch({user:{id:nextId,name:'새 요청자',isFallbackRole:false},session:{user:{id:nextId},access_token:'next-synthetic'}});
- await assertAvailable();
- await ui.switch({role:'teacher'}); await assertAvailable();
- assert.equal(ui.writes.length,0);
+test('retired request entry stays read-only across refresh and remount', async t => {
+ const ui = await mount(t); await ui.accept(0);
+ assert.match(document.body.textContent, /이전 요청의 내용과 처리 이력만 조회/);
+ assert.equal(ui.button('요청 작성'), undefined);
+ assert.equal(document.querySelector('form'), null);
+ assert.ok(document.querySelector(`a[href="/admin/ai-agent/${row.id}"]`));
+ await ui.flush(() => ui.button('새로고침').click()); await ui.accept(1);
+ await ui.remount(); await ui.accept(2);
+ assert.equal(ui.writes.length, 0);
+ assert.ok(ui.reads.every(read => read.init.method === 'GET'));
+});
+
+test('StrictMode remount creates a live request controller and keeps refresh usable', async t => {
+ const ui = await mount(t, { strict: true });
+ const live = ui.reads.filter(read => !read.init.signal?.aborted);
+ assert.ok(live.length > 0, 'a live read must survive StrictMode effect replay');
+ await ui.flush(() => { for (const read of live) read.resolve(Response.json({ data: { items: [row], total: 1, page: 1, pageSize: 10 }, error: null })); });
+ assert.match(document.body.textContent, /이전 계정 요청/);
+ const before = ui.reads.length; await ui.flush(() => ui.button('새로고침').click());
+ assert.equal(ui.reads.length, before + 1); await ui.accept(before);
+ assert.match(document.body.textContent, /이전 계정 요청/); assert.equal(ui.writes.length, 0);
 });

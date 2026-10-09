@@ -1,6 +1,6 @@
 # 등록 연락처 발송 경계 통합 후보
 
-기준은 `f2d308a0e2999a80f37f77f53341286561b92d51`이며, 이 문서와 SQL은 2026-10-09 로컬 검토 후보다. 운영 DB, 공급자, 설정, 연락처 값에 접근하지 않았다. DB 준비 작업은 자동 승인 심사에서 거부되어 실제 SQL 실행·pgTAP·동시성 시험은 0건이다. **운영 적용 준비 완료가 아니다.**
+최초 기준은 `f2d308a0e2999a80f37f77f53341286561b92d51`이다. 아래 초기 검증 이력의 DB 0·free-tier 차단은 그 검토 시점 기록이며 현재 후보의 상태를 대신하지 않는다. 후속 `589a0dca555131eb05b43dfb1b953d119cc39dec`의 부모 격리 검증과 이번 등록 안내 보완은 별도 증거다. 이번 보완은 승인된 세 목적 중 기존 등록 안내의 source/fence/정책을 연결하며, 운영 DB·provider·권한 활성화·실제 발송은 수행하지 않는다. **운영 적용 준비 완료가 아니다.**
 
 ## 허용 목적과 기존 기능
 
@@ -10,11 +10,11 @@
 | `appointment_reminder` | 예약 리마인드 | 서버의 canonical kind가 `level_test`인 경우만 허용 |
 | `observation_booking` | 청강 예약 | 현재 동일 청강 단계만 허용 |
 | `observation_reminder` | 청강 리마인드 | 현재 동일 청강 단계만 허용 |
-| `admission_application` | 입학신청서 | 등록 안내 목적 후보. 의미 매핑이 별도 승인되기 전 차단 |
+| `admission_application` | 입학신청서 | 승인된 등록 안내 목적. 같은 task의 current nonreview planned/unbatched 계획 대상 과목 모두가 아직 수동 종결 상태가 아니고 case/generation이 열려 있을 때 허용 |
 | `visit_consultation_booking` | 방문상담 예약 | 세 목적 밖 연락처 사용 후보, 차단 |
 | `waiting_notice` | 대기 안내 | 세 목적 밖 연락처 사용 후보, 차단 |
 
-기존 기능 ID·업무 편집 기능은 보존한다. 브라우저 승인 플래그, 새 HTTP 권한, 임의 보관 연장을 추가하지 않는다. 등록 안내의 의미 매핑이 아직 승인되지 않았으므로 세 번째 목적의 실제 발송 완료를 주장하지 않는다. 방문상담·대기 등 목적 밖 연락은 별도 중단 또는 외부 업무 시스템 이관 검토가 필요하다. 직원 GoogleChat·in_app·WebPush 알림을 학부모 전화 발송으로 간주하여 중단하지 않았다.
+기존 기능 ID·업무 편집 기능은 보존한다. 브라우저 승인 플래그, 새 HTTP 권한, 임의 보관 연장을 추가하지 않는다. 기존 등록 안내는 task UUID 원본과 고정 registration 목적을 사용하며 기존 canonical resolver의 일정·계획·중복 검증을 유지한다. appointment provenance를 차용하거나 mixed-terminal 계획 일부를 잘라 보내지 않는다. 목적 매핑은 실제 발송 완료·worker 활성화의 증거가 아니다. 방문상담·대기 등 목적 밖 연락은 계속 차단한다. 직원 GoogleChat·in_app·WebPush 알림을 학부모 전화 발송으로 간주하여 중단하지 않았다.
 
 ## 실제 소비 경계
 
@@ -46,7 +46,7 @@ actor/preview/request key/원래 generation과 HMAC이 동일한 저장 결과�
 
 bundle은 기준 소스에서 preview-only/runtime 0이며 실제 claim/begin DB adapter가 없다. generic worker는 fence/grant 없이는 발송하지 않는다. 존재하지 않는 실제 번들 dispatcher가 연결됐다고 주장하지 않는다.
 
-## 검증과 남은 적용 조건
+## 최초 f2d 검토 이력 — 현재 후보의 검증 상태가 아님
 
 관련 Node 회귀 206건과 새 final-ordered-source 시험 2건이 통과했다. 이 중 새 mocked dispatch 시험 19건은 종결·모든 단계 종료·generation 변경·목적 밖 메시지·허가 응답 scope 변조·불확실한 marker/provider/finalize·저장 결과 replay·원문 없는 저장 evidence를 검증한다. 네트워크 transport는 전부 mock이다. ES2017 strict TypeScript로 변경 서버 파일 7개를 검사했으며 `git diff --check`가 통과했다. SQL 텍스트 검사와 pgTAP 파일 존재 검사는 DB 실행 통과를 의미하지 않는다.
 

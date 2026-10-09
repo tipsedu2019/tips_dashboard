@@ -1,8 +1,8 @@
 # 등록 연락 목적과 발송 종결 정책
 
-기준 소스는 main `6a6d7abe4f45e366beccc14efbbcce0534f0370f`이다. 사용자가 승인한 연락처 용도는 등록 단계의 레벨테스트 안내, 청강 안내, 등록 안내다. 모든 현재 등록 단계가 종결되면 대시보드의 실제 연락처를 제거하고 등록 후 연락은 MakeEdu에서 처리한다. 이 정책은 보관기간을 추가하지 않는다.
+최초 검토 소스는 main `6a6d7abe4f45e366beccc14efbbcce0534f0370f`이며 이번 등록 안내 보완은 `589a0dca555131eb05b43dfb1b953d119cc39dec` 후보 위에 적용한다. 사용자가 승인한 연락처 용도는 등록 단계의 레벨테스트 안내, 청강 안내, 등록 안내다. 모든 현재 등록 단계가 종결되면 대시보드의 실제 연락처를 제거하고 등록 후 연락은 MakeEdu에서 처리한다. 이 정책은 보관기간을 추가하지 않는다.
 
-`registration-contact-message-policy.ts`는 독립 순수 판단 모듈이다. 기존 route, SQL, 종류 정의와 UI는 이 변경에서 수정하지 않는다. 이 모듈의 시험 통과는 운영 DB 적용, 공급자 활성화, 연락처 제거 완료를 의미하지 않는다.
+`registration-contact-message-policy.ts`는 독립 순수 판단 모듈이다. 후속 SQL fence와 실제 서버 소비 어댑터는 기존 등록 안내의 canonical source와 목적을 연결한다. 종류 ID·UI·업무 배열·lifecycle 삭제 의미는 변경하지 않는다. 이 모듈의 시험 통과는 운영 DB 적용, 공급자 활성화, 연락처 제거 완료를 의미하지 않는다.
 
 ## 기존 7개 종류의 목적 매핑
 
@@ -14,11 +14,11 @@
 | `visit_consultation_booking` | 방문상담 예약 | 없음 | 세 목적 밖 후보. 연락 기능 별도 중단 또는 외부 이관 검토 |
 | `appointment_reminder` | 예약 리마인드 | `level_test` 조건부 | 서버의 실제 appointment kind가 `level_test`이고 원본 단계가 열려 있을 때만 허용. 방문상담은 목적 밖, 종류 불명은 차단 |
 | `waiting_notice` | 대기 안내 | 없음 | 세 목적 밖 후보. 연락 기능 별도 중단 또는 외부 이관 검토 |
-| `admission_application` | 입학신청서 | `registration` 후보 | 등록 안내와의 의미 매핑이 미확정이므로 자동 허용하지 않음 |
+| `admission_application` | 입학신청서 | `registration` | 기존 task UUID 원본의 현재 nonreview·미보관 과목에 planned/unbatched 등록 계획이 있고, 해당 계획 대상 과목 모두가 아직 수동 종결 상태가 아닐 때 허용 |
 | `observation_booking` | 청강 예약 | `observation` | 해당 원본 청강 단계가 열려 있는 동안 허용 |
 | `observation_reminder` | 청강 리마인드 | `observation` | 같은 원본 청강 단계가 열려 있는 동안 허용. 다른 열린 과목으로 권한을 대신하지 않음 |
 
-`admission_application`의 등록 목적 고정 매핑이 이후 확정되면 서버 소비 코드와 정책 버전을 함께 검토한다. HTTP 요청 또는 브라우저의 승인 플래그로 후보를 허용하면 안 된다. 알려지지 않은 종류와 bundle 종류는 이 모듈에서 차단하며 기존 bundle 기능 자체를 제거하지 않는다.
+`admission_application`은 이미 승인된 등록 안내 목적의 기존 기능에 대한 고정 매핑이다. 원래 resolver의 저장된 일정·등록 계획·중복 발송·권한 검증은 계속 적용하며, mixed-terminal 계획 집합은 전체 차단한다. HTTP 요청 또는 브라우저의 승인 플래그가 권한 근거가 되지 않는다. 이 source 변경은 실제 공급자 활성화·발송을 허용한 기록이 아니다. 알려지지 않은 종류와 bundle 종류는 이 모듈에서 차단하며 기존 bundle 기능 자체를 제거하지 않는다.
 
 ## 종결과 generation 경계
 

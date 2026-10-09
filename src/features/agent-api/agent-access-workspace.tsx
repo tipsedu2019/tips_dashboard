@@ -1,10 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs";
-import { AiAgentCredentialWorkspace } from "@/features/ai-agent/ai-agent-credential-issue-dialog";
-import { AiAgentPersonalCredentialWorkspace } from "@/features/ai-agent/ai-agent-personal-credential-workspace";
-import { AiAgentSpacePolicySettings } from "@/features/ai-agent/ai-agent-space-policy-settings";
+import { ApiSupportWorkspace, ApiUsageGuide } from "./api-support-workspace";
 import { requestAppNavigation } from "@/lib/guarded-navigation";
 import { Copy, Plus, RefreshCw, X } from "lucide-react";
 import { useAuth } from "@/providers/auth-provider";
@@ -28,12 +26,13 @@ const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat("ko-
 
 export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
   const { role, loading, user } = useAuth();
-  const [tab, setTab] = useState("connections");
+  const [tab, setTab] = useState("support");
   const allowed = !loading && role === "admin" && user?.isFallbackRole === false;
-  if (!allowed) return <AgentConnectionWorkspace apiEnabled={apiEnabled} />;
+  if (loading) return <SettingsWorkspaceShell><p role="status">권한 확인 중…</p></SettingsWorkspaceShell>;
+  if (!allowed) return <SettingsWorkspaceShell><p role="alert">관리자 계정에서만 API 설정을 이용할 수 있습니다.</p></SettingsWorkspaceShell>;
   return <WorkspaceTabs value={tab} onValueChange={(value) => requestAppNavigation(() => setTab(value))}>
-    <div className="px-4 sm:px-5 lg:px-6"><WorkspaceTabsList aria-label="AI 연결 설정"><WorkspaceTabsTrigger value="connections">연결 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="requests">AI 요청 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="personal">개인 요청 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="spaces">알림 공간</WorkspaceTabsTrigger></WorkspaceTabsList></div>
-    <WorkspaceTabsPanel>{tab === "spaces" ? <AiAgentSpacePolicySettings /> : tab === "personal" ? <AiAgentPersonalCredentialWorkspace /> : tab === "requests" ? <AiAgentCredentialWorkspace /> : <AgentConnectionWorkspace apiEnabled={apiEnabled} />}</WorkspaceTabsPanel>
+    <div className="px-4 sm:px-5 lg:px-6"><WorkspaceTabsList aria-label="API 설정"><WorkspaceTabsTrigger value="support">지원 기능</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="connections">연결 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="guide">사용 안내</WorkspaceTabsTrigger></WorkspaceTabsList></div>
+    <WorkspaceTabsPanel>{tab === "connections" ? <AgentConnectionWorkspace key={user.id} apiEnabled={apiEnabled} /> : tab === "guide" ? <ApiUsageGuide /> : <ApiSupportWorkspace apiEnabled={apiEnabled} />}</WorkspaceTabsPanel>
   </WorkspaceTabs>;
 }
 
@@ -108,8 +107,9 @@ function AgentConnectionWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
     return () => { active = false; controller.abort(); clearTimeout(timer); };
   }, [allowed, user?.id, createOpen, query, classAccess]);
 
-  // A role/account transition must also clear a one-time secret already in memory.
-  useEffect(() => {
+  // Commit the actor reset before passive reads can resolve. The keyed parent
+  // also hides the previous account's inventory and one-time secret immediately.
+  useLayoutEffect(() => {
     generation.current += 1;
     currentActor.current = actorIdentity;
     queueMicrotask(() => { setSecret(""); setCreateOpen(false); setRevokeTarget(null); setRows([]); });
@@ -149,13 +149,13 @@ function AgentConnectionWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
   };
 
   if (authLoading) return <SettingsWorkspaceShell><p role="status">권한 확인 중…</p></SettingsWorkspaceShell>;
-  if (!allowed) return <SettingsWorkspaceShell><p role="alert">관리자 계정에서만 AI 연결을 관리할 수 있습니다.</p></SettingsWorkspaceShell>;
+  if (!allowed) return <SettingsWorkspaceShell><p role="alert">관리자 계정에서만 API 연결을 관리할 수 있습니다.</p></SettingsWorkspaceShell>;
   return <SettingsWorkspaceShell>
     <SettingsMasterHeader filters={<span className="text-sm text-muted-foreground">내가 발급한 연결</span>} actions={<>
       <Button variant="outline" onClick={() => setRevision((value) => value + 1)} disabled={loading} aria-label="연결 목록 새로고침"><RefreshCw />새로고침</Button>
       <Button ref={createRef} onClick={beginCreate} disabled={!apiEnabled || busy || loading || Boolean(loadError || mutationError)}><Plus />연결 키 발급</Button>
     </>} />
-    {!apiEnabled ? <p role="status" className="text-sm text-muted-foreground">AI 연결이 아직 활성화되지 않았습니다.</p> : null}
+    {!apiEnabled ? <p role="status" className="text-sm text-muted-foreground">업무 API가 아직 활성화되지 않았습니다.</p> : null}
     {loadError ? <p role="alert" className="text-sm text-destructive">{loadError}</p> : null}
     <SettingsTableFrame><Table className="min-w-[860px]"><TableHeader><TableRow>
       {["연결 이름", "권한", "대상 수업", "만료", "마지막 사용", "작업"].map((title) => <TableHead className={title === "작업" ? settingsTableActionHeadClass : settingsTableHeadClass} key={title}>{title}</TableHead>)}
@@ -172,7 +172,7 @@ function AgentConnectionWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
       })}
       {!rows.length ? <TableRow><TableCell colSpan={6} className="h-24 text-center text-muted-foreground">{loading ? "불러오는 중…" : loadError ? "목록을 확인할 수 없습니다." : "발급한 연결 키가 없습니다."}</TableCell></TableRow> : null}
     </TableBody></Table></SettingsTableFrame>
-    <DataTablePagination page={page} pageSize={pageSize} totalCount={loadError ? null : total} loading={loading} onPageChange={setPage} onPageSizeChange={(size) => { setPreference(size); setPage(1); }} ariaLabel="AI 연결 페이지" />
+    <DataTablePagination page={page} pageSize={pageSize} totalCount={loadError ? null : total} loading={loading} onPageChange={setPage} onPageSizeChange={(size) => { setPreference(size); setPage(1); }} ariaLabel="API 연결 페이지" />
     {message || mutationError ? <ActionFeedback message={mutationError || message} error={Boolean(mutationError)} onDismiss={() => { setMessage(""); setMutationError(""); }} /> : null}
     <Dialog open={createOpen} onOpenChange={(open) => { if (!open) closeCreate(); }}><FormDialogContent title="연결 키 발급" description="수업 범위와 허용 작업을 지정해 연결 키를 발급합니다." onSubmit={create} onCancel={closeCreate} cancelLabel="키 발급 취소" submitLabel="키 발급" busy={busy} submitDisabled={(classAccess === "selected" && (!selected.length || selected.length > 50)) || !label.trim() || (mode === "write" && !edits.length && calendar !== "write")} error={error} returnFocusRef={createRef} height={650}>
       <div className="grid gap-2"><Label htmlFor="agent-label">연결 이름</Label><Input id="agent-label" value={label} onChange={(event) => setLabel(event.target.value)} maxLength={80} required disabled={busy} /></div>

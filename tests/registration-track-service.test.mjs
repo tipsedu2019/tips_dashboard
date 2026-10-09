@@ -8,6 +8,7 @@ import vm from "node:vm";
 
 import ts from "typescript";
 import { canUseRegistrationParentContact, normalizeRegistrationCaseContact, stripRegistrationTaskContact } from "../src/features/tasks/registration-contact-client.ts";
+import { createRegistrationDetailObservation } from "../src/features/tasks/registration-detail-observation.ts";
 import { buildRegistrationSubjectHistory } from "../src/features/tasks/registration-track-history.js";
 import { readRegistrationContactEvents } from "../src/features/tasks/registration-contact-event-reader.ts";
 
@@ -353,6 +354,7 @@ async function loadFactory(extraGlobals = {}) {
   vm.runInNewContext(compiled, {
     module: sandboxModule,
     exports: sandboxModule.exports,
+    createRegistrationDetailObservation,
     AbortController,
     AbortSignal,
     clearTimeout,
@@ -959,6 +961,7 @@ function createClient({ queryHandler, rpcHandler, contactHandler, eventHandler }
 
 function readyOptions(overrides = {}) {
   return {
+    detailObservation: { now: () => performance.now(), emit: () => {} },
     probeRuntime: async () => ({ mode: "ready", version: 1 }),
     probeIntakeRuntime: async () => ({ available: true, version: 1 }),
     probeObservationRuntime: async () => ({ available: true, runtimeVersion: 1 }),
@@ -5238,4 +5241,125 @@ test("real common v1/contact v2/subject envelopes retain row provenance through 
   assert.equal(history.at(-1).actorKind, null);
   assert.equal(history.at(-1).timeKind, "unavailable");
   assert.doesNotMatch(JSON.stringify({events, history}), /PRIVATE_|parentPhone|requestNotePresent|changedFields/);
+});
+
+test("detail observations keep raw SDK failures private and preserve error identity, sharing and retries", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const privateError = { code: "SYNTHETIC", message: "FAKE_PRIVATE_STUDENT_TOKEN_URL", details: "FAKE_PRIVATE_BODY", hint: "FAKE_PRIVATE_HINT" };
+  const outputs = [];
+  let fail = true;
+  const harness = createClient({
+    queryHandler: query => schedulingDetailRows(query.table),
+    eventHandler: () => fail ? { data: null, error: privateError }
+      : eventRpcResult(detailRows("ops_task_events").data),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    detailObservation: { now: () => 42, emit: rows => outputs.push(rows) },
+  }));
+  const pending = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+  assert.strictEqual(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), pending);
+  await assert.rejects(pending, error => error === privateError);
+  assert.equal(outputs.length, 1);
+  assert.ok(outputs[0].some(row => row.kind === "events" && row.phase === "failure"));
+  assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
+  assert.equal(JSON.stringify(outputs).includes(CONTACT_TASK), false);
+  assert.equal(JSON.stringify(outputs).includes("viewer-1"), false);
+  for (const row of outputs[0]) assert.deepEqual(Object.keys(row), ["kind", "phase", "elapsedMs"]);
+  fail = false;
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+  const count = harness.queries.length;
+  await assertReauthorizedCachedDetail(service, harness, detail);
+  assert.equal(harness.queries.length, count);
+  assert.equal(outputs.length, 1, "successful retry and cache hit are silent");
+});
+
+test("detail observations report an initial-group failure without exposing reminder payloads", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const outputs = [];
+  const harness = createClient({
+    queryHandler: query => schedulingDetailRows(query.table),
+    rpcHandler: () => ({ data: [{ appointment_id: "FAKE_PRIVATE_ID", unexpected: "FAKE_PRIVATE_VALUE" }], error: null }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    detailObservation: { now: () => 1, emit: rows => outputs.push(rows) },
+  }));
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), /registration_customer_reminder_summary_shape_invalid/);
+  assert.equal(outputs.length, 1);
+  assert.ok(outputs[0].some(row => row.kind === "initial_rows" && row.phase === "failure"));
+  assert.equal(outputs[0].some(row => row.kind.startsWith("reminder")), false,
+    "the unchanged legacy RPC is observed only through its initial group");
+  assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
+});
+
+test("detail observations record final DTO validation failure without making partial detail successful", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const outputs = [];
+  const harness = createClient({ queryHandler: query => {
+    const result = schedulingDetailRows(query.table);
+    return query.table === "ops_registration_subject_tracks"
+      ? { ...result, data: result.data.map(row => ({ ...row, subject: "FAKE_PRIVATE_UNSUPPORTED" })) }
+      : result;
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    detailObservation: { now: () => 1, emit: rows => outputs.push(rows) },
+  }));
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), /registration_subject_unsupported/);
+  assert.equal(outputs.length, 1);
+  assert.ok(outputs[0].some(row => row.kind === "detail_decode" && row.phase === "failure"));
+  assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
+});
+
+test("observation clock and output failures cannot replace a detail error or successful result", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const error = new Error("synthetic business failure");
+  for (const observation of [
+    { now() { throw new Error("clock unavailable"); }, emit() { assert.fail(); } },
+    { now: () => 1, emit() { throw new Error("output unavailable"); } },
+  ]) {
+    let fail = true;
+    const harness = createClient({
+      queryHandler: query => schedulingDetailRows(query.table),
+      eventHandler: () => fail ? { data: null, error }
+        : eventRpcResult(detailRows("ops_task_events").data),
+    });
+    const service = createRegistrationTrackService(harness.client, readyOptions({ detailObservation: observation }));
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), value => value === error);
+    fail = false;
+    assert.equal((await service.loadCaseDetail(CONTACT_TASK, "viewer-1")).task.id, CONTACT_TASK);
+  }
+});
+
+test("enabling detail observations preserves query order, filters, counts, result and microtask scheduling", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const variants = [];
+  for (const enabled of [false, true]) {
+    const sequence = [];
+    const outputs = [];
+    let tick = 0;
+    let done = false;
+    const pulse = () => { tick += 1; if (!done && tick < 1000) queueMicrotask(pulse); };
+    const harness = createClient({ queryHandler: query => {
+      sequence.push([query.table, tick]);
+      return schedulingDetailRows(query.table);
+    }, eventHandler: () => {
+      sequence.push(["read_registration_contact_events_v1", tick]);
+      return eventRpcResult(detailRows("ops_task_events").data);
+    }, contactHandler: () => {
+      sequence.push(["get_registration_case_contact_v1", tick]);
+      return { data: contactState(), error: null };
+    } });
+    const service = createRegistrationTrackService(harness.client, readyOptions({
+      detailObservation: enabled ? { now: () => tick, emit: rows => outputs.push(rows) } : undefined,
+    }));
+    queueMicrotask(pulse);
+    try {
+      const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+      assert.ok(tick < 1000, "synthetic microtask probe must stay bounded");
+      variants.push({ detail: JSON.parse(JSON.stringify(detail)), sequence, ticks: tick,
+        queries: harness.queries.map(({ signal, ...query }) => ({ ...query, signalPresent: Boolean(signal) })),
+        rpcCalls: harness.rpcCalls });
+    } finally { done = true; }
+    assert.deepEqual(outputs, []);
+  }
+  assert.deepEqual(variants[1], variants[0]);
 });

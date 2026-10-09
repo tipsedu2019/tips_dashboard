@@ -13,7 +13,7 @@ export const REGISTRATION_CONTACT_MESSAGE_PURPOSE_MAPPING = Object.freeze({
   visit_consultation_booking: Object.freeze({ label: "방문상담 예약", purpose: null, decision: "candidate" }),
   appointment_reminder: Object.freeze({ label: "예약 리마인드", purpose: null, decision: "candidate" }),
   waiting_notice: Object.freeze({ label: "대기 안내", purpose: null, decision: "candidate" }),
-  admission_application: Object.freeze({ label: "입학신청서", purpose: "registration", decision: "candidate" }),
+  admission_application: Object.freeze({ label: "입학신청서", purpose: "registration", decision: "allowed" }),
   observation_booking: Object.freeze({ label: "청강 예약", purpose: "observation", decision: "allowed" }),
   observation_reminder: Object.freeze({ label: "청강 리마인드", purpose: "observation", decision: "allowed" }),
 } as const)
@@ -50,9 +50,8 @@ export function resolveRegistrationContactMessagePurpose(
         ? "purpose_outside_policy" : "canonical_appointment_kind_required" })
   }
   return Object.freeze({ decision: mapping.decision, messageKind: kind, label: mapping.label,
-    purpose: mapping.purpose, reasonCode: kind === "admission_application"
-      ? "registration_mapping_requires_review"
-      : mapping.decision === "allowed" ? "allowed_purpose" : "purpose_outside_policy" })
+    purpose: mapping.purpose, reasonCode: mapping.decision === "allowed"
+      ? "allowed_purpose" : "purpose_outside_policy" })
 }
 
 export type RegistrationContactMessageRequestDigest = Readonly<{ version: 1; digest: string }>

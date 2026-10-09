@@ -55,14 +55,19 @@ export function useAiAgentRequests({ service, page, pageSize, scope, status, sea
     ready: boolean;
 }) {
     const [snapshot, setSnapshot] = useState<NumberedPageSnapshot<AiRequest>>({ scope: null, requestedPage: 1, page: 1, pageSize, totalCount: null, rows: [], loading: true, error: null });
-    const controller = useMemo(() => createNumberedPageController<AiRequest>({
-        async loadPage(input) { const query = JSON.parse(input.scope) as Pick<AiRequestListQuery, 'scope' | 'status' | 'search'>; const result = await service.list({ ...query, page: input.page, pageSize: input.pageSize }, input.signal); return { rows: result.items, totalCount: result.total, page: result.page, pageSize: result.pageSize }; },
-        onChange: value => { if (service.active())
-            setSnapshot(value); },
-    }), [service]);
+    const controller = useRef<ReturnType<typeof createNumberedPageController<AiRequest>> | null>(null);
+    // A disposed controller is terminal. StrictMode replays effects, so each
+    // mounted effect owns a fresh controller instead of reusing a disposed memo.
+    useEffect(() => {
+        const instance = createNumberedPageController<AiRequest>({
+            async loadPage(input) { const query = JSON.parse(input.scope) as Pick<AiRequestListQuery, 'scope' | 'status' | 'search'>; const result = await service.list({ ...query, page: input.page, pageSize: input.pageSize }, input.signal); return { rows: result.items, totalCount: result.total, page: result.page, pageSize: result.pageSize }; },
+            onChange: value => { if (service.active()) setSnapshot(value); },
+        });
+        controller.current = instance;
+        return () => { instance.dispose(); if (controller.current === instance) controller.current = null; };
+    }, [service]);
     const query = JSON.stringify({ scope, ...(status ? { status } : {}), ...(search ? { search } : {}) });
-    useEffect(() => { if (ready)
-        void controller.load({ scope: query, page, pageSize }); }, [controller, query, page, pageSize, ready]);
-    useEffect(() => () => controller.dispose(), [controller]);
-    return { snapshot, retry: controller.retry };
+    useEffect(() => { if (ready) void controller.current?.load({ scope: query, page, pageSize }); }, [service, query, page, pageSize, ready]);
+    const retry = useCallback(() => controller.current?.retry() ?? Promise.resolve(), []);
+    return { snapshot, retry };
 }

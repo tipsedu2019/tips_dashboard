@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { type AiActivity, type AiAgentRequestService, aiRequestErrorMessage } from './ai-agent-request-service';
-import { aiRequestDate } from './ai-agent-request-workspace';
+import { aiRequestDate } from './ai-agent-request-format';
 const kindLabels:Record<string,string>={created:'요청 작성',claimed:'처리 시작',renewed:'처리 연장',progress:'진행 기록',question:'질문',answer:'답변',comment:'추가 내용',done:'완료',cancelled:'취소',resumed:'재개',prepared:'작업 준비',started:'작업 시작',result:'작업 결과',incident:'확인 필요',reconciled_manual_observation:'수동 확인',reconciled_domain_receipt:'업무 결과 확인'};
 const stateLabels:Record<string,string>={prepared:'준비',started:'실행 중',succeeded:'성공',failed:'실패',unknown:'결과 확인 필요',cancelled:'취소'};
 export function AiAgentRequestActivity({activity,service}:{activity:AiActivity;service:AiAgentRequestService}){
