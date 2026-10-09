@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { readFinalUuidProtocolSources, sourceHash, UUID_PROTOCOL_SIGNATURES } from "./helpers/registration-privacy-uuid-final-source.mjs"
+import { applyPr126TransferCompletionSource, readFinalUuidProtocolSources, replaceOne, sourceHash,
+  TRANSFER_COMPLETION_PR126_SOURCE, UUID_PROTOCOL_SIGNATURES } from "./helpers/registration-privacy-uuid-final-source.mjs"
 
 const draft = readFileSync(new URL("../docs/security/sql/registration-student-uuid-copy-boundary-draft.sql", import.meta.url), "utf8")
 const finalSources = readFinalUuidProtocolSources()
@@ -20,6 +21,87 @@ test("nine source-pinned targets include the real last-lesson worker and final o
     ["20260825152044_registration_admission_checklist_roster_consistency.sql", "20260922105632_registration_multiple_textbooks.sql"])
   assert.deepEqual(finalSources.get("dashboard_private.complete_ops_withdrawal_roster_transition_impl(uuid,text)").sources,
     ["20260801110000_withdrawal_subject_scoped_completion.sql", "20261006090000_withdrawal_last_lesson_release.sql", "20261007141548_withdrawal_completion_without_settlement.sql"])
+  assert.deepEqual(finalSources.get("dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)").sources,
+    ["20260712182834_registration_subject_track_mutations.sql", TRANSFER_COMPLETION_PR126_SOURCE.migration])
+})
+
+test("PR126 dynamic transfer reconstruction fails closed on changed source or old body; no SQL execution is implied", () => {
+  const migration = readFileSync(new URL(`../supabase/migrations/${TRANSFER_COMPLETION_PR126_SOURCE.migration}`, import.meta.url), "utf8")
+  const original = readFileSync(new URL("../supabase/migrations/20260712182834_registration_subject_track_mutations.sql", import.meta.url), "utf8")
+    .match(/create function dashboard_private\.complete_ops_transfer_roster_transition_impl\([\s\S]*?\bas\s+\$\$([\s\S]*?)\$\$;/iu)?.[1]
+  assert.ok(original)
+  const final = finalSources.get("dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)").body
+  assert.equal(applyPr126TransferCompletionSource(original, migration), final)
+  assert.equal(sourceHash(final), TRANSFER_COMPLETION_PR126_SOURCE.finalBodySha256)
+  assert.throws(() => applyPr126TransferCompletionSource(original, `${migration}\n-- changed source`), /reviewed full migration source/u)
+  assert.throws(() => applyPr126TransferCompletionSource(original.replace("'40001'", "'23514'"), migration), /exact ordered body/u)
+  assert.throws(() => applyPr126TransferCompletionSource(final, migration), /exact ordered body/u)
+})
+
+test("transfer candidate differs from final PR126 body only in three UUID identity/epoch source fragments", () => {
+  const signature = "dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)"
+  let expected = finalSources.get(signature).body
+  expected = replaceOne(expected, "  v_name_key text;\n  v_parent_phone_key text;\n", "", "identity declarations")
+  expected = replaceOne(expected, String.raw`  v_name_key := pg_catalog.lower(
+    pg_catalog.regexp_replace(coalesce(v_pre_student.name, ''), '\s+', '', 'g')
+  );
+  v_parent_phone_key := pg_catalog.regexp_replace(
+    coalesce(v_pre_student.parent_contact, ''), '\D+', '', 'g'
+  );
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'registration-student:' || v_name_key || ':' || v_parent_phone_key,
+      0
+    )
+  );`, `  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('registration-student-id:' || v_student_id::text, 0)
+  );`, "UUID advisory identity")
+  expected = replaceOne(expected, String.raw`    or pg_catalog.lower(
+      pg_catalog.regexp_replace(coalesce(v_student.name, ''), '\s+', '', 'g')
+    ) is distinct from v_name_key
+    or pg_catalog.regexp_replace(
+      coalesce(v_student.parent_contact, ''), '\D+', '', 'g'
+    ) is distinct from v_parent_phone_key`, `    or v_student.id is distinct from v_pre_student.id
+    or v_student.created_at is distinct from v_pre_student.created_at`, "UUID epoch rescan")
+  assert.equal(candidates.get(signature).body, expected, "no PR126 status, roster, claim, receipt, auth, lock or business logic is restored to an older body")
+})
+
+test("PR126 removed-source and enrolled-destination reconciliation preserves waits, destination claim and saved business facts", () => {
+  const transfer = candidates.get("dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)").body
+  assert.doesNotMatch(transfer, /if v_student\.status = '퇴원'|raise exception 'registration_student_reactivation_required'|raise exception 'registration_student_class_already_active'/u)
+  for (const direction of ["from", "to"]) {
+    assert.ok(transfer.includes(`coalesce(v_student.waitlist_class_ids, '[]'::jsonb) ? v_${direction}_class_id::text`))
+    assert.ok(transfer.includes(`coalesce(v_${direction}_class.waitlist_ids, '[]'::jsonb) ? v_student_id::text`))
+    assert.ok(transfer.includes(`case when coalesce(v_student.class_ids, '[]'::jsonb) ? v_${direction}_class_id::text then 'enrolled' else 'removed' end`))
+  }
+  assert.match(transfer, /into v_to_claim_count, v_to_claim_id[\s\S]*?enrollment\.class_id = v_to_class_id and enrollment\.roster_active/u)
+  assert.match(transfer, /v_to_claim_count > 1 or exists[\s\S]*?enrollment\.id = v_to_claim_id[\s\S]*?enrollment\.status <> 'enrolled'/u)
+  assert.match(transfer, /v_to_class_id,\n    'enrolled',\n    case[^\n]+\n    v_to_claim_id,/u)
+  assert.ok(transfer.includes("v_detail.from_class_end_date is null or v_detail.to_class_start_date is null"))
+  assert.ok(transfer.indexOf("update public.students set status = '재원'") < transfer.indexOf("update public.ops_transfer_details"))
+  assert.ok(transfer.includes("class_name = v_detail.to_class_name,\n    subject = v_task.subject"))
+  assert.ok(transfer.includes("coalesce(v_detail.from_class_name, '')"))
+  assert.ok(transfer.includes("coalesce(v_detail.to_class_name, '') || ' 등록 · transfer_to_class'"))
+  assert.ok(transfer.includes("'학생 상태', v_student.status, '재원'"))
+  for (const message of ["ops_transfer_completion_state_conflict", "ops_transfer_checklist_incomplete",
+    "registration_student_reactivation_required", "registration_roster_mode_conflict",
+    "registration_student_class_already_active", "registration_open_admission_batch"]) {
+    assert.ok(!transfer.includes(`raise exception '${message}' using errcode = '40001'`), message)
+  }
+})
+
+test("separate PR126 requested/applied snapshot producer and actor NULL authorization guard are not overwritten by this draft", () => {
+  const migration = readFileSync(new URL(`../supabase/migrations/${TRANSFER_COMPLETION_PR126_SOURCE.migration}`, import.meta.url), "utf8")
+  const actorGuard = readFileSync(new URL("../supabase/migrations/20261009082000_ops_legacy_dispatch_actor_null_guard.sql", import.meta.url), "utf8")
+  assert.equal(sourceHash(migration), TRANSFER_COMPLETION_PR126_SOURCE.migrationSha256)
+  for (const field of ["requested_transfer_snapshot_status", "requested_transfer_snapshot", "applied_transfer_snapshot"]) assert.ok(migration.includes(`'${field}'`))
+  assert.ok(migration.includes("source.event_type = 'transfer.submitted'\n      order by source.created_at, source.id\n      limit 1"))
+  assert.ok(migration.includes("when p_event_key = 'transfer.completed' then v_requested_transfer_snapshot ->> 'after_class_start_date'"))
+  assert.ok(actorGuard.includes("if not coalesce(("))
+  assert.ok(actorGuard.includes("), false) then"))
+  assert.ok(actorGuard.includes("ops_task_legacy_dispatch_forbidden' using errcode = '42501'"))
+  for (const signature of ["dashboard_private.record_ops_transition_notification_source_v1(public.ops_tasks,text,uuid)",
+    "public.get_ops_task_legacy_dispatch_before_subject_completion_v1(uuid,uuid)"]) assert.ok(!candidates.has(signature))
 })
 
 for (const [signature, original] of finalSources) {

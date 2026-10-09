@@ -17,6 +17,43 @@ export const UUID_PROTOCOL_SIGNATURES = Object.freeze([
 export const sourceHash = (value) => createHash("sha256").update(value).digest("hex")
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
+export const TRANSFER_COMPLETION_PR126_SOURCE = Object.freeze({
+  migration: "20261009065550_transfer_completion_preexcluded_rosters.sql",
+  migrationSha256: "59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099",
+  priorCatalogDefinitionMd5: "f5ae6b686d5ab30065b2409096bd0c30",
+  priorBodySha256: "4d3a441fcabfbef2f8e62886923c63f80cf8fa4c5785a2697f3a5ed35eb6cfe5",
+  finalBodySha256: "d4cebfecb6727afb7f714836d382ab530f9c7d419fba5f763f88cf03aafe4a8c",
+})
+
+/** Reconstruct PR126's first DO only. Catalog MD5 is an input source pin, not a runtime claim. */
+export function applyPr126TransferCompletionSource(body, source) {
+  const pin = TRANSFER_COMPLETION_PR126_SOURCE
+  assert.equal(sourceHash(source), pin.migrationSha256, "PR126: reviewed full migration source")
+  assert.equal(sourceHash(body), pin.priorBodySha256, "PR126: exact ordered body before dynamic patch")
+  const section = source.match(/do \$transfer_completion\$([\s\S]*?)\$transfer_completion\$;/u)?.[1]
+  assert.ok(section, "PR126: isolated transfer completion DO")
+  assert.ok(section.includes("'dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)'::regprocedure"), "PR126: exact target")
+  assert.ok(section.includes(`pg_catalog.md5(definition) <> '${pin.priorCatalogDefinitionMd5}'`), "PR126: catalog definition guard retained in source")
+  const conflicts = [
+    ["ops_transfer_completion_state_conflict", 3], ["ops_transfer_checklist_incomplete", 1],
+    ["registration_student_reactivation_required", 1], ["registration_roster_mode_conflict", 2],
+    ["registration_student_class_already_active", 1], ["registration_open_admission_batch", 1],
+  ]
+  const listed = section.match(/foreach business_message in array array\[([^\]]+)\]/u)?.[1]
+  assert.ok(listed, "PR126: explicit business label list")
+  assert.deepEqual([...listed.matchAll(/'([^']+)'/gu)].map((match) => match[1]), conflicts.map(([message]) => message), "PR126: six business labels")
+  for (const [message, count] of conflicts) {
+    const old = `raise exception '${message}' using errcode = '40001'`
+    assert.equal(body.split(old).length - 1, count, `PR126: ${message} exact old raise count`)
+    body = body.replaceAll(old, `raise exception '${message}' using errcode = '23514'`)
+  }
+  const pairs = [...section.matchAll(/anchor := \$anchor\$([\s\S]*?)\$anchor\$;\s*replacement := \$replacement\$([\s\S]*?)\$replacement\$;/gu)]
+  assert.equal(pairs.length, 10, "PR126: ten exact ordered transfer anchors")
+  for (const [index, pair] of pairs.entries()) body = replaceOne(body, pair[1], pair[2], `PR126: transfer anchor ${index + 1}`)
+  assert.equal(sourceHash(body), pin.finalBodySha256, "PR126: exact reconstructed final body")
+  return body
+}
+
 export function replaceOne(source, before, after, description) {
   assert.ok(before.length > 0, `${description}: nonempty anchor`)
   assert.equal(source.split(before).length - 1, 1, `${description}: exactly one anchor`)
@@ -117,6 +154,10 @@ export function readFinalUuidProtocolSources() {
         assert.equal(body.split("'40001'").length - 1, 2, `${file}: two actual rescans`)
         return body
       })
+    }
+    if (file === TRANSFER_COMPLETION_PR126_SOURCE.migration) {
+      mutate("dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)",
+        (body) => applyPr126TransferCompletionSource(body, source))
     }
   }
   assert.equal(targets.size, UUID_PROTOCOL_SIGNATURES.length)

@@ -1184,6 +1184,21 @@ function actorClient(context: HandlerAuthContext) {
   return context.actorClient as SupabaseClient
 }
 
+async function readRegistrationCustomerMessageContactFence(
+  client: SupabaseClient,
+  actorProfileId: string,
+  messageKind: RegistrationCustomerMessageKind,
+  sourceId: string,
+) {
+  const result = await client.rpc("read_registration_contact_message_fence_v1", {
+    p_actor_profile_id: actorProfileId,
+    p_message_kind: messageKind,
+    p_source_id: sourceId,
+  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  if (result.error) httpError(503, "registration_customer_message_runtime_unavailable")
+  return result.data
+}
+
 async function readRegistrationCustomerMessageSourceTask(
   client: SupabaseClient,
   table: string,
@@ -1378,11 +1393,9 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
       )
     },
     readContactFence(input) {
-      return rpc(input.context, "read_registration_contact_message_fence_v1", {
-        p_actor_profile_id: input.actorProfileId,
-        p_message_kind: input.messageKind,
-        p_source_id: input.sourceId,
-      })
+      return readRegistrationCustomerMessageContactFence(
+        serviceClient(input.context), input.actorProfileId, input.messageKind, input.sourceId,
+      )
     },
     createRequestDigest(input) {
       if (!pepper) httpError(503, "registration_customer_message_runtime_unavailable")
