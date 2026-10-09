@@ -9,7 +9,7 @@
 - 별도 AI 메뉴를 sidebar/빠른 이동의 공용 navigation에서 제거한다. 설정 명칭은 API로 변경한다.
 - 알림에 이미 기록된 `/admin/ai-agent/{id}`를 보존한다. 요청 목록·상세·작업 journal은 기존 actor ACL 아래 읽기 전용으로 남긴다. 생성·취소·재개·답변·중앙/개인 요청 키 발급·공간 정책 UI를 제거한다.
 - 기존 business key 화면을 통합 탭에 유지한다. 계정별 key로 동기 분리하고 actor 초기화를 passive read보다 먼저 수행하여 빠른 inventory 응답이 초기화에 지워지는 경합을 막는다.
-- 원래 API/서비스/복구 로직, auth-provider, AuthGuard, migrations, RLS/ACL, notification code는 변경하지 않는다. 요청 완료 상태를 업무 반영 영수증으로 표시하지 않는다.
+- 요청 목록 hook은 StrictMode effect 재시작마다 조회 컨트롤러를 새로 소유하여 폐기된 컨트롤러 재사용으로 무한 로딩되던 문제를 수정한다. 원래 API/서비스/복구 로직, auth-provider, AuthGuard, migrations, RLS/ACL, notification code는 변경하지 않는다. 요청 완료 상태를 업무 반영 영수증으로 표시하지 않는다.
 
 ## 제거와 검증 전환
 

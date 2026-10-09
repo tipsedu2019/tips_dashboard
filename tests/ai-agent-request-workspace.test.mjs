@@ -49,3 +49,14 @@ test('retired request entry stays read-only across refresh and remount', async t
  assert.equal(ui.writes.length, 0);
  assert.ok(ui.reads.every(read => read.init.method === 'GET'));
 });
+
+test('StrictMode remount creates a live request controller and keeps refresh usable', async t => {
+ const ui = await mount(t, { strict: true });
+ const live = ui.reads.filter(read => !read.init.signal?.aborted);
+ assert.ok(live.length > 0, 'a live read must survive StrictMode effect replay');
+ await ui.flush(() => { for (const read of live) read.resolve(Response.json({ data: { items: [row], total: 1, page: 1, pageSize: 10 }, error: null })); });
+ assert.match(document.body.textContent, /이전 계정 요청/);
+ const before = ui.reads.length; await ui.flush(() => ui.button('새로고침').click());
+ assert.equal(ui.reads.length, before + 1); await ui.accept(before);
+ assert.match(document.body.textContent, /이전 계정 요청/); assert.equal(ui.writes.length, 0);
+});
