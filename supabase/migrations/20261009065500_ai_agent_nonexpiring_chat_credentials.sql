@@ -9,12 +9,24 @@ alter table dashboard_private.ai_agent_credentials
  add constraint ai_agent_nonexpiring_chat_only check (
   expires_at is not null or (credential_kind='central' and cardinality(scopes)=2
    and scopes @> array['chat:outbox:read','chat:send']::text[])) not valid;
+-- Existing NOT NULL expiry proves old rows satisfy this CHECK. Keep validation
+-- atomic with the function contract; install only after the empty/inactive
+-- production preflight: validation still scans under ACCESS EXCLUSIVE.
+-- Lock waiting is bounded to 5s; each statement is bounded to 120s.
+-- squawk-ignore constraint-missing-not-valid
 alter table dashboard_private.ai_agent_credentials validate constraint ai_agent_nonexpiring_chat_only;
 alter table dashboard_private.chat_credential_space_grants
  add constraint chat_nonexpiring_reply_only check (
   expires_at is not null or (purposes=array['bridge_reply']::text[] and bridge_source_id is not null)) not valid;
+-- Same bounded atomic validation; old grant expiries are all NOT NULL.
+-- squawk-ignore constraint-missing-not-valid
 alter table dashboard_private.chat_credential_space_grants validate constraint chat_nonexpiring_reply_only;
+-- Intentional explicit Chat-only NULL contract, constrained above. Existing
+-- rows stay finite. Deploy the NULL-aware UI before the first indefinite key.
+-- squawk-ignore ban-drop-not-null
 alter table dashboard_private.ai_agent_credentials alter column expires_at drop not null;
+-- Paired Chat grant contract; same deployment/rollback restriction as above.
+-- squawk-ignore ban-drop-not-null
 alter table dashboard_private.chat_credential_space_grants alter column expires_at drop not null;
 
 create or replace function public.create_ai_agent_credential_v1(p_label text,p_scopes text[],p_grant jsonb,p_expires_at timestamptz default null) returns jsonb

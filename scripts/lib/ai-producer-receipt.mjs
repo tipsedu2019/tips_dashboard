@@ -86,7 +86,7 @@ export const ACCEPTED_AI_MIGRATIONS=Object.freeze([
 // and intermediate-issuance ACL correction supersede uninstalled SQL snapshots;
 // prior receipts remain historical.
 export const THREAD_REPLY_MIGRATION=Object.freeze({"fileName":"20261008140556_ai_agent_thread_replies.sql","sha256":"2b618a4944c4e5bdf573b1335cd146a4eb989fff451ca585f4e55a8c348682c1","status":"final"});
-export const NONEXPIRING_CHAT_MIGRATION=Object.freeze({"fileName":"20261009065500_ai_agent_nonexpiring_chat_credentials.sql","sha256":"ffe2086b5cafc9da401e851bac7d23ccec970f0ba177b0db9f7b84008e2c12da","status":"final"});
+export const NONEXPIRING_CHAT_MIGRATION=Object.freeze({"fileName":"20261009065500_ai_agent_nonexpiring_chat_credentials.sql","sha256":"e404d9eb1fff35514dd8822e8b745ef8f59444fc4e614736ca6d59b4210be912","status":"final"});
 export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  {"fileName": "20261004030228_ai_agent_request_notification_optin.sql", "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01", "status": "final"},
  {"fileName": "20261007062153_ai_agent_personal_owner.sql", "sha256": "3ba31674ad33d258e70e39a2048ad1d28508cde3473bc7e61d5f9cc6213a1fad", "status": "final"},
