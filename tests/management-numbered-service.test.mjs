@@ -9,7 +9,7 @@ const filters = {
 };
 const student = {
   kind: "students", id: "91000000-0000-4000-8000-000000000101", name: "학생 101", grade: "중2", school: "관리중",
-  contact: null, parentContact: "01012345678", status: "재원", storedStatus: "재원", registeredCount: 1, waitlistCount: 0, sortKey: "학생 101", updatedAt: "2026-08-31T00:00:00+00:00",
+  uid: "S-101", makeeduDetailId: null, status: "재원", storedStatus: "재원", registeredCount: 1, waitlistCount: 0, sortKey: "학생 101", updatedAt: "2026-08-31T00:00:00+00:00",
 };
 const classRow = {
   kind: "classes", id: "92000000-0000-4000-8000-000000000101", name: "수업 101", subject: "영어", grade: "중2",
@@ -123,7 +123,7 @@ test("invalid page, size, filters and sort are rejected before network access", 
 
 test("all supported actionable headers can request global server sorting", async () => {
   for (const [kind, columns] of [
-    ["students", ["title", "status", "school", "grade", "contact", "parentContact"]],
+    ["students", ["title", "status", "school", "grade"]],
     ["classes", ["title", "status", "subject", "grade", "schedule", "teacher", "classroom", "capacity", "tuition"]],
     ["textbooks", ["title", "status", "subject", "publisher", "price", "updatedAt"]],
   ]) {
@@ -141,7 +141,7 @@ test("malformed or scope-mismatched responses fail instead of returning empty su
     { ...valid, totalCount: "101" }, { ...valid, totalCount: -1 }, { ...valid, totalCount: 101.5 },
     { ...valid, totalCount: Number.MAX_SAFE_INTEGER + 1 }, { ...valid, rows: [] },
     { ...valid, rows: [classRow] }, { ...valid, rows: [{ ...student, id: "" }] },
-    { ...valid, rows: [{ ...student, contact: 123 }] }, { ...valid, rows: [{ ...student, name: undefined }] },
+    { ...valid, rows: [{ ...student, uid: 123 }] }, { ...valid, rows: [{ ...student, makeeduDetailId: {} }] }, { ...valid, rows: [{ ...student, name: undefined }] },
     { ...valid, rows: [{ ...student, sortKey: undefined }] },
     { ...valid, rows: [student, student], totalCount: 102 },
     { ...valid, rows: Array(11).fill(student), totalCount: 111 },
@@ -176,12 +176,31 @@ test("other database failures are propagated without retry or partial success", 
 });
 
 test("persisted unsupported sorts normalize before request, retaining valid primary/secondary order", () => {
+  assert.deepEqual(normalizeManagementNumberedSort("students", [
+    { id: "contact", desc: false }, { id: "school", desc: true }, { id: "parentContact", desc: true }, { id: "grade", desc: false },
+  ]), [{ id: "school", desc: true }, { id: "grade", desc: false }]);
   assert.deepEqual(normalizeManagementNumberedSort("classes", [{ id: "enrollmentStatus", desc: true }, { id: "weeklyHours", desc: false }]), []);
   assert.deepEqual(normalizeManagementNumberedSort("students", [
     { id: "teacher", desc: false }, { id: "grade", desc: true }, { id: "grade", desc: false }, { id: "title", desc: false }, { id: "school", desc: true },
   ]), [{ id: "grade", desc: true }, { id: "title", desc: false }]);
   assert.deepEqual(normalizeManagementNumberedSort("textbooks", null), []);
   assert.deepEqual(normalizeManagementNumberedSort("textbooks", [{ id: "price", desc: "true" }]), []);
+});
+
+test("rolling old student DTO drops contact keys and defaults separate link identifiers without UID inference", async () => {
+  const req = request("students", { page: 1 });
+  const oldStudent = Object.fromEntries(Object.entries(student).filter(([key]) => !["uid", "makeeduDetailId"].includes(key)));
+  const wire = transport(rpcArgs(req), { data: { rows: [{ ...oldStudent, contact: "01000000000", parentContact: "01011111111", unknownPrivateField: "private" }], page: 1, pageSize: 10, totalCount: 1 }, error: null });
+  const result = await createManagementNumberedReadService({ supabase: wire.client }).readPage(req);
+  assert.deepEqual(result.rows, [{ ...oldStudent, uid: null, makeeduDetailId: null }]);
+  assert.doesNotMatch(JSON.stringify(result), /contact|01000000000|01011111111|unknownPrivateField/);
+});
+
+test("contact sorting is rejected before network access", async () => {
+  const service = createManagementNumberedReadService({ supabase: { rpc: assert.fail } });
+  for (const id of ["contact", "parentContact"]) {
+    await assert.rejects(service.readPage(request("students", { sort: [{ id, desc: false }] })), { code: "management_numbered_request_invalid" });
+  }
 });
 
 for (const [status, registeredCount, waitlistCount] of [["재원", 2, 3], ["대기", 0, 4], ["퇴원", 0, 0]]) {

@@ -284,8 +284,8 @@ test("class student detail tab shows operational roster context and waitlist pro
   assert.match(pageSource, /getStudentGradeValue\(record\)/);
   assert.match(pageSource, />학교<\/div>/);
   assert.match(pageSource, />학년<\/div>/);
-  assert.match(pageSource, /학생 연락처/);
-  assert.match(pageSource, /학부모 연락처/);
+  assert.doesNotMatch(rosterSource, /학생 연락처|학부모 연락처|formatStudentContact|getStudentContactValue/);
+  assert.doesNotMatch(pageSource, /matchesClassRosterSearch\([^;]*(?:getStudentContactValue|\.contact|\.parent_contact|parentContact|guardianContact|studentContact|\.phone)/);
   assert.doesNotMatch(pageSource, /relatedMeta\(record\) \|\| "학생 정보 확인 필요"/);
   assert.doesNotMatch(pageSource, /Badge variant=\{modeLabel === "수강" \? "default" : "secondary"\}\>\{modeLabel\}<\/Badge>/);
   assert.doesNotMatch(pageSource, /Badge variant="outline"\>\{text\(record\?\.status\)\}<\/Badge>/);
@@ -884,8 +884,9 @@ test("class counseling view is not rendered in the dashboard", async () => {
   const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
   const migrationSource = await readFile(new URL("supabase/migrations/20260610120000_student_counseling_note.sql", root), "utf8");
 
-  assert.match(hookSource, /readOptionalTable\("students"\)/);
-  assert.match(pageSource, /function getStudentContactValue/);
+  assert.match(hookSource, /readOptionalStudentMasters\(\)/);
+  assert.match(hookSource, /return await readStudentMasterRows\(supabase\)/);
+  assert.doesNotMatch(pageSource, /function getStudentContactValue/);
   assert.doesNotMatch(pageSource, /function getStudentCounselingNote/);
   assert.doesNotMatch(pageSource, /data-testid="class-counseling-student-cards"/);
   assert.doesNotMatch(pageSource, /data-testid="class-counseling-student-card"/);
@@ -894,8 +895,7 @@ test("class counseling view is not rendered in the dashboard", async () => {
   assert.doesNotMatch(pageSource, /document\.getElementById\(`class-counseling-card-\$\{requestedClassDetailStudentId\}`\)/);
   assert.doesNotMatch(pageSource, /document\.getElementById\(`class-counseling-note-\$\{requestedClassDetailStudentId\}`\)/);
   assert.doesNotMatch(pageSource, /focusRequestedCounselingStudent/);
-  assert.match(pageSource, /학생 연락처/);
-  assert.match(pageSource, /학부모 연락처/);
+  assert.doesNotMatch(pageSource, /학생 연락처|학부모 연락처|formatStudentContact/);
   assert.doesNotMatch(pageSource, /상담 메모/);
   assert.doesNotMatch(pageSource, /handleCounselingNoteSave/);
   assert.doesNotMatch(pageSource, /service\.updateStudentCounselingNote/);

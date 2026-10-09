@@ -1,4 +1,5 @@
 import { getStudentEnrollmentCounts, getStudentEnrollmentStatus } from "./student-enrollment-status.js";
+import { omitStudentContactFields } from "./student-master-privacy.js";
 import {
   ACTIVE_CLASS_STATUS,
   PREPARING_CLASS_STATUS,
@@ -125,7 +126,8 @@ function computeWeeklyClassMinutes(schedule) {
   return totalMinutes;
 }
 
-export function normalizeStudentManagementRecord(row = {}) {
+export function normalizeStudentManagementRecord(input = {}) {
+  const row = omitStudentContactFields(input);
   const school = text(row.school) || "학교 미정";
   const grade = text(row.grade) || "학년 미정";
   const title = text(row.name) || "이름 미정";
@@ -146,10 +148,6 @@ export function normalizeStudentManagementRecord(row = {}) {
     metaSummary: buildMetaSummary([
       classStatus,
       row.uid ? `UID ${row.uid}` : "",
-      row.contact ? `연락처 ${row.contact}` : "",
-      row.parent_contact || row.parentContact
-        ? `학부모 ${row.parent_contact || row.parentContact}`
-        : "",
       row.enroll_date || row.enrollDate
         ? `등록 ${row.enroll_date || row.enrollDate}`
         : "",
@@ -162,8 +160,6 @@ export function normalizeStudentManagementRecord(row = {}) {
       status,
       classStatus,
       text(row.uid),
-      text(row.contact),
-      text(row.parent_contact || row.parentContact),
       recentIssue,
     ]
       .filter(Boolean)

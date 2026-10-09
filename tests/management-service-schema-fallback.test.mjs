@@ -85,8 +85,19 @@ function makeStudentDeleteGuardClient({ student, classes = [], history = [], reg
     calls,
     from(table) {
       return {
-        async select() {
-          return { data: rows[table] || [], error: null };
+        select(columns) {
+          if (table !== "students") return Promise.resolve({ data: rows[table] || [], error: null });
+          assert.equal(columns, "id,name,status,class_ids,waitlist_class_ids");
+          let selectedId = "";
+          return {
+            eq(column, id) { assert.equal(column, "id"); selectedId = id; return this; },
+            maybeSingle() { return this; },
+            abortSignal(signal) { assert.ok(signal instanceof AbortSignal); return this; },
+            async retry(enabled) {
+              assert.equal(enabled, false);
+              return { data: (rows.students || []).find((row) => row.id === selectedId) || null, error: null };
+            },
+          };
         },
         delete() {
           return {
@@ -340,9 +351,15 @@ function makeStudentUpsertClient(errorColumn) {
       return {
         upsert(payload) {
           calls.push(payload);
+          let selectedColumns = "";
           return {
-            async select() {
-              if (Object.prototype.hasOwnProperty.call(payload, errorColumn)) {
+            select(columns) { assert.ok(columns.includes("id")); assert.ok(!columns.includes("contact")); selectedColumns = columns; return this; },
+            order(column) { assert.equal(column, "id"); return this; },
+            limit(value) { assert.equal(value, 1); return this; },
+            abortSignal(signal) { assert.ok(signal instanceof AbortSignal); return this; },
+            async retry(enabled) {
+              assert.equal(enabled, false);
+              if (Object.prototype.hasOwnProperty.call(payload, errorColumn) || selectedColumns.split(",").includes(errorColumn)) {
                 return {
                   data: null,
                   error: {
@@ -709,11 +726,23 @@ test("student upserts retry without optional counseling fields when the live sch
     status: "재원",
   });
 
-  assert.equal(saved.saved, true);
+  assert.equal(saved.name, "김학생");
+  assert.ok(!Object.prototype.hasOwnProperty.call(saved, "saved"));
   assert.equal(client.calls.length, 2);
   assert.equal(client.calls[0].recent_issue, "학부모 전화 요청");
   assert.ok(!Object.prototype.hasOwnProperty.call(client.calls[1], "recent_issue"));
   assert.equal(client.calls[1].name, "김학생");
+});
+
+test("missing optional student status is removed from both fallback write and returning projection", async () => {
+  const client = makeStudentUpsertClient("status");
+  const saved = await createManagementService({ supabase: client }).updateStudent({ id: "student-1", name: "합성 학생", status: "재원" });
+  assert.equal(saved.id, "student-1");
+  assert.equal(saved.name, "합성 학생");
+  assert.equal(client.calls.length, 2);
+  assert.equal(client.calls[0].status, "재원");
+  assert.ok(!Object.hasOwn(client.calls[1], "status"));
+  assert.ok(!Object.hasOwn(saved, "status"));
 });
 
 test("class metadata updates retry without optional class type while preserving operation fields", async () => {

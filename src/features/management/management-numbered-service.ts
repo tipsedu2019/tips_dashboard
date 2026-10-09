@@ -9,7 +9,7 @@ export type ManagementNumberedSort = readonly { id: string; desc: boolean }[];
 // The controller/table must use this allow-list for manual server sorting.
 // Derived enrollmentStatus/weeklyHours have no parent-key projection and stay disabled.
 export const MANAGEMENT_NUMBERED_SORT_COLUMNS: Record<ManagementNumberedKind, readonly string[]> = {
-  students: ["title", "status", "school", "grade", "contact", "parentContact"],
+  students: ["title", "status", "school", "grade"],
   classes: ["title", "status", "subject", "grade", "schedule", "teacher", "classroom", "capacity", "tuition"],
   textbooks: ["title", "status", "subject", "publisher", "price", "updatedAt"],
 };
@@ -17,7 +17,7 @@ export const MANAGEMENT_NUMBERED_SORT_COLUMNS: Record<ManagementNumberedKind, re
 type RowBase = { id: string; status: string; sortKey: string; updatedAt: string };
 export type ManagementNumberedStudent = RowBase & {
   kind: "students"; name: string; grade: string | null; school: string | null;
-  contact: string | null; parentContact: string | null;
+  uid: string | null; makeeduDetailId: string | null;
   registeredCount: number; waitlistCount: number; storedStatus: string;
 };
 export type ManagementNumberedClass = RowBase & {
@@ -96,7 +96,8 @@ function isRow<K extends ManagementNumberedKind>(value: unknown, kind: K): value
   if (kind === "students") return typeof value.name === "string"
     && isCount(value.registeredCount) && isCount(value.waitlistCount) && typeof value.storedStatus === "string"
     && value.status === (value.registeredCount > 0 ? "재원" : value.waitlistCount > 0 ? "대기" : "퇴원")
-    && ["grade", "school", "contact", "parentContact"].every((key) => isNullableText(value[key]));
+    && ["grade", "school"].every((key) => isNullableText(value[key]))
+    && ["uid", "makeeduDetailId"].every((key) => value[key] === undefined || isNullableText(value[key]));
   if (kind === "classes") return typeof value.name === "string" && typeof value.subject === "string"
     && ["grade", "schedule", "teacherName", "classroom"].every((key) => isNullableText(value[key]))
     && ["capacity", "weeklyMinutes", "fee"].every((key) => isNullableNumber(value[key])) && isCount(value.studentCount);
@@ -113,7 +114,16 @@ function parsePage<K extends ManagementNumberedKind>(data: unknown, request: Man
   if (data.rows.length !== expectedLength || new Set(data.rows.map((row) => row.id)).size !== data.rows.length) {
     throw readError("management_numbered_response_invalid");
   }
-  return { rows: data.rows, page: request.page, pageSize: request.pageSize, totalCount: data.totalCount };
+  const rows = request.kind === "students" ? data.rows.map((record) => {
+    const row = record as ManagementNumberedStudent;
+    return {
+      kind: row.kind, id: row.id, name: row.name, uid: row.uid ?? null, makeeduDetailId: row.makeeduDetailId ?? null,
+      grade: row.grade, school: row.school, status: row.status, storedStatus: row.storedStatus,
+      registeredCount: row.registeredCount, waitlistCount: row.waitlistCount,
+      sortKey: row.sortKey, updatedAt: row.updatedAt,
+    };
+  }) as RowFor<K>[] : data.rows;
+  return { rows, page: request.page, pageSize: request.pageSize, totalCount: data.totalCount };
 }
 
 export function createManagementNumberedReadService({ supabase }: { supabase: Pick<SupabaseClient, "rpc"> }) {
