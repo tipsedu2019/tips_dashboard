@@ -120,7 +120,7 @@ export function RegistrationApplicationCreate({
       onRegistrationFieldChange("schoolGrade", value)
       return
     }
-    if (field === "parentPhone" || field === "studentPhone") {
+    if (field === "parentPhone") {
       onRegistrationFieldChange(field, normalizeRegistrationPhone(value))
       return
     }
@@ -154,7 +154,6 @@ export function RegistrationApplicationCreate({
                 schoolGrade: registration.schoolGrade || "",
                 schoolName: registration.schoolName || "",
                 parentPhone: registration.parentPhone || "",
-                studentPhone: registration.studentPhone || "",
                 inquiryAt: registration.inquiryAt || "",
                 requestNote: registration.requestNote || "",
               }}

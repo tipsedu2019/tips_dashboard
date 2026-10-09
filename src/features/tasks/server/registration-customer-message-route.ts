@@ -36,11 +36,20 @@ import {
 import {
   createRegistrationCustomerMessageSourceResolver,
   readRegistrationCustomerMessagePrivateSource,
+  registrationCustomerMessageContactContract as contactContract,
   type RegistrationCustomerMessagePrivateSource,
   type RegistrationCustomerMessagePublicSource,
   type RegistrationCustomerMessageReadinessContract,
   type RegistrationCustomerMessagePreviewContract,
 } from "./registration-customer-message-source.ts"
+import {
+  assertRegistrationCustomerMessageContactAttemptGrant,
+  assertRegistrationCustomerMessageContactUse,
+  isRegistrationCustomerMessageContactGeneration,
+  parseRegistrationCustomerMessageContactFence,
+  registrationCustomerMessageMinimalProviderEvidence,
+} from "./registration-customer-message-contact-fence.ts"
+import type { RegistrationContactMessageRequestDigest } from "../registration-contact-message-policy.ts"
 
 type JsonRecord = Record<string, unknown>
 const SAFE_SOURCE_ERROR_CODES = new Set([
@@ -68,6 +77,29 @@ type RouteDependencies = Readonly<{
   now?: () => Date
   authenticate(request: Request): Promise<HandlerAuthContext>
   authorizeTask(context: HandlerAuthContext, taskId: string): Promise<boolean>
+  readContactFence(input: Readonly<{
+    actorProfileId: string
+    messageKind: RegistrationCustomerMessageKind
+    sourceId: string
+    context: HandlerAuthContext
+  }>): Promise<unknown>
+  createRequestDigest(input: Readonly<{
+    actorProfileId: string
+    taskId: string
+    messageKind: RegistrationCustomerMessageKind
+    sourceId: string
+    contactGeneration: string
+    previewId: string | null
+    requestKey: string | null
+  }>): RegistrationContactMessageRequestDigest
+  readRequestReplay(input: Readonly<{
+    actorProfileId: string
+    previewId: string
+    requestKey: string
+    requestDigest: RegistrationContactMessageRequestDigest
+    contactGeneration: string
+    context: HandlerAuthContext
+  }>): Promise<unknown>
   resolveSource(input: Readonly<{
     actorProfileId: string
     messageKind: RegistrationCustomerMessageKind
@@ -93,7 +125,7 @@ type RouteDependencies = Readonly<{
     taskId: string
     messageKind: RegistrationCustomerMessageKind
     sourceId: string
-    contract: RegistrationCustomerMessagePreviewContract
+    contract: RegistrationCustomerMessageContactContract
     context: HandlerAuthContext
   }>): Promise<unknown>
   listHistory(input: Readonly<{
@@ -122,7 +154,7 @@ type RouteDependencies = Readonly<{
     actorProfileId: string
     previewId: string
     requestKey: string
-    contract: RegistrationCustomerMessagePreviewContract
+    contract: RegistrationCustomerMessageContactContract
     context: HandlerAuthContext
   }>): Promise<unknown>
   releasePreSendClaim(input: Readonly<{
@@ -135,7 +167,7 @@ type RouteDependencies = Readonly<{
     messageId: string
     claimToken: string
     dispatchToken: string
-    contract: RegistrationCustomerMessagePreviewContract
+    contract: RegistrationCustomerMessageContactContract
     context: HandlerAuthContext
   }>): Promise<unknown>
   sendProvider(input: Readonly<{
@@ -191,6 +223,27 @@ type RouteDependencies = Readonly<{
     context: HandlerAuthContext
   }>): Promise<unknown>
 }>
+
+export type RegistrationCustomerMessageContactContract = Readonly<
+  Omit<RegistrationCustomerMessagePreviewContract, "parentPhoneDigits"> & {
+    version: 1
+    contactGeneration: string
+    recipientLast4: string
+    requestDigest: RegistrationContactMessageRequestDigest
+  }
+>
+
+async function readContactFence(dependencies: RouteDependencies, input: Parameters<RouteDependencies["readContactFence"]>[0]) {
+  const value = await dependencies.readContactFence(input)
+  const taskId = isRecord(value) ? value.taskId : null
+  if (typeof taskId !== "string") httpError(503, "registration_customer_message_source_unavailable")
+  return parseRegistrationCustomerMessageContactFence(value, { taskId, ...input })
+}
+
+function requireContactUse(input: Parameters<typeof assertRegistrationCustomerMessageContactUse>[0]) {
+  try { return assertRegistrationCustomerMessageContactUse(input) }
+  catch { httpError(409, "registration_customer_message_source_ineligible") }
+}
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const OPERATOR_ROLES = Object.freeze(["admin", "staff"])
@@ -524,10 +577,11 @@ function previewTargetValue(value: unknown) {
     sourceId: value.sourceId,
   })
   const taskId = text(value.taskId).toLowerCase()
-  if (!target || !UUID_PATTERN.test(taskId)) {
+  if (!target || !UUID_PATTERN.test(taskId)
+    || !isRegistrationCustomerMessageContactGeneration(value.contactGeneration)) {
     httpError(409, "registration_customer_message_confirmation_conflict")
   }
-  return { ...target, taskId }
+  return { ...target, taskId, contactGeneration: value.contactGeneration }
 }
 
 function marker(value: unknown, expected: Readonly<{ messageId: string; dispatchToken: string }>) {
@@ -551,7 +605,7 @@ function databaseCode(error: unknown) {
 }
 
 function claimError(error: unknown): never {
-  if (["23505", "40001", "P0002", "42501", "22023"].includes(databaseCode(error))) {
+  if (["23505", "23514", "40001", "P0002", "42501", "22023"].includes(databaseCode(error))) {
     httpError(409, "registration_customer_message_confirmation_conflict")
   }
   httpError(503, "registration_customer_message_runtime_unavailable")
@@ -627,6 +681,11 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         const target = await previewTarget(request)
         const context = await dependencies.authenticate(request)
         requireRole(context, OPERATOR_ROLES)
+        const contactFence = await readContactFence(dependencies, {
+          actorProfileId: context.actorProfileId, ...target, context,
+        })
+        requireContactUse({ fence: contactFence, action: "preview",
+          expectedContactGeneration: contactFence.contactGeneration, request: null })
         const observationTarget = target.messageKind === "observation_booking"
           || target.messageKind === "observation_reminder"
         const source = observationTarget
@@ -649,7 +708,7 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           ...target,
           context,
         })
-        if (resolvedSource.taskId !== taskId) {
+        if (resolvedSource.taskId !== taskId || taskId !== contactFence.taskId) {
           httpError(503, "registration_customer_message_source_unavailable")
         }
         const privateSource = dependencies.readPrivateSource(resolvedSource)
@@ -703,7 +762,10 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
             actorProfileId: context.actorProfileId,
             taskId: resolvedSource.taskId,
             ...target,
-            contract: privateSource.previewContract,
+            contract: contactContract(privateSource, contactFence, dependencies.createRequestDigest({
+              actorProfileId: context.actorProfileId, taskId: contactFence.taskId, ...target,
+              contactGeneration: contactFence.contactGeneration, previewId: null, requestKey: null,
+            })),
             context,
           }), target, now())
           if (receipt.recipientLast4 !== resolvedSource.recipientLast4) {
@@ -748,6 +810,33 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         if (!await dependencies.authorizeTask(context, target.taskId)) {
           httpError(409, "registration_customer_message_confirmation_conflict")
         }
+        const requestDigest = dependencies.createRequestDigest({
+          actorProfileId: context.actorProfileId, ...target,
+          previewId: input.previewId, requestKey: input.requestKey,
+        })
+        const requestIdentity = { requestKey: input.requestKey, digest: requestDigest }
+        const replayValue = await dependencies.readRequestReplay({
+          actorProfileId: context.actorProfileId, previewId: input.previewId,
+          requestKey: input.requestKey, requestDigest,
+          contactGeneration: target.contactGeneration, context,
+        })
+        if (replayValue !== null) {
+          const replay = sendResult(replayValue)
+          if (replay.owner !== false || replay.idempotent !== true
+            || replay.messageKind !== target.messageKind) {
+            httpError(503, "registration_customer_message_result_unavailable")
+          }
+          return json(assertRegistrationCustomerMessagePublicPayload(publicSendResult(replay)))
+        }
+        const initialContactFence = await readContactFence(dependencies, {
+          actorProfileId: context.actorProfileId, messageKind: target.messageKind,
+          sourceId: target.sourceId, context,
+        })
+        if (initialContactFence.taskId !== target.taskId) {
+          httpError(409, "registration_customer_message_confirmation_conflict")
+        }
+        requireContactUse({ fence: initialContactFence, action: "claim",
+          expectedContactGeneration: target.contactGeneration, request: requestIdentity })
         const initialSource = await resolvePreviewSource(dependencies, {
           actorProfileId: context.actorProfileId,
           messageKind: target.messageKind,
@@ -764,7 +853,7 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
             actorProfileId: context.actorProfileId,
             previewId: input.previewId,
             requestKey: input.requestKey,
-            contract: initialPrivateSource.previewContract,
+            contract: contactContract(initialPrivateSource, initialContactFence, requestDigest),
             context,
           }))
         } catch (error) {
@@ -782,6 +871,13 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
         let privateSource: RegistrationCustomerMessagePrivateSource
         let attempt: ReturnType<typeof marker>
         try {
+          const contactFence = await readContactFence(dependencies, {
+            actorProfileId: context.actorProfileId, messageKind: target.messageKind,
+            sourceId: target.sourceId, context,
+          })
+          if (contactFence.taskId !== target.taskId) throw new Error("source_task_mismatch")
+          requireContactUse({ fence: contactFence, action: "attempt", claimed: true,
+            expectedContactGeneration: target.contactGeneration, request: requestIdentity })
           const canonicalSource = await resolvePreviewSource(dependencies, {
             actorProfileId: context.actorProfileId,
             messageKind: target.messageKind,
@@ -792,13 +888,21 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           privateSource = dependencies.readPrivateSource(canonicalSource)
           const templateId = privateSource.readinessContract.templateId
           if (!templateId) throw new Error("template_missing")
-          attempt = marker(await dependencies.markAttemptStarted({
+          const markerValue = await dependencies.markAttemptStarted({
             messageId: claim.messageId,
             claimToken,
             dispatchToken,
-            contract: privateSource.previewContract,
+            contract: contactContract(privateSource, contactFence, requestDigest),
             context,
-          }), { messageId: claim.messageId, dispatchToken })
+          })
+          attempt = marker(markerValue, { messageId: claim.messageId, dispatchToken })
+          if (attempt.allowed) {
+            assertRegistrationCustomerMessageContactAttemptGrant(
+              isRecord(markerValue) ? markerValue.contactGrant : null,
+              { scope: target, contactGeneration: target.contactGeneration,
+                messageId: claim.messageId, dispatchToken, request: requestIdentity },
+            )
+          }
         } catch {
           try {
             await dependencies.releasePreSendClaim({
@@ -867,7 +971,7 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
             messageId: claim.messageId,
             dispatchToken,
             outcome: providerOutcome,
-            evidence: providerEvidence,
+            evidence: registrationCustomerMessageMinimalProviderEvidence(providerOutcome, providerEvidence, now()),
             providerPayloadChecksum,
             context,
           }))
@@ -907,7 +1011,7 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
           actorProfileId: context.actorProfileId,
           messageId: input.messageId,
           resolution: provider.outcome,
-          evidence: provider.evidence,
+          evidence: registrationCustomerMessageMinimalProviderEvidence(provider.outcome, provider.evidence, now()),
           requestKey: lookupContext.requestKey,
           context,
         }))
@@ -1272,6 +1376,29 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
         context as Parameters<ReturnType<typeof createProductionRegistrationCustomerMessageAuth>["authorizeTask"]>[0],
         taskId,
       )
+    },
+    readContactFence(input) {
+      return rpc(input.context, "read_registration_contact_message_fence_v1", {
+        p_actor_profile_id: input.actorProfileId,
+        p_message_kind: input.messageKind,
+        p_source_id: input.sourceId,
+      })
+    },
+    createRequestDigest(input) {
+      if (!pepper) httpError(503, "registration_customer_message_runtime_unavailable")
+      return Object.freeze({ version: 1 as const, digest: createHmac("sha256", pepper)
+        .update(JSON.stringify(["registration-contact-message-request-v1", input.actorProfileId,
+          input.taskId, input.messageKind, input.sourceId, input.contactGeneration,
+          input.previewId, input.requestKey]), "utf8").digest("hex") })
+    },
+    readRequestReplay(input) {
+      return exactRpc(input.context, "read_registration_contact_message_request_replay_v1", {
+        p_actor_profile_id: input.actorProfileId,
+        p_preview_id: input.previewId,
+        p_request_key: input.requestKey,
+        p_request_digest: input.requestDigest,
+        p_contact_generation: input.contactGeneration,
+      })
     },
     async resolveSource(input) {
       if (!isRegistrationCustomerMessageSingleSourceKind(input.messageKind)) {

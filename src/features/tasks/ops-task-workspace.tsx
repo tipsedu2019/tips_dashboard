@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic"
 
+import { stripRegistrationTaskContact } from "./registration-contact-client.ts"
 import { DataTableToolbar, DataTableCommandRow, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
 import { DataTableSearchField } from "@/components/data-table/data-table-search-field"
 import { useDataTableColumns } from "@/components/data-table/data-table-columns"
@@ -178,7 +179,6 @@ import {
   getRegistrationTaskStatusForPipeline,
   getRegistrationTransitionBlockers,
   isRegistrationCompletionImmutable,
-  normalizeRegistrationPhone,
   normalizeRegistrationCampus,
   parseRegistrationSubjects,
   prepareRegistrationLevelTestRetry,
@@ -244,6 +244,7 @@ import {
   createRegistrationCase,
   createRegistrationMutationRequestKey,
   probeRegistrationObservationRuntime,
+  loadRegistrationCaseContact,
   setRegistrationWorkflowStatus,
   toObservationAwareCaseDetail,
   updateRegistrationCaseCommon,
@@ -2974,8 +2975,6 @@ function matchesSearch(task: OpsTask, query: string) {
     task.requestedTeam,
     task.memo,
     task.registration?.pipelineStatus,
-    task.registration?.parentPhone,
-    task.registration?.studentPhone,
     task.registration?.counselor,
     task.withdrawal?.customerReason,
     task.withdrawal?.teacherOpinion,
@@ -10581,7 +10580,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSaving(true)
     setMessage("")
     try {
+      const contactState = await loadRegistrationCaseContact(track.track.taskId)
       const receipt = await setRegistrationWorkflowStatus({
+        taskId: track.track.taskId,
+        contactState,
         trackId: track.trackId,
         workflowStatus,
         expectedWorkflowRevision: track.workflowRevision,
@@ -11097,7 +11099,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       memo: input.memo || "",
       createdAt: existing?.createdAt || timestamp,
       updatedAt: timestamp,
-      registration: input.type === "registration" ? input.registration : undefined,
+      registration: input.type === "registration" ? stripRegistrationTaskContact({ registration: input.registration }).registration : undefined,
       withdrawal: input.type === "withdrawal" ? input.withdrawal : undefined,
       transfer: input.type === "transfer" ? input.transfer : undefined,
       wordRetest: input.type === "word_retest" ? input.wordRetest : undefined,
@@ -11459,8 +11461,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             studentName: payload.studentName || "",
             schoolGrade: registration.schoolGrade || "",
             schoolName: registration.schoolName || "",
-            parentPhone: registration.parentPhone || "",
-            studentPhone: registration.studentPhone || "",
+            contactState: detail.contactState,
             campus: normalizeRegistrationCampus(payload.campus),
             inquiryAt: registration.inquiryAt || "",
             requestNote: registration.requestNote || "",
@@ -11506,7 +11507,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 schoolGrade: registration.schoolGrade || "",
                 schoolName: registration.schoolName || "",
                 parentPhone: registration.parentPhone || "",
-                studentPhone: registration.studentPhone || "",
                 campus: normalizeRegistrationCampus(createPayload.campus),
                 inquiryAt: registration.inquiryAt || "",
                 subjects,
@@ -14328,8 +14328,6 @@ function TypeSpecificFields({
     if (options.fillRegistration) {
       updateRegistration("schoolGrade", registration.schoolGrade || student.grade)
       updateRegistration("schoolName", registration.schoolName || student.school)
-      updateRegistration("studentPhone", registration.studentPhone || student.contact)
-      updateRegistration("parentPhone", registration.parentPhone || student.parentContact)
     }
     if (options.fillWithdrawalClass) {
       updateWithdrawal("schoolGrade", withdrawal.schoolGrade || student.grade)
@@ -14686,20 +14684,6 @@ function TypeSpecificFields({
               label={<RegistrationFieldLabel label="학교" requirement="optional" />}
               value={registration.schoolName || ""}
               onChange={(value) => updateRegistration("schoolName", value)}
-            />
-            <RegistrationFocusTarget focusKey="parentPhone">
-              <TextField
-                label={<RegistrationFieldLabel label="학부모 전화" requirement="optional" />}
-                value={registration.parentPhone || ""}
-                inputMode="tel"
-                onChange={(value) => updateRegistration("parentPhone", normalizeRegistrationPhone(value))}
-              />
-            </RegistrationFocusTarget>
-            <TextField
-              label={<RegistrationFieldLabel label="학생 전화" requirement="optional" />}
-              value={registration.studentPhone || ""}
-              inputMode="tel"
-              onChange={(value) => updateRegistration("studentPhone", normalizeRegistrationPhone(value))}
             />
             <TextField
               label={<RegistrationFieldLabel label="문의일시" requirement="optional" />}
@@ -16911,8 +16895,6 @@ function RegistrationDetailPanel({ task, selectedTrackId }: { task: OpsTask; sel
           <Info label="학생" value={task.studentName || "미지정"} />
           <Info label="학년" value={registration.schoolGrade || "미정"} />
           <Info label="학교" value={registration.schoolName || "미정"} />
-          <Info label="학부모 전화" value={registration.parentPhone || "미정"} />
-          <OptionalInfo label="학생 전화" value={registration.studentPhone} />
           <Info label="문의일시" value={dateLabel(registration.inquiryAt || "")} />
         </dl>
       </section>

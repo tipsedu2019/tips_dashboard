@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { validatePageSize } from '../src/lib/numbered-pagination.ts';
+import { stripRegistrationTaskContact } from '../src/features/tasks/registration-contact-client.ts';
 
 // Load the real pure declarations, not substituted mapper/filter implementations.
 // The existing service module also initializes unrelated browser/global clients.
@@ -15,7 +16,7 @@ const declarations = syntax.statements.filter((node) => names.has(node.name?.tex
 function compile(source, require = () => { throw new Error('unexpected import'); }) {
   const sandboxModule = { exports: {} };
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
-    { module: sandboxModule, exports: sandboxModule.exports, require, AbortSignal, Error, RangeError, Date, Set, Object, Number });
+    { module: sandboxModule, exports: sandboxModule.exports, require, AbortSignal, Error, RangeError, Date, Set, Object, Number, stripRegistrationTaskContact });
   return sandboxModule.exports;
 }
 const shared = compile(`${declarations}\nmodule.exports={assertOpsTaskPageFilters,createDefaultOpsTaskPageFilters,mapOpsTaskPageRow};`);
@@ -129,6 +130,28 @@ const registration = {
   pipelineStatus: 'inquiry', schoolGrade: '', schoolName: '', parentPhone: '', studentPhone: '', levelTestResult: '', levelTestPlace: '', levelTestMaterialLink: '', counselor: '', classStartSession: '', requestNote: '',
   inquiryAt: null, levelTestAt: null, levelTestCompletedAt: null, phoneConsultationAt: null, visitConsultationAt: null, consultationAt: null, classStartDate: null,
 };
+for (const [label, contact] of [
+  ['omitted', {}], ['null tombstones', { parentPhone: null, studentPhone: null }],
+  ['legacy populated', { parentPhone: '010-0000-0000', studentPhone: '010-0000-0001' }],
+]) test(`registration accepts ${label} typed slots without returning contacts`, async () => {
+  const row = typedRow('registration');
+  row.registration = { ...registration };
+  delete row.registration.parentPhone;
+  delete row.registration.studentPhone;
+  Object.assign(row.registration, contact);
+  const result = await readTyped('registration', row);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.rows[0].registration, 'parentPhone'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.rows[0].registration, 'studentPhone'), false);
+  assert.equal(JSON.stringify(result).includes('010-0000-0000'), false);
+  assert.equal(JSON.stringify(result).includes('010-0000-0001'), false);
+  assert.equal(result.rows[0].registration.requestNote, registration.requestNote);
+});
+for (const contact of [{ parentPhone: 1 }, { studentPhone: {} }, { parent_phone: '010-0000-0000' }, { student_phone: null }]) {
+  test(`registration rejects malformed or unsupported typed slots ${JSON.stringify(contact)}`, async () => {
+    const row = typedRow('registration'); row.registration = { ...registration, ...contact };
+    await assert.rejects(() => readTyped('registration', row), /response_invalid/);
+  });
+}
 const track = {
   id: id(901), taskId: id(1), subject: '영어', status: 'inquiry', workflowStatus: 'inquiry', workflowRevision: 1,
   workflowStatusEnteredAt: '2026-08-31T00:00:00Z', stageEnteredAt: '2026-08-31T00:00:00Z', legacy: false,

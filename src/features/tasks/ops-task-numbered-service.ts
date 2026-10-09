@@ -42,9 +42,21 @@ const COMMON: Shape = {
   summaryFlags: (value) => Array.isArray(value) && value.every(string),
 }
 const REGISTRATION: Shape = {
-  ...fields("pipelineStatus schoolGrade schoolName parentPhone studentPhone levelTestResult levelTestPlace levelTestMaterialLink counselor classStartSession requestNote", string),
+  ...fields("pipelineStatus schoolGrade schoolName levelTestResult levelTestPlace levelTestMaterialLink counselor classStartSession requestNote", string),
   ...fields("inquiryAt levelTestAt levelTestCompletedAt phoneConsultationAt visitConsultationAt consultationAt", nullable(timestamp)),
   classStartDate: nullable(date),
+}
+function validRegistration(value: unknown): boolean {
+  if (!object(value)) return false
+  const projection = { ...value }
+  // Old producers return typed slots; new producers omit them or use null
+  // tombstones. Neither shape makes a list DTO a contact source.
+  for (const key of ["parentPhone", "studentPhone"]) {
+    if (Object.prototype.hasOwnProperty.call(projection, key)
+      && projection[key] !== null && !string(projection[key])) return false
+    delete projection[key]
+  }
+  return matches(projection, REGISTRATION)
 }
 const ENROLLMENT_REQUIRED: Shape = {
   classId: uuid,
@@ -119,7 +131,7 @@ const DISPLAY: Record<string, Shape> = {
 function validRow(value: unknown, taskType: OpsTaskPageFilters["taskType"]): value is Record<string, unknown> {
   const shape = { ...COMMON, type: taskType === "general" ? oneOf("general", "textbook") : oneOf(taskType) }
   if (taskType === "registration") {
-    Object.assign(shape, { registration: (item: unknown) => matches(item, REGISTRATION), registrationTracks: (items: unknown) => Array.isArray(items)
+    Object.assign(shape, { registration: validRegistration, registrationTracks: (items: unknown) => Array.isArray(items)
       && items.every((item) => matches(item, TRACK) && object(value) && item.taskId === value.id)
       && new Set(items.map((item) => item.id)).size === items.length })
   } else if (Object.prototype.hasOwnProperty.call(INLINE, taskType)) {

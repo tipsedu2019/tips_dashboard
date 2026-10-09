@@ -95,6 +95,10 @@ async function setup(t, url = 'https://test.invalid/admin/tasks') {
   window.matchMedia = (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {} });
   for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
+  // react-dom is loaded before JSDOM and can select its legacy input-event
+  // fallback. Supply equivalent event registration on this synthetic window.
+  dom.window.HTMLElement.prototype.attachEvent = function (name, listener) { this.addEventListener(name.replace(/^on/, ''), listener); };
+  dom.window.HTMLElement.prototype.detachEvent = function (name, listener) { this.removeEventListener(name.replace(/^on/, ''), listener); };
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
   window.cancelAnimationFrame = window.clearTimeout; window.scrollTo = () => {};
@@ -102,7 +106,13 @@ async function setup(t, url = 'https://test.invalid/admin/tasks') {
   window.HTMLElement.prototype.scrollIntoView = () => {};
   window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify({ 'ops-task:general': { mode: 'manual', pageSize: 10 } }));
   const root = createRoot(document.getElementById('root'));
-  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  t.after(async () => {
+    await act(async () => root.unmount());
+    // Radix restores focus on a deferred task; keep its owning document alive
+    // until that standard dialog cleanup completes.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    dom.window.close();
+  });
   return { root };
 }
 async function hook(t, initial = {}) {
@@ -990,7 +1000,7 @@ for (const navigationMode of ['native', 'legacy']) test(`registration ${navigati
   assert.equal(page.requests.length, 0);
 });
 
-for (const mode of ['booking', 'decision']) test(`real registration ${mode} child protects parent close, subject replacement and remaining sibling drafts`, async t => {
+for (const mode of ['booking', 'decision']) test(`real registration ${mode === 'decision' ? 'readonly decision history with booking draft' : 'booking child'} protects parent close, subject replacement and remaining sibling drafts`, async t => {
   const env = process.env.NODE_ENV; process.env.NODE_ENV = 'test'; t.after(() => { process.env.NODE_ENV = env; });
   const page = await workspace(t, { workspace: 'registration', observationDraftMode: mode, search: `?fixture=registration-subject-tracks&fixtureRole=staff&observationDraftQa=${mode}` });
   await settleDraftUi(() => document.querySelector('[data-testid="registration-case-desktop-list"] [data-registration-case-row]').click());
@@ -998,9 +1008,18 @@ for (const mode of ['booking', 'decision']) test(`real registration ${mode} chil
   await settleDraftUi(() => app().onFocusTrack('20000000-0000-4000-8000-000000000001'));
   assert.ok(document.querySelector("[data-registration-application-dirty]"), document.body.textContent.slice(-4000));
   assert.ok(app());
-  assert.ok(document.querySelector('[aria-label="청강 반"], [id^="observation-decision-"]'), JSON.stringify({runtime:app().observationRuntime,body:document.body.textContent.slice(-9000)}));
-  const choice = mode === 'booking' ? '20000000-0000-4000-8000-000000000003' : 'waiting_current_class';
-  const selector = () => currentComponentProps('RegistrationSelect', p => mode === 'booking' ? p['aria-label'] === '청강 반' : p.id?.startsWith('observation-decision-'));
+  assert.ok(document.querySelector('[aria-label="청강 반"]'), JSON.stringify({runtime:app().observationRuntime,body:document.body.textContent.slice(-9000)}));
+  if (mode === 'decision') {
+    // PR96 keeps the historical attendance/decision panel read-only; operational
+    // progress changes through the separate manual workflow selector.
+    const feedback = currentComponentProps('RegistrationObservationFeedbackPanel');
+    assert.equal(feedback.canDecide, false);
+    assert.equal(feedback.canRecordAttendance, false);
+    assert.equal(feedback.detail.observationId, '20000000-0000-4000-8000-000000000009');
+    assert.equal(document.querySelector('[id^="observation-decision-"]'), null);
+  }
+  const choice = '20000000-0000-4000-8000-000000000003';
+  const selector = () => currentComponentProps('RegistrationSelect', p => p['aria-label'] === '청강 반');
   await settleDraftUi(() => selector().onValueChange(choice));
   assert.equal(unloadIsBlocked(), true);
   const { requestAppNavigation } = page.load('src/lib/guarded-navigation.ts'); const routes = [];

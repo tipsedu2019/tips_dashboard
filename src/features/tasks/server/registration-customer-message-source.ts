@@ -14,6 +14,8 @@ import {
   type RegistrationCustomerMessageSubject,
   type RegistrationCustomerMessageWaitingKind,
 } from "./registration-customer-message-catalog.ts"
+import type { RegistrationContactMessageRequestDigest } from "../registration-contact-message-policy.ts"
+import type { RegistrationCustomerMessageContactFence } from "./registration-customer-message-contact-fence.ts"
 
 type JsonRecord = Record<string, unknown>
 
@@ -66,6 +68,17 @@ export type RegistrationCustomerMessagePreviewContract = Readonly<{
   renderedBodyChecksum: string
   renderedButtonsChecksum: string
 }>
+
+/** The DB receipt receives HMAC/last4/checksums; raw contact stays ephemeral. */
+export function registrationCustomerMessageContactContract(
+  source: RegistrationCustomerMessagePrivateSource,
+  fence: RegistrationCustomerMessageContactFence,
+  requestDigest: RegistrationContactMessageRequestDigest,
+) {
+  const { parentPhoneDigits, ...checksums } = source.previewContract
+  return Object.freeze({ ...checksums, version: 1 as const, contactGeneration: fence.contactGeneration,
+    recipientLast4: parentPhoneDigits.slice(-4), requestDigest })
+}
 
 export type RegistrationCustomerMessageReadinessContract = Readonly<{
   credentialsConfigured: boolean

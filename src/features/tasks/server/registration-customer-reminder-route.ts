@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import { createHmac } from "node:crypto"
 
 import {
   createRegistrationCustomerMessageCatalog,
@@ -14,6 +15,7 @@ import {
 import {
   createRegistrationCustomerMessageSourceResolver,
   readRegistrationCustomerMessagePrivateSource,
+  registrationCustomerMessageContactContract,
 } from "./registration-customer-message-source.ts"
 import {
   RegistrationCustomerReminderBookingFactChangedError,
@@ -22,6 +24,11 @@ import {
   authorizeRegistrationCustomerReminderWorker,
   createRegistrationCustomerReminderWorker,
 } from "./registration-customer-reminder-worker.ts"
+import {
+  assertRegistrationCustomerMessageContactUse,
+  parseRegistrationCustomerMessageContactFence,
+  registrationCustomerMessageMinimalProviderEvidence,
+} from "./registration-customer-message-contact-fence.ts"
 import type {
   RegistrationCustomerReminderBegin,
   RegistrationCustomerReminderWorkerBatchResult,
@@ -454,6 +461,18 @@ export function parseRegistrationCustomerReminderClaim(
 ): RegistrationCustomerReminderClaim | null {
   if (value === null) return null
   if (!isRecord(value)) normalizeRegistrationCustomerReminderRpcFailure(null)
+  if (exactKeys(value, ["claim", "contactFence"])) {
+    const claim = parseRegistrationCustomerReminderClaim(value.claim)
+    if (!claim || !isRecord(value.contactFence) || typeof value.contactFence.taskId !== "string") {
+      normalizeRegistrationCustomerReminderRpcFailure(null)
+    }
+    const sourceId = claim.messageKind === "observation_reminder" ? claim.observationId : claim.appointmentId
+    if (!sourceId) normalizeRegistrationCustomerReminderRpcFailure(null)
+    const contactFence = parseRegistrationCustomerMessageContactFence(value.contactFence, {
+      taskId: value.contactFence.taskId, sourceId, messageKind: claim.messageKind,
+    })
+    return Object.freeze({ ...claim, contactFence })
+  }
   if (exactKeys(value, [
     "jobId", "appointmentId", "claimToken", "sourceRevision", "scheduledFor", "requestKey",
   ])) {
@@ -482,7 +501,8 @@ export function parseRegistrationCustomerReminderClaim(
 
 export function parseRegistrationCustomerReminderBegin(value: unknown): RegistrationCustomerReminderBegin {
   if (!isRecord(value)) normalizeRegistrationCustomerReminderRpcFailure(null)
-  if (!exactKeys(value, ["allowed", "messageId", "dispatchToken", "currentStatus"])) {
+  const hasGrant = Object.prototype.hasOwnProperty.call(value, "contactGrant")
+  if (!exactKeys(value, ["allowed", "messageId", "dispatchToken", "currentStatus", ...(hasGrant ? ["contactGrant"] : [])])) {
     normalizeRegistrationCustomerReminderRpcFailure(null)
   }
   const messageId = value.messageId === null ? null : text(value.messageId)
@@ -508,6 +528,7 @@ export function parseRegistrationCustomerReminderBegin(value: unknown): Registra
     messageId,
     dispatchToken,
     currentStatus: currentStatus as RegistrationCustomerReminderBegin["currentStatus"],
+    ...(hasGrant ? { contactGrant: value.contactGrant } : {}),
   })
 }
 
@@ -593,22 +614,37 @@ export function createProductionRegistrationCustomerReminderRouteHandlers(
   })
   const worker = createRegistrationCustomerReminderWorker({
     async claim() {
+      // Separate PostgREST transactions: recovery queue/message locks must not
+      // be retained when the parent-first contact fence is acquired by claim.
+      await serviceRpc(client, "reconcile_registration_customer_reminder_claims_v1")
       return parseRegistrationCustomerReminderClaim(
         await serviceRpc(client, "claim_registration_customer_reminder_job_v1"),
       )
     },
     async prepare(claim): Promise<RegistrationCustomerReminderPrepared> {
-      const rawSource = await serviceRpc(client, "read_registration_customer_reminder_source_v1", {
+      const sourceEnvelope = await serviceRpc(client, "read_registration_customer_reminder_source_v1", {
         p_job_id: claim.jobId,
         p_claim_token: claim.claimToken,
       }, {
         sourceIneligibleIsTerminal: true,
         observationSourceRead: claim.messageKind === "observation_reminder",
       })
+      if (!isRecord(sourceEnvelope) || !exactKeys(sourceEnvelope, ["source", "contactFence"])
+        || !claim.contactFence) throw new RegistrationCustomerReminderSourceIneligibleError()
+      const contactFence = parseRegistrationCustomerMessageContactFence(sourceEnvelope.contactFence, claim.contactFence)
+      const pepper = environmentText(environment.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER)
+      if (!pepper) throw new Error("registration_customer_reminder_runtime_unavailable")
+      const requestDigest = Object.freeze({ version: 1 as const, digest: createHmac("sha256", pepper)
+        .update(JSON.stringify(["registration-contact-message-scheduled-request-v1", claim.jobId,
+          claim.requestKey, contactFence.taskId, contactFence.messageKind, contactFence.sourceId,
+          claim.contactFence.contactGeneration]), "utf8").digest("hex") })
+      assertRegistrationCustomerMessageContactUse({ fence: contactFence, action: "claim",
+        expectedContactGeneration: claim.contactFence.contactGeneration,
+        request: { requestKey: claim.requestKey, digest: requestDigest } })
       const resolver = createRegistrationCustomerMessageSourceResolver({
         catalog,
         recipientHashPepper: environmentText(environment.REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER),
-        resolveSource: async () => rawSource,
+        resolveSource: async () => sourceEnvelope.source,
       })
       const sourceId = claim.messageKind === "observation_reminder"
         ? claim.observationId
@@ -628,8 +664,10 @@ export function createProductionRegistrationCustomerReminderRouteHandlers(
         templateId: privateSource.readinessContract.templateId,
         variables: privateSource.rendered.variables,
         buttons: privateSource.rendered.buttons,
-        contract: privateSource.previewContract,
+        contract: registrationCustomerMessageContactContract(privateSource, contactFence, requestDigest),
         readinessContract: privateSource.readinessContract,
+        contactFence,
+        requestDigest,
       })
     },
     async begin({ claim, prepared }) {
@@ -661,7 +699,9 @@ export function createProductionRegistrationCustomerReminderRouteHandlers(
         p_message_id: begin.messageId,
         p_dispatch_token: begin.dispatchToken,
         p_result: providerResult.outcome,
-        p_provider_result: providerResult.evidence,
+        p_provider_result: registrationCustomerMessageMinimalProviderEvidence(
+          providerResult.outcome, providerResult.evidence, new Date(),
+        ),
         p_provider_payload_checksum: providerResult.providerPayloadChecksum,
       })
     },

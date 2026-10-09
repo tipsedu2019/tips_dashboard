@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   assertRegistrationCustomerMessagePublicPayload,
   isRegistrationCustomerMessageBundleKind,
@@ -13,6 +14,10 @@ import {
   RegistrationCustomerMessageHttpError,
   createProductionRegistrationCustomerMessageAuth,
 } from "./registration-customer-message-auth.ts"
+import {
+  assertRegistrationCustomerMessageContactUse,
+  parseRegistrationCustomerMessageContactFence,
+} from "./registration-customer-message-contact-fence.ts"
 
 function json(value: unknown, status = 200) {
   return Response.json(value, { status, headers: { "Cache-Control": "no-store" } })
@@ -24,6 +29,27 @@ function errorResponse(error: unknown) {
     return json({ ok: false, code: "registration_customer_message_source_invalid" }, 422)
   }
   return json({ ok: false, code: "registration_customer_message_runtime_unavailable" }, 503)
+}
+
+async function readBundleContactFence(
+  client: SupabaseClient,
+  actorProfileId: string,
+  messageKind: string,
+  sourceId: string,
+) {
+  return client.rpc("read_registration_contact_message_fence_v1", {
+    p_actor_profile_id: actorProfileId,
+    p_message_kind: messageKind,
+    p_source_id: sourceId,
+  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+
+async function readBundleSource(client: SupabaseClient, messageKind: string, sourceId: string) {
+  return client.rpc("resolve_registration_customer_message_bundle_source_v1", {
+    p_message_kind: messageKind,
+    p_task_id: sourceId,
+    p_service_date: null,
+  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 
 export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
@@ -42,19 +68,26 @@ export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
         throw new RegistrationCustomerMessageHttpError(404, "registration_customer_message_source_not_found")
       }
       const bundleTarget = { messageKind: target.messageKind, sourceId: target.sourceId }
+      const fenceResult = await readBundleContactFence(
+        context.serviceClient, context.actorProfileId, target.messageKind, target.sourceId,
+      )
+      if (fenceResult.error) {
+        throw new RegistrationCustomerMessageHttpError(503, "registration_customer_message_runtime_unavailable")
+      }
+      const contactFence = parseRegistrationCustomerMessageContactFence(fenceResult.data, {
+        ...bundleTarget, taskId: target.sourceId,
+      })
+      try {
+        assertRegistrationCustomerMessageContactUse({ fence: contactFence, action: "preview",
+          expectedContactGeneration: contactFence.contactGeneration, request: null })
+      } catch {
+        throw new RegistrationCustomerMessageHttpError(409, "registration_customer_message_source_ineligible")
+      }
       const resolver = createRegistrationCustomerMessageBundleSourceResolver({
         catalog,
         async resolveSource(input) {
-          const result = await context.serviceClient.rpc("resolve_registration_customer_message_bundle_source_v1", {
-            p_message_kind: input.messageKind,
-            p_task_id: input.sourceId,
-            p_service_date: null,
-          })
+          const result = await readBundleSource(context.serviceClient, input.messageKind, input.sourceId)
           if (result.error) {
-            console.error("registration_customer_message_bundle_source_rpc_failed", {
-              code: result.error.code,
-              hint: result.error.hint,
-            })
             throw new Error("registration_customer_message_bundle_source_invalid")
           }
           return result.data

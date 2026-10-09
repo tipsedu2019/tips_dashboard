@@ -183,6 +183,11 @@ function sendResult(state, overrides = {}) {
   }
 }
 
+function contactFence() {
+  return { version: 1, taskId: IDS.task, sourceId: IDS.observation, messageKind: "observation_booking",
+    contactPhase: "open", contactGeneration: "1", allPhasesClosed: false, sourcePhaseOpen: true,
+    canonicalAppointmentKind: "observation_class" }
+}
 function createObservationProductionHarness({
   runtimeVersion = 0,
   activationMode = "off",
@@ -338,6 +343,17 @@ function createObservationProductionHarness({
     },
     async rpc(name, args) {
       calls.rpcNames.push(name)
+      if (name === "read_registration_contact_message_fence_v1") {
+        return { data: contactFence(), error: null }
+      }
+      if (name === "read_registration_contact_message_request_replay_v1") {
+        const saved = messages.get(args.p_request_key)
+        if (!saved) return { data: null, error: null }
+        assert.equal(saved.previewId, args.p_preview_id)
+        assert.deepEqual(saved.requestDigest, args.p_request_digest)
+        assert.equal(args.p_contact_generation, "1")
+        return { data: sendResult(saved, { idempotent: true, owner: false }), error: null }
+      }
       if (name === "resolve_registration_customer_message_source_v1") {
         assert.equal(args.p_message_kind, "observation_booking")
         assert.equal(args.p_source_id, IDS.observation)
@@ -463,14 +479,19 @@ function createObservationProductionHarness({
       }
       if (name === "read_registration_customer_message_preview_target_v1") {
         if (!previews.has(args.p_preview_id)) return { data: null, error: { code: "P0002" } }
-        return { data: { ...OBSERVATION_BOOKING_TARGET, taskId: IDS.task }, error: null }
+        return { data: { ...OBSERVATION_BOOKING_TARGET, taskId: IDS.task, contactGeneration: "1" }, error: null }
       }
       if (name === "claim_registration_customer_message_v1") {
         const replay = messages.get(args.p_request_key)
         if (replay) return { data: sendResult(replay, { idempotent: true, owner: false }), error: null }
         const preview = previews.get(args.p_preview_id)
         if (!preview) return { data: null, error: { code: "P0002" } }
-        if (JSON.stringify(preview.contract) !== JSON.stringify(args.p_contract)) {
+        const previewFacts = { ...preview.contract }
+        delete previewFacts.requestDigest
+        const { requestDigest: sendDigest, ...sendFacts } = args.p_contract
+        assert.equal("parentPhoneDigits" in args.p_contract, false)
+        assert.match(sendDigest.digest, /^[a-f0-9]{64}$/u)
+        if (JSON.stringify(previewFacts) !== JSON.stringify(sendFacts)) {
           return { data: null, error: { code: "40001", message: "registration_customer_message_preview_stale" } }
         }
         const state = {
@@ -479,6 +500,7 @@ function createObservationProductionHarness({
           claimToken: nextClaimId,
           dispatchToken: nextDispatchId,
           sourceFingerprint: args.p_contract.sourceFingerprint,
+          previewId: args.p_preview_id, requestDigest: args.p_contract.requestDigest,
         }
         messages.set(args.p_request_key, state)
         return {
@@ -508,6 +530,8 @@ function createObservationProductionHarness({
             messageId: args.p_message_id,
             currentStatus: "pending",
             dispatchToken: args.p_dispatch_token,
+            contactGrant: { version: 1, action: "attempt", linearization: "registration_contact_case_lock_v1",
+              messageId: args.p_message_id, dispatchToken: args.p_dispatch_token, contactFence: contactFence() },
           },
           error: null,
         }

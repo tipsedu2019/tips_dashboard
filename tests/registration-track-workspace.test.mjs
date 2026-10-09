@@ -14,6 +14,7 @@ import {
 } from "../src/features/tasks/registration-application-model.ts";
 import { createRegistrationObservationAsyncOwnership } from "../src/features/tasks/registration-workspace-route.ts";
 import * as registrationTrackModel from "../src/features/tasks/registration-track-model.js";
+import * as registrationContactClient from "../src/features/tasks/registration-contact-client.ts";
 import { getSelectableRegistrationScheduleSessions } from "../src/features/tasks/registration-workflow.js";
 import { getRegistrationWorkflowViewKey } from "../src/features/tasks/registration-workflow-status.js";
 
@@ -317,7 +318,8 @@ async function loadMountedRegistrationApplication({
   loadFeedback,
   withdrawObservation = async () => ({ changed: false }),
   enterObservation = async () => ({ changed: false }),
-  setWorkflowStatus = async () => undefined,
+  setWorkflowStatus = async (input) => mountedWorkflowStatusReceipt(input),
+  getContactReceipt = () => null,
   isOpsStatus = () => true,
   workflowStatusOptions = () => [],
   canStartObservation = () => false,
@@ -403,6 +405,7 @@ async function loadMountedRegistrationApplication({
     ["@/components/ui/badge", { Badge }],
     ["@/components/ui/button", { Button }],
     ["./registration-select", { RegistrationSelect }],
+    ["./registration-contact-client.ts", registrationContactClient],
     ["@/features/notifications/notification-delivery-control", { GoogleChatDeliveryControl: Passthrough }],
     ["@/lib/supabase", { supabase: {} }],
     ["./registration-application-admission-section", { RegistrationApplicationAdmissionSection: Passthrough }],
@@ -521,8 +524,8 @@ async function loadMountedRegistrationApplication({
     }],
     ["../../lib/academic-subject-registry.ts", { ACADEMIC_SUBJECT_VALUES: ["영어", "수학", "과학"] }],
     ["./registration-track-model.js", {
-      canManageRegistrationCase: (viewerRole) => viewerRole === "admin" || viewerRole === "staff",
-      getRegistrationActionPermissions: () => ({ canManage: false, canCompleteConsultation: false, readOnly: true }),
+      canManageRegistrationCase: registrationTrackModel.canManageRegistrationCase,
+      getRegistrationActionPermissions: registrationTrackModel.getRegistrationActionPermissions,
       getRegistrationActiveConsultation: () => null,
       getRegistrationAdmissionApplicationState: () => ({
         targetTrackIds: [],
@@ -532,6 +535,7 @@ async function loadMountedRegistrationApplication({
       getRegistrationCurrentClassWaitClassId: () => null,
     }],
     ["./registration-track-service", {
+      getRegistrationCaseContactReceipt: getContactReceipt,
       ensureRegistrationWorkflowNotificationSourceIds: async (...args) => { notificationCalls.push({ kind: "ensure", args }); return [] },
       saveRegistrationCaseInquiry: async () => undefined,
       saveRegistrationPhoneConsultation: async () => undefined,
@@ -586,6 +590,53 @@ const MOUNTED_REGISTRATION_OBSERVATION_ID = "76000000-0000-4000-8000-00000000000
 const MOUNTED_REGISTRATION_OBSERVATION_LESSON_ID = "76000000-0000-4000-8000-000000000005"
 const MOUNTED_REGISTRATION_FUTURE_LESSON_ID = "76000000-0000-4000-8000-000000000006"
 const MOUNTED_REGISTRATION_FUTURE_SESSION_KEY = "normalized:2026-08-24:2"
+
+function mountedRegistrationContactState(taskId, trackId, overrides = {}) {
+  return registrationContactClient.normalizeRegistrationCaseContact({
+    version: 1, taskId, revision: "1", generation: "1", phase: "open",
+    closureReason: null, closedAt: null, parentPhone: null, studentId: null,
+    commonRevision: 1, allPhasesClosed: false, currentTrackIds: [trackId], ...overrides,
+  }, taskId)
+}
+
+function mountedWorkflowStatusReceipt(input) {
+  return {
+    trackId: input.trackId, workflowStatus: input.workflowStatus,
+    workflowRevision: input.expectedWorkflowRevision + 1,
+    workflowStatusEnteredAt: "2026-10-09T09:00:00.000Z",
+    contactState: mountedRegistrationContactState(input.taskId, input.trackId, { revision: "2" }),
+    sourceEventIds: [], enrollmentFinalization: null,
+  }
+}
+
+function mountedPrivacyApplicationProps(contactState, viewerRole = "staff", onReload = async () => undefined) {
+  const taskId = contactState.taskId
+  const trackId = contactState.currentTrackIds[0]
+  const task = { id: taskId, type: "registration", title: "합성 등록", studentName: "합성 학생", registration: {
+    schoolName: "합성 학교", schoolGrade: "중2", requestNote: "보존할 업무 메모",
+    parentPhone: "010-1111-2222", studentPhone: "010-3333-4444",
+  } }
+  return {
+    task, detail: {
+      task, contactState, commonRevision: contactState.commonRevision,
+      tracks: [{ id: trackId, taskId, subject: "영어", status: "inquiry", workflowStatus: "inquiry",
+        workflowRevision: 1, directorProfileId: null, observationAttemptCount: 0,
+        observationSummaryVisible: false, migrationReviewRequired: false, legacy: false, waitingKind: null }],
+      events: [{ id: "synthetic-business-history", eventType: "case_created", metadata: { note: "보존할 업무 이력" } }],
+      appointments: [], levelTests: [], consultations: [], enrollments: [], admissionBatches: [],
+      admissionApplicationMessageStatus: "not_sent", admissionApplicationMessageClaimActive: false, admissionApplicationMessageId: null,
+    },
+    focusTrackId: null, viewerId: MOUNTED_REGISTRATION_OBSERVATION_LESSON_ID, viewerRole,
+    onFocusTrack: () => undefined, onReload, onWarning: () => undefined, subjectCapabilities: [], closeAction: null,
+  }
+}
+
+function mountedInquiryEditor(view, mounted) {
+  const shell = findMountedRegistrationElement(view, (node) => node.type === mounted.RegistrationApplicationShell, "privacy registration shell")
+  const editor = shell.props.inquiry.props.editorContent
+  assert.ok(editor.props.detail && typeof editor.props.onReload === "function", "real parent supplies the inquiry consumer")
+  return editor
+}
 
 const mountedRegistrationObservation = Object.freeze({
   observationId: MOUNTED_REGISTRATION_OBSERVATION_ID,
@@ -873,7 +924,9 @@ test("create and detail share the approved subject-first inquiry controls", asyn
   assert.match(inquiry, /<RegistrationInquiryCommonFields/)
   assert.match(create, /<RegistrationSubjectPicker/)
   assert.match(inquiry, /<RegistrationSubjectPicker/)
-  assert.match(fields, /학생명[\s\S]*학년[\s\S]*학교[\s\S]*학부모 전화[\s\S]*학생 전화[\s\S]*문의일시[\s\S]*요청 사항/)
+  assert.match(fields, /학생명[\s\S]*학년[\s\S]*학교[\s\S]*학부모 전화[\s\S]*문의일시[\s\S]*요청 사항/)
+  assert.doesNotMatch(fields, /학생 전화|studentPhone|student-phone/)
+  assert.match(fields, /showParentContact \? <Label/)
   assert.match(picker, /const locked = Boolean\(props\.disabledSubjects\?\.has\(subject\)\)/)
   assert.match(picker, /variant=\{selected && locked \? "secondary" : selected \? "default" : "outline"\}/)
   assert.match(picker, /aria-pressed=\{selected\}/)
@@ -903,7 +956,7 @@ test("inquiry fact inputs stay editable without catalog, grade, identity, or com
   const createGradeChange = sourceBetween(
     create,
     'if (field === "schoolGrade") {',
-    'if (field === "parentPhone" || field === "studentPhone")',
+    'if (field === "parentPhone")',
   )
   const submit = sourceBetween(inquiry, "async function submit()", "async function retryConflictRefresh")
 
@@ -1686,9 +1739,8 @@ test("track editor shows common information once and subject-scoped navigation",
     "export type RegistrationApplicationInquirySectionProps",
   )
   assert.match(application, /<RegistrationInquiryEditor/)
-  assert.match(application, /updateRegistrationCaseCommon/)
-  assert.match(application, /syncRegistrationCaseSubjects/)
-  assert.doesNotMatch(application, /saveRegistrationCaseInquiry/)
+  assert.match(application, /saveRegistrationCaseInquiry/)
+  assert.doesNotMatch(application, /updateRegistrationCaseCommon|syncRegistrationCaseSubjects/)
   assert.match(application, /expectedCommonRevision:\s*detail\.commonRevision/)
   assert.match(application, /const genericDetail = useMemo<OpsRegistrationCaseDetail>/)
   assert.doesNotMatch(editorSource, /identityLocked|getRegistrationIdentityEditLock/)
@@ -1801,7 +1853,7 @@ test("two tracks at different statuses expose both current sections and actions 
   assert.doesNotMatch(source, /selectedStageEditor|현재 업무/)
 })
 
-test("inquiry subject conflicts keep independent facts and submit the opened subject snapshot", async () => {
+test("inquiry saves facts and the opened subject snapshot through one atomic privacy command", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8");
   const body = sourceBetween(source, "async function saveInquiry", "function handleSubjectTabChange");
   const compiled = ts.transpileModule(`async function saveInquiry${body}\nmodule.exports = saveInquiry`, {
@@ -1809,14 +1861,22 @@ test("inquiry subject conflicts keep independent facts and submit the opened sub
   }).outputText;
   const writes = [];
   const runtime = { exports: {} };
+  const contactState = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID, {
+    revision: "4", generation: "2", commonRevision: 7, parentPhone: "010-0000-0000",
+  });
+  const blocked = [];
   vm.runInNewContext(compiled, {
     module: runtime, canManageCase: true,
-    detail: { task: { id: "case-1" }, commonRevision: 7, tracks: [{ subject: "영어" }] },
-    updateRegistrationCaseCommon: async input => { writes.push(["facts", input]); return { commonRevision: 8 }; },
-    syncRegistrationCaseSubjects: async input => {
-      writes.push(["subjects", input]);
+    detail: { task: { id: MOUNTED_REGISTRATION_TASK_ID }, contactState, commonRevision: 7, tracks: [{ subject: "영어" }] },
+    sourceContactKey: `${MOUNTED_REGISTRATION_TASK_ID}:4`,
+    setBlockedContactSnapshot: (key) => blocked.push(key),
+    setContactOverride: () => assert.fail("a rejected atomic inquiry has no committed receipt"),
+    saveRegistrationCaseInquiry: async input => {
+      writes.push(input);
       throw new Error("registration_subjects_conflict");
     },
+    updateRegistrationCaseCommon: () => assert.fail("facts must not commit separately"),
+    syncRegistrationCaseSubjects: () => assert.fail("subjects must not commit separately"),
     errorMessage: error => error.message,
     onReload: () => assert.fail("the inquiry editor owns conflict refresh and draft comparison"),
     onWarning: () => assert.fail("a stale subject save must use the conflict result"),
@@ -1827,15 +1887,18 @@ test("inquiry subject conflicts keep independent facts and submit the opened sub
     subjects: ["영어", "과학"],
   }, "same-request");
   assert.equal(result, "conflict");
-  assert.equal(writes[0][0], "facts");
-  assert.equal(writes[0][1].requestNote, "내 입력");
-  assert.equal(writes[0][1].expectedCommonRevision, 7);
-  assert.deepEqual(JSON.parse(JSON.stringify(writes[1])), ["subjects", {
-    taskId: "case-1", subjects: ["영어", "과학"], expectedSubjects: ["영어"], requestKey: "same-request:subjects",
-  }]);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(writes[0])), {
+    taskId: MOUNTED_REGISTRATION_TASK_ID, contactState,
+    studentName: "학생", schoolGrade: "중2", schoolName: "학교", parentPhone: "01000000000",
+    campus: "본관", inquiryAt: "2026-09-07T18:00", requestNote: "내 입력", priority: "normal",
+    expectedCommonRevision: 7, subjects: ["영어", "과학"], expectedSubjects: ["영어"], requestKey: "same-request",
+  });
+  assert.ok(blocked.every((key) => key === `${MOUNTED_REGISTRATION_TASK_ID}:4`));
+  assert.equal(Object.hasOwn(writes[0], "studentPhone"), false);
 });
 
-test("Notion-style inquiry facts and subjects save independently without history or capability locks", async () => {
+test("inquiry facts and subjects save atomically without history or capability locks", async () => {
   const [application, inquiry] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-application-inquiry-section.tsx", import.meta.url), "utf8"),
@@ -1843,15 +1906,13 @@ test("Notion-style inquiry facts and subjects save independently without history
   const saveInquiry = sourceBetween(application, "async function saveInquiry", "function handleSubjectTabChange")
 
   assert.match(application, /<RegistrationInquiryEditor[\s\S]*?canEdit=\{canManageCase\}/)
-  assert.match(saveInquiry, /Promise\.allSettled\(\[/)
-  assert.match(saveInquiry, /updateRegistrationCaseCommon\(\{/)
-  assert.match(saveInquiry, /syncRegistrationCaseSubjects\(\{/)
-  assert.match(saveInquiry, /requestKey: `\$\{requestKey\}:facts`/)
-  assert.match(saveInquiry, /requestKey: `\$\{requestKey\}:subjects`/)
-  assert.match(saveInquiry, /rejectedWrites\.some\([\s\S]*?registration_common_revision_conflict[\s\S]*?registration_subjects_conflict[\s\S]*?return "conflict"/)
-  assert.match(saveInquiry, /rejectedWrites\.length === 2[\s\S]*?throw/)
-  assert.match(saveInquiry, /onWarning\([\s\S]*?await onReload\(\)[\s\S]*?return "partial"/)
-  assert.doesNotMatch(saveInquiry, /saveRegistrationCaseInquiry/)
+  assert.equal((saveInquiry.match(/await saveRegistrationCaseInquiry\(/g) || []).length, 1)
+  assert.match(saveInquiry, /contactState: detail\.contactState/)
+  assert.match(saveInquiry, /expectedCommonRevision: detail\.commonRevision[\s\S]*?expectedSubjects: detail\.tracks\.map/)
+  assert.match(saveInquiry, /if \(receipt\.contactState\) setContactOverride\(receipt\.contactState\)/)
+  assert.match(saveInquiry, /registration_common_revision_conflict[\s\S]*?registration_subjects_conflict[\s\S]*?registration_contact_conflict[\s\S]*?return "conflict"/)
+  assert.match(saveInquiry, /throw error/)
+  assert.doesNotMatch(saveInquiry, /Promise\.allSettled|updateRegistrationCaseCommon|syncRegistrationCaseSubjects|:facts|:subjects|return "partial"|studentPhone/)
   assert.doesNotMatch(inquiry, /registrationTrackCanBeRemoved|getRegistrationSubjectPickerAvailability|disabledSubjects=|registration_subject_removal_blocked/)
   assert.match(inquiry, /disabled=\{!canEdit \|\| saving \|\| refreshPending \|\| Boolean\(conflictAttempt\)\}/)
   assert.match(inquiry, /\{canEdit \? \([\s\S]*?<RegistrationSaveButton/)
@@ -1941,6 +2002,124 @@ test("registration application threads the exact deep-linked attempt into the re
   assert.match(detail, /canRecordAttendance=\{false\}/)
   assert.match(detail, /canDecide=\{false\}/)
   assert.doesNotMatch(detail, /canEditFeedback=/)
+})
+
+test("mounted privacy projections use scoped contact state for every role and preserve business records", async () => {
+  for (const role of ["admin", "staff", "teacher", "assistant", "viewer"]) {
+    for (const phase of ["open", "closed", "unknown"]) {
+      const manager = role === "admin" || role === "staff"
+      const parentPhone = phase === "open" && manager ? "010-0000-0000" : null
+      const state = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID,
+        phase === "closed" ? { phase, closureReason: "whole_case_cancelled", closedAt: "2026-10-09T09:00:00.000Z" }
+          : { parentPhone })
+      const props = mountedPrivacyApplicationProps(state, role)
+      if (phase === "unknown") delete props.detail.contactState
+      const hookHarness = createRegistrationEditorHookHarness()
+      const mounted = await loadMountedRegistrationApplication({ hookHarness, loadManagerDetail: async () => null, loadFeedback: async () => null })
+      try {
+        const editor = mountedInquiryEditor(hookHarness.render(mounted.RegistrationApplication, props), mounted)
+        assert.equal(editor.props.canEdit, manager, `${role}/${phase}: contact metadata never grants a management role`)
+        assert.deepEqual(editor.props.detail.task.registration, {
+          schoolName: "합성 학교", schoolGrade: "중2", requestNote: "보존할 업무 메모",
+          ...(parentPhone ? { parentPhone } : {}),
+        }, `${role}/${phase}: scoped current parent contact is the sole display source`)
+        assert.equal(editor.props.detail.events, props.detail.events)
+        assert.equal(editor.props.detail.enrollments, props.detail.enrollments)
+        assert.equal(editor.props.detail.admissionBatches, props.detail.admissionBatches)
+        assert.equal(JSON.stringify(editor.props.detail).includes("010-1111-2222"), false)
+        assert.equal(JSON.stringify(editor.props.detail).includes("010-3333-4444"), false)
+      } finally { hookHarness.cleanup() }
+    }
+  }
+})
+
+test("newer closed receipt masks an old open read even when reload fails", async () => {
+  const open = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID, { parentPhone: "010-0000-0000" })
+  const closed = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID, {
+    revision: "2", phase: "closed", closureReason: "all_current_tracks_terminal",
+    closedAt: "2026-10-09T09:00:00.000Z", allPhasesClosed: true,
+  })
+  const props = mountedPrivacyApplicationProps(open, "staff", async () => { throw new Error("synthetic reload failure") })
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({ hookHarness, getContactReceipt: () => closed, loadManagerDetail: async () => null, loadFeedback: async () => null })
+  try {
+    let editor = mountedInquiryEditor(hookHarness.render(mounted.RegistrationApplication, props), mounted)
+    assert.equal(editor.props.detail.task.registration.parentPhone, open.parentPhone)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    await assert.rejects(editor.props.onReload(), /synthetic reload failure/)
+    editor = mountedInquiryEditor(hookHarness.render(mounted.RegistrationApplication, props), mounted)
+    assert.equal(editor.props.detail.contactState, closed)
+    assert.equal(Object.hasOwn(editor.props.detail.task.registration, "parentPhone"), false)
+    assert.equal(editor.props.detail.events, props.detail.events)
+  } finally { hookHarness.cleanup() }
+})
+
+test("fresh equal-revision scoped read wins a metadata-only open receipt", async () => {
+  const fresh = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID, {
+    revision: "2", generation: "2", parentPhone: "010-0000-0000",
+  })
+  const receipt = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID, { revision: "2", generation: "2" })
+  const props = mountedPrivacyApplicationProps(fresh)
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({ hookHarness, getContactReceipt: () => receipt, loadManagerDetail: async () => null, loadFeedback: async () => null })
+  try {
+    let editor = mountedInquiryEditor(hookHarness.render(mounted.RegistrationApplication, props), mounted)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    await editor.props.onReload()
+    editor = mountedInquiryEditor(hookHarness.render(mounted.RegistrationApplication, props), mounted)
+    assert.equal(editor.props.detail.contactState, fresh)
+    assert.equal(editor.props.detail.task.registration.parentPhone, fresh.parentPhone)
+    assert.equal(editor.props.detail.events, props.detail.events)
+  } finally { hookHarness.cleanup() }
+})
+
+test("cancelled case keeps manual nonterminal reopening reachable without rehydrating contact", async () => {
+  for (const role of ["admin", "staff"]) {
+    const closed = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID, {
+      phase: "closed", closureReason: "whole_case_cancelled", closedAt: "2026-10-09T09:00:00.000Z",
+    })
+    const reopened = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID, { revision: "2", generation: "2" })
+    const calls = []
+    const warnings = []
+    const props = mountedPrivacyApplicationProps(closed, role, async () => { throw new Error("synthetic reload failure") })
+    props.task.status = "canceled"
+    props.onWarning = (message) => warnings.push(message)
+    const hookHarness = createRegistrationEditorHookHarness()
+    const mounted = await loadMountedRegistrationApplication({
+      hookHarness, getContactReceipt: () => reopened, loadManagerDetail: async () => null, loadFeedback: async () => null,
+      workflowStatusOptions: () => [{ value: "level_test_requested", label: "레벨테스트 신청" }],
+      setWorkflowStatus: async (input) => { calls.push(input); return { ...mountedWorkflowStatusReceipt(input), contactState: reopened } },
+    })
+    try {
+      let view = hookHarness.render(mounted.RegistrationApplication, props)
+      const shell = findMountedRegistrationElement(view, (node) => node.type === mounted.RegistrationApplicationShell, "cancelled case shell")
+      const status = findMountedRegistrationElement(shell.props.subjectNavigation,
+        (node) => node.type === RegistrationSelect && node.props["aria-label"] === "영어 진행상태", "cancelled case manual selector")
+      assert.equal(status.props.disabled, false, role)
+      assert.ok(status.props.options.some((option) => option.value === "level_test_requested"))
+      hookHarness.flushEffects()
+      await flushMountedRegistrationWork()
+      status.props.onValueChange("level_test_requested")
+      await flushMountedRegistrationWork()
+      assert.equal(calls.length, 1)
+      assert.equal(calls[0].taskId, closed.taskId)
+      assert.equal(calls[0].trackId, closed.currentTrackIds[0])
+      assert.equal(calls[0].contactState, closed)
+      assert.equal(calls[0].expectedWorkflowRevision, 1)
+      assert.equal(calls[0].workflowStatus, "level_test_requested")
+      assert.match(calls[0].requestKey, /^registration-workflow-status:/)
+      assert.equal(Object.hasOwn(calls[0], "parentPhone"), false)
+      assert.equal(Object.hasOwn(calls[0], "studentPhone"), false)
+      view = hookHarness.render(mounted.RegistrationApplication, props)
+      const editor = mountedInquiryEditor(view, mounted)
+      assert.equal(Object.hasOwn(editor.props.detail.task.registration, "parentPhone"), false)
+      assert.equal(JSON.stringify(editor.props.detail).includes("010-1111-2222"), false)
+      assert.equal(JSON.stringify(editor.props.detail).includes("010-3333-4444"), false)
+      assert.ok(warnings.some((message) => message.includes("synthetic reload failure")))
+    } finally { hookHarness.cleanup() }
+  }
 })
 
 test("mounted registration application accepts only its canonical observation booking target", async () => {
@@ -2165,6 +2344,7 @@ test("trial status remains selectable and changes through the independent manual
     },
     setWorkflowStatus: async (input) => {
       genericStatusCalls.push(input)
+      return mountedWorkflowStatusReceipt(input)
     },
     isOpsStatus: (status) => !String(status).startsWith("observation_"),
     workflowStatusOptions: () => [{ value: "waiting_current_class", label: "현재반 대기" }],
@@ -2173,6 +2353,7 @@ test("trial status remains selectable and changes through the independent manual
     task: { id: taskId, title: "성다엘 등록", studentName: "성다엘", type: "registration" },
     detail: {
       task: { id: taskId, title: "성다엘 등록", studentName: "성다엘", registration: null },
+      contactState: mountedRegistrationContactState(taskId, trackId),
       commonRevision: 1,
       tracks: [{
         id: trackId,
@@ -2315,7 +2496,7 @@ test("mounted consultation status selector never starts an observation process",
       enterCalls.push(input)
       return { changed: true }
     },
-    setWorkflowStatus: async (input) => genericStatusCalls.push(input),
+    setWorkflowStatus: async (input) => { genericStatusCalls.push(input); return mountedWorkflowStatusReceipt(input) },
     workflowStatusOptions: () => [
       { value: "consultation_completed", label: "상담 완료" },
       { value: "waiting_next_opening", label: "다음 개강 알림" },
@@ -2328,6 +2509,7 @@ test("mounted consultation status selector never starts an observation process",
     task: { id: taskId, title: "수학 등록", studentName: "김학생", type: "registration" },
     detail: {
       task: { id: taskId, title: "수학 등록", studentName: "김학생", registration: null },
+      contactState: mountedRegistrationContactState(taskId, trackId),
       commonRevision: 1,
       tracks: [{
         id: trackId,
@@ -2395,6 +2577,8 @@ test("mounted consultation status selector never starts an observation process",
     assert.equal(enterCalls.length, 0)
     assert.equal(genericStatusCalls.length, 1)
     assert.deepEqual(genericStatusCalls[0], {
+      taskId,
+      contactState: props.detail.contactState,
       trackId,
       expectedWorkflowRevision: 6,
       workflowStatus: "waiting_next_opening",
@@ -3126,7 +3310,8 @@ test("common information conflicts retain the attempted draft when latest-data r
   assert.match(retry, /await onReload\(\)/)
   assert.doesNotMatch(retry, /onSave/)
   assert.match(saveInquiry, /registration_common_revision_conflict[\s\S]*?registration_subjects_conflict[\s\S]*?return "conflict"/)
-  assert.match(saveInquiry, /return "conflict"[\s\S]*?rejectedWrites\.length === 2[\s\S]*?await onReload\(\)[\s\S]*?return "partial"/)
+  assert.match(saveInquiry, /setBlockedContactSnapshot\(sourceContactKey\)/)
+  assert.doesNotMatch(saveInquiry, /rejectedWrites|return "partial"|await onReload\(\)/)
 })
 
 test("canonical registration mutation closures fail closed outside management roles", async () => {
@@ -3295,7 +3480,11 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
   const taskId = "7a000000-0000-4000-8000-000000000001"
   const trackId = "7a000000-0000-4000-8000-000000000002"
   const baseDetail = {
-    task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+    task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: {
+      schoolName: "합성 학교", schoolGrade: "중2", requestNote: "보존할 업무 메모",
+      parentPhone: "010-1111-2222", studentPhone: "010-3333-4444",
+    } },
+    contactState: mountedRegistrationContactState(taskId, trackId),
     commonRevision: 1,
     events: [{
       id: "history-event", trackId, eventType: "case_created", subject: "영어",
@@ -3385,7 +3574,11 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
       const automaticHistory = findMountedRegistrationElements(shell.props.historyAction, (node) => node.type === mounted.RegistrationApplicationHistoryAction)
       assert.equal(automaticHistory.length, 1, `${roleCase.role}: automatic history remains available exactly once`)
       assert.equal(automaticHistory[0].props.profiles, profiles)
-      assert.deepEqual(automaticHistory[0].props.detail, baseDetail, "history receives the complete canonical case, independent of customer-message access")
+      assert.deepEqual(automaticHistory[0].props.detail, {
+        ...baseDetail, task: { ...baseDetail.task, registration: {
+          schoolName: "합성 학교", schoolGrade: "중2", requestNote: "보존할 업무 메모",
+        } },
+      }, "history keeps the complete business case and scoped metadata without retired contact slots")
       for (const [name, nodes] of [["management preview", managementActions], ["visit cancellation", cancellationActions], ["customer history", customerHistory]]) {
         assert.equal(nodes.length, roleCase.readOnly ? 0 : 1, `${roleCase.role}: ${name} requires management access even with ready data`)
       }

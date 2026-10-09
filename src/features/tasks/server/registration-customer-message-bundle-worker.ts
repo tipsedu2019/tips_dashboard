@@ -1,6 +1,19 @@
 import type { RegistrationCustomerMessageButton } from "./registration-customer-message-catalog.ts"
+import {
+  assertRegistrationCustomerMessageContactAttemptGrant,
+  assertRegistrationCustomerMessageContactUse,
+  parseRegistrationCustomerMessageContactFence,
+  type RegistrationCustomerMessageContactFence,
+} from "./registration-customer-message-contact-fence.ts"
+import type { RegistrationContactMessageRequestDigest } from "../registration-contact-message-policy.ts"
 
-export type RegistrationCustomerMessageBundleWorkerClaim = Readonly<{ bundleId: string; claimToken: string }>
+export type RegistrationCustomerMessageBundleWorkerClaim = Readonly<{
+  bundleId: string
+  claimToken: string
+  contactFence: RegistrationCustomerMessageContactFence
+  requestKey: string
+  requestDigest: RegistrationContactMessageRequestDigest
+}>
 export type RegistrationCustomerMessageBundleWorkerPrepared = Readonly<{
   to: string
   templateId: string
@@ -11,6 +24,7 @@ export type RegistrationCustomerMessageBundleWorkerBegin = Readonly<{
   allowed: boolean
   messageId: string | null
   dispatchToken: string | null
+  contactGrant?: unknown
 }>
 export type RegistrationCustomerMessageBundleWorkerResult = Readonly<{
   ok: true
@@ -33,8 +47,12 @@ export function createRegistrationCustomerMessageBundleWorker(dependencies: Depe
     async runOnce(): Promise<RegistrationCustomerMessageBundleWorkerResult> {
       const claim = await dependencies.claim()
       if (!claim) return { ok: true, processed: false, providerAttempted: false, outcome: "idle" }
+      const requestIdentity = { requestKey: claim.requestKey, digest: claim.requestDigest }
       let prepared: RegistrationCustomerMessageBundleWorkerPrepared
       try {
+        const fence = parseRegistrationCustomerMessageContactFence(claim.contactFence, claim.contactFence)
+        assertRegistrationCustomerMessageContactUse({ fence, action: "claim",
+          expectedContactGeneration: fence.contactGeneration, request: requestIdentity })
         prepared = await dependencies.prepare(claim)
       } catch {
         try { await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" }) } catch { /* lease expiry remains safe */ }
@@ -43,6 +61,12 @@ export function createRegistrationCustomerMessageBundleWorker(dependencies: Depe
       let begin: RegistrationCustomerMessageBundleWorkerBegin
       try {
         begin = await dependencies.begin({ claim, prepared })
+        if (begin.allowed && begin.messageId && begin.dispatchToken) {
+          assertRegistrationCustomerMessageContactAttemptGrant(begin.contactGrant, {
+            scope: claim.contactFence, contactGeneration: claim.contactFence.contactGeneration,
+            messageId: begin.messageId, dispatchToken: begin.dispatchToken, request: requestIdentity,
+          })
+        }
       } catch {
         try { await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" }) } catch { /* lease expiry remains safe */ }
         return { ok: true, processed: true, providerAttempted: false, outcome: "held" }

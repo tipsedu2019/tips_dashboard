@@ -7,7 +7,12 @@ import {
   createRegistrationCustomerReminderWorker,
 } from "../src/features/tasks/server/registration-customer-reminder-worker.ts"
 
+const CONTACT_FENCE = Object.freeze({ version: 1, taskId: "00000000-0000-4000-8000-000000000007",
+  sourceId: "00000000-0000-4000-8000-000000000002", messageKind: "appointment_reminder", contactPhase: "open",
+  contactGeneration: "1", allPhasesClosed: false, sourcePhaseOpen: true, canonicalAppointmentKind: "level_test" })
+const CONTACT_DIGEST = Object.freeze({ version: 1, digest: "a".repeat(64) })
 const CLAIM = Object.freeze({
+  messageKind: "appointment_reminder", observationId: null, contactFence: CONTACT_FENCE,
   jobId: "00000000-0000-4000-8000-000000000001",
   appointmentId: "00000000-0000-4000-8000-000000000002",
   claimToken: "00000000-0000-4000-8000-000000000003",
@@ -17,6 +22,7 @@ const CLAIM = Object.freeze({
 })
 
 const PREPARED = Object.freeze({
+  contactFence: CONTACT_FENCE, requestDigest: CONTACT_DIGEST,
   to: "01012345678",
   templateId: "template-reminder",
   variables: Object.freeze({ "#{학생명}": "김팁스" }),
@@ -26,6 +32,8 @@ const PREPARED = Object.freeze({
 })
 
 const BEGIN = Object.freeze({
+  contactGrant: { version: 1, action: "attempt", linearization: "registration_contact_case_lock_v1",
+    messageId: "00000000-0000-4000-8000-000000000005", dispatchToken: "00000000-0000-4000-8000-000000000006", contactFence: CONTACT_FENCE },
   allowed: true,
   messageId: "00000000-0000-4000-8000-000000000005",
   dispatchToken: "00000000-0000-4000-8000-000000000006",

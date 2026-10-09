@@ -83,7 +83,18 @@ const LEGACY_SOURCE = Object.freeze({
   place: "본관",
 })
 
+function contactFenceForJob(job) {
+  const observation = job.messageKind === "observation_reminder"
+  return { version: 1, taskId: OBSERVATION_SOURCE.taskId, sourceId: observation ? job.observationId : job.appointmentId,
+    messageKind: observation ? "observation_reminder" : "appointment_reminder", contactPhase: "open", contactGeneration: "1",
+    allPhasesClosed: false, sourcePhaseOpen: true, canonicalAppointmentKind: observation ? "observation_class" : "level_test" }
+}
+const CONTACT_FENCE = contactFenceForJob(OBSERVATION_CLAIM)
+const CONTACT_DIGEST = { version: 1, digest: "a".repeat(64) }
+const CONTACT_GRANT = { version: 1, action: "attempt", linearization: "registration_contact_case_lock_v1",
+  messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, contactFence: CONTACT_FENCE }
 const PREPARED = Object.freeze({
+  contactFence: CONTACT_FENCE, requestDigest: CONTACT_DIGEST,
   to: "01012345678",
   templateId: "template-observation-reminder",
   variables: Object.freeze({ "#{학생명}": "김팁스" }),
@@ -109,7 +120,7 @@ function workerFixture(overrides = {}) {
   const worker = reminderWorker.createRegistrationCustomerReminderWorker({
     async claim() {
       calls.claim += 1
-      return OBSERVATION_CLAIM
+      return { ...OBSERVATION_CLAIM, contactFence: CONTACT_FENCE }
     },
     async prepare() {
       calls.prepare += 1
@@ -117,7 +128,7 @@ function workerFixture(overrides = {}) {
     },
     async begin() {
       calls.begin += 1
-      return { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" }
+      return { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending", contactGrant: CONTACT_GRANT }
     },
     async release(input) {
       calls.release.push(input)
@@ -251,6 +262,7 @@ function createStatefulReminderService({
   const client = {
     rpc(name, args = {}) {
       calls.rpc.push({ name, args })
+      if (name === "reconcile_registration_customer_reminder_claims_v1") return rpcResponse(null)
       if (name === "claim_registration_customer_reminder_job_v1") {
         const job = state.jobs.find((candidate) => (
           candidate.status === "pending"
@@ -263,7 +275,7 @@ function createStatefulReminderService({
         job.availableAt = null
         state.transitions.push(`claim:${job.jobId}`)
         afterClaim?.({ state, job })
-        return rpcResponse(rawClaim(job))
+        return rpcResponse({ claim: rawClaim(job), contactFence: contactFenceForJob(job) })
       }
       if (name === "read_registration_customer_reminder_source_v1") {
         const job = jobFor(args)
@@ -282,7 +294,7 @@ function createStatefulReminderService({
         const source = sourceFor(job)
         state.transitions.push(`read:${job.jobId}:${job.sourceRevisionAtRead}`)
         afterRead?.({ state, job, source })
-        return rpcResponse(source)
+        return rpcResponse({ source, contactFence: contactFenceForJob(job) })
       }
       if (name === "begin_registration_customer_reminder_dispatch_v1") {
         const job = jobFor(args)
@@ -356,6 +368,7 @@ function createStatefulReminderService({
           messageId: MESSAGE_ID,
           dispatchToken: DISPATCH_TOKEN,
           currentStatus: "pending",
+          contactGrant: { ...CONTACT_GRANT, contactFence: contactFenceForJob(job) },
         })
       }
       if (name === "release_registration_customer_reminder_job_v1") {
@@ -396,11 +409,19 @@ function createStatefulReminderService({
 }
 
 function rpcNames(calls) {
-  const names = calls.rpc.map(({ name }) => name)
+  const rawNames = calls.rpc.map(({ name }) => name)
+  // Assert the new separate-transaction boundary even for idle/no-op claims.
+  rawNames.forEach((name, index) => {
+    if (name === "claim_registration_customer_reminder_job_v1") {
+      assert.equal(rawNames[index - 1], "reconcile_registration_customer_reminder_claims_v1")
+    }
+  })
+  const names = rawNames.filter((name) => name !== "reconcile_registration_customer_reminder_claims_v1")
   return names.filter((name, index) => (
     !(name === "claim_registration_customer_reminder_job_v1" && index === names.length - 1 && names.length > 1)
     && !(name === "claim_registration_customer_reminder_job_v1" && index > 0 && names[index - 1] === name)
-  ))
+  )).flatMap((name) => name === "claim_registration_customer_reminder_job_v1"
+    ? ["reconcile_registration_customer_reminder_claims_v1", name] : [name])
 }
 
 
@@ -544,7 +565,7 @@ test("worker refreshes exactly once and sends only the refreshed observation pay
       calls.begin += 1
       return calls.begin === 1
         ? { allowed: false, messageId: null, dispatchToken: null, currentStatus: "refresh_required" }
-        : { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending" }
+        : { allowed: true, messageId: MESSAGE_ID, dispatchToken: DISPATCH_TOKEN, currentStatus: "pending", contactGrant: CONTACT_GRANT }
     },
     async send(input) {
       calls.send += 1
@@ -576,6 +597,7 @@ test("production refresh re-reads once, mutates between begin attempts, and send
 
   assert.equal((await response.json()).unknown, 1)
   assert.deepEqual(rpcNames(scenario.calls), [
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
@@ -650,6 +672,7 @@ test("production second drift stops after two reads and two begin attempts witho
   assert.equal(result.skipped, 1)
   assert.equal(result.providerAttempted, 0)
   assert.deepEqual(rpcNames(scenario.calls), [
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
@@ -718,7 +741,7 @@ test("production consumer treats DB claim:null as idle without a source read, ma
   assert.equal(result.processed, 0)
   assert.equal(result.providerAttempted, 0)
   assert.equal(result.stopped, "idle")
-  assert.deepEqual(rpcNames(scenario.calls), ["claim_registration_customer_reminder_job_v1"])
+  assert.deepEqual(rpcNames(scenario.calls), ["reconcile_registration_customer_reminder_claims_v1", "claim_registration_customer_reminder_job_v1"])
   assert.equal(scenario.calls.provider, 0)
   assert.equal(scenario.calls.finalize.length, 0)
 })
@@ -762,13 +785,16 @@ test("stateful production RPC boundary preserves legacy delivery while runtime f
   assert.equal((await afterClaim.json()).skipped, 1)
   assert.equal((await afterRead.json()).skipped, 1)
   assert.deepEqual(rpcNames(scenario.calls), [
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
     "finalize_registration_customer_reminder_dispatch_v1",
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "release_registration_customer_reminder_job_v1",
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
@@ -815,6 +841,7 @@ test("deferred booking-fact change at the production read boundary releases term
 
   assert.equal((await response.json()).skipped, 1)
   assert.deepEqual(rpcNames(scenario.calls), [
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "release_registration_customer_reminder_job_v1",
@@ -844,6 +871,7 @@ test("activation OFF after read cancels the claimed observation at begin without
   assert.equal(scenario.state.activation.mode, "off")
   assert.deepEqual(scenario.calls.failures, ["begin:claim_invalid"])
   assert.deepEqual(rpcNames(scenario.calls), [
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
@@ -866,6 +894,7 @@ test("receipt drift after read reaches the distinct readiness failure without pr
   assert.equal(scenario.state.receipt.sendable, false)
   assert.deepEqual(scenario.calls.failures, ["begin:receipt_drift"])
   assert.deepEqual(rpcNames(scenario.calls), [
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
@@ -911,9 +940,11 @@ test("lead-hours change after claim recomputes due, defers the next claim, and p
     lastErrorCode: "settings_changed",
   })
   assert.deepEqual(rpcNames(scenario.calls), [
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
@@ -960,10 +991,12 @@ test("unknown observation dispatch is never retried by a second worker invocatio
   assert.equal((await first.json()).unknown, 1)
   assert.equal((await second.json()).stopped, "idle")
   assert.deepEqual(rpcNames(scenario.calls), [
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
     "read_registration_customer_reminder_source_v1",
     "begin_registration_customer_reminder_dispatch_v1",
     "finalize_registration_customer_reminder_dispatch_v1",
+    "reconcile_registration_customer_reminder_claims_v1",
     "claim_registration_customer_reminder_job_v1",
   ])
   assert.equal(scenario.calls.provider, 1)

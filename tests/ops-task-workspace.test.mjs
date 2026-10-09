@@ -804,9 +804,16 @@ test("registration keeps the operational pipeline as first-class state", async (
     "REGISTRATION_PIPELINE_STATUSES",
     "ops_registration_details_pipeline_status_idx",
     "findRegistrationPipelineStatus",
-    "syncRegistrationPipelineStatusForTaskStatus",
     "registration_pipeline_status_check",
   ]);
+  // Manual parent task status no longer infers a subject pipeline or enrollment.
+  const parentStatusMutation = serviceSource.slice(
+    serviceSource.indexOf("async function updateRegistrationOpsTaskStatus"),
+    serviceSource.indexOf("export async function updateOpsTaskStatus"),
+  );
+  assert.match(parentStatusMutation, /status === "canceled"[\s\S]*?closeRegistrationCaseContact/);
+  assert.match(parentStatusMutation, /updateOpsTaskStatusRow\(currentTask\.id, status\)/);
+  assert.doesNotMatch(parentStatusMutation, /pipeline_status|pipelineStatus|assignOpsStudentToClass/);
 });
 
 test("registration workspace replaces Notion registration management with one application row per view", async () => {
@@ -1869,7 +1876,6 @@ test("registration create persists one flat fact row without runtime, workflow, 
     'data-registration-focus="schoolGrade"',
     "학교",
     'data-registration-focus="parentPhone"',
-    "학생 전화",
     "문의일시",
     '요청 사항',
   ];
@@ -1879,7 +1885,9 @@ test("registration create persists one flat fact row without runtime, workflow, 
       `${orderedInquiryFields[index - 1]} should appear before ${orderedInquiryFields[index]}`,
     );
   }
-  assertIncludesAll(inquirySource, ["문의 과목", "학생명", "문의일시", "학년", "학교", "학부모 전화", "학생 전화"]);
+  assertIncludesAll(inquirySource, ["문의 과목", "학생명", "문의일시", "학년", "학교", "학부모 전화"]);
+  assert.doesNotMatch(inquirySource, /학생 전화|data-common-field="student-phone"|data-registration-focus="studentPhone"/);
+  assert.match(inquiryFieldsSource, /showParentContact \?/);
   assert.match(inquiryFieldsSource, /data-common-field="inquiry-at"[\s\S]*?type="datetime-local"/);
   assert.match(inquiryFieldsSource, /data-common-field="school-name"/);
   assert.doesNotMatch(inquirySource, /focusKey="inquiryAt"|DateTimePickerControl|required/);
@@ -4301,9 +4309,6 @@ test("management sync connects registration transfer withdrawal and word retest 
     "assertDifferentOpsClass(fromClass, toClass",
     "전반 완료 전에 전 수업과 후 수업을 다르게 선택하세요.",
     "resolveOpsRegistrationStudent",
-    "matchesOpsRegistrationStudent",
-    "identityFields.length === 0",
-    "supportingFields",
     "return null",
     "const existingStudent = shouldEnsureStudent ? await resolveOpsRegistrationStudent(input) : null",
     'runIdempotentOpsTaskProducerRpc("cleanup_created_ops_task_v1"',
@@ -4322,6 +4327,13 @@ test("management sync connects registration transfer withdrawal and word retest 
     '"transfer_to_class"',
     ".from(\"ops_word_retests\")",
   ]);
+  const registrationResolver = serviceSource.slice(
+    serviceSource.indexOf("async function resolveOpsRegistrationStudent"),
+    serviceSource.indexOf("async function ensureOpsStudent"),
+  );
+  assert.match(registrationResolver, /isOpsRegistrationStudentId\(input\.studentId\)/);
+  assert.match(registrationResolver, /selectOpsRegistrationStudentById\(input\.studentId\)/);
+  assert.doesNotMatch(registrationResolver, /studentName|parentPhone|studentPhone|matchesOpsRegistrationStudent|findOpsStudentByName/);
 
   assertIncludesAll(accessMigrationSource, [
     "create schema if not exists dashboard_private",
