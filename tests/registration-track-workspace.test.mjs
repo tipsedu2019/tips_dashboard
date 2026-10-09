@@ -401,11 +401,19 @@ async function loadMountedRegistrationApplication({
     submitRegistrationObservationFeedback: async () => ({ changed: false }),
     withdrawRegistrationObservation: withdrawObservation,
   }
+  const studentBinding = loadNotificationComponent("src/features/tasks/registration-student-binding.tsx", new Map([
+    ["react", hookHarness.react],
+    ["./registration-track-service", {
+      bindRegistrationStudent: () => assert.fail("application harness never submits a student binding"),
+      searchRegistrationStudentCandidates: () => assert.fail("application harness never preloads student candidates"),
+    }],
+  ]))
   const localModules = new Map([
     ["@/components/ui/badge", { Badge }],
     ["@/components/ui/button", { Button }],
     ["./registration-select", { RegistrationSelect }],
     ["./registration-contact-client.ts", registrationContactClient],
+    ["./registration-student-binding", studentBinding],
     ["@/features/notifications/notification-delivery-control", { GoogleChatDeliveryControl: Passthrough }],
     ["@/lib/supabase", { supabase: {} }],
     ["./registration-application-admission-section", { RegistrationApplicationAdmissionSection: Passthrough }],
@@ -576,6 +584,7 @@ async function loadMountedRegistrationApplication({
     RegistrationCustomerMessageCaseHistory,
     RegistrationApplicationHistoryAction,
     RegistrationVisitCancellationActions,
+    RegistrationStudentBinding: studentBinding.RegistrationStudentBinding,
     RegistrationAppointmentEditor,
     Button,
     RegistrationObservationEditor,
@@ -2122,6 +2131,99 @@ test("cancelled case keeps manual nonterminal reopening reachable without rehydr
   }
 })
 
+function registrationBindingInHost(shell, mounted) {
+  const hosts = [shell.props.waiting, shell.props.registration]
+  const bindings = hosts.flatMap(host => findMountedRegistrationElements(host.props.fields,
+    node => node.type === mounted.RegistrationStudentBinding))
+  assert.equal(bindings.length, 1, "one UUID binding consumer across the preserved placement sections")
+  return bindings[0]
+}
+
+function registrationBindingHostFieldset(shell, section) {
+  const hooks = createRegistrationEditorHookHarness()
+  const actual = loadNotificationComponent("src/features/tasks/registration-application-shell.tsx", new Map([["react", hooks.react]]))
+  try {
+    const view = hooks.render(actual.RegistrationApplicationShell, shell.props)
+    hooks.flushEffects()
+    const host = findMountedRegistrationElement(view, node => node.props.section === section, "actual shell binding section")
+    const content = host.type(host.props)
+    return findMountedRegistrationElement(content, node => node.type === "fieldset", "actual shell permission fieldset")
+  } finally { hooks.cleanup() }
+}
+
+test("manual waiting and enrollment views mount one UUID binder inside the correct permission fieldset", async () => {
+  for (const [workflowStatus, hostKey] of [["waiting_new_class", "waiting"], ["enrollment_requested", "registration"]]) {
+    for (const role of ["admin", "staff", "teacher"]) {
+      const state = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID)
+      const props = mountedPrivacyApplicationProps(state, role)
+      props.task.studentId = "76000000-0000-4000-8000-000000000098"
+      props.detail.tracks[0].workflowStatus = workflowStatus
+      props.detail.collectionWindows = { scheduledAppointments: { overflow: false }, currentEnrollments: { overflow: false } }
+      const hooks = createRegistrationEditorHookHarness()
+      const mounted = await loadMountedRegistrationApplication({ hookHarness: hooks, loadManagerDetail: async () => null, loadFeedback: async () => null })
+      try {
+        const view = hooks.render(mounted.RegistrationApplication, props)
+        const shell = findMountedRegistrationElement(view, node => node.type === mounted.RegistrationApplicationShell, "UUID binding application shell")
+        const binder = registrationBindingInHost(shell, mounted)
+        assert.equal(findMountedRegistrationElements(shell.props[hostKey].props.fields, node => node.type === mounted.RegistrationStudentBinding).length, 1)
+        assert.equal(binder.props.taskId, state.taskId)
+        assert.equal(binder.props.viewerId, props.viewerId)
+        assert.equal(binder.props.viewerRole, role)
+        assert.equal(binder.props.contactState, state)
+        assert.equal(typeof binder.props.onBound, "function")
+        assert.equal(mountedInquiryEditor(view, mounted).props.detail.task.studentId, "",
+          "current unbound metadata clears a stale master UUID at the string DTO boundary")
+        const permitted = role === "admin" || role === "staff"
+        assert.equal(shell.props[hostKey].props.editable, permitted)
+        assert.equal(registrationBindingHostFieldset(shell, hostKey).props.disabled, !permitted,
+          `${workflowStatus}/${role}: real role state controls the actual fieldset`)
+      } finally { hooks.cleanup() }
+    }
+  }
+})
+
+test("UUID binding metadata updates the actual case after a failed reload without contact or roster mutation", async () => {
+  for (const workflowStatus of ["waiting_new_class", "enrollment_requested"]) {
+    const opened = mountedRegistrationContactState(MOUNTED_REGISTRATION_TASK_ID, MOUNTED_REGISTRATION_TRACK_ID, { parentPhone: "010-0000-0000" })
+    const selectedId = "76000000-0000-4000-8000-000000000099"
+    const saved = { taskId: opened.taskId, studentId: selectedId, changed: true,
+      contactState: mountedRegistrationContactState(opened.taskId, MOUNTED_REGISTRATION_TRACK_ID, { revision: "9", studentId: selectedId }) }
+    let reloads = 0
+    const warnings = [], mutations = []
+    const props = mountedPrivacyApplicationProps(opened, "staff", async () => { reloads += 1; throw new Error("synthetic reload failure") })
+    props.detail.tracks[0].workflowStatus = workflowStatus
+    props.onWarning = message => warnings.push(message)
+    const hooks = createRegistrationEditorHookHarness()
+    const mounted = await loadMountedRegistrationApplication({
+      hookHarness: hooks, loadManagerDetail: async () => null, loadFeedback: async () => null,
+      notificationCalls: mutations,
+      setWorkflowStatus: () => assert.fail("binding must not change manual workflow or actual enrollment"),
+    })
+    try {
+      let view = hooks.render(mounted.RegistrationApplication, props)
+      let shell = findMountedRegistrationElement(view, node => node.type === mounted.RegistrationApplicationShell, "binding receipt shell")
+      const binder = registrationBindingInHost(shell, mounted)
+      hooks.flushEffects()
+      await flushMountedRegistrationWork()
+      await binder.props.onBound(saved)
+      assert.equal(reloads, 1)
+      assert.equal(warnings.length, 1)
+      view = hooks.render(mounted.RegistrationApplication, props)
+      shell = findMountedRegistrationElement(view, node => node.type === mounted.RegistrationApplicationShell, "acknowledged binding shell")
+      const editor = mountedInquiryEditor(view, mounted)
+      assert.equal(editor.props.detail.task.studentId, selectedId)
+      assert.equal(editor.props.detail.contactState, saved.contactState)
+      assert.equal(Object.hasOwn(editor.props.detail.task.registration, "parentPhone"), false)
+      assert.equal(Object.hasOwn(editor.props.detail.task.registration, "studentPhone"), false)
+      for (const value of ["010-0000-0000", "010-1111-2222", "010-3333-4444"]) assert.equal(JSON.stringify(editor.props.detail).includes(value), false)
+      assert.equal(editor.props.detail.enrollments, props.detail.enrollments)
+      assert.equal(editor.props.detail.admissionBatches, props.detail.admissionBatches)
+      assert.equal(registrationBindingInHost(shell, mounted).props.contactState.studentId, selectedId)
+      assert.equal(mutations.length, 0)
+    } finally { hooks.cleanup() }
+  }
+})
+
 test("mounted registration application accepts only its canonical observation booking target", async () => {
   const taskId = "76500000-0000-4000-8000-000000000001"
   const trackId = "76500000-0000-4000-8000-000000000002"
@@ -3480,7 +3582,7 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
   const taskId = "7a000000-0000-4000-8000-000000000001"
   const trackId = "7a000000-0000-4000-8000-000000000002"
   const baseDetail = {
-    task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: {
+    task: { id: taskId, title: "김학생 등록", studentId: "", studentName: "김학생", registration: {
       schoolName: "합성 학교", schoolGrade: "중2", requestNote: "보존할 업무 메모",
       parentPhone: "010-1111-2222", studentPhone: "010-3333-4444",
     } },

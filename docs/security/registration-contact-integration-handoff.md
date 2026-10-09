@@ -9,6 +9,7 @@
 - 연락처 조회는 열린 사건의 필요한 상세에서만 별도로 수행한다. 목록·저장 초안·공통 캐시·변경 비교·mutation 응답의 typed 연락처 사본을 제거한다. mutation 영수증은 parentPhone:null인 명시적 업무 메타데이터다. 실제 초기화·재조회 실패·오래된 응답에서도 더 최신 종결 영수증이 우선한다.
 - 현재 미보관 과목 모두의 등록완료/미등록/문의종료, 전체 취소, 마지막 과목 제외를 사건의 종결 조건으로 다룬다. 수동 진행상태와 실제 roster 등록을 구분한다. 종결된 사건 전체의 재개는 새 세대와 빈 연락처이며 예전 번호를 가져오지 않는다. 다른 과목 때문에 사건이 이미 열려 있을 때 한 종결 과목만 재개하면 현재 사건 세대를 유지한다. 과거 legacy 종결은 읽기와 발송에서 논리적으로 차단하되, 알 수 없는 과거 종결시각을 발명하지 않는다.
 - 최종 등록·수강·대기·철회·예약 퇴원 등 9개 실제 SQL 경로의 전화 기반 학생 조회/자동 생성/학생 master 전화 복사를 제거하는 별도 후보를 제공한다. 명시적 persisted UUID가 없으면 실패한다. 수강 관계·시수·출결·교재·정산·퇴원 기록, 실제 동시성 충돌 `40001`, lock·재실행·마지막 수업일 기준을 유지하는 소스 검토를 수행했다.
+- 83ac8b5 검토본에서 남았던 학생 UUID 연결 UI·transport·service 호출자를 후속 소스 후보에 연결했다. 대기/등록 영역의 기존 `SearchCombobox`에서 연락처 없는 학생 기본정보를 20개씩 조회하고 선택한 행의 UUID만 `bind_student`로 보낸다. 신규 master는 기존 학생관리에서 기본정보로 생성한 뒤 명시 연결한다. 원래 사건 세대·수정번호와 동일 요청 키를 유지하며, 누락/다른 UUID 응답·중복 클릭·오래된 선택/검색/저장 응답을 거부한다. 확인된 UUID를 재조회 실패에도 유지하고 실제 roster·진행상태·연락처 재개를 자동 실행하지 않는다.
 - 단일 발송, 예약 리마인드, 묶음 발송의 source→preview→claim→attempt 경계에 사건 세대·종결·허용 용도 fence를 연결한다. 종결 후 exact replay는 저장된 최소 결과를 반환하며 번호를 다시 읽거나 발송하지 않는다. provider prose와 임의 payload는 새 결과 영수증에서 제거한다. 입학신청서·대기 안내는 사용자의 등록 안내 포함 여부가 확인되기 전 차단 후보로 유지한다.
 
 현재 ordered main의 리마인드 claim 생산자는 20260901111200에서 `return null`로 퇴역했고 이 no-send 경계를 유지한다. 합성 worker 회귀는 어댑터 후보의 계약을 검사하며 현재 운영 리마인드가 활성이라는 증거가 아니다. 퇴역 이전 함수 정의를 최종 생산자로 사용하지 않는다.
@@ -22,13 +23,13 @@
 3. **필요한 신규 RPC 권한이 미설치.** 새 service-only/목적 조회/fence RPC에 필요한 권한은 SQL 후보에서 withheld로 표시한다. 현재 범위에서 운영 grant나 configuration은 수행하지 않았다. 권한을 포함한 atomic cutover 계획 없이는 클라이언트만 배포하면 기존 저장/발송이 fail-closed되어 업무가 중단될 수 있다.
 4. **과거 사본은 남는다.** 기존 학생 master, 사건 전화, 이벤트·영수증·감사 기록·백업의 영구 삭제는 별도 승인 대상이다. 자유 메모에 적은 번호, 기존 direct Data API 원문 조회·전화 쓰기·student UUID 변경 권한까지 이 후보가 모두 막았다고 주장하지 않는다. 보호 대상 contact 열의 claim 경계와 broader 기존 열 ACL은 별도이며, 이전 감사 v3/MakeEdu 매핑 SQL도 runtime·소비자·권한 검증이 남아 있다.
 5. **동시 작업 통합 검토가 남는다.** 별도 transfer 작업의 최종 UUID·학급·정산 변경과 9개 full-function 후보가 겹칠 수 있다. 그 작업공간은 수정하지 않았다. 실제 merge 전 최종 함수 preimage와 양쪽 잠금 순서·학생 binding 계약을 다시 확인해야 한다.
-6. **실제 학생 UUID 연결 UI가 미연결이다.** `bind_student`는 서버 whitelist·SQL 후보에 있지만 현재 browser transport union과 현대 등록 service/UI에는 호출자가 없다. 기존 persisted UUID를 가진 사건의 연결은 보존되지만, 연결이 없는 사건의 실제 수강·대기 실행은 후보가 거절하며 사용자가 화면에서 해소할 동선은 없다. 수강·대기 영역에서 연락처 없는 bounded 학생 후보(이름·학교·학년·표시 원생번호)를 명시적으로 선택하고 원 사건의 세대·수정번호와 함께 `bind_student`를 호출하는 동선을 먼저 연결해야 한다. 이름·전화·표시 원생번호만으로 자동 동일인 추정하지 않는다. 새로운 학생은 기존 학생 기본정보 생성 흐름으로 UUID를 만든 뒤 명시 연결하는 방식을 검토한다. 이 후보를 등록 전체 흐름이 완료된 상태로 간주하지 않는다.
+6. **학생 검색의 DB 응답 최소화는 미설치다.** UI·호출자 누락은 소스와 mock 수준에서 해소했지만, 재사용한 기존 `list_management_numbered_page_v1`의 운영 SQL은 연락처 JSON을 포함한다. 새 소비자는 기본정보 5개 필드로만 재projection하며 연락처를 표시·검색·binding 입력/응답/초안에 넣지 않는다. 그러나 소비자 삭제만으로 HTTP 원문 전송을 막지는 못한다. 이전 `student-contact-reader-minimization-draft.sql`의 최종 ordered reader 교체를 함께 설치·검증해야 한다. 현재 운영 query/config/grant나 SQL 실행은 하지 않았으며 실제 전체 등록 저장·연결·수강 경로의 DB 검증은 대기한다.
 
 ## 필요한 검증 순서
 
 1. 이 실행 대화에서 직접 신뢰된 사용자 승인으로 합성 DB 재생성·스키마 쓰기·후보 설치·회귀의 범위를 인정받는다. 운영 접근과 과거 영구 삭제는 제외한다.
 2. 고정 baseline과 PR96 최종 함수를 같은 소유의 네트워크 없는 DB에서 재현한다. 설치 순서와 owner/OID/ACL/config preimage를 검증한 뒤 reader/audit·UUID·contact lifecycle·message fence 후보를 설치한다. service-only 쓰기와 authenticated 읽기 경계를 분리해서 검사한다.
-3. 학생 명시 연결 UI·service를 bounded 비연락처 reader와 `bind_student`에 연결하고, 실제 사용자 동선으로 연결 전 거절·명시 선택·UUID receipt·중복 이름·권한·오래된 세대·학생 binding 경합을 검사한다. 등록 문의 생성/수정, 전체 과목 종결/마지막 제외/전체 취소/재개/새 입력, 오래된 세대·수정번호, 동일키 replay/다른 입력 충돌, 원자적 실패 rollback, nullable 메타데이터를 실제 client producer output으로 확인한다. 업무 UUID·수강·시수·출결·교재·정산 스냅샷이 보존되는지 확인한다.
+3. 연결한 학생 UI·service의 실제 DB producer output으로 연결 전 거절·명시 선택·UUID receipt·중복 이름·권한·오래된 세대·학생 binding 경합을 검사하고, 최종 numbered reader의 원문 응답에서 연락처가 null/제외인지 확인한다. 등록 문의 생성/수정, 전체 과목 종결/마지막 제외/전체 취소/재개/새 입력, 오래된 세대·수정번호, 동일키 replay/다른 입력 충돌, 원자적 실패 rollback, nullable 메타데이터를 확인한다. 업무 UUID·수강·시수·출결·교재·정산 스냅샷이 보존되는지 확인한다.
 4. 전체 cancel/subject terminal/학생 binding/최종 등록/퇴원·transfer와 발송 attempt를 두 세션으로 경합한다. 종결 전 선형화된 provider attempt와 종결 후 미시작을 구분하고, 불확실한 결과를 자동 재시도하지 않는다. provider 실제 발송은 계속 0으로 둔다.
 5. 실제 최종 함수의 SQLSTATE를 pgTAP으로 증명한다. 입력·키 재사용은 `22023`, 접근은 `42501`, domain 상태 충돌은 `23514`, 실제 rescan 동시성만 `40001`이다. preimage/의존성 설치 불일치는 `55000`, 찾을 수 없는 대상은 `P0002`도 확인한다. 신규 ACL 승인·비페이지형 계약 등록·기존 필수 검사 통과 뒤 별도의 운영 배포 승인을 받는다.
 

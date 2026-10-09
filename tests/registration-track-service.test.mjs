@@ -31,6 +31,136 @@ const CONTACT_KEY = "73000000-0000-4000-8000-000000000090";
 function contactState(overrides = {}) { return {version:1,taskId:CONTACT_TASK,revision:"1",generation:"1",phase:"open",closureReason:null,closedAt:null,parentPhone:null,studentId:null,commonRevision:3,allPhasesClosed:false,currentTrackIds:[CONTACT_TRACK],...overrides}; }
 function contactEnvelope(mutation,result = {}) { return {version:1,taskId:CONTACT_TASK,command:mutation.command,requestKey:mutation.requestKey,replayed:false,result:{taskId:CONTACT_TASK,contactState:contactState({revision:"2"}),...result}}; }
 function commonContactInput(overrides = {}) { return {taskId:CONTACT_TASK,contactState:contactState(),studentName:"합성학생",schoolGrade:"중2",schoolName:"합성학교",parentPhone:"01000000000",studentPhone:"RETIRED_STUDENT_CANARY",campus:"본관",inquiryAt:"2026-09-01T18:49",requestNote:"업무메모",priority:"normal",expectedCommonRevision:3,requestKey:CONTACT_KEY,...overrides}; }
+const BIND_STUDENT = "73000000-0000-4000-8000-000000000081";
+function bindingResult(overrides = {}) { return { studentId: BIND_STUDENT, changed: true,
+  contactState: contactState({ revision: "2", studentId: BIND_STUDENT }), ...overrides }; }
+
+test("explicit student binding sends only the selected UUID with original exact counters and acknowledges metadata", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const calls = [];
+  let invalidations = 0;
+  const harness = createClient();
+  const opened = contactState({ generation: "9007199254740993", revision: "9007199254740994", parentPhone: "01000000000" });
+  const state = contactState({ generation: opened.generation, revision: "9007199254740995", studentId: BIND_STUDENT });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    mutateContact: async (command) => { calls.push(command); return contactEnvelope(command, bindingResult({ contactState: state })); },
+    onMutationSuccess: () => invalidations++,
+  }));
+  const receipt = await service.bindRegistrationStudent({ taskId: CONTACT_TASK, studentId: BIND_STUDENT,
+    contactState: opened, requestKey: CONTACT_KEY });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ command: "bind_student", taskId: CONTACT_TASK,
+    requestKey: CONTACT_KEY, expectedGeneration: opened.generation, expectedRevision: opened.revision, payload: { studentId: BIND_STUDENT } }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(receipt)), { taskId: CONTACT_TASK, ...bindingResult({ contactState: state }) });
+  assert.equal(JSON.stringify(calls).includes("01000000000"), false);
+  assert.equal(JSON.stringify(receipt).includes("01000000000"), false);
+  assert.equal(service.getContactReceipt(CONTACT_TASK).studentId, BIND_STUDENT);
+  assert.equal(service.getContactReceipt(CONTACT_TASK).parentPhone, null);
+  assert.equal(invalidations, 1);
+  assert.equal(harness.queries.length, 0);
+  assert.equal(harness.rpcCalls.length, 0);
+  assert.equal(opened.parentPhone, "01000000000");
+});
+
+test("closed case UUID binding materializes its closure timestamp without opening a contact generation", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const opened = contactState({ phase: "closed", closureReason: "all_current_tracks_terminal", allPhasesClosed: true, closedAt: null });
+  const after = { ...opened, revision: "2", studentId: BIND_STUDENT, closedAt: "2026-10-09T12:00:00Z" };
+  const service = createRegistrationTrackService(createClient().client, readyOptions({
+    mutateContact: async (command) => contactEnvelope(command, bindingResult({ contactState: after })),
+  }));
+  const receipt = await service.bindRegistrationStudent({ taskId: CONTACT_TASK, studentId: BIND_STUDENT,
+    contactState: opened, requestKey: CONTACT_KEY });
+  assert.equal(receipt.contactState.phase, "closed");
+  assert.equal(receipt.contactState.generation, opened.generation);
+  assert.equal(receipt.contactState.parentPhone, null);
+  assert.equal(receipt.contactState.closedAt, after.closedAt);
+});
+
+test("malformed identity, missing snapshot and a different previously bound UUID fail before HTTP", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let calls = 0;
+  const service = createRegistrationTrackService(createClient().client, readyOptions({ mutateContact: async () => { calls++; assert.fail("unexpected mutation"); } }));
+  const base = { taskId: CONTACT_TASK, studentId: BIND_STUDENT, contactState: contactState(), requestKey: CONTACT_KEY };
+  for (const patch of [{ studentId: "DISPLAY-081" }, { studentId: BIND_STUDENT + "\n" },
+    { requestKey: `prefix:${CONTACT_KEY}` }, { contactState: null },
+    { contactState: contactState({ generation: "01" }) }, { contactState: contactState({ taskId: BIND_STUDENT }) },
+    { contactState: contactState({ studentId: "73000000-0000-4000-8000-000000000082" }) }]) {
+    await assert.rejects(service.bindRegistrationStudent({ ...base, ...patch }), /registration_(student_binding|contact_)/);
+  }
+  assert.equal(calls, 0);
+  assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+});
+
+test("binding receipt identity and scope must agree before cache notification or metadata acknowledgement", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const other = "73000000-0000-4000-8000-000000000082";
+  const badStates = [{ studentId: other }, { generation: "2" }, { revision: "1" }, { commonRevision: 4 },
+    { currentTrackIds: [other] }, { allPhasesClosed: true },
+    { phase: "closed", closureReason: "whole_case_cancelled", closedAt: null }, { parentPhone: "01000000000" }];
+  const badResults = [{ taskId: undefined }, { studentId: other }, { studentId: null }, { changed: "false" }, { changed: undefined },
+    ...badStates.map((patch) => ({ contactState: contactState({ revision: "2", studentId: BIND_STUDENT, ...patch }) }))];
+  for (const patch of badResults) {
+    let notifications = 0;
+    const service = createRegistrationTrackService(createClient().client, readyOptions({
+      mutateContact: async (command) => contactEnvelope(command, bindingResult(patch)), onMutationSuccess: () => notifications++,
+    }));
+    await assert.rejects(service.bindRegistrationStudent({ taskId: CONTACT_TASK, studentId: BIND_STUDENT,
+      contactState: contactState(), requestKey: CONTACT_KEY }), /registration_(student_binding_response_invalid|contact_mutation_response_invalid)/);
+    assert.equal(notifications, 0);
+    assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+  }
+});
+
+test("an explicitly repeated same-student binding accepts changed=false without rebinding identity", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const service = createRegistrationTrackService(createClient().client, readyOptions({
+    mutateContact: async (command) => ({ ...contactEnvelope(command, bindingResult({ changed: false })), replayed: true }),
+  }));
+  const result = await service.bindRegistrationStudent({ taskId: CONTACT_TASK, studentId: BIND_STUDENT,
+    contactState: contactState({ studentId: BIND_STUDENT }), requestKey: CONTACT_KEY });
+  assert.equal(result.changed, false);
+  assert.equal(result.studentId, BIND_STUDENT);
+});
+
+test("binding timeout leaves no acknowledgement and an explicit replay retains the original intent", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const calls = [];
+  let notifications = 0;
+  const service = createRegistrationTrackService(createClient().client, readyOptions({ mutateContact: async (command) => {
+    calls.push(command);
+    if (calls.length === 1) throw new Error("registration_contact_mutation_timeout");
+    return { ...contactEnvelope(command, bindingResult()), replayed: true };
+  }, onMutationSuccess: () => notifications++ }));
+  const input = { taskId: CONTACT_TASK, studentId: BIND_STUDENT, contactState: contactState(), requestKey: CONTACT_KEY };
+  await assert.rejects(service.bindRegistrationStudent(input), /registration_contact_mutation_timeout/);
+  assert.equal(calls.length, 1);
+  assert.equal(notifications, 0);
+  assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+  await service.bindRegistrationStudent(input);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), JSON.parse(JSON.stringify(calls[1])));
+  assert.equal(notifications, 1);
+});
+
+test("pending binding captures selection, key and contact scope before the caller object changes", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const pending = deferred();
+  let sent;
+  const service = createRegistrationTrackService(createClient().client, readyOptions({ mutateContact: async (command) => {
+    sent = command; await pending.promise; return contactEnvelope(command, bindingResult());
+  } }));
+  const input = { taskId: CONTACT_TASK, studentId: BIND_STUDENT, contactState: contactState(), requestKey: CONTACT_KEY };
+  const result = service.bindRegistrationStudent(input);
+  input.studentId = "73000000-0000-4000-8000-000000000082";
+  input.requestKey = "73000000-0000-4000-8000-000000000083";
+  input.contactState.generation = "2";
+  input.contactState.revision = "9";
+  pending.resolve();
+  assert.equal((await result).studentId, BIND_STUDENT);
+  assert.equal(sent.payload.studentId, BIND_STUDENT);
+  assert.equal(sent.requestKey, CONTACT_KEY);
+  assert.equal(sent.expectedGeneration, "1");
+  assert.equal(sent.expectedRevision, "1");
+});
 
 test("business detail joins omit typed phones and cached detail reauthorizes the temporary recipient", async () => {
   const { createRegistrationTrackService } = await loadFactory();

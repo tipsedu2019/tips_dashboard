@@ -4,6 +4,7 @@ import { Children, useCallback, useEffect, useMemo, useRef, useState, type React
 
 import { Button } from "@/components/ui/button"
 import { RegistrationSelect } from "./registration-select"
+import { RegistrationStudentBinding } from "./registration-student-binding"
 import { RegistrationManagementNotificationActions } from "./registration-management-notification-actions"
 import { supabase } from "@/lib/supabase"
 
@@ -336,7 +337,7 @@ export function RegistrationApplication({
   const contactState = blockedContactSnapshot === sourceContactKey ? null : availableContactState
   const detail = useMemo(() => {
     const safeTask = stripRegistrationTaskContact(sourceDetail.task)
-    return { ...sourceDetail, contactState, task: { ...safeTask, registration: { ...safeTask.registration, ...(contactState?.phase === "open" && !contactState.allPhasesClosed && contactState.parentPhone !== null ? { parentPhone: contactState.parentPhone } : {}) } } }
+    return { ...sourceDetail, contactState, task: { ...safeTask, studentId: contactState ? contactState.studentId ?? "" : safeTask.studentId, registration: { ...safeTask.registration, ...(contactState?.phase === "open" && !contactState.allPhasesClosed && contactState.parentPhone !== null ? { parentPhone: contactState.parentPhone } : {}) } } }
   }, [sourceDetail, contactState])
   const onReload = useCallback(async (...args: Parameters<RegistrationApplicationProps["onReload"]>) => {
     const latest = getRegistrationCaseContactReceipt(sourceDetail.task.id)
@@ -1529,11 +1530,31 @@ export function RegistrationApplication({
       <p className="text-sm text-muted-foreground">청강 이력을 불러오는 중입니다.</p>
     ) : null
 
+  const workflowView = getRegistrationWorkflowViewKey(activeGenericTrack?.workflowStatus)
+  const studentBinding = (
+    <RegistrationStudentBinding
+      key={`${detail.task.id}:${viewerId}:${viewerRole}`}
+      taskId={detail.task.id}
+      studentName={detail.task.studentName}
+      viewerId={viewerId}
+      viewerRole={viewerRole}
+      contactState={contactState ?? null}
+      onDirtyChange={dirty => setDirty("placement:student-binding", dirty)}
+      onBound={async saved => {
+        setContactOverride(saved.contactState)
+        setDirty("placement:student-binding", false)
+        try { await onReload() } catch {
+          onWarning("학생은 연결되었습니다. 최신 등록 정보를 다시 불러와 주세요.")
+        }
+      }}
+    />
+  )
   const registrationSection = (
     <RegistrationApplicationPlacementSection
       editable={registrationState.editable}
       fields={(
         <div className="grid gap-3">
+          {workflowView !== "waiting" ? studentBinding : null}
           {renderTrackFrames("placement", "registration")}
         </div>
       )}
@@ -1558,7 +1579,6 @@ export function RegistrationApplication({
       ) : null}
     </div>
   ) : null
-  const workflowView = getRegistrationWorkflowViewKey(activeGenericTrack?.workflowStatus)
   const managementNotificationSection = workflowView === "level_test" ? "level_test"
     : workflowView === "consultation_requested" || workflowView === "consultation_completed" ? "consultation"
     : workflowView === "waiting" ? "waiting"
@@ -1806,6 +1826,7 @@ export function RegistrationApplication({
           editable={waitingState.editable}
           fields={(
             <div className="grid gap-3">
+              {workflowView === "waiting" ? studentBinding : null}
               {renderTrackFrames("placement", "waiting")}
             </div>
           )}

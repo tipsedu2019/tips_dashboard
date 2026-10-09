@@ -1,4 +1,4 @@
-export type RegistrationContactCommand = "create" | "update_common" | "save_inquiry" | "set_workflow_status" | "waiting_details" | "close" | "reopen"
+export type RegistrationContactCommand = "create" | "update_common" | "save_inquiry" | "set_workflow_status" | "waiting_details" | "close" | "reopen" | "bind_student"
 export type RegistrationContactMutation = {
   command: RegistrationContactCommand
   taskId: string | null

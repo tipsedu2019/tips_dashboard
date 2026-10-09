@@ -117,6 +117,20 @@ function projectReceipt(value: unknown, command: Command): Record<string, unknow
     || value.command !== command.command || typeof value.replayed !== "boolean" || !record(value.result)
     || (command.taskId !== null && value.taskId !== command.taskId)) fail(503, "registration_contact_response_invalid")
   const source = value.result
+  if (command.command === "bind_student") {
+    if (!uuid(source.taskId) || source.taskId.toLowerCase() !== value.taskId.toLowerCase()
+      || !uuid(source.studentId) || source.studentId.toLowerCase() !== (command.payload.studentId as string).toLowerCase()
+      || typeof source.changed !== "boolean" || !record(source.contactState) || source.contactState.parentPhone !== null) {
+      fail(503, "registration_contact_response_invalid")
+    }
+    let contact: ReturnType<typeof normalizeRegistrationCaseContact>
+    try { contact = normalizeRegistrationCaseContact(source.contactState, value.taskId) } catch { fail(503, "registration_contact_response_invalid") }
+    if (contact.studentId?.toLowerCase() !== source.studentId.toLowerCase()
+      || contact.generation !== command.expectedGeneration
+      || BigInt(contact.revision) <= BigInt(command.expectedRevision as string)) fail(503, "registration_contact_response_invalid")
+    return { version: 1, taskId: value.taskId, requestKey: value.requestKey, command: value.command, replayed: value.replayed,
+      result: { taskId: source.taskId, studentId: source.studentId, changed: source.changed, contactState: contact } }
+  }
   const result: Record<string, unknown> = {}
   for (const key of ["taskId", "trackId", "studentId", "classId"]) {
     if (hasOwn(source, key)) {

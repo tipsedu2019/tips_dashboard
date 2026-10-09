@@ -56,6 +56,43 @@ test("verified actor and complete command are the only RPC authority; receipt co
   assert.equal(JSON.stringify(calls.rpc[0]).includes("synthetic-test-pepper"), false)
 })
 
+test("student binding acknowledges only the requested UUID and required metadata without roster fields", async () => {
+  const input = command({ command: "bind_student", payload: { studentId: OTHER } })
+  const responseFor = changed => receipt(input, { result: {
+    taskId: TASK, studentId: OTHER, changed,
+    contactState: { ...receipt().result.contactState, studentId: OTHER },
+    enrollmentFinalization: { privateUnexpected: PHONE }, rawSnapshot: PHONE,
+  } })
+  for (const changed of [true, false]) {
+    const fixture = harness({ command: input, response: responseFor(changed) })
+    const response = await fixture.run()
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.deepEqual(Object.keys(body.result).sort(), ["changed", "contactState", "studentId", "taskId"])
+    assert.equal(body.result.studentId, OTHER)
+    assert.equal(body.result.contactState.studentId, OTHER)
+    assert.equal(body.result.contactState.phase, "closed")
+    assert.equal(body.result.contactState.parentPhone, null)
+    assert.equal(JSON.stringify(body).includes(PHONE), false)
+    assert.equal(fixture.calls.rpc[0].args.p_payload.studentId, OTHER)
+  }
+  const invalid = []
+  for (const key of ["taskId", "studentId", "changed"]) {
+    const value = responseFor(true); delete value.result[key]; invalid.push(value)
+  }
+  for (const patch of [{ taskId: ACTOR }, { studentId: ACTOR }, { studentId: null }, { changed: "true" }]) {
+    const value = responseFor(true); Object.assign(value.result, patch); invalid.push(value)
+  }
+  for (const patch of [{ studentId: ACTOR }, { studentId: null }, { generation: "3" }, { revision: "8" }, { parentPhone: PHONE }]) {
+    const value = responseFor(true); Object.assign(value.result.contactState, patch); invalid.push(value)
+  }
+  for (const value of invalid) {
+    const fixture = harness({ command: input, response: value })
+    assert.equal((await fixture.run()).status, 503)
+    assert.equal(fixture.calls.rpc.length, 1)
+  }
+})
+
 test("full-command HMAC binds actor, recipient, generation, action, request and every business field", () => {
   const input = command({ command: "update_common", payload: { parentPhone: PHONE, studentName: "합성", requestNote: "합성 메모" } })
   const hash = registrationContactCommandHmac(ACTOR, input, "synthetic-test-pepper")

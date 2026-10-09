@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase"
 import { canUseRegistrationParentContact, normalizeRegistrationCaseContact, stripRegistrationTaskContact, type RegistrationCaseContactState } from "./registration-contact-client.ts"
 import { createRegistrationContactTransport, type RegistrationContactMutation } from "./registration-contact-transport.ts"
+import { createRegistrationStudentCandidateService, type RegistrationStudentCandidateRequest, type RegistrationStudentBindingInput, type RegistrationStudentBindingResult } from "./registration-student-binding-service.ts"
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js"
 import {
   parseAcademicSubject,
@@ -3121,6 +3122,7 @@ export function createRegistrationTrackService(
   async function mutateContact(
     command: RegistrationContactMutation["command"], taskId: string | null, requestKey: string,
     state: RegistrationCaseContactState | null | undefined, payload: Record<string, unknown>,
+    validateResult?: (result: Record<string, unknown> & { contactState: RegistrationCaseContactState }) => void,
   ): Promise<Record<string, unknown> & { contactState: RegistrationCaseContactState }> {
     if (!options.mutateContact) throw new Error("registration_contact_runtime_unavailable")
     if (taskId && (!state || state.taskId !== taskId)) throw new Error("registration_contact_snapshot_required")
@@ -3134,10 +3136,39 @@ export function createRegistrationTrackService(
     if (result.taskId !== undefined && result.taskId !== resolvedTaskId) throw new Error("registration_contact_receipt_invalid")
     const contactState = normalizeRegistrationCaseContact(result.contactState, resolvedTaskId, { allowMissingParentPhone: true })
     if (contactState.parentPhone !== null) throw new Error("registration_contact_mutation_response_invalid")
+    const acknowledged = { ...result, taskId: resolvedTaskId, contactState }
+    validateResult?.({ ...result, contactState })
     rememberContact(contactState)
     clearCaches()
     try { options.onMutationSuccess?.() } catch { /* The server mutation is already committed. */ }
-    return { ...result, taskId: resolvedTaskId, contactState }
+    return acknowledged
+  }
+  async function bindRegistrationStudent(input: RegistrationStudentBindingInput): Promise<RegistrationStudentBindingResult> {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const { studentId, taskId, requestKey } = input
+    if (typeof studentId !== "string" || studentId.length !== 36 || !uuid.test(studentId)
+      || typeof requestKey !== "string" || requestKey.length !== 36 || !uuid.test(requestKey)) {
+      throw new Error("registration_student_binding_request_invalid")
+    }
+    if (!input.contactState) throw new Error("registration_contact_snapshot_required")
+    const opened = normalizeRegistrationCaseContact({ ...input.contactState, parentPhone: null }, taskId)
+    if (opened.studentId !== null && opened.studentId.toLowerCase() !== studentId.toLowerCase()) {
+      throw new Error("registration_student_binding_immutable")
+    }
+    const result = await mutateContact("bind_student", taskId, requestKey, opened, { studentId }, (receipt) => {
+      const state = receipt.contactState
+      const selected = studentId.toLowerCase()
+      const trackIds = (ids: readonly string[]) => ids.map((id) => id.toLowerCase()).sort().join("|")
+      if (receipt.taskId !== taskId || typeof receipt.studentId !== "string" || receipt.studentId.toLowerCase() !== selected
+        || state.studentId?.toLowerCase() !== selected || typeof receipt.changed !== "boolean"
+        || state.generation !== opened.generation || state.phase !== opened.phase
+        || state.closureReason !== opened.closureReason || state.allPhasesClosed !== opened.allPhasesClosed
+        || state.commonRevision !== opened.commonRevision || trackIds(state.currentTrackIds) !== trackIds(opened.currentTrackIds)
+        || BigInt(state.revision) <= BigInt(opened.revision)) {
+        throw new Error("registration_student_binding_response_invalid")
+      }
+    })
+    return { taskId, studentId: result.studentId as string, changed: result.changed as boolean, contactState: result.contactState }
   }
   async function closeRegistrationCaseContact(input: { taskId: string; contactState?: RegistrationCaseContactState | null; requestKey: string }) {
     const state = input.contactState ?? await readContact(input.taskId)
@@ -3909,6 +3940,7 @@ export function createRegistrationTrackService(
   }
 
   return {
+    bindRegistrationStudent,
     closeRegistrationCaseContact,
     readContact,
     getContactReceipt,
@@ -4040,6 +4072,16 @@ const defaultRegistrationTrackService = createRegistrationTrackService(
 
 export function closeRegistrationCaseContact(input: { taskId: string; contactState?: RegistrationCaseContactState | null; requestKey: string }) {
   return defaultRegistrationTrackService.closeRegistrationCaseContact(input)
+}
+
+export function bindRegistrationStudent(input: RegistrationStudentBindingInput): Promise<RegistrationStudentBindingResult> {
+  return defaultRegistrationTrackService.bindRegistrationStudent(input)
+}
+
+const defaultRegistrationStudentCandidateService = createRegistrationStudentCandidateService({ supabase })
+
+export function searchRegistrationStudentCandidates(input: RegistrationStudentCandidateRequest) {
+  return defaultRegistrationStudentCandidateService.searchRegistrationStudentCandidates(input)
 }
 
 export function getRegistrationCaseContactReceipt(taskId: string): RegistrationCaseContactState | null {

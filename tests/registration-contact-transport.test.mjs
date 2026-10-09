@@ -68,3 +68,24 @@ test("successful responses must be JSON objects", async () => {
     await assert.rejects(mutate(command), /registration_contact_response_invalid/)
   }
 })
+
+test("bind_student uses the authenticated HTTP boundary with a UUID-only payload and stable explicit retry", async () => {
+  const studentId = "00000000-0000-4000-8000-000000000003"
+  const bind = { ...command, command: "bind_student", payload: { studentId } }
+  const response = { ...receipt, command: "bind_student", result: { taskId: bind.taskId, studentId, changed: true,
+    contactState: { parentPhone: null, studentId } } }
+  const calls = []
+  const mutate = createRegistrationContactTransport({ getAccessToken: async () => "SYNTHETIC_SESSION",
+    fetch: async (path, request) => { calls.push([path, request]);
+      if (calls.length === 1) throw new TypeError("synthetic timeout response lost")
+      return ok({ ...response, replayed: true })
+    },
+  })
+  await assert.rejects(mutate(bind), /registration_contact_mutation_unavailable/)
+  assert.equal(calls.length, 1)
+  assert.equal((await mutate(bind)).replayed, true)
+  assert.deepEqual(calls.map((call) => JSON.parse(call[1].body)), [bind, bind])
+  assert.ok(calls.every(([path, request]) => path === "/api/registration/contact"
+    && request.method === "POST" && request.headers.Authorization === "Bearer SYNTHETIC_SESSION"))
+  assert.doesNotMatch(calls[0][1].body, /parentPhone|studentPhone|name|school|uid|hmac|digest/)
+})
