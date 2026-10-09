@@ -63,7 +63,7 @@ try {
    await page.getByRole('link', { name: '이전 요청 목록', exact: true }).click();
    await page.getByRole('link', { name: /합성 긴 요청 제목/ }).filter({ visible: true }).first().waitFor();
    for (const state of ['empty', 'error', 'loading']) {
-    await control({ mode: state }); await page.getByRole('button', { name: 'AI 요청 새로고침', exact: true }).click();
+    await control({ mode: state }); const retry = page.getByRole('button', { name: 'AI 요청 다시 조회', exact: true }); if (await retry.count()) await retry.click(); else await page.getByRole('button', { name: 'AI 요청 새로고침', exact: true }).click();
     if (state === 'empty') await page.getByText('AI 요청이 없습니다.', { exact: true }).filter({ visible: true }).first().waitFor();
     if (state === 'error') await page.getByRole('button', { name: 'AI 요청 다시 조회', exact: true }).waitFor();
     if (state === 'loading') await page.getByText('불러오는 중…', { exact: true }).filter({ visible: true }).first().waitFor();
