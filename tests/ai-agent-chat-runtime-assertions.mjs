@@ -3,10 +3,22 @@ import {chatOutboxSchema,chatPreparedSchema,validateChatCompletion} from '../src
 import {createChatSendHandler} from '../src/features/chat/server/chat-send-route.ts';
 import {resolveBridgeSource} from '../src/features/chat/server/chat-runtime-configuration.ts';
 import {loadNotificationComponent} from './helpers/notification-component-loader.mjs';
-const {credentialIssueSchema}=loadNotificationComponent('src/features/ai-agent/ai-agent-credential-service.ts');
+const {credentialIssueSchema,credentialListSchema}=loadNotificationComponent('src/features/ai-agent/ai-agent-credential-service.ts');
+export function assertNonExpiringCredentialCapture(data) {
+ for(const key of ['nonExpiringFirst','nonExpiringReplay'])assert.deepEqual(credentialIssueSchema.parse(data[key]),data[key]);
+ assert.deepEqual(credentialListSchema.parse(data.nonExpiringList),data.nonExpiringList);
+ assert.equal(data.nonExpiringFirst.expiresAt,null);assert.equal(data.nonExpiringReplay.token,null);
+ assert.deepEqual({...data.nonExpiringFirst,token:null},data.nonExpiringReplay);
+ assert.deepEqual(data.nonExpiringFirst.scopes,['chat:outbox:read','chat:send']);
+ assert.deepEqual(data.nonExpiringFirst.grant,{spaceKeys:Array.from({length:7},(_,i)=>`space_${i+1}`),purposes:['bridge_reply'],bridgeSourceId:data.bridge.bridgeSourceId});
+ const metadata={...data.nonExpiringFirst};delete metadata.token;
+ const listed=data.nonExpiringList.items.find(row=>row.id===metadata.id);
+ assert.ok(listed);for(const [key,value] of Object.entries(metadata))assert.deepEqual(listed[key],value);
+}
 export async function assertChatProducerParity(data) {
  assert.deepEqual(data.provenance,{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0});
  assert.deepEqual(credentialIssueSchema.parse(data.first),data.first);assert.deepEqual(credentialIssueSchema.parse(data.replay),data.replay);assert.equal(data.replay.token,null);
+ assertNonExpiringCredentialCapture(data);
  for(const key of ['hostile','safeEmpty','unconfigured'])assert.deepEqual(chatOutboxSchema.parse(data[key]),data[key]);
  for(const key of ['prepared','recorded'])assert.deepEqual(chatPreparedSchema.parse(data[key]),data[key]);
  for(const key of ['hostile','safeEmpty'])validateChatCompletion(data[key],'https://dashboard.test.invalid');

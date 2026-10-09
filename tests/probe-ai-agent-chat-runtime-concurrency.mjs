@@ -144,7 +144,8 @@ try {
 const url=new URL(process.env.TASK_LOCAL_DB_URL||'https://invalid.invalid');assert.equal(url.hostname,'127.0.0.1');assert.equal(url.pathname,'/postgres');assert.match(process.env.TASK_LOCAL_DB_NONCE||'',/^[a-f0-9]{32}$/);
 const config=await readFile('supabase/config.toml','utf8'),project=config.match(/^project_id = "(tips_supabase_db_qa_[a-f0-9]{12})"/m)?.[1];assert.ok(project);assert.ok(config.includes(`[db]\nport = ${url.port}\n`));
 const container=`supabase_db_${project}`;
-const actor=randomUUID(),source=randomUUID(),key=randomUUID();const evidence=[];
+const actor=randomUUID(),source=randomUUID(),key=randomUUID();const evidence=[],probeStartedAt=Date.now();
+const checkpoint=name=>console.error(JSON.stringify({event:'ai_chat_runtime_checkpoint',name,elapsedMs:Date.now()-probeStartedAt}));
 
 // BEGIN GENERATED AI PROBE SESSION SETUP
 // Generated: DO NOT EDIT. Regenerate: node scripts/generate-ai-agent-probe-runtime.mjs
@@ -163,7 +164,7 @@ async function waiting(blocker,writer){const until=Date.now()+15000;while(Date.n
 async function race(name,blockSql,writeSql,expect='42501',finish='commit'){
  const b=session(),w=session();try{b.write(`begin;set local statement_timeout='35s';${blockSql};select 'BLOCKER:'||pg_backend_pid();\n`);const bp=Number((await b.line(/^BLOCKER:(\d+)$/m))[1]);
   w.write(`begin;set local statement_timeout='30s';set local lock_timeout='25s';select 'WRITER:'||pg_backend_pid();create function pg_temp.exercise() returns text language plpgsql as $$begin ${writeSql.expression};return '00000';exception when others then return SQLSTATE;end$$;${writeSql.role}select 'STATE:'||pg_temp.exercise();\n`);const wp=Number((await w.line(/^WRITER:(\d+)$/m))[1]);assert.equal(await waiting(bp,wp),true,name+' actual wait');b.end(finish+';\n');assert.equal((await b.complete).code,0);const state=(await w.line(/^STATE:([A-Z0-9]{5})$/m))[1];w.end('commit;\n');assert.equal((await w.complete).code,0);assert.equal(state,expect,name);evidence.push({name,actualLockWait:true,sqlstate:state,blockerCommittedFirst:finish==='commit'});if(name.startsWith('prepare cfg first'))return JSON.parse((await b.line(/^PREPARED:(.*)$/m))[1]);
- }finally{for(const s of [b,w])if(!s.child.stdin.destroyed)s.end('rollback;\n');await closeSessions(b,w);}}
+ }finally{for(const s of [b,w])if(!s.child.stdin.destroyed)s.end('rollback;\n');await closeSessions(b,w);checkpoint(name);}}
 await query(`insert into auth.users(id,instance_id,aud,role,email) values('${actor}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','runtime-race-${actor}@test.invalid');insert into public.profiles(id,role,name) values('${actor}','admin','synthetic runtime') on conflict(id) do update set role='admin';`);
 await query(`select ${sync(await configInput(true,'https://dashboard.test.invalid'))};`);
 await race('support disable wins before new issuance',service(`select ${sync(await configInput(false,'https://dashboard.test.invalid'))}`),{role:user(''),expression:`perform ${create(input)}`});
@@ -203,12 +204,24 @@ const recorded=JSON.parse(await query(`select public.ai_agent_chat_api_v1('${has
 const unconfigured=await completion('<>@*[]',null);assert.equal(unconfigured.state,'cancelled');assert.equal(unconfigured.expectedSpace,null);
 await query(`update dashboard_private.chat_credential_space_grants set revoked_at=clock_timestamp() where credential_id='${first.id}';`);
 const denied=await query(`do $$begin perform public.ai_agent_chat_bridge_grant_v1('${hash}');raise exception 'unexpected_success';exception when sqlstate '42501' then raise notice 'BRIDGE_DENIED:42501';end$$;select '42501';`);assert.equal(denied,'42501');
+const neverInput={label:'Synthetic non-expiring seven-room reply',scopes:['chat:outbox:read','chat:send'],grant:{spaceKeys:Array.from({length:7},(_,i)=>`space_${i+1}`),purposes:['bridge_reply'],bridgeSourceId:source},expiresAt:null,nonExpiring:true,idempotencyKey:randomUUID()};
+// Reuse one bounded psql child, while preserving a separate committed transaction
+// and authenticated role/claims setup for each actual gateway response.
+const neverResponses=await query(`
+ begin;${user(`select 'NEVER_FIRST:'||${create(neverInput)}::text;`)}commit;
+ begin;${user(`select 'NEVER_REPLAY:'||${create(neverInput)}::text;`)}commit;
+ begin;${user("select 'NEVER_LIST:'||public.ai_agent_credential_api_v1('list','{}')::text;")}commit;`);
+assert.deepEqual(neverResponses.split('\n').filter(row=>row.startsWith('NEVER_')).map(row=>row.slice(0,row.indexOf(':'))),['NEVER_FIRST','NEVER_REPLAY','NEVER_LIST']);
+const neverResponse=tag=>{const rows=neverResponses.split('\n').filter(row=>row.startsWith(tag+':'));assert.equal(rows.length,1,tag+' actual gateway response');return JSON.parse(rows[0].slice(tag.length+1));};
+const nonExpiringFirst=neverResponse('NEVER_FIRST'),nonExpiringReplay=neverResponse('NEVER_REPLAY'),nonExpiringList=neverResponse('NEVER_LIST');
+assert.equal(nonExpiringFirst.expiresAt,null);assert.equal(nonExpiringReplay.token,null);
+checkpoint('nonexpiring first replay list captured');
 // Restore only this probe's synthetic mutable configuration. Preserve monotonic revisions.
-for(const row of prior.spaces){await query(`update dashboard_private.chat_space_configuration set configured=${row.configured},resource_name=${row.resource_name===null?'null':"'"+row.resource_name+"'"},public_origin=${row.public_origin===null?'null':"'"+row.public_origin+"'"},revision=revision+1 where space_key='${row.space_key}';`);}
-await query(`update dashboard_private.ai_agent_chat_support set issuance_enabled=${prior.support.issuance_enabled},public_origin=${prior.support.public_origin===null?'null':"'"+prior.support.public_origin+"'"},revision=revision+1 where singleton;`);
+await query(prior.spaces.map(row=>`update dashboard_private.chat_space_configuration set configured=${row.configured},resource_name=${row.resource_name===null?'null':"'"+row.resource_name+"'"},public_origin=${row.public_origin===null?'null':"'"+row.public_origin+"'"},revision=revision+1 where space_key='${row.space_key}';`).join('\n')+`\nupdate dashboard_private.ai_agent_chat_support set issuance_enabled=${prior.support.issuance_enabled},public_origin=${prior.support.public_origin===null?'null':"'"+prior.support.public_origin+"'"},revision=revision+1 where singleton;`);
+checkpoint('synthetic configuration restored');
 console.log(JSON.stringify({status:'passed',checkpoints:evidence,providerCalls:0,originConflictRollback:{before,after},committedAttemptBeforeLaterSync:true}));
 // Synthetic fixture-only DTOs for an independent strict consumer, never provider data.
-console.log('AI_CHAT_RUNTIME_CAPTURE:'+JSON.stringify({provenance:{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0},first,replay,bridge,hostile,safeEmpty,prepared,recorded,unconfigured,bridgeGrantLoss:{code:'42501',message:'ai_agent_grant_forbidden'}}));
+console.log('AI_CHAT_RUNTIME_CAPTURE:'+JSON.stringify({provenance:{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0},first,replay,bridge,hostile,safeEmpty,prepared,recorded,unconfigured,nonExpiringFirst,nonExpiringReplay,nonExpiringList,bridgeGrantLoss:{code:'42501',message:'ai_agent_grant_forbidden'}}));
 
 } finally {
 // BEGIN GENERATED AI PROBE CLEANUP

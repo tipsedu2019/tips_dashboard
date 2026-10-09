@@ -71,6 +71,24 @@ test('Chat-only issuance with no explicit room does not issue any credential',as
  await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
  assert.equal(ui.writes.length,0);assert.ok(document.body.textContent.includes('발급하지 못했습니다'));
 });
+test('non-expiring seven-room Chat intent survives response loss and never becomes a worker key',async t=>{
+ const ui=await mount(t,{configuredCount:7});await ui.flush(()=>ui.button('AI 요청 키 발급').click());
+ const select=async(id,value)=>ui.flush(()=>{const field=document.querySelector(id);field.value=value;field.dispatchEvent(new window.Event('change',{bubbles:true}));});
+ assert.equal(document.querySelector('#ai-credential-days option[value="never"]'),null);
+ await select('#ai-credential-preset','chat_reply');await select('#ai-credential-days','never');
+ await select('#ai-credential-preset','worker');assert.equal(document.querySelector('#ai-credential-days').value,'1');assert.equal(document.querySelector('#ai-credential-days option[value="never"]'),null);
+ await select('#ai-credential-preset','chat_reply');await select('#ai-credential-days','never');
+ await ui.flush(()=>{for(let n=1;n<=7;n++)[...document.querySelectorAll('label')].find(el=>el.textContent===`공간 ${n}`).querySelector('button').click();});
+ await ui.flush(()=>{const field=document.querySelector('#ai-credential-source');Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(field,id);field.dispatchEvent(new window.Event('input',{bubbles:true}));});
+ await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+ const first=ui.writes[0],payload=first.args.p_input;assert.equal(payload.expiresAt,null);assert.equal(payload.nonExpiring,true);
+ assert.deepEqual(payload.scopes,['chat:outbox:read','chat:send']);assert.deepEqual(payload.grant.spaceKeys,Array.from({length:7},(_,i)=>`space_${i+1}`));assert.deepEqual(payload.grant.purposes,['bridge_reply']);assert.equal(payload.grant.queues,undefined);
+ await ui.flush(()=>first.reject(new Error('synthetic response loss')));await ui.remount();await ui.flush(()=>ui.button('발급 결과 확인').click());
+ assert.ok(document.querySelector('[aria-label="확인 중인 발급 권한"]').textContent.includes('무기한'));assert.equal(document.querySelector('#ai-credential-days'),null);
+ await ui.flush(()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+ assert.deepEqual(ui.writes[1].args,first.args);await ui.flush(()=>ui.writes[1].resolve(Response.json({...credential,scopes:payload.scopes,grant:payload.grant,expiresAt:null,token:null})));
+ assert.equal(document.querySelector('input[aria-label="발급된 AI 요청 키"]'),null);
+});
 
 test('ambiguous worker issuance recovery cannot be presented as Chat-only after remount',async t=>{
  const ui=await mount(t);await ui.flush(()=>ui.button('AI 요청 키 발급').click());

@@ -2,7 +2,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {createAiAgentProbeRuntime} from './lib/ai-agent-probe-runtime.mjs';
 
-export const probes=['auth','claim','space-policy','chat-runtime','thread-replies'].map(name=>`tests/probe-ai-agent-${name}-concurrency.mjs`).concat('tests/probe-ai-agent-http-producer.mjs');
+export const probes=['auth','claim','space-policy','chat-runtime','thread-replies','nonexpiring'].map(name=>`tests/probe-ai-agent-${name}-concurrency.mjs`).concat('tests/probe-ai-agent-http-producer.mjs');
 const warning='// Generated: DO NOT EDIT. Regenerate: node scripts/generate-ai-agent-probe-runtime.mjs';
 const blocks={
  RUNTIME:`${warning}\nconst {closeSessions,selfTestBounds,startDeadline,configureContainer,session,query,finishRuntime}=(${createAiAgentProbeRuntime.toString()})({assert,spawn,randomUUID});\nif(process.argv.includes('--self-test-timeout')) {await selfTestBounds();process.exit(0);}\nstartDeadline();`,

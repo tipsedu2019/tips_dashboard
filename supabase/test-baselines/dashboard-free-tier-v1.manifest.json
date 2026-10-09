@@ -816,6 +816,11 @@
       "status": "final"
     },
     {
+      "fileName": "20261009065500_ai_agent_nonexpiring_chat_credentials.sql",
+      "sha256": "e404d9eb1fff35514dd8822e8b745ef8f59444fc4e614736ca6d59b4210be912",
+      "status": "final"
+    },
+    {
       "fileName": "20261009065550_transfer_completion_preexcluded_rosters.sql",
       "status": "final",
       "sha256": "59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099"
