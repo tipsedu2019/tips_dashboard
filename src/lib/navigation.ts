@@ -297,12 +297,14 @@ export function buildAdminNavGroups({
   canEditCurriculumPlanning,
   canUseAssistantOperations = false,
   isAdmin = false,
+  canUsePersonalApiSettings = false,
 }: {
   canManageAll: boolean
   canEditCurriculumPlanning: boolean
   canUseAssistantOperations?: boolean
   isAdmin?: boolean
   canUseAiAgentRequests?: boolean
+  canUsePersonalApiSettings?: boolean
 }): NavGroup[] {
   const assistantOverviewItems: NavItem[] = [
     {
@@ -414,6 +416,12 @@ export function buildAdminNavGroups({
         },
       ],
     })
+  }
+
+  if (!canManageAll && canUsePersonalApiSettings) {
+    groups.push({ label: "설정", items: [{ title: "환경 설정", url: "/admin/settings/agent-access", icon: Settings2,
+      items: [{ title: "API", url: "/admin/settings/agent-access" }],
+    }] })
   }
 
   return groups

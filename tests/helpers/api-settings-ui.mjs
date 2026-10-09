@@ -14,7 +14,7 @@ export async function mountApiSettings(t, options = {}) {
  let auth = { user: { id: '10000000-0000-4000-8000-000000000001', isFallbackRole: false }, role: 'admin', loading: false, ...options.auth };
  const rpcCalls = [], fetchCalls = [], previousFetch = globalThis.fetch;
  globalThis.fetch = async (...args) => { fetchCalls.push(args); throw new Error('unexpected HTTP request'); };
- const { AgentAccessWorkspace } = loadNotificationComponent('src/features/agent-api/agent-access-workspace.tsx', new Map([
+ const overrides = new Map([
   ['@/providers/auth-provider', { useAuth: () => auth }],
   ['@/lib/supabase', { supabase: { rpc(name, args) {
    rpcCalls.push({ name, args });
@@ -24,7 +24,11 @@ export async function mountApiSettings(t, options = {}) {
   ['next/link', props => { const { href, children, ...rest } = props; delete rest.prefetch; return createElement('a', { href, ...rest }, children); }],
   ['@/lib/guarded-navigation', { requestAppNavigation: callback => callback() }],
   ['@/hooks/use-data-table-page-size', { useDataTablePageSize: () => ({ pageSize: 10, ready: true, setPreference() {} }) }],
- ]));
+ ]);
+ if (options.personalService) {
+  overrides.set('./personal-connection-service', { personalConnectionService: options.personalService });
+ }
+ const { AgentAccessWorkspace } = loadNotificationComponent('src/features/agent-api/agent-access-workspace.tsx', overrides);
  const { createRoot } = await import('react-dom/client'); const root = createRoot(document.getElementById('root'));
  const flush = async callback => act(async () => { callback?.(); await new Promise(resolve => setTimeout(resolve, 20)); });
  const render = () => root.render(createElement(AgentAccessWorkspace, { apiEnabled: options.apiEnabled ?? true }));

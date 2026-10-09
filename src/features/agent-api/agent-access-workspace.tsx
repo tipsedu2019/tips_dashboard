@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs";
 import { ApiSupportWorkspace, ApiUsageGuide } from "./api-support-workspace";
+import { PersonalConnectionSupport, PersonalConnectionGuide } from "./personal-connection-guide";
+import { PersonalConnectionWorkspace } from "./personal-connection-workspace";
 import { requestAppNavigation } from "@/lib/guarded-navigation";
 import { Copy, Plus, RefreshCw, X } from "lucide-react";
 import { useAuth } from "@/providers/auth-provider";
@@ -27,12 +29,15 @@ const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat("ko-
 export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
   const { role, loading, user } = useAuth();
   const [tab, setTab] = useState("support");
-  const allowed = !loading && role === "admin" && user?.isFallbackRole === false;
+  const allowed = !loading && ["admin", "teacher"].includes(role) && user?.isFallbackRole === false;
   if (loading) return <SettingsWorkspaceShell><p role="status">권한 확인 중…</p></SettingsWorkspaceShell>;
-  if (!allowed) return <SettingsWorkspaceShell><p role="alert">관리자 계정에서만 API 설정을 이용할 수 있습니다.</p></SettingsWorkspaceShell>;
+  if (!allowed) return <SettingsWorkspaceShell><p role="alert">확인된 관리자·교사 계정에서 API 설정을 이용할 수 있습니다.</p></SettingsWorkspaceShell>;
+  const personal = role === "teacher";
   return <WorkspaceTabs value={tab} onValueChange={(value) => requestAppNavigation(() => setTab(value))}>
     <div className="px-4 sm:px-5 lg:px-6"><WorkspaceTabsList aria-label="API 설정"><WorkspaceTabsTrigger value="support">지원 기능</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="connections">연결 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="guide">사용 안내</WorkspaceTabsTrigger></WorkspaceTabsList></div>
-    <WorkspaceTabsPanel>{tab === "connections" ? <AgentConnectionWorkspace key={user.id} apiEnabled={apiEnabled} /> : tab === "guide" ? <ApiUsageGuide /> : <ApiSupportWorkspace apiEnabled={apiEnabled} />}</WorkspaceTabsPanel>
+    <WorkspaceTabsPanel>{personal
+      ? tab === "connections" ? <PersonalConnectionWorkspace key={user.id} ownerId={user.id} /> : tab === "guide" ? <PersonalConnectionGuide /> : <PersonalConnectionSupport />
+      : tab === "connections" ? <AgentConnectionWorkspace key={user.id} apiEnabled={apiEnabled} /> : tab === "guide" ? <ApiUsageGuide /> : <ApiSupportWorkspace apiEnabled={apiEnabled} />}</WorkspaceTabsPanel>
   </WorkspaceTabs>;
 }
 

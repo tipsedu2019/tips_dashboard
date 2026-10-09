@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { mountApiSettings } from './helpers/api-settings-ui.mjs';
 import { loadNotificationComponent } from './helpers/notification-component-loader.mjs';
-for (const role of ['staff', 'teacher', 'assistant', 'viewer']) test(`${role} receives no new settings permission or personal-key issuance`, async t => {
+for (const role of ['staff', 'assistant', 'viewer']) test(`${role} receives no new settings permission or personal-key issuance`, async t => {
  const ui = await mountApiSettings(t, { auth: { role } });
- assert.match(document.body.textContent, /관리자 계정에서만 API 설정/);
+ assert.match(document.body.textContent, /확인된 관리자·교사 계정/);
  assert.equal(document.querySelector('[role="tab"]'), null);
  assert.equal(ui.rpcCalls.length, 0); assert.equal(ui.fetchCalls.length, 0);
 });

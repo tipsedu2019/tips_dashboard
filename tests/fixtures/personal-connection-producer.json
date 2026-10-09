@@ -1,0 +1,233 @@
+{
+  "input": {
+    "label": "SQL producer fixture",
+    "classIds": [
+      "ad050000-0000-4000-8000-000000000201"
+    ],
+    "expiresAt": "2026-10-10T17:27:23.564Z",
+    "requestId": "ad050000-0000-4000-8000-000000004010",
+    "schoolIds": [
+      "ad050000-0000-4000-8000-000000000501"
+    ]
+  },
+  "issue": {
+    "secret": "tips_dashboard_personal_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "requestId": "ad050000-0000-4000-8000-000000004010",
+    "credential": {
+      "id": "7957df5a-6107-4b73-be7b-c56c134d8059",
+      "label": "SQL producer fixture",
+      "classes": [
+        {
+          "id": "ad050000-0000-4000-8000-000000000201",
+          "name": "Synthetic owned class"
+        }
+      ],
+      "ownerId": "ad050000-0000-4000-8000-000000000002",
+      "schools": [
+        {
+          "id": "ad050000-0000-4000-8000-000000000501",
+          "name": "Synthetic granted school"
+        }
+      ],
+      "expiresAt": "2026-10-10T17:27:23.564Z",
+      "revokedAt": null,
+      "lastUsedAt": null
+    }
+  },
+  "targets": {
+    "kind": "classes",
+    "page": 1,
+    "items": [
+      {
+        "id": "ad050000-0000-4000-8000-000000000201",
+        "name": "Synthetic owned class"
+      }
+    ],
+    "total": 1,
+    "search": "",
+    "ownerId": "ad050000-0000-4000-8000-000000000002",
+    "pageSize": 10
+  },
+  "snapshot": {
+    "page": 1,
+    "items": [
+      {
+        "id": "7957df5a-6107-4b73-be7b-c56c134d8059",
+        "label": "SQL producer fixture",
+        "classes": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000201",
+            "name": "Synthetic owned class"
+          }
+        ],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000501",
+            "name": "Synthetic granted school"
+          }
+        ],
+        "expiresAt": "2026-10-10T17:27:23.564Z",
+        "revokedAt": null,
+        "lastUsedAt": null
+      },
+      {
+        "id": "ad050000-0000-4000-8000-000000003500",
+        "label": "Synthetic wait expiry",
+        "classes": [],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000501",
+            "name": "Synthetic granted school"
+          }
+        ],
+        "expiresAt": "2026-10-09T17:24:33.194Z",
+        "revokedAt": "2026-10-09T17:24:34.061Z",
+        "lastUsedAt": null
+      },
+      {
+        "id": "2133b908-c052-431a-a43e-772217a78459",
+        "label": "Synthetic race 3004",
+        "classes": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000201",
+            "name": "Synthetic owned class"
+          }
+        ],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000501",
+            "name": "Synthetic granted school"
+          }
+        ],
+        "expiresAt": "2026-10-10T17:23:36.586Z",
+        "revokedAt": "2026-10-09T17:24:34.062Z",
+        "lastUsedAt": null
+      },
+      {
+        "id": "2ca3a0c3-1c42-4c91-912a-017c8125852f",
+        "label": "Synthetic race 3002",
+        "classes": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000201",
+            "name": "Synthetic owned class"
+          }
+        ],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000501",
+            "name": "Synthetic granted school"
+          }
+        ],
+        "expiresAt": "2026-10-10T17:23:36.008Z",
+        "revokedAt": "2026-10-09T17:24:31.514Z",
+        "lastUsedAt": "2026-10-09T17:24:31.354Z"
+      },
+      {
+        "id": "96c37b84-ee91-42d4-87b9-3b961aead75f",
+        "label": "Synthetic race 3001",
+        "classes": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000201",
+            "name": "Synthetic owned class"
+          }
+        ],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000501",
+            "name": "Synthetic granted school"
+          }
+        ],
+        "expiresAt": "2026-10-10T17:23:35.715Z",
+        "revokedAt": "2026-10-09T17:24:31.012Z",
+        "lastUsedAt": null
+      },
+      {
+        "id": "ad050000-0000-4000-8000-000000000704",
+        "label": "Synthetic already expired",
+        "classes": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000201",
+            "name": "Synthetic owned class"
+          }
+        ],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [],
+        "expiresAt": "2026-10-09T17:22:35.668Z",
+        "revokedAt": "2026-10-09T17:24:34.062Z",
+        "lastUsedAt": null
+      },
+      {
+        "id": "ad050000-0000-4000-8000-000000000703",
+        "label": "Synthetic calendar only",
+        "classes": [],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000501",
+            "name": "Synthetic granted school"
+          }
+        ],
+        "expiresAt": "2026-10-10T17:23:35.668Z",
+        "revokedAt": "2026-10-09T17:24:34.062Z",
+        "lastUsedAt": null
+      },
+      {
+        "id": "ad050000-0000-4000-8000-000000000702",
+        "label": "Synthetic class only",
+        "classes": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000201",
+            "name": "Synthetic owned class"
+          }
+        ],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [],
+        "expiresAt": "2026-10-10T17:23:35.667Z",
+        "revokedAt": "2026-10-09T17:23:36.532Z",
+        "lastUsedAt": null
+      },
+      {
+        "id": "ad050000-0000-4000-8000-000000000701",
+        "label": "Synthetic explicit reads",
+        "classes": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000201",
+            "name": "Synthetic owned class"
+          },
+          {
+            "id": "ad050000-0000-4000-8000-000000000202",
+            "name": "\uc811\uadfc\ud560 \uc218 \uc5c6\ub294 \uc218\uc5c5"
+          },
+          {
+            "id": "ad050000-0000-4000-8000-000000000203",
+            "name": "\uc811\uadfc\ud560 \uc218 \uc5c6\ub294 \uc218\uc5c5"
+          },
+          {
+            "id": "ad050000-0000-4000-8000-000000000204",
+            "name": "\uc811\uadfc\ud560 \uc218 \uc5c6\ub294 \uc218\uc5c5"
+          }
+        ],
+        "ownerId": "ad050000-0000-4000-8000-000000000002",
+        "schools": [
+          {
+            "id": "ad050000-0000-4000-8000-000000000501",
+            "name": "Synthetic granted school"
+          }
+        ],
+        "expiresAt": "2026-10-10T17:23:35.667Z",
+        "revokedAt": "2026-10-09T17:24:34.062Z",
+        "lastUsedAt": null
+      }
+    ],
+    "total": 9,
+    "status": "ready",
+    "ownerId": "ad050000-0000-4000-8000-000000000002",
+    "pageSize": 10,
+    "operation": null
+  }
+}
