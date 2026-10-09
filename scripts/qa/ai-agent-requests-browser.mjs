@@ -29,7 +29,7 @@ try {
   const metrics = () => page.evaluate(() => { const head = document.querySelector('[data-slot="table-head"]'); return { font: getComputedStyle(document.body).fontFamily, headHeight: head?.getBoundingClientRect().height, headFont: head ? getComputedStyle(head).fontSize : null }; });
   try {
    await page.goto(`${base}/__fixture?route=schools&theme=${theme}`);
-   await page.locator('[data-testid="settings-database-frame"]').waitFor(); await page.waitForTimeout(300);
+   await page.locator('input[data-school-row-name]').filter({ visible: true }).first().waitFor();
    row.reference = await metrics(); await screenshot('schools-reference');
    await page.goto(base + '/admin/settings/agent-access');
    await page.getByRole('tab', { name: '지원 기능', exact: true }).waitFor();

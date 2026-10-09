@@ -26,6 +26,7 @@ async function api(req,res){
  log.push({path,method:req.method,query:Object.fromEntries(url.searchParams),...(path.startsWith('/api/ai-agent/')?{body:args,...(['POST','PATCH'].includes(req.method)?{idempotencyKey:req.headers['idempotency-key'],ifMatch:req.headers['if-match']}: {})}: {})});
  if(path==='/auth/v1/user'&&req.method==='GET'){const actor=actorFor(req);return json(res,users.find(user=>user.id===actor?.id)??users[0]);}
  if(path==='/rest/v1/profiles'&&req.method==='GET'){const id=url.searchParams.get('id')?.replace(/^eq\./,'');return json(res,id?profiles.find(person=>person.id===id)??null:profiles);}
+ if(path==='/rest/v1/academic_schools'&&req.method==='GET')return json(res,Array.from({length:9},(_,i)=>({id:idFor('a17',i),name:'합성 고등학교 '+(i+1),category:'high',color:'#999999',sort_order:i})));
  if(path.startsWith('/api/ai-agent/')){
    const actor=actorFor(req);if(!actor||!['admin','staff','teacher','assistant'].includes(actor.role))return failure(res,'ai_agent_forbidden',403);
    if(path==='/api/ai-agent/requests'){
