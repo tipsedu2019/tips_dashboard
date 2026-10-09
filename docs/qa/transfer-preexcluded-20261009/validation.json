@@ -1,0 +1,288 @@
+{
+  "base": "6a6d7abe4f45e366beccc14efbbcce0534f0370f",
+  "productionActions": 0,
+  "overallGate": "BLOCKED",
+  "sourceHashes": {
+    "src/features/tasks/ops-task-service.ts": "7408227970a6d896cb6883b8809eef5ee2100f3aa5d8f2728211e15bb660c7c5",
+    "src/features/tasks/ops-task-workspace.tsx": "e3e488eda5a3849dc7bb74e60c750d093cb49140ddeba86be08e2f8b39ab8c63",
+    "supabase/migrations/20261009065550_transfer_completion_preexcluded_rosters.sql": "59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099",
+    "supabase/tests/transfer_preexcluded_completion_test.sql": "7b90184dc225c6cdcea509d171bfc1f2d5114ebc03dbe494d31c3269b1f0ab51",
+    "tests/transfer-preexcluded-completion.test.mjs": "d36512bb6b38a42991b82c15e4a41591180d7299ed82fe598415de703311c985",
+    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "c2e01268908d4fcc2392528f8cc212ec044c09316190de5f14a4983f346e5c4d"
+  },
+  "baseline": {
+    "exitCode": 0,
+    "assertions": 5,
+    "failed": [],
+    "inputSHA256": "5487878548ba923651875392a659ff97f9aeace48aed6712f6749e14d0095752"
+  },
+  "transferPgtap": {
+    "exitCode": 0,
+    "assertions": 220,
+    "failed": [],
+    "inputSHA256": "7b90184dc225c6cdcea509d171bfc1f2d5114ebc03dbe494d31c3269b1f0ab51"
+  },
+  "adjacentOperations": {
+    "exitCode": 0,
+    "assertions": 39,
+    "failed": [],
+    "inputSHA256": "a87cf13038ba6c131688e4b6e7d4752ac40cb5311786a9be761496bf6d583b9f"
+  },
+  "adjacentWithdrawal": {
+    "exitCode": 0,
+    "assertions": 83,
+    "failed": [],
+    "inputSHA256": "ed4669636ad15aed0786f2e5d4c13fdead5aa288bc1c61106229fd1014e6dee9"
+  },
+  "adapterFailure": {
+    "exitCode": 3,
+    "assertions": 20,
+    "failed": [
+      "not ok 14 - 전반은 완료 상태로 바로 생성할 수 없다",
+      "not ok 17 - 퇴원 제출은 업무·원본·canonical 이벤트를 함께 만든다"
+    ],
+    "inputSHA256": "d22b2ca77a494468715730a8c6f128eb6adaa6325cd7830e545cacaac8b929e5"
+  },
+  "defaultLint": {
+    "exitCode": 0,
+    "separateAdapterSuiteRemainsFailed": true
+  },
+  "catalog": {
+    "functions": 1108,
+    "changed": [
+      "dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)",
+      "dashboard_private.record_ops_transition_notification_source_v1(ops_tasks,text,uuid)"
+    ],
+    "ownersACLSearchPathUnchanged": true,
+    "restoredCatalogExact": true,
+    "beforeSHA256": "618a81b76f8f4b70510ef87aa050c653aa0b9624c317564b7a742ac86d203e57",
+    "afterSHA256": "3b0e5a735ea29ce84ffb62197d7910a1bddeac1c97183cb681e8ec0456213d55"
+  },
+  "concurrency": [
+    {
+      "label": "wire_same concurrent RPC outcomes",
+      "passed": true
+    },
+    {
+      "label": "wire_same one commit one history one notification",
+      "passed": true
+    },
+    {
+      "label": "wire_diff concurrent RPC outcomes",
+      "passed": true
+    },
+    {
+      "label": "wire_diff one commit one history one notification",
+      "passed": true
+    },
+    {
+      "label": "concurrent destination enrollment completes without duplication",
+      "passed": true
+    },
+    {
+      "label": "actual locked rescan collision retains SQLSTATE 40001",
+      "passed": true
+    },
+    {
+      "label": "collision leaves transfer untouched",
+      "passed": true
+    }
+  ],
+  "browser": [
+    {
+      "label": "normal",
+      "actor": "admin",
+      "width": 1440,
+      "passed": true,
+      "pageErrors": [],
+      "externalRequestsBlocked": []
+    },
+    {
+      "label": "removed",
+      "actor": "admin",
+      "width": 1440,
+      "passed": true,
+      "pageErrors": [],
+      "externalRequestsBlocked": []
+    },
+    {
+      "label": "target_registered",
+      "actor": "admin",
+      "width": 1440,
+      "passed": true,
+      "pageErrors": [],
+      "externalRequestsBlocked": []
+    },
+    {
+      "label": "both_done",
+      "actor": "staff",
+      "width": 390,
+      "passed": true,
+      "pageErrors": [],
+      "externalRequestsBlocked": []
+    },
+    {
+      "label": "withdrawn",
+      "actor": "staff",
+      "width": 390,
+      "passed": true,
+      "pageErrors": [],
+      "externalRequestsBlocked": []
+    },
+    {
+      "label": "staff",
+      "actor": "staff",
+      "width": 1440,
+      "passed": true,
+      "pageErrors": [],
+      "externalRequestsBlocked": []
+    }
+  ],
+  "browserDatabaseAudit": {
+    "rows": [
+      {
+        "label": "normal",
+        "status": "done",
+        "savedDates": [
+          "2026-09-01",
+          "3회차",
+          "2026-09-02",
+          "4회차"
+        ],
+        "sourceAbsent": true,
+        "studentStatus": "재원",
+        "targetHistory": 1,
+        "completionEvents": 1,
+        "targetOccurrences": 1,
+        "canonicalNotifications": 1,
+        "targetRosterOccurrences": 1
+      },
+      {
+        "label": "removed",
+        "status": "done",
+        "savedDates": [
+          "2026-09-01",
+          "3회차",
+          "2026-09-02",
+          "4회차"
+        ],
+        "sourceAbsent": true,
+        "studentStatus": "재원",
+        "targetHistory": 1,
+        "completionEvents": 1,
+        "targetOccurrences": 1,
+        "canonicalNotifications": 1,
+        "targetRosterOccurrences": 1
+      },
+      {
+        "label": "withdrawn",
+        "status": "done",
+        "savedDates": [
+          "2026-09-01",
+          "3회차",
+          "2026-09-02",
+          "4회차"
+        ],
+        "sourceAbsent": true,
+        "studentStatus": "재원",
+        "targetHistory": 1,
+        "completionEvents": 1,
+        "targetOccurrences": 1,
+        "canonicalNotifications": 1,
+        "targetRosterOccurrences": 1
+      },
+      {
+        "label": "target_registered",
+        "status": "done",
+        "savedDates": [
+          "2026-09-01",
+          "3회차",
+          "2026-09-02",
+          "4회차"
+        ],
+        "sourceAbsent": true,
+        "studentStatus": "재원",
+        "targetHistory": 0,
+        "completionEvents": 1,
+        "targetOccurrences": 1,
+        "canonicalNotifications": 1,
+        "targetRosterOccurrences": 1
+      },
+      {
+        "label": "both_done",
+        "status": "done",
+        "savedDates": [
+          "2026-09-01",
+          "3회차",
+          "2026-09-02",
+          "4회차"
+        ],
+        "sourceAbsent": true,
+        "studentStatus": "재원",
+        "targetHistory": 0,
+        "completionEvents": 1,
+        "targetOccurrences": 1,
+        "canonicalNotifications": 1,
+        "targetRosterOccurrences": 1
+      },
+      {
+        "label": "staff",
+        "status": "done",
+        "savedDates": [
+          "2026-09-01",
+          "3회차",
+          "2026-09-02",
+          "4회차"
+        ],
+        "sourceAbsent": true,
+        "studentStatus": "재원",
+        "targetHistory": 1,
+        "completionEvents": 1,
+        "targetOccurrences": 1,
+        "canonicalNotifications": 1,
+        "targetRosterOccurrences": 1
+      }
+    ],
+    "boundary": {
+      "cron": "off",
+      "jobRuns": 0,
+      "httpQueue": 0,
+      "deliveries": 0
+    }
+  },
+  "static": {
+    "nodeTests": {
+      "total": 203,
+      "passed": 203,
+      "failed": 0
+    },
+    "typecheck": 0,
+    "eslint": {
+      "errors": 0,
+      "warnings": 7
+    },
+    "build": 0,
+    "squawk": {
+      "version": "2.63.0",
+      "issues": 0,
+      "binarySHA256": "2c7f5686f98fc50c61d44b7250f18472c066c359385d8cba749d3c27b4380158"
+    },
+    "layout": 0,
+    "sqlstate": 0,
+    "freeTierAllWorktree": 0
+  },
+  "rawEvidenceHashes": {
+    "regression-final.tap": "4c7413bbeb36f403a50299bebb9dc9cd313a218a6e0120ca3038f82d7cda031a",
+    "node-tests.tap": "b9d51c8c8328929e8f01a34ec41e376e877c76d7299053cb294d93abb62ff9c9",
+    "concurrency-final.json": "c6f30daec6f7c145ec8ed682acddf2321cef8381f317b0453ebf24fd6fa579cf",
+    "browser/results.json": "19b2466ecc2af2e6527b43cfe07419e72541bb0814cb5abf2ef85ebb2fd81d9b",
+    "default-lint.json": "cb84826a87c4c9d96d3600d836dcf984f095cde2fb783782449cd181bc816324",
+    "typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint-full.log": "999a6b16873b4d1eb86d4ad3297b4e31439ba2d1edeb53de28c83675a9d27838",
+    "build.log": "b1fe0607277a677d09a43890df2b6204a39a2f1d91b8da9bb81232a843afa0bb",
+    "squawk.log": "0980291be805e7007e8bef2b3b4afe163e0bbbd72beaa64c11e924f5fa0032ad",
+    "free-tier.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "layout.log": "487a77776cd6fe21f8fd3b4a079471a86cb955b03ffda043d43ac7bfa122fcf1",
+    "sqlstate.log": "0d7f013368b8312323a93e3ce3df33f5f2a0a9835cfaf3cbea1cc372675d3ae9"
+  }
+}
