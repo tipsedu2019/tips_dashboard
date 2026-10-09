@@ -1,5 +1,6 @@
 import { getRegistrationEnrollmentTextbookIds } from "./registration-track-model.js";
 import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts";
+import { REGISTRATION_WORKFLOW_STATUS_LABELS } from "./registration-workflow-status.js";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -18,6 +19,11 @@ function uniqueSubjects(values) {
 }
 
 const DEFAULT_STAGE_BY_EVENT = {
+  registration_workflow_status_changed: "inquiry",
+  registration_fact_saved: "inquiry",
+  registration_common_info_updated: "inquiry",
+  registration_subjects_synced: "inquiry",
+  registration_subject_removed: "inquiry",
   case_created: "inquiry",
   inquiry_routed: "inquiry",
   director_default_resolved: "responsibility",
@@ -230,8 +236,26 @@ function legacyEventTitle(value) {
 }
 
 function eventTitle(event, metadata = record(event.metadata), eventTypes = [text(event.eventType)]) {
+  const recordingTitles = {
+    registration_common_info_updated: "공통 정보 변경",
+    registration_subjects_synced: "문의 과목 변경",
+    registration_subject_removed: "문의 과목 제외",
+  };
+  if (recordingTitles[event.eventType]) return recordingTitles[event.eventType];
   const legacyTitle = legacyEventTitle(event.legacyText);
   if (legacyTitle) return legacyTitle;
+  if (event.eventType === "registration_workflow_status_changed") return "진행상태 변경";
+  if (event.eventType === "registration_fact_saved") {
+    const labels = {
+      appointment_details: "예약 정보 저장",
+      waiting_details: "대기 정보 저장",
+      consultation_details: "상담 정보 저장",
+      enrollment_details: "등록 정보 저장",
+      level_test_result: "레벨테스트 결과 저장",
+      admission_checklist: "입학 처리 기록",
+    };
+    return labels[text(metadata.factType)] || "등록 정보 저장";
+  }
   const types = new Set(eventTypes.map(text));
   const changeKind = text(metadata.changeKind);
   if (changeKind === "appointment_updated" && types.size > 1) return "예약 변경";
@@ -290,6 +314,11 @@ function eventTitle(event, metadata = record(event.metadata), eventTypes = [text
 }
 
 function snapshotDescription(event) {
+  if (event.eventType === "registration_workflow_status_changed") {
+    return [event.source, event.destination]
+      .map((value) => REGISTRATION_WORKFLOW_STATUS_LABELS[text(value)] || displayValue(value))
+      .filter(Boolean).join(" → ");
+  }
   const metadata = record(event.metadata);
   const subjectTransitions = list(metadata.subjectTransitions).map(record);
   const snapshotKeys = [
@@ -378,7 +407,7 @@ function historyItem({
   origin = "canonical",
 }) {
   const exactOccurredAt = text(occurredAt);
-  const normalizedTimeKind = timeKind === "exact" && exactOccurredAt ? "exact" : "unavailable";
+  const normalizedTimeKind = timeKind === "exact" && Number.isFinite(Date.parse(exactOccurredAt)) ? "exact" : "unavailable";
   return {
     id,
     kind,
@@ -889,8 +918,8 @@ export function buildRegistrationSubjectHistory(detail = {}) {
   return items.sort((left, right) => {
     if (left.timeKind !== right.timeKind) return left.timeKind === "exact" ? -1 : 1;
     if (left.occurredAt && right.occurredAt) {
-      const timeOrder = right.occurredAt.localeCompare(left.occurredAt);
-      if (timeOrder !== 0) return timeOrder;
+      const timeOrder = Date.parse(right.occurredAt) - Date.parse(left.occurredAt);
+      if (Number.isFinite(timeOrder) && timeOrder !== 0) return timeOrder;
     }
     return left.id.localeCompare(right.id);
   });

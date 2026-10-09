@@ -22,6 +22,7 @@ const REGISTRATION_WORKSPACE_WORKFLOW_STATUS_SET = new Set<string>([
   "waiting_current_class",
   "waiting_new_class",
   "waiting_next_opening",
+  "observation_requested",
   "enrollment_requested",
   "payment_in_progress",
   "registered",

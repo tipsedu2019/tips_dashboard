@@ -87,7 +87,7 @@ export function getRegistrationObservationFeedbackMountPlan(input: {
   managerDetail: Pick<
     RegistrationObservationManagerDetail,
     "currentObservation" | "latestDecisionObservation"
-  > | null
+  > & Partial<Pick<RegistrationObservationManagerDetail, "attempts">> | null
   canManageObservation: boolean
   canManageCase: boolean
 }) {
@@ -97,6 +97,12 @@ export function getRegistrationObservationFeedbackMountPlan(input: {
       observationId: input.managerDetail.currentObservation.observationId,
       historyOnly: false,
     } as const
+  }
+  const latestHistory = input.managerDetail.attempts?.find((attempt) => (
+    ["attended_feedback_pending", "completed", "no_show"].includes(attempt.status)
+  ))
+  if (input.canManageCase && latestHistory) {
+    return { observationId: latestHistory.observationId, historyOnly: true } as const
   }
   if (input.canManageCase && input.managerDetail.latestDecisionObservation) {
     return {
@@ -517,7 +523,7 @@ export function RegistrationObservationFeedbackPanel({
           id={`observation-review-${detail.observationId}`}
           className="text-sm font-semibold"
         >
-          청강 확인
+          청강 이력
         </h3>
         <p className="text-sm text-muted-foreground">
           {STATUS_LABELS[state.detail.status]} · {state.detail.className} · 담당 {state.detail.teacherName}
@@ -535,14 +541,14 @@ export function RegistrationObservationFeedbackPanel({
                 : "미확인"}
           </dd>
         </div>
-        <div>
+        {state.detail.decisionKind ? <div>
           <dt className="text-xs text-muted-foreground">원장 결정</dt>
           <dd>
             {state.detail.decisionKind
               ? DECISION_LABELS[state.detail.decisionKind]
               : "미결정"}
           </dd>
-        </div>
+        </div> : null}
       </dl>
 
       {hasLegacyFeedback ? (
@@ -573,11 +579,6 @@ export function RegistrationObservationFeedbackPanel({
         </section>
       ) : null}
 
-      {state.detail.status === "attended_feedback_pending" ? (
-        <p className="text-sm text-muted-foreground">
-          담당 강사의 Google Chat 보고를 확인한 뒤 원장 결정을 저장하세요.
-        </p>
-      ) : null}
 
       {canRecordAttendance && state.detail.status === "scheduled" ? (
         <div className="grid gap-2">

@@ -429,7 +429,6 @@ export function RegistrationApplication({
     activeDeepLinkedAttempt
     && ["completed", "no_show", "canceled"].includes(activeDeepLinkedAttempt.status),
   )
-  const activeDeepLinkedAttemptCanceled = activeDeepLinkedAttempt?.status === "canceled"
   const deepLinkedObservationHistoryEligible = activeDeepLinkedAttemptTerminal
     && canManageActiveObservation
   const activeObservationTrackIdRef = useRef(activeTrack?.id || null)
@@ -1518,12 +1517,8 @@ export function RegistrationApplication({
       <RegistrationObservationFeedbackPanel
         key={activeFeedbackObservationId}
         detail={observationFeedbackDetail}
-        canRecordAttendance={!activeDeepLinkedAttemptTerminal
-          && canManageCase
-          && !activeFeedbackHistoryOnlyMode}
-        canDecide={!activeDeepLinkedAttemptCanceled
-          && !activeFeedbackHistoryOnlyMode
-          && canManageCase}
+        canRecordAttendance={false}
+        canDecide={false}
         actions={registrationObservationFeedbackActions}
         onSaved={handleObservationFeedbackSaved}
         onReload={reloadObservationFeedback}
@@ -1532,7 +1527,7 @@ export function RegistrationApplication({
     ) : observationFeedbackError ? (
       <p role="alert" className="text-sm text-destructive">{observationFeedbackError}</p>
     ) : observationFeedbackLoading ? (
-      <p className="text-sm text-muted-foreground">청강 확인 정보를 불러오는 중입니다.</p>
+      <p className="text-sm text-muted-foreground">청강 이력을 불러오는 중입니다.</p>
     ) : null
 
   const registrationSection = (

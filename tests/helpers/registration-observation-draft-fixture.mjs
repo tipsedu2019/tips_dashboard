@@ -14,7 +14,7 @@ export function createObservationDraftFixtureState(state, mode) {
   }
   if (mode === "decision") {
     const session = Object.values(observation.sessions)[0][0];
-    const attempt = { ...session, observationId: "20000000-0000-4000-8000-000000000009", taskId, trackId, appointmentId: "20000000-0000-4000-8000-000000000010", appointmentStatus: "scheduled", status: "completed", attendance: "attended", suitabilityResult: "fit", decisionKind: null, revision: 2, feedbackRevision: 1, appointmentNotificationRevision: 1, createdAt: "2026-09-10T00:00:00Z", updatedAt: "2026-09-10T00:00:00Z" };
+    const attempt = { ...session, observationId: "20000000-0000-4000-8000-000000000009", taskId, trackId, appointmentId: "20000000-0000-4000-8000-000000000010", appointmentStatus: "completed", status: "completed", attendance: "attended", suitabilityResult: "fit", decisionKind: null, revision: 2, feedbackRevision: 1, appointmentNotificationRevision: 1, createdAt: "2026-09-10T00:00:00Z", updatedAt: "2026-09-10T00:00:00Z" };
     manager.currentObservation = attempt;
     manager.attempts = [attempt];
     Object.assign(track, { observationCurrentId: attempt.observationId, observationCurrentAppointmentId: attempt.appointmentId, observationCurrentStatus: attempt.status, observationAttemptCount: 1, observationRevision: 2, observationFeedbackRevision: 1, observationNotificationRevision: 1 });
