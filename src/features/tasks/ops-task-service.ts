@@ -635,6 +635,10 @@ function persistOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptions, data:
   }
 }
 
+export function clearOpsTaskPageStatsCache() {
+  opsTaskPageStatsCache.clear()
+}
+
 export function clearOpsTaskWorkspaceDataCache() {
   opsTaskWorkspaceDataCache.clear()
   opsTaskPageStatsCache.clear()
