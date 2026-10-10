@@ -62,6 +62,8 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/tests/ai_agent_personal_owner_test.sql',
  'supabase/tests/agent_personal_dashboard_read_test.sql',
  'src/features/ai-agent/ai-agent-personal-credential-service.ts',
+ 'src/features/agent-api/feature-registry.ts',
+ 'src/features/agent-api/feature-registry.json',
  'src/features/agent-api/server/personal-dashboard-read.ts',
  'src/features/agent-api/server/http.ts',
  'src/features/agent-api/server/response-contract.ts',

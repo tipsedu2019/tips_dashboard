@@ -1,3 +1,4 @@
+import { annotateFeaturePaths } from "../feature-registry.ts";
 import { agentCredentialContracts, agentResponseHeaders } from './openapi-contract.ts';
 const json = (schema: object) => ({ "application/json": { schema } });
 const uuid = { type: "string", format: "uuid" };
@@ -34,3 +35,5 @@ export const agentOpenApi = {
     "/operations/{requestKey}": { get: { operationId: "getOperation", description: "Requires schedule:write. Credential-scoped durable receipt lookup using the client-generated request key. state=unknown means no durable receipt was visible, NOT failed/not-applied. Do not issue another mutation on unknown; report unresolved. Applied receipt lookups also attempt recovery of public cache invalidation. GET returns 200 for both applied and failed receipts; inspect data.state and error.", parameters: [{ name: "requestKey", in: "path", required: true, schema: uuid }], responses: responseFor("Operation") } },
   },
 } as const;
+
+annotateFeaturePaths(1, agentOpenApi.paths);

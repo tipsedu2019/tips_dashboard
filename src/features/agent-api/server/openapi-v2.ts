@@ -1,3 +1,4 @@
+import { annotateFeaturePaths } from "../feature-registry.ts";
 import { z } from "zod";
 import { classEditRequest, pastLessonStateCorrectionRequest } from "./class-edit-contract.ts";
 import { calendarChange } from "./calendar-contract.ts";
@@ -66,3 +67,5 @@ export const agentEditOpenApi={
   "/operations/{requestKey}":{get:get("classOperation",[{in:"path",name:"requestKey",required:true,schema:uuid}])},
  },
 };
+
+annotateFeaturePaths(2, agentEditOpenApi.paths);

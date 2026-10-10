@@ -1,3 +1,4 @@
+import { featureForRoute } from "../feature-registry.ts";
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { getRoleCapabilities } from '../../../lib/auth-utils.ts';
@@ -69,7 +70,8 @@ export function createPersonalDashboardReadHandler(dependencies: { enabled: () =
       const token = /^Bearer (tips_dashboard_personal_[a-f0-9]{64})$/u.exec(request.headers.get('authorization') ?? '')?.[1];
       if (!token) throw new HttpError(401, 'agent_unauthorized');
       // Personal writes, catalogs, receipt replay and other APIs are unsupported.
-      if (request.method !== 'GET') throw new HttpError(403, 'agent_scope_forbidden');
+      const feature = featureForRoute(2, request.method, path);
+      if (!feature?.personal) throw new HttpError(403, 'agent_scope_forbidden');
       const query = new URL(request.url).searchParams;
       if (new Set(query.keys()).size !== [...query.keys()].length) throw new HttpError(400, 'invalid_request');
       const raw = Object.fromEntries(query);
@@ -84,6 +86,8 @@ export function createPersonalDashboardReadHandler(dependencies: { enabled: () =
       } else if (path.length === 3 && path[0] === 'calendar' && path[1] === 'schools') {
         action = 'calendar_context'; input = { ...z.object({ schoolYear: z.coerce.number().pipe(calendarYear) }).strict().parse(raw), schoolId: uuid.parse(path[2]) };
       } else throw new HttpError(403, 'agent_scope_forbidden');
+
+      if (feature.personal.action !== action) throw new HttpError(403, 'agent_scope_forbidden');
 
       // Only the DB callback can resolve the stored owner and current row grant.
       // Never call agent_api_v2/agent_calendar_api_v1 using an issuing admin.

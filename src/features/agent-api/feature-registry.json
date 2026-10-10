@@ -1,0 +1,394 @@
+[
+  {
+    "id": "v1.health",
+    "title": "기존 연결 상태",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 1,
+      "path": "/health",
+      "method": "get",
+      "operationId": "getAgentConnection"
+    },
+    "personal": null
+  },
+  {
+    "id": "v1.classes",
+    "title": "수업 목록",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 1,
+      "path": "/classes",
+      "method": "get",
+      "operationId": "listClasses"
+    },
+    "personal": null
+  },
+  {
+    "id": "v1.class",
+    "title": "기존 수업 정보",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 1,
+      "path": "/classes/{classId}",
+      "method": "get",
+      "operationId": "getClass"
+    },
+    "personal": null
+  },
+  {
+    "id": "v1.calendar",
+    "title": "기간별 학사일정",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 1,
+      "path": "/calendar/events",
+      "method": "get",
+      "operationId": "listAcademicEvents"
+    },
+    "personal": null
+  },
+  {
+    "id": "v1.weekly.preview",
+    "title": "주간 시간 변경 미리보기",
+    "mode": "write",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 1,
+      "path": "/classes/{classId}/weekly-time/preview",
+      "method": "post",
+      "operationId": "previewWeeklyTimeChange"
+    },
+    "personal": null
+  },
+  {
+    "id": "v1.commit",
+    "title": "주간 시간 변경 확정",
+    "mode": "write",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 1,
+      "path": "/operations",
+      "method": "post",
+      "operationId": "commitWeeklyTimeChange"
+    },
+    "personal": null
+  },
+  {
+    "id": "v1.receipt",
+    "title": "주간 시간 변경 결과",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 1,
+      "path": "/operations/{requestKey}",
+      "method": "get",
+      "operationId": "getOperation"
+    },
+    "personal": null
+  },
+  {
+    "id": "v2.health",
+    "title": "업무 연결 상태",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/health",
+      "method": "get",
+      "operationId": "editHealth"
+    },
+    "personal": null
+  },
+  {
+    "id": "calendar.schools.read",
+    "title": "허용 학교 목록",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/calendar/schools",
+      "method": "get",
+      "operationId": "calendarSchools"
+    },
+    "personal": {
+      "action": "schools",
+      "scope": "calendar:read",
+      "target": "schools"
+    }
+  },
+  {
+    "id": "calendar.events.read",
+    "title": "학교 학사일정",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/calendar/schools/{schoolId}",
+      "method": "get",
+      "operationId": "calendarWorkspace"
+    },
+    "personal": {
+      "action": "calendar_context",
+      "scope": "calendar:read",
+      "target": "schools"
+    }
+  },
+  {
+    "id": "calendar.preview",
+    "title": "학사일정 추가·수정 미리보기",
+    "mode": "write",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/calendar/changes/preview",
+      "method": "post",
+      "operationId": "previewCalendarChanges"
+    },
+    "personal": null
+  },
+  {
+    "id": "calendar.commit",
+    "title": "학사일정 변경 확정",
+    "mode": "write",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/calendar/operations",
+      "method": "post",
+      "operationId": "commitCalendarChanges"
+    },
+    "personal": null
+  },
+  {
+    "id": "calendar.receipts",
+    "title": "학사일정 변경 이력",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/calendar/operations",
+      "method": "get",
+      "operationId": "listCalendarOperations"
+    },
+    "personal": null
+  },
+  {
+    "id": "calendar.receipt",
+    "title": "학사일정 변경 결과",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/calendar/operations/{requestKey}",
+      "method": "get",
+      "operationId": "calendarOperation"
+    },
+    "personal": null
+  },
+  {
+    "id": "class.schedule.read",
+    "title": "담당 수업·시간표",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/classes/{classId}",
+      "method": "get",
+      "operationId": "classWorkspace"
+    },
+    "personal": {
+      "action": "class_context",
+      "scope": "class-details:read",
+      "target": "classes"
+    }
+  },
+  {
+    "id": "class.catalogs",
+    "title": "수업 변경용 교사·강의실 목록",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/classes/{classId}/catalogs",
+      "method": "get",
+      "operationId": "classCatalogs"
+    },
+    "personal": null
+  },
+  {
+    "id": "class.preview",
+    "title": "수업 기본 정보·일정 변경 미리보기",
+    "mode": "write",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/classes/{classId}/changes/preview",
+      "method": "post",
+      "operationId": "previewClassChanges"
+    },
+    "personal": null
+  },
+  {
+    "id": "class.past.preview",
+    "title": "지난 정규 회차 상태 정정 미리보기",
+    "mode": "write",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/classes/{classId}/lesson-state-corrections/preview",
+      "method": "post",
+      "operationId": "previewPastLessonStateCorrection"
+    },
+    "personal": null
+  },
+  {
+    "id": "class.commit",
+    "title": "수업 변경 확정",
+    "mode": "write",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/operations",
+      "method": "post",
+      "operationId": "commitClassChanges"
+    },
+    "personal": null
+  },
+  {
+    "id": "class.receipts",
+    "title": "수업 변경 이력",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/operations",
+      "method": "get",
+      "operationId": "listClassOperations"
+    },
+    "personal": null
+  },
+  {
+    "id": "class.receipt",
+    "title": "수업 변경 결과",
+    "mode": "read",
+    "surface": "external",
+    "implemented": true,
+    "production": "baseline_bdf13d0d",
+    "verification": "runtime_unverified",
+    "endpoint": {
+      "version": 2,
+      "path": "/operations/{requestKey}",
+      "method": "get",
+      "operationId": "classOperation"
+    },
+    "personal": null
+  },
+  {
+    "id": "internal.students",
+    "title": "학생·등록·전반·퇴원",
+    "mode": "internal",
+    "surface": "internal",
+    "implemented": true,
+    "production": "not_assessed",
+    "verification": "not_assessed",
+    "endpoint": null,
+    "personal": null
+  },
+  {
+    "id": "internal.payments",
+    "title": "결제·수납",
+    "mode": "internal",
+    "surface": "internal",
+    "implemented": true,
+    "production": "not_assessed",
+    "verification": "not_assessed",
+    "endpoint": null,
+    "personal": null
+  },
+  {
+    "id": "internal.textbooks",
+    "title": "교재 업무",
+    "mode": "internal",
+    "surface": "internal",
+    "implemented": true,
+    "production": "not_assessed",
+    "verification": "not_assessed",
+    "endpoint": null,
+    "personal": null
+  },
+  {
+    "id": "internal.class-lifecycle",
+    "title": "수업 생성·폐강·승인 단계 변경",
+    "mode": "internal",
+    "surface": "internal",
+    "implemented": true,
+    "production": "not_assessed",
+    "verification": "not_assessed",
+    "endpoint": null,
+    "personal": null
+  }
+]

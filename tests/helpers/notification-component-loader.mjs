@@ -14,6 +14,7 @@ export function loadNotificationComponent(path, overrides = new Map()) {
   const cache = new Map()
   function load(url) {
     if (cache.has(url.href)) return cache.get(url.href).exports
+    if (url.pathname.endsWith(".json")) return JSON.parse(readFileSync(url, "utf8"))
     const runtime = { exports: {} }
     cache.set(url.href, runtime)
     const code = ts.transpileModule(readFileSync(url, "utf8"), {

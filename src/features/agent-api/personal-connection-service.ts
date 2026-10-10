@@ -13,5 +13,6 @@ export const personalConnectionService: PersonalConnectionService = Object.freez
   load: ({ signal, ...input }) => call("snapshot", input, signal),
   targets: ({ signal, ...input }) => call("targets", input, signal),
   issue: input => call("issue", input, AbortSignal.timeout(15_000)),
+  permissions: input => call("permissions", input, AbortSignal.timeout(15_000)),
   revoke: input => call("revoke", input, AbortSignal.timeout(15_000)),
 });

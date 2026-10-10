@@ -1,4 +1,4 @@
--- Synthetic only. Apply the candidate proposal after the ordered baseline. All changes roll back.
+-- Synthetic only. Apply both lifecycle and feature-permissions proposals after the ordered baseline. All changes roll back.
 begin;
 select no_plan();
 create function pg_temp.pd_id(n integer) returns uuid language sql immutable as $$select ('ad050000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
@@ -43,7 +43,7 @@ insert into dashboard_private.agent_personal_dashboard_credentials(id,created_by
 (pg_temp.pd_id(703),pg_temp.pd_id(1),pg_temp.pd_id(2),'Synthetic calendar only',pg_temp.pd_hash(703),array['calendar:read'],'{}',array[pg_temp.pd_id(501)],clock_timestamp()+interval '1 day'),
 (pg_temp.pd_id(704),pg_temp.pd_id(1),pg_temp.pd_id(2),'Synthetic already expired',pg_temp.pd_hash(704),array['class-details:read'],array[pg_temp.pd_id(201)],'{}',clock_timestamp()-interval '1 minute');
 create temp table pc_result(name text primary key, input jsonb, result jsonb);grant all on pc_result to authenticated,service_role;
-create function pg_temp.pc_issue(n integer,cs uuid[] default array[pg_temp.pd_id(201)],ss uuid[] default array[pg_temp.pd_id(501)]) returns jsonb language sql as $$select jsonb_build_object('requestId',pg_temp.pd_id(n),'label','Synthetic personal connection','expiresAt',to_char(clock_timestamp()+interval '1 day','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'classIds',to_jsonb(cs),'schoolIds',to_jsonb(ss))$$;
+create function pg_temp.pc_issue(n integer,cs uuid[] default array[pg_temp.pd_id(201)],ss uuid[] default array[pg_temp.pd_id(501)]) returns jsonb language sql as $$select jsonb_build_object('requestId',pg_temp.pd_id(n),'label','Synthetic personal connection','expiresAt',to_char(clock_timestamp()+interval '1 day','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'classIds',to_jsonb(cs),'schoolIds',to_jsonb(ss),'featureIds',to_jsonb((case when cardinality(cs)>0 then array['class.schedule.read'] else '{}'::text[] end)||(case when cardinality(ss)>0 then array['calendar.schools.read','calendar.events.read'] else '{}'::text[] end)))$$;
 select ok(has_function_privilege('authenticated','public.agent_personal_connection_v1(text,jsonb)','execute'),'authenticated can enter guarded RPC');
 select ok(not has_function_privilege('anon','public.agent_personal_connection_v1(text,jsonb)','execute'),'anonymous cannot invoke lifecycle');
 select ok(not has_function_privilege('service_role','public.agent_personal_connection_v1(text,jsonb)','execute'),'service callback cannot issue');

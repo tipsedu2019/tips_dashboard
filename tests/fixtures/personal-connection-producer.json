@@ -4,17 +4,22 @@
     "classIds": [
       "ad050000-0000-4000-8000-000000000201"
     ],
-    "expiresAt": "2026-10-10T17:27:23.564Z",
+    "expiresAt": "2026-10-11T02:02:16.402Z",
     "requestId": "ad050000-0000-4000-8000-000000004010",
     "schoolIds": [
       "ad050000-0000-4000-8000-000000000501"
+    ],
+    "featureIds": [
+      "class.schedule.read",
+      "calendar.events.read",
+      "calendar.schools.read"
     ]
   },
   "issue": {
     "secret": "tips_dashboard_personal_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "requestId": "ad050000-0000-4000-8000-000000004010",
     "credential": {
-      "id": "7957df5a-6107-4b73-be7b-c56c134d8059",
+      "id": "abcffcbd-a03d-404e-b14c-b280b3378d47",
       "label": "SQL producer fixture",
       "classes": [
         {
@@ -29,9 +34,15 @@
           "name": "Synthetic granted school"
         }
       ],
-      "expiresAt": "2026-10-10T17:27:23.564Z",
+      "expiresAt": "2026-10-11T02:02:16.402Z",
       "revokedAt": null,
-      "lastUsedAt": null
+      "featureIds": [
+        "calendar.events.read",
+        "calendar.schools.read",
+        "class.schedule.read"
+      ],
+      "lastUsedAt": null,
+      "featureRevision": 1
     }
   },
   "targets": {
@@ -52,7 +63,7 @@
     "page": 1,
     "items": [
       {
-        "id": "7957df5a-6107-4b73-be7b-c56c134d8059",
+        "id": "abcffcbd-a03d-404e-b14c-b280b3378d47",
         "label": "SQL producer fixture",
         "classes": [
           {
@@ -67,84 +78,15 @@
             "name": "Synthetic granted school"
           }
         ],
-        "expiresAt": "2026-10-10T17:27:23.564Z",
+        "expiresAt": "2026-10-11T02:02:16.402Z",
         "revokedAt": null,
-        "lastUsedAt": null
-      },
-      {
-        "id": "ad050000-0000-4000-8000-000000003500",
-        "label": "Synthetic wait expiry",
-        "classes": [],
-        "ownerId": "ad050000-0000-4000-8000-000000000002",
-        "schools": [
-          {
-            "id": "ad050000-0000-4000-8000-000000000501",
-            "name": "Synthetic granted school"
-          }
+        "featureIds": [
+          "calendar.events.read",
+          "calendar.schools.read",
+          "class.schedule.read"
         ],
-        "expiresAt": "2026-10-09T17:24:33.194Z",
-        "revokedAt": "2026-10-09T17:24:34.061Z",
-        "lastUsedAt": null
-      },
-      {
-        "id": "2133b908-c052-431a-a43e-772217a78459",
-        "label": "Synthetic race 3004",
-        "classes": [
-          {
-            "id": "ad050000-0000-4000-8000-000000000201",
-            "name": "Synthetic owned class"
-          }
-        ],
-        "ownerId": "ad050000-0000-4000-8000-000000000002",
-        "schools": [
-          {
-            "id": "ad050000-0000-4000-8000-000000000501",
-            "name": "Synthetic granted school"
-          }
-        ],
-        "expiresAt": "2026-10-10T17:23:36.586Z",
-        "revokedAt": "2026-10-09T17:24:34.062Z",
-        "lastUsedAt": null
-      },
-      {
-        "id": "2ca3a0c3-1c42-4c91-912a-017c8125852f",
-        "label": "Synthetic race 3002",
-        "classes": [
-          {
-            "id": "ad050000-0000-4000-8000-000000000201",
-            "name": "Synthetic owned class"
-          }
-        ],
-        "ownerId": "ad050000-0000-4000-8000-000000000002",
-        "schools": [
-          {
-            "id": "ad050000-0000-4000-8000-000000000501",
-            "name": "Synthetic granted school"
-          }
-        ],
-        "expiresAt": "2026-10-10T17:23:36.008Z",
-        "revokedAt": "2026-10-09T17:24:31.514Z",
-        "lastUsedAt": "2026-10-09T17:24:31.354Z"
-      },
-      {
-        "id": "96c37b84-ee91-42d4-87b9-3b961aead75f",
-        "label": "Synthetic race 3001",
-        "classes": [
-          {
-            "id": "ad050000-0000-4000-8000-000000000201",
-            "name": "Synthetic owned class"
-          }
-        ],
-        "ownerId": "ad050000-0000-4000-8000-000000000002",
-        "schools": [
-          {
-            "id": "ad050000-0000-4000-8000-000000000501",
-            "name": "Synthetic granted school"
-          }
-        ],
-        "expiresAt": "2026-10-10T17:23:35.715Z",
-        "revokedAt": "2026-10-09T17:24:31.012Z",
-        "lastUsedAt": null
+        "lastUsedAt": null,
+        "featureRevision": 1
       },
       {
         "id": "ad050000-0000-4000-8000-000000000704",
@@ -157,9 +99,11 @@
         ],
         "ownerId": "ad050000-0000-4000-8000-000000000002",
         "schools": [],
-        "expiresAt": "2026-10-09T17:22:35.668Z",
-        "revokedAt": "2026-10-09T17:24:34.062Z",
-        "lastUsedAt": null
+        "expiresAt": "2026-10-10T02:01:16.401Z",
+        "revokedAt": null,
+        "featureIds": [],
+        "lastUsedAt": null,
+        "featureRevision": 0
       },
       {
         "id": "ad050000-0000-4000-8000-000000000703",
@@ -172,9 +116,11 @@
             "name": "Synthetic granted school"
           }
         ],
-        "expiresAt": "2026-10-10T17:23:35.668Z",
-        "revokedAt": "2026-10-09T17:24:34.062Z",
-        "lastUsedAt": null
+        "expiresAt": "2026-10-11T02:02:16.401Z",
+        "revokedAt": null,
+        "featureIds": [],
+        "lastUsedAt": null,
+        "featureRevision": 0
       },
       {
         "id": "ad050000-0000-4000-8000-000000000702",
@@ -187,9 +133,11 @@
         ],
         "ownerId": "ad050000-0000-4000-8000-000000000002",
         "schools": [],
-        "expiresAt": "2026-10-10T17:23:35.667Z",
-        "revokedAt": "2026-10-09T17:23:36.532Z",
-        "lastUsedAt": null
+        "expiresAt": "2026-10-11T02:02:16.401Z",
+        "revokedAt": null,
+        "featureIds": [],
+        "lastUsedAt": null,
+        "featureRevision": 0
       },
       {
         "id": "ad050000-0000-4000-8000-000000000701",
@@ -219,15 +167,18 @@
             "name": "Synthetic granted school"
           }
         ],
-        "expiresAt": "2026-10-10T17:23:35.667Z",
-        "revokedAt": "2026-10-09T17:24:34.062Z",
-        "lastUsedAt": null
+        "expiresAt": "2026-10-11T02:02:16.401Z",
+        "revokedAt": null,
+        "featureIds": [],
+        "lastUsedAt": null,
+        "featureRevision": 0
       }
     ],
-    "total": 9,
+    "total": 5,
     "status": "ready",
     "ownerId": "ad050000-0000-4000-8000-000000000002",
     "pageSize": 10,
-    "operation": null
+    "operation": null,
+    "permissionVersion": 1
   }
 }

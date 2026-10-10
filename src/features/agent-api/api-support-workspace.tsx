@@ -1,31 +1,12 @@
 import Link from "next/link";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { SettingsMasterHeader, SettingsTableFrame, SettingsWorkspaceShell, settingsTableCellClass, settingsTableHeadClass } from "@/features/management/settings-master-layout";
-
-export const API_SUPPORT = [
-  { feature: "수업 조회", status: "지원", scope: "허용된 수업 목록·기본 정보·시간표·회차 조회" },
-  { feature: "수업 기본 정보", status: "지원", scope: "이름·유형·과목·학년·정원·수강료 수정" },
-  { feature: "주간·날짜별 일정", status: "제한 지원", scope: "기존 주간 시간과 앞으로의 회차·휴강·보강. 승인 단계 변경은 제외" },
-  { feature: "지난 회차 상태 정정", status: "제한 지원", scope: "조건을 충족하는 기존 정규 회차 한 건의 진행·취소 상태. 과거 일정 전체 수정은 제외" },
-  { feature: "학교 학사일정", status: "지원", scope: "조회·추가·수정. 삭제는 미지원" },
-  { feature: "학생·등록·전반·퇴원·결제·교재 업무", status: "미지원", scope: "업무 API 제공 범위에 포함되지 않음. 권한이 있는 대시보드 화면에서 처리" },
-  { feature: "수업 생성·폐강·승인 단계 변경", status: "미지원", scope: "권한이 있는 대시보드 화면에서 처리" },
-  { feature: "개인별 API 연결", status: "제한 지원", scope: "별도 개인 읽기 키는 담당 수업·허용 학교 조회만 지원. 개인 키 발급 화면과 개인 업무 수정은 미제공" },
-  { feature: "Google Chat 대화·외부 서비스 작업", status: "미지원", scope: "대화 읽기·수정과 MakeEdu 작업은 이 업무 API의 범위가 아님" },
-] as const;
+import { ApiFeatureCatalog } from "./feature-catalog";
+import { SettingsMasterHeader, SettingsWorkspaceShell } from "@/features/management/settings-master-layout";
 
 export function ApiSupportWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
   return <SettingsWorkspaceShell>
-    <SettingsMasterHeader filters={<span className="text-sm text-muted-foreground">업무 API 지원 범위</span>} actions={<Link href="/api/v2/openapi" prefetch={false} className="text-sm hover:underline">API 명세</Link>} />
-    {!apiEnabled ? <p role="status" className="text-sm text-muted-foreground">업무 API가 비활성화되어 있습니다. 아래는 구현된 기능 범위입니다.</p> : null}
-    <p className="text-sm text-muted-foreground">기존 관리자 발급 연결 키의 권한과 대상 범위 안에서 사용할 수 있습니다. 대시보드 로그인 권한이 API 키로 자동 이전되지는 않습니다.</p>
-    <SettingsTableFrame><Table className="table-fixed min-w-[320px]">
-      <TableHeader><TableRow><TableHead className={`${settingsTableHeadClass} w-[30%]`}>기능</TableHead><TableHead className={settingsTableHeadClass}>지원 범위</TableHead></TableRow></TableHeader>
-      <TableBody>{API_SUPPORT.map(row => <TableRow key={row.feature}>
-        <TableCell className={`${settingsTableCellClass} whitespace-normal break-words align-top font-medium`}>{row.feature}</TableCell>
-        <TableCell className={`${settingsTableCellClass} whitespace-normal break-words`}><span className="font-medium">{row.status}</span><p className="mt-1 text-sm text-muted-foreground">{row.scope}</p></TableCell>
-      </TableRow>)}</TableBody>
-    </Table></SettingsTableFrame>
+    <SettingsMasterHeader filters={<span className="text-sm font-medium">API 기능 목록</span>} actions={<Link href="/api/v2/openapi" prefetch={false} className="text-sm hover:underline">API 명세</Link>} />
+    {!apiEnabled ? <p role="status" className="text-sm text-muted-foreground">업무 API가 비활성화되어 있습니다.</p> : null}
+    <ApiFeatureCatalog />
   </SettingsWorkspaceShell>;
 }
 

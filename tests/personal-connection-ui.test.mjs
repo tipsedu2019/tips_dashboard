@@ -11,18 +11,27 @@ function fixture() {
  const state = { ownerId, items: [], calls: [], mode: 'normal' };
  const classes = [{ id: classId, name: '합성 담당 수업' }], schools = [{ id: schoolId, name: '합성 허용 학교' }];
  const service = {
-  async load(input) { return { status: 'ready', ownerId: state.ownerId, items: state.items.slice((input.page-1)*input.pageSize,input.page*input.pageSize), total: state.items.length, page: input.page, pageSize: input.pageSize, operation: input.pending ? { ...input.pending, state: state.mode === 'recovered' ? 'applied' : 'unknown', credential: state.mode === 'recovered' ? state.items[0] : null } : null }; },
+  async load(input) { if(state.mode==='quota'&&input.pending)throw Error('synthetic recovery quota');return { status: 'ready', permissionVersion: 1, ownerId: state.ownerId, items: state.items.slice((input.page-1)*input.pageSize,input.page*input.pageSize), total: state.items.length, page: input.page, pageSize: input.pageSize, operation: input.pending ? { ...input.pending, state: state.mode === 'recovered' ? 'applied' : 'unknown', credential: state.mode === 'recovered' ? state.items[0] : null,change: input.pending.kind==='permissions' && state.mode==='recovered' ? state.change : null } : null }; },
   async targets(input) { const rows = input.kind === 'classes' ? classes : schools; return { ownerId: state.ownerId, kind: input.kind, search: input.search.trim(), items: rows, total: rows.length, page: input.page, pageSize: input.pageSize }; },
   async issue(input) {
    state.calls.push({ kind: 'issue', input, persisted: JSON.parse(window.sessionStorage.getItem(`tips:personal-connection:pending:${state.ownerId}`)) });
-   const credential = { id: id(10), ownerId: state.ownerId, label: input.label, classes: classes.filter(row=>input.classIds.includes(row.id)), schools: schools.filter(row=>input.schoolIds.includes(row.id)), expiresAt: input.expiresAt, revokedAt: null, lastUsedAt: null };
+   const credential = { id: id(10), ownerId: state.ownerId, label: input.label, featureIds: input.featureIds, featureRevision: 1, classes: classes.filter(row=>input.classIds.includes(row.id)), schools: schools.filter(row=>input.schoolIds.includes(row.id)), expiresAt: input.expiresAt, revokedAt: null, lastUsedAt: null };
    state.items = [credential];
    if (state.mode === 'unknown') throw new Error(syntheticSecret);
    const result = { requestId: input.requestId, credential, secret: syntheticSecret };
    if (state.mode === 'delayed') return await new Promise(resolve => { state.resolveIssue = () => resolve(result); });
    return result;
   },
-  async revoke(input) { state.calls.push({ kind: 'revoke', input }); const credential = { ...state.items.find(row=>row.id===input.credentialId), revokedAt: new Date().toISOString() }; state.items=[credential]; return { requestId: input.requestId, credential }; },
+  async permissions(input) {
+   state.calls.push({kind:'permissions',input,persisted:JSON.parse(window.sessionStorage.getItem(`tips:personal-connection:pending:${state.ownerId}`))});
+   if(state.mode==='quota')throw Error('synthetic permission quota');
+   const before=state.items.find(row=>row.id===input.credentialId);
+   const change={beforeFeatures:before.featureIds,afterFeatures:input.featureIds,revision:before.featureRevision+1};
+   const credential={...before,featureIds:input.featureIds,featureRevision:change.revision};state.items=[credential];state.change=change;
+   if(state.mode==='permission-lost')throw Error('synthetic uncertain update');
+   return {requestId:input.requestId,credential,change};
+  },
+  async revoke(input) { state.calls.push({ kind: 'revoke', input }); const credential = { ...state.items.find(row=>row.id===input.credentialId), revokedAt: new Date().toISOString() }; state.items=[credential];if(state.revokeLost)throw Error('synthetic revoke response loss'); return { requestId: input.requestId, credential }; },
  };
  return { state, service };
 }
@@ -32,16 +41,18 @@ async function input(ui, value) {
 async function review(ui) {
  await ui.flush(()=>ui.button('새 개인 연결').click()); await input(ui,'합성 일정 읽기');
  await ui.flush(()=>document.querySelector('[role="checkbox"]').click());
+ await ui.flush(()=>document.querySelector('[aria-label="담당 수업·시간표"]').click());
  await ui.flush(()=>ui.button('범위 확인').click());
 }
 async function confirm(ui) {
  await ui.flush(()=>document.querySelector('[role="checkbox"]').click());
  await ui.flush(()=>ui.button('확인하고 키 발급').click());
 }
-test('verified teacher sees exactly three read features and no business inventory calls',async t=>{
+test('verified teacher sees registered external and internal features without business inventory calls',async t=>{
  const ui=await mountApiSettings(t,{auth:{role:'teacher'}});
- assert.equal(document.querySelectorAll('tbody tr').length,3);
- assert.match(document.body.textContent,/담당 수업 일정/); assert.match(document.body.textContent,/학교 학사일정/);
+ assert.equal(document.querySelectorAll('tbody tr').length,10);
+ assert.match(document.body.textContent,/외부 업무 API 21개 · 개인 연결 조회 3개/);
+ assert.match(document.body.textContent,/개인 연결 선택 가능/); assert.match(document.body.textContent,/학교 학사일정/);
  await ui.tab('연결 키'); assert.match(document.body.textContent,/개인 연결 목록이나 처리 결과를 확인하지 못했습니다/);
  assert.doesNotMatch(document.body.textContent,/발급한 개인 읽기 연결이 없습니다/);
  assert.equal(ui.button('새 개인 연결').disabled,true);
@@ -126,11 +137,54 @@ test('paged target search retains selections past fifty rows and caps each grant
 });
 
 test('disabled API blocks new personal issuance while preserving list, refresh and revoke',async t=>{
- const {state,service}=fixture();state.items=[{id:id(10),ownerId,label:'합성 기존 연결',classes:[{id:classId,name:'합성 담당 수업'}],schools:[],expiresAt:'2099-01-01T00:00:00.000Z',revokedAt:null,lastUsedAt:null}];
+ const {state,service}=fixture();state.items=[{id:id(10),ownerId,label:'합성 기존 연결',featureIds:['class.schedule.read'],featureRevision:1,classes:[{id:classId,name:'합성 담당 수업'}],schools:[],expiresAt:'2099-01-01T00:00:00.000Z',revokedAt:null,lastUsedAt:null}];
  const ui=await mountApiSettings(t,{auth:{role:'teacher'},apiEnabled:false,personalService:service});await ui.tab('연결 키');
  assert.match(document.body.textContent,/개인 읽기 API가 비활성화/);assert.match(document.body.textContent,/합성 기존 연결/);assert.equal(ui.button('새 개인 연결').disabled,true);
  await ui.flush(()=>ui.button('새 개인 연결').click());assert.equal(state.calls.length,0);assert.equal(document.querySelector('[role="dialog"]'),null);
  await ui.flush(()=>ui.button('목록 새로고침').click());assert.equal(ui.button('폐기').disabled,false);
  await ui.flush(()=>ui.button('폐기').click());await ui.flush(()=>document.querySelector('[aria-label="개인 연결 폐기 폐기"]').click());
  assert.equal(state.calls.length,1);assert.equal(state.calls[0].kind,'revoke');assert.match(document.body.textContent,/폐기됨/);
+});
+
+test('new permissions default off; unsupported features have no active checkbox; cancel preserves grants',async t=>{
+ const {state,service}=fixture();const ui=await mountApiSettings(t,{auth:{role:'teacher'},personalService:service});await ui.tab('연결 키');
+ await ui.flush(()=>ui.button('새 개인 연결').click());
+ assert.equal(document.querySelectorAll('[aria-label="연결별 기능 권한"] [role="checkbox"]').length,3);
+ assert.ok([...document.querySelectorAll('[aria-label="연결별 기능 권한"] [role="checkbox"]')].every(x=>x.getAttribute('aria-checked')==='false'));
+ await ui.flush(()=>ui.button('취소').click());await review(ui);await confirm(ui);await ui.flush(()=>ui.button('닫기').click());
+ await ui.flush(()=>ui.button('기능 관리').click());await ui.flush(()=>document.querySelector('[aria-label="담당 수업·시간표"]').click());
+ await ui.flush(()=>ui.button('취소').click());assert.deepEqual(state.items[0].featureIds,['class.schedule.read']);assert.equal(state.calls.filter(x=>x.kind==='permissions').length,0);
+});
+test('unchecking all features saves an audited revision through the real UI and blocks double clicks',async t=>{
+ const {state,service}=fixture();const ui=await mountApiSettings(t,{auth:{role:'teacher'},personalService:service});await ui.tab('연결 키');await review(ui);await confirm(ui);await ui.flush(()=>ui.button('닫기').click());
+ await ui.flush(()=>ui.button('기능 관리').click());await ui.flush(()=>document.querySelector('[aria-label="담당 수업·시간표"]').click());
+ await ui.flush(()=>{const b=ui.button('기능 권한 저장');b.click();b.click();});
+ const calls=state.calls.filter(x=>x.kind==='permissions');assert.equal(calls.length,1);assert.equal(calls[0].input.expectedRevision,1);assert.deepEqual(calls[0].input.featureIds,[]);assert.equal(calls[0].persisted.kind,'permissions');
+ assert.equal(state.items[0].featureRevision,2);assert.match(document.body.textContent,/허용 기능 0개/);assert.equal(window.sessionStorage.length,0);
+});
+test('lost permission response recovers the original request without reapplying or storing grants',async t=>{
+ const {state,service}=fixture();const ui=await mountApiSettings(t,{auth:{role:'teacher'},personalService:service});await ui.tab('연결 키');await review(ui);await confirm(ui);await ui.flush(()=>ui.button('닫기').click());
+ state.mode='permission-lost';await ui.flush(()=>ui.button('기능 관리').click());await ui.flush(()=>document.querySelector('[aria-label="담당 수업·시간표"]').click());await ui.flush(()=>ui.button('기능 권한 저장').click());
+ assert.match(document.body.textContent,/처리 결과를 확인하지 못했습니다/);assert.equal(ui.button('새 개인 연결').disabled,true);
+ const pending=JSON.parse(window.sessionStorage.getItem(`tips:personal-connection:pending:${ownerId}`));assert.deepEqual(Object.keys(pending).sort(),['kind','requestId']);
+ state.mode='recovered';await ui.flush(()=>ui.button('처리 결과 확인').click());assert.match(document.body.textContent,/기존 기능 권한 변경 결과/);assert.match(document.body.textContent,/허용 기능 0개/);assert.equal(state.calls.filter(x=>x.kind==='permissions').length,1);
+});
+
+test('last target removal still allows clearing the now-ineligible checked feature',async t=>{
+ const {service}=fixture();const ui=await mountApiSettings(t,{auth:{role:'teacher'},personalService:service});await ui.tab('연결 키');await ui.flush(()=>ui.button('새 개인 연결').click());await input(ui,'합성 학교 연결');
+ await ui.flush(()=>document.querySelector('[aria-label="담당 수업 검색 결과"] [role="checkbox"]').click());await ui.flush(()=>document.querySelector('[aria-label="담당 수업·시간표"]').click());
+ await ui.flush(()=>document.querySelector('[aria-label="허용 학교 검색 결과"] [role="checkbox"]').click());await ui.flush(()=>document.querySelector('[aria-label="학교 학사일정"]').click());
+ await ui.flush(()=>document.querySelector('[aria-label="선택한 담당 수업"] button').click());
+ const checked=document.querySelector('[aria-label="담당 수업·시간표"]');assert.equal(checked.disabled,false);await ui.flush(()=>checked.click());assert.equal(ui.button('범위 확인').disabled,false);
+});
+test('quota-blocked recovery preserves the grant request and still permits separately journaled revoke',async t=>{
+ const {state,service}=fixture();const ui=await mountApiSettings(t,{auth:{role:'teacher'},personalService:service});await ui.tab('연결 키');await review(ui);await confirm(ui);await ui.flush(()=>ui.button('닫기').click());
+ state.mode='quota';await ui.flush(()=>ui.button('기능 관리').click());await ui.flush(()=>ui.button('기능 권한 저장').click());
+ const primary=window.sessionStorage.getItem(`tips:personal-connection:pending:${ownerId}`);assert.ok(primary);
+ await ui.flush(()=>ui.button('처리 결과 확인').click());assert.match(document.body.textContent,/확인된 기존 연결은 폐기/);assert.equal(ui.button('새 개인 연결').disabled,true);assert.equal(ui.button('폐기').disabled,false);
+ state.revokeLost=true;await ui.flush(()=>ui.button('폐기').click());await ui.flush(()=>document.querySelector('[aria-label="개인 연결 폐기 폐기"]').click());
+ assert.equal(window.sessionStorage.getItem(`tips:personal-connection:pending:${ownerId}`),primary);
+ const secondary=JSON.parse(window.sessionStorage.getItem(`tips:personal-connection:revoke:${ownerId}`));assert.deepEqual(Object.keys(secondary).sort(),['credentialId','requestId']);
+ state.revokeLost=false;await ui.flush(()=>ui.button('폐기 결과 확인').click());assert.equal(window.sessionStorage.getItem(`tips:personal-connection:revoke:${ownerId}`),null);assert.equal(window.sessionStorage.getItem(`tips:personal-connection:pending:${ownerId}`),primary);
+ const calls=state.calls.filter(x=>x.kind==='revoke');assert.equal(calls.length,2);assert.deepEqual(calls[0].input,calls[1].input);assert.match(document.body.textContent,/폐기됨/);
 });

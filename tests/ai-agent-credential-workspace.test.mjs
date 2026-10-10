@@ -6,7 +6,7 @@ import { mountApiSettings } from './helpers/api-settings-ui.mjs';
 test('API settings defaults to support without issuing or reading credentials', async t => {
  const ui = await mountApiSettings(t);
  assert.deepEqual([...document.querySelectorAll('[role="tab"]')].map(tab => tab.textContent), ['지원 기능', '연결 키', '사용 안내']);
- assert.match(document.body.textContent, /개인 키 발급 화면과 개인 업무 수정은 미제공/);
+ assert.match(document.body.textContent, /외부 업무 API 21개 · 개인 연결 조회 3개/);
  assert.equal(ui.rpcCalls.length, 0); assert.equal(ui.fetchCalls.length, 0);
  for (const label of ['AI 요청 키 발급', '개인 요청 키 발급', '알림 공간']) assert.equal(ui.button(label), undefined);
 });

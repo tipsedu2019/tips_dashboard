@@ -1,3 +1,4 @@
+import { featureForRoute } from "../feature-registry.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { agentOpenApi } from "./openapi.ts";
@@ -47,6 +48,7 @@ export function createAgentApiHandler(dependencies: { enabled: () => boolean; rp
     try {
       if (path.join("/") === "openapi" && request.method === "GET") return reply(agentOpenApi);
       if (!dependencies.enabled()) throw new HttpError(503, "agent_api_disabled");
+      if (!featureForRoute(1, request.method, path)) throw new HttpError(404, "route_not_found");
       const token = /^Bearer (tips_agent_[a-f0-9]{64})$/.exec(request.headers.get("authorization") || "")?.[1];
       if (!token) throw new HttpError(401, "agent_unauthorized");
       const url = new URL(request.url);

@@ -1,3 +1,4 @@
+import { featureForRoute } from "../feature-registry.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { HttpError, record, response, errorStatus, jsonBody, knownCodes, type AgentRpc } from "./http.ts";
@@ -24,6 +25,7 @@ export function createAgentCalendarHandler(dependencies:{enabled:()=>boolean;rpc
     const reply = (body: unknown, status = 200) => contract.finish(response(body, status), body);
     try {
       if(!dependencies.enabled()) throw new HttpError(503,'agent_api_disabled');
+      if (!featureForRoute(2, request.method, path)) throw new HttpError(404, "route_not_found");
       const token=/^Bearer (tips_agent_[a-f0-9]{64})$/.exec(request.headers.get('authorization')||'')?.[1];
       if(!token) throw new HttpError(401,'agent_unauthorized');
       const hash=createHash('sha256').update(token).digest('hex');
