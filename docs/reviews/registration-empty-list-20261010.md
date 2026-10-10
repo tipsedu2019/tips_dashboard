@@ -47,7 +47,7 @@
 - 수정 전 bdf13d0d에 같은 초기 11개 회귀를 실행: 5 통과, **6 실패**. 실패는 통계 불일치 2종, pending/error 2종, 트랙 불일치 2종이다. 수정 후 신규 전체 13개 통과.
 - 관련 9개 테스트 파일 **272/272 통과**. 공통 목록/버튼/탭 디자인 계약 **22/22 통과**.
 - TypeScript noEmit 통과. 변경 파일 ESLint 오류 0, 기존 service unused 경고 3개. diff whitespace 검사 통과.
-- 로컬 free-tier tasks worktree 검사 및 migration layout 검사 통과. SQL 변경 없음. GitHub 유료 검사 실행/재실행 없음.
+- 로컬 free-tier tasks의 커밋 범위 검사 및 migration layout 검사 통과. SQL 변경 없음. GitHub 유료 검사 실행/재실행 없음.
 - 초기 확장 검사에서 공용 JSDOM teardown 변경 때문에 청강 초안 테스트가 실패했다. 공용 harness 변경을 제거했고 최종 전체 검사는 통과했다. 원본 main pagination 85개도 통과. 기존 harness의 React legacy input/focus 경고는 원본에서도 관찰되며 관련 없는 PR132의 harness 수정은 가져오지 않았다.
 - Chromium 실제 합성 UI: 1200×852 및 390×844에서 전후 화면 확인. 모바일 문서 가로 넘침 없음, 재조회 버튼 44px, Enter 재조회 후 검색 초점 유지 및 10개 정상 행 복구. 화면 복원 확인.
 
@@ -59,6 +59,14 @@ node --test --experimental-strip-types tests/data-table-pagination.test.mjs test
 node node_modules/typescript/bin/tsc --noEmit --incremental false
 node scripts/verify-free-tier-query-contracts.mjs --base bdf13d0db1d0664c2a6b366b176818f6bfc3d38b --worktree --surface tasks
 ```
+
+## 독립 리뷰와 병행 변경 통합
+
+- 독립 reviewer가 소스 커밋 `fab43e0bd440920643b2c4a598c8f20af6c3359b`를 검토하고 신규 13개를 별도로 실행해 13/13 통과를 확인했다. 수정 필요한 결함은 발견되지 않았으며 draft PR 준비가 가능하다는 결론이다. 이는 merge·배포 승인이 아니다.
+- 해당 커밋과 PR132 head `a29859d3130b7586bdc096652b11296c5d5f62eb`의 `git merge-tree --write-tree`는 충돌 없이 tree `797a87a26b314ff390472cb8c2a032f0e9986747`을 만들었다. 이 tree를 임시 사본에 풀어 신규 13개를 다시 실행했고 13/13 통과했다. 전체 통합 suite와 운영 적용은 검증하지 않았다.
+- PR133 head `7581b6990e0d3852ace0b4c0c5596e436a636f62`와도 Git 충돌이 없었다(tree `661a83ec5b587714ab8543931ad5ace8a30dfab8`). PR133과의 런타임 통합은 실행하지 않았다. 두 병행 PR을 동시에 합친 소스는 미검증이다.
+- 이후 증거 갱신 커밋은 보고서와 합성 스크린샷만 바꾸며 검증한 애플리케이션·테스트 소스는 동일하다. 현재 main이나 병행 PR head가 달라지면 부모가 다시 통합 검증해야 한다.
+- 다크 모드의 별도 브라우저 캡처는 수행하지 않았다. 공통 토큰·컴포넌트를 바꾸지 않았고 기존 오류 텍스트와 공통 outline Button을 사용한다.
 
 ## 합성 화면 증거
 
