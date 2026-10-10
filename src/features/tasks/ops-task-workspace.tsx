@@ -114,6 +114,7 @@ import {
   deleteOpsTask,
   emptyOpsTaskWorkspaceData,
   clearOpsTaskWorkspaceDataCache,
+  clearOpsTaskPageStatsCache,
   loadOpsRegistrationCaseDetail,
   loadOpsTaskById,
   loadOpsRegistrationClassDetail,
@@ -8302,6 +8303,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ])
 
   const [supplementRevision, setSupplementRevision] = useState(0)
+  const [taskStatsFilterScope, setTaskStatsFilterScope] = useState<string | null>(null)
   const refreshNumberedPage = numberedPage.refresh
   const reload = useCallback(async (_force = false, _showPending = true) => {
     void _force
@@ -8331,6 +8333,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const controller = new AbortController()
     workspaceLoadAbortControllerRef.current = controller
     const generation = ++workspaceLoadGenerationRef.current
+    setTaskStatsFilterScope(null)
     setData((current) => current ? { ...current, stats: undefined } : current)
     const registration = taskPageFilters.taskType === "registration"
       ? startOpsRegistrationTaskPageSupplementLoad({ filters: taskPageFilters, viewerId: currentUserId, signal: controller.signal })
@@ -8338,7 +8341,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const stats = registration?.stats || startOpsTaskPageStatsSupplementLoad({ filters: taskPageFilters, viewerId: currentUserId, signal: controller.signal })
     const current = () => workspaceMountedRef.current && !controller.signal.aborted && workspaceLoadGenerationRef.current === generation
     void stats.then((stats) => {
-      if (stats && current()) setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { stats }))
+      if (stats && current()) {
+        setTaskStatsFilterScope(JSON.stringify(taskPageFilters))
+        setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { stats }))
+      }
     })
     void registration?.registrationRuntime.then((registrationRuntime) => {
       if (registrationRuntime && current()) setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { registrationRuntime }))
@@ -9308,6 +9314,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const completeFixtureRegistrationPage = useMemo(() => numberedServerPage ? null : getCompleteOpsTaskFixturePage(visibleRegistrationCaseItems, fixturePage, fixturePageSize.pageSize), [fixturePage, fixturePageSize.pageSize, numberedServerPage, visibleRegistrationCaseItems])
   const visibleTasks = completeFixtureTaskPage?.rows || filteredTasks
   const displayedRegistrationCaseItems = completeFixtureRegistrationPage?.rows || visibleRegistrationCaseItems
+  // Counts and rows are separate reads. Only compare accepted matching scopes;
+  // a legitimate empty owner/search scope must not inherit another tab's count.
+  const registrationListCountMismatch = isRegistrationWorkspace && numberedServerPage
+    && !numberedPage.loading && !numberedPage.error && numberedPage.scope !== null
+    && displayedRegistrationCaseItems.length === 0
+    && (Number(numberedPage.totalCount) > 0 || (
+      taskStatsFilterScope === JSON.stringify(taskPageFilters)
+      && JSON.stringify((JSON.parse(numberedPage.scope) as { filters: OpsTaskPageFilters }).filters) === taskStatsFilterScope
+      && Number(authoritativeTaskStats?.total) > 0
+    ))
+  const hideUnconfirmedRegistrationEmpty = isRegistrationWorkspace && registrationMode === "list"
+    && numberedServerPage && displayedRegistrationCaseItems.length === 0
+    && (numberedPage.loading || Boolean(numberedPage.error) || registrationListCountMismatch)
   const fixtureNumberedPage = isRegistrationWorkspace ? completeFixtureRegistrationPage : completeFixtureTaskPage
   const listNumberedPage = fixtureNumberedPage || numberedPage
 
@@ -12712,7 +12731,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         {numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           목록을 불러오지 못했습니다.{numberedPage.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}
           <Button variant="outline" size="sm" disabled={numberedPage.loading} onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void numberedPage.retry() }}>다시 시도</Button>
-        </div> : numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과: {acceptedCriteriaLabel}</div> : null}
+        </div> : numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과: {acceptedCriteriaLabel}</div> : registrationListCountMismatch && registrationMode === "list" ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+          목록과 집계 건수가 일치하지 않습니다. 다시 조회해 주세요.
+          <Button variant="outline" size="form" onClick={() => {
+            workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
+            clearOpsTaskPageStatsCache()
+            void reload()
+          }}>다시 조회</Button>
+        </div> : null}
 
 	        {loading && !isWithdrawalWorkspace && !isTransferWorkspace ? (
           isRegistrationWorkspace ? (
@@ -12722,7 +12748,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ) : (
             <TaskListSkeleton showType={!isTodoWorkspace} />
           )
-	        ) : shouldHideEmptySurface ? null : isRegistrationWorkspace ? (
+	        ) : shouldHideEmptySurface || hideUnconfirmedRegistrationEmpty ? null : isRegistrationWorkspace ? (
             registrationMode === "calendar" ? (
               <RegistrationAppointmentCalendar
                 refreshToken={`${registrationFixtureRevision}:${registrationCalendarRefreshToken}`}
