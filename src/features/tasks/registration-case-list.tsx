@@ -20,7 +20,6 @@ import type { RegistrationObservationTrackWorkflowStatus } from "./registration-
 import {
   REGISTRATION_WORKFLOW_STATUS_LABELS,
   getRegistrationInlineWorkflowStatusOptions,
-  isRegistrationObservationWorkflowStatus,
 } from "./registration-workflow-status.js"
 
 export type RegistrationCaseListProps = {
@@ -179,9 +178,6 @@ function RegistrationTrackStatusControl({
   disabled: boolean
   onStatusChange: RegistrationCaseListProps["onStatusChange"]
 }) {
-  if (isRegistrationObservationWorkflowStatus(track.workflowStatus)) {
-    return <RegistrationTrackStatusBadge status={track.workflowStatus} />
-  }
   const options = getRegistrationInlineWorkflowStatusOptions({
     currentStatus: track.workflowStatus,
     viewerId,

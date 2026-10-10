@@ -9,6 +9,7 @@ import {
   sortAcademicSubjects,
 } from "../../lib/academic-subject-registry.ts";
 import { normalizeStudentStatus } from "../../lib/student-status.js";
+import { omitStudentContactFields, projectStudentMasterRecord } from "./student-master-privacy.js";
 import { invalidatePublicClassesCacheAfterMutation } from "../../lib/public-classes-cache-invalidation.js";
 
 const DEFAULT_CLASS_STATUS = "수강";
@@ -184,8 +185,9 @@ function withOpaqueRelationCursor(page, context) {
   const rawCursor = page.nextCursor;
   return {
     ...page,
-    rows: context.kind === "students" && Array.isArray(page.rows)
-      ? page.rows.map(normalizeClassRelationRecord)
+    rows: Array.isArray(page.rows)
+      ? context.kind === "students" ? page.rows.map(normalizeClassRelationRecord)
+        : context.kind === "classes" ? page.rows.map(omitStudentContactFields) : page.rows
       : page.rows,
     nextCursor: rawCursor && typeof rawCursor === "object"
       ? encodeManagementRelationCursor({
@@ -207,7 +209,7 @@ function withOpaqueDetailRelationCursors(detail, kind, entityId) {
   return fields.reduce((result, [field, relationKind]) => ({
     ...result,
     [field]: withOpaqueRelationCursor(result[field], { kind, entityId, relationKind }),
-  }), { ...detail });
+  }), { ...detail, ...(kind === "students" ? { record: omitStudentContactFields(detail.record || {}) } : {}) });
 }
 
 export function createManagementReadService(options = {}) {
@@ -1137,6 +1139,40 @@ async function selectRows(client, table) {
   return data || [];
 }
 
+// Legacy full-catalog consumers still receive every accessible student, never a
+// truncated page. Publish the contact-free result only after the complete read.
+export async function readStudentMasterRows(client) {
+  const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+  return withReadDeadline(async (operationSignal) => {
+    const requestSignal = AbortSignal.any([operationSignal, deadline]);
+    const rows = [];
+    let lastId = "";
+    for (;;) {
+      requestSignal.throwIfAborted();
+      const { data, error } = await client.from("students")
+        .select("id,name,uid,school,grade,enroll_date,status,class_ids,waitlist_class_ids,created_at,updated_at")
+        .filter("id", lastId ? "gt" : "gte", lastId || "00000000-0000-0000-0000-000000000000")
+        .order("id", { ascending: true }).limit(30)
+        .abortSignal(requestSignal).retry(false);
+      requestSignal.throwIfAborted();
+      if (error) throw error;
+      if (!Array.isArray(data) || data.length > 30) throw managementReadError("student_master_page_invalid");
+      for (const record of data) {
+        const id = record?.id;
+        if (typeof id !== "string" || id.length !== 36 || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
+          throw managementReadError("student_master_page_invalid");
+        }
+        if (lastId && id <= lastId) throw managementReadError("student_master_page_changed");
+        lastId = id;
+        rows.push(projectStudentMasterRecord(record));
+      }
+      // A server-side cap can be smaller than the requested page size. Only an
+      // empty continuation proves exhaustion; the first page includes zero UUID.
+      if (data.length === 0) return rows;
+    }
+  }, { deadline });
+}
+
 async function selectStudentRosterRecord(client, studentId) {
   const { data, error } = await client
     .from("students")
@@ -1239,14 +1275,32 @@ function getStaleSchemaFallbackFields(error, optionalFields) {
 }
 
 async function upsertStudentRows(client, payload) {
+  const write = async (value) => {
+    const { data, error } = await client.from("students")
+      .upsert(value, { onConflict: "id" })
+      .select("id,name,uid,school,grade,enroll_date,status,class_ids,waitlist_class_ids,created_at,updated_at")
+      .order("id").limit(1)
+      .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+    if (error) throw error;
+    return (data || []).map((record) => projectStudentMasterRecord(record));
+  };
   try {
-    return await upsertRows(client, "students", payload);
+    return await write(payload);
   } catch (error) {
     const fallbackFields = getStaleSchemaFallbackFields(error, ["status", "recent_issue", "counseling_note"]);
     if (fallbackFields.length === 0) {
       throw error;
     }
-    return upsertRows(client, "students", stripPayloadFields(payload, fallbackFields));
+    if (fallbackFields.includes("status")) {
+      const { data, error: fallbackError } = await client.from("students")
+        .upsert(stripPayloadFields(payload, fallbackFields), { onConflict: "id" })
+        .select("id,name,uid,school,grade,enroll_date,class_ids,waitlist_class_ids,created_at,updated_at")
+        .order("id").limit(1)
+        .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+      if (fallbackError) throw fallbackError;
+      return (data || []).map((record) => projectStudentMasterRecord(record));
+    }
+    return write(stripPayloadFields(payload, fallbackFields));
   }
 }
 
@@ -1330,13 +1384,13 @@ function getClassStudentMode(classItem, studentId) {
 async function assertStudentPhysicalDeleteAllowed(client, studentId) {
   const safeStudentId = trimText(studentId);
   if (!safeStudentId) return;
-  const [students, classes, history, registrationEnrollments] = await Promise.all([
-    selectRows(client, "students"),
+  const [studentRecord, classes, history, registrationEnrollments] = await Promise.all([
+    selectStudentRosterRecord(client, safeStudentId),
     selectRows(client, "classes"),
     selectOptionalRows(client, "student_class_enrollment_history"),
     selectOptionalRows(client, "ops_registration_enrollments"),
   ]);
-  const student = findById(students, safeStudentId);
+  const student = findById(studentRecord ? [studentRecord] : [], safeStudentId);
   const ownLinks = normalizeIdList(student?.class_ids || student?.classIds).length
     + normalizeIdList(student?.waitlist_class_ids || student?.waitlistClassIds).length;
   const reverseLinks = classes.some((classItem) => (
@@ -1457,8 +1511,6 @@ export function buildStudentPayload(record = {}, options = {}) {
     uid: trimText(record.uid),
     school: trimText(record.school),
     grade: trimText(record.grade),
-    contact: trimText(record.contact),
-    parent_contact: trimText(record.parentContact || record.parent_contact),
     recent_issue: trimText(record.recentIssue || record.recent_issue || record.latestIssue || record.latest_issue || record.specialNote || record.special_note),
     enroll_date: formatDateOnly(record.enrollDate || record.enroll_date || new Date()),
     status: normalizeStudentStatus(record.status),
@@ -1707,11 +1759,14 @@ export function createManagementService(options = {}) {
         .from("students")
         .update({ counseling_note: trimText(note) })
         .eq("id", safeStudentId)
-        .select();
+        .select("id,name,uid,school,grade,enroll_date,status,class_ids,waitlist_class_ids,created_at,updated_at,counseling_note")
+        .order("id").limit(1)
+        .abortSignal(AbortSignal.timeout(8_000)).retry(false);
       if (error) {
         throw error;
       }
-      return Array.isArray(data) ? data[0] || null : data || null;
+      const record = Array.isArray(data) ? data[0] || null : data || null;
+      return record ? projectStudentMasterRecord(record, ["counseling_note"]) : null;
     },
 
     async deleteStudent(id) {
@@ -1896,7 +1951,7 @@ export function createManagementService(options = {}) {
 
     async listStudents() {
       const client = ensureClient(supabase);
-      return selectRows(client, "students");
+      return readStudentMasterRows(client);
     },
 
     async listClasses() {

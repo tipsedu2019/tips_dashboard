@@ -10,7 +10,6 @@ export type RegistrationInquiryFieldValues = {
   schoolGrade: string
   schoolName: string
   parentPhone: string
-  studentPhone: string
   inquiryAt: string
   requestNote: string
 }
@@ -43,6 +42,7 @@ export type RegistrationInquiryCommonFieldsProps = {
   values: RegistrationInquiryFieldValues
   disabled?: boolean
   disabledFields?: Partial<Record<RegistrationInquiryFieldName, boolean>>
+  showParentContact?: boolean
   onChange: (field: RegistrationInquiryFieldName, value: string) => void
 }
 
@@ -50,6 +50,7 @@ export function RegistrationInquiryCommonFields({
   values,
   disabled = false,
   disabledFields = {},
+  showParentContact = true,
   onChange,
 }: RegistrationInquiryCommonFieldsProps) {
   const gradeOptions = getRegistrationGradeOptions()
@@ -96,27 +97,17 @@ export function RegistrationInquiryCommonFields({
         />
       </Label>
 
-      <Label className="grid min-w-0 gap-1.5" data-registration-focus="parentPhone">
+      {showParentContact ? <Label className="grid min-w-0 gap-1.5" data-registration-focus="parentPhone">
         <span>학부모 전화</span>
         <Input
           data-common-field="parent-phone"
           inputMode="tel"
+          autoComplete="off"
           value={values.parentPhone}
           disabled={disabled || disabledFields.parentPhone}
           onChange={(event) => onChange("parentPhone", event.target.value)}
         />
-      </Label>
-
-      <Label className="grid min-w-0 gap-1.5">
-        <span>학생 전화</span>
-        <Input
-          data-common-field="student-phone"
-          inputMode="tel"
-          value={values.studentPhone}
-          disabled={disabled || disabledFields.studentPhone}
-          onChange={(event) => onChange("studentPhone", event.target.value)}
-        />
-      </Label>
+      </Label> : null}
 
       <Label className="grid min-w-0 gap-1.5">
         <span>문의일시</span>

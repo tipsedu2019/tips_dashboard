@@ -15,7 +15,7 @@ import {
   normalizeTextbookManagementRecord,
 } from "./records.js";
 import { buildCurriculumWorkspaceModel } from "../academic/records.js";
-import { createManagementReadService, getAssignedClassTextbookIds } from "./management-service.js";
+import { createManagementReadService, getAssignedClassTextbookIds, readStudentMasterRows } from "./management-service.js";
 import type { ManagementListPageSize } from "./management-page-size";
 import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller";
 import { createManagementNumberedReadService, type ManagementNumberedSort } from "./management-numbered-service";
@@ -151,6 +151,17 @@ async function readOptionalTable(table: string, columns = "*") {
   return (data || []) as unknown as Record<string, unknown>[];
 }
 
+async function readOptionalStudentMasters() {
+  try {
+    return await readStudentMasterRows(supabase);
+  } catch (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) {
+      return [] as Record<string, unknown>[];
+    }
+    throw error;
+  }
+}
+
 async function readActiveScienceSubjectAreas() {
   const { data, error } = await withTableTimeout(
     supabase!.rpc("list_active_science_subject_areas_v1"),
@@ -212,8 +223,6 @@ function toClassStudentSummary(student: Record<string, unknown> | undefined, id:
     school: textValue(student?.school),
     grade: textValue(student?.grade),
     status: textValue(student?.status),
-    contact: textValue(student?.contact || student?.phone || student?.student_contact || student?.studentContact),
-    parentContact: textValue(student?.parent_contact || student?.parentContact || student?.guardian_contact || student?.guardianContact),
     counselingNote: textValue(student?.counseling_note || student?.counselingNote || student?.memo || student?.note),
     recentIssue,
   };
@@ -554,7 +563,7 @@ async function enrichManagementRows(
 
   if (kind === "classes") {
     const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs, teacherCatalogs, classroomCatalogs, scienceSubjectAreas] = await Promise.all([
-      readOptionalTable("students"),
+      readOptionalStudentMasters(),
       readOptionalTable("class_schedule_sync_groups"),
       readOptionalTable("class_schedule_sync_group_members", "group_id,class_id,sort_order"),
       readOptionalTable("class_terms"),
@@ -710,7 +719,6 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
     return {
       ...record,
       school_category: record.schoolCategory,
-      parent_contact: record.parentContact,
       enroll_date: record.enrollDate,
       counseling_note: record.counselingNote,
       recent_issue: record.recentIssue,

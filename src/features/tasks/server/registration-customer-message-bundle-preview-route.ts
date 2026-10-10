@@ -1,3 +1,8 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
+import {
+  assertRegistrationNonpageableRpcArguments,
+  assertRegistrationNonpageableRpcResult,
+} from "../../../lib/registration-nonpageable-rpc-contract.js"
 import {
   assertRegistrationCustomerMessagePublicPayload,
   isRegistrationCustomerMessageBundleKind,
@@ -8,11 +13,15 @@ import {
   createRegistrationCustomerMessageCatalog,
   type RegistrationCustomerMessageServerEnv,
 } from "./registration-customer-message-catalog.ts"
-import { createRegistrationCustomerMessageBundleSourceResolver } from "./registration-customer-message-bundle-source.ts"
+import { createRegistrationCustomerMessageBundlePreviewSourceResolver } from "./registration-customer-message-bundle-source.ts"
 import {
   RegistrationCustomerMessageHttpError,
   createProductionRegistrationCustomerMessageAuth,
 } from "./registration-customer-message-auth.ts"
+import {
+  assertRegistrationCustomerMessageContactUse,
+  parseRegistrationCustomerMessageContactFence,
+} from "./registration-customer-message-contact-fence.ts"
 
 function json(value: unknown, status = 200) {
   return Response.json(value, { status, headers: { "Cache-Control": "no-store" } })
@@ -26,10 +35,44 @@ function errorResponse(error: unknown) {
   return json({ ok: false, code: "registration_customer_message_runtime_unavailable" }, 503)
 }
 
+async function readBundleContactFence(
+  client: SupabaseClient,
+  actorProfileId: string,
+  messageKind: string,
+  sourceId: string,
+) {
+  const args = {
+    p_actor_profile_id: actorProfileId,
+    p_message_kind: messageKind,
+    p_source_id: sourceId,
+  }
+  assertRegistrationNonpageableRpcArguments("read_registration_contact_message_fence_v1", args)
+  const result = await client.rpc("read_registration_contact_message_fence_v1", args)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  if (result.error) return result
+  assertRegistrationNonpageableRpcResult("read_registration_contact_message_fence_v1", result.data, args)
+  return result
+}
+
+async function readBundleSource(client: SupabaseClient, messageKind: string, sourceId: string) {
+  const args = {
+    p_message_kind: messageKind,
+    p_task_id: sourceId,
+    p_service_date: null,
+  }
+  assertRegistrationNonpageableRpcArguments("read_registration_contact_bundle_preview_v1", args)
+  const result = await client.rpc("read_registration_contact_bundle_preview_v1", args)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  if (result.error) return result
+  assertRegistrationNonpageableRpcResult("read_registration_contact_bundle_preview_v1", result.data, args)
+  return result
+}
+
 export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
   environment: NodeJS.ProcessEnv = process.env,
+  dependencies: Readonly<{ auth?: ReturnType<typeof createProductionRegistrationCustomerMessageAuth> }> = {},
 ) {
-  const auth = createProductionRegistrationCustomerMessageAuth()
+  const auth = dependencies.auth ?? createProductionRegistrationCustomerMessageAuth()
   const catalog = createRegistrationCustomerMessageCatalog(environment as RegistrationCustomerMessageServerEnv)
   return async function preview(request: Request) {
     try {
@@ -42,19 +85,26 @@ export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
         throw new RegistrationCustomerMessageHttpError(404, "registration_customer_message_source_not_found")
       }
       const bundleTarget = { messageKind: target.messageKind, sourceId: target.sourceId }
-      const resolver = createRegistrationCustomerMessageBundleSourceResolver({
+      const fenceResult = await readBundleContactFence(
+        context.serviceClient, context.actorProfileId, target.messageKind, target.sourceId,
+      )
+      if (fenceResult.error) {
+        throw new RegistrationCustomerMessageHttpError(503, "registration_customer_message_runtime_unavailable")
+      }
+      const contactFence = parseRegistrationCustomerMessageContactFence(fenceResult.data, {
+        ...bundleTarget, taskId: target.sourceId,
+      })
+      try {
+        assertRegistrationCustomerMessageContactUse({ fence: contactFence, action: "preview",
+          expectedContactGeneration: contactFence.contactGeneration, request: null })
+      } catch {
+        throw new RegistrationCustomerMessageHttpError(409, "registration_customer_message_source_ineligible")
+      }
+      const resolver = createRegistrationCustomerMessageBundlePreviewSourceResolver({
         catalog,
         async resolveSource(input) {
-          const result = await context.serviceClient.rpc("resolve_registration_customer_message_bundle_source_v1", {
-            p_message_kind: input.messageKind,
-            p_task_id: input.sourceId,
-            p_service_date: null,
-          })
+          const result = await readBundleSource(context.serviceClient, input.messageKind, input.sourceId)
           if (result.error) {
-            console.error("registration_customer_message_bundle_source_rpc_failed", {
-              code: result.error.code,
-              hint: result.error.hint,
-            })
             throw new Error("registration_customer_message_bundle_source_invalid")
           }
           return result.data

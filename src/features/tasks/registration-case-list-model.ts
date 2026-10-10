@@ -162,10 +162,10 @@ export function getRegistrationObservationListSummary(
     ? "청강 완료"
     : track.workflowStatus === "observation_feedback_pending"
       || track.observationCurrentStatus === "attended_feedback_pending"
-      ? "원장 확인 대기"
+      ? "참석 기록 있음"
       : track.observationCurrentStatus === "scheduled"
         ? "청강 예약"
-        : "예약 필요"
+        : "예약 없음"
   return {
     label,
     scheduledAt: track.observationNearestScheduledAt,

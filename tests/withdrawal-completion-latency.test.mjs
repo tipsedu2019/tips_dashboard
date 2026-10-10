@@ -35,7 +35,7 @@ function load(source, names, mocks) {
 
 const readerNames = ["text", "numberText", "bool", "normalizeType", "normalizeStatus", "normalizePriority",
   "isMissingRelationError", "profileLabel", "buildProfileLookup", "byTaskId", "singleByTaskId", "mapWithdrawal",
-  "mapComment", "mapAttachment", "mapEvent", "mapTask", "loadOpsTaskById", "loadOpsWithdrawalTaskForCompletion", "inputFromTask"]
+  "mapComment", "mapAttachment", "mapEvent", "mapTask", "readOpsTaskActorProfiles", "loadOpsTaskById", "loadOpsWithdrawalTaskForCompletion", "inputFromTask"]
 
 function readerHarness({ type = "withdrawal", errorTable = "", feeProcessed = false } = {}) {
   const reads = []

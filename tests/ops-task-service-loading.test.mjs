@@ -7,6 +7,7 @@ import ts from "typescript";
 
 import { getRegistrationWorkflowStatusFromLegacyTrack } from "../src/features/tasks/registration-workflow-status.js";
 import { createOpsTaskPageStatsCache } from "../src/features/tasks/ops-task-page-stats-cache.ts";
+import { stripRegistrationTaskContact } from "../src/features/tasks/registration-contact-client.ts";
 
 const serviceSource = await readFile(
   new URL("../src/features/tasks/ops-task-service.ts", import.meta.url),
@@ -63,6 +64,7 @@ function transpileAndLoad(source, exports, mocks = {}) {
     module: sandboxModule,
     exports: sandboxModule.exports,
     createOpsTaskPageStatsCache,
+    stripRegistrationTaskContact,
     setRegistrationTrackMutationCacheInvalidator: () => {},
     ...mocks,
   });
@@ -1334,23 +1336,29 @@ test("persisted registration data renders immediately but still revalidates and 
 
   const seedHarness = createWorkspaceLoaderHarness({ windowMock });
   const seedLoad = seedHarness.loadOpsTaskWorkspaceData(options);
-  seedHarness.releaseTasks([{ id: "persisted-registration-task" }]);
+  seedHarness.releaseTasks([{ id: "persisted-registration-task", registration: { parentPhone: "010-0000-0000", studentPhone: "010-0000-0001", schoolName: "합성 학교" } }]);
   await seedLoad;
   assert.equal(session.getSetCount(), 1);
+  const cacheKey = session.storage.key(0);
+  const beforeHydration = JSON.parse(session.storage.getItem(cacheKey));
+  assert.doesNotMatch(session.storage.getItem(cacheKey), /010-0000|parentPhone|studentPhone/);
 
   const reloadHarness = createWorkspaceLoaderHarness({ windowMock });
   const persisted = reloadHarness.getPersistedOpsTaskWorkspaceData(options);
   assert.equal(persisted.tasks[0].id, "persisted-registration-task");
   assert.equal(reloadHarness.getCachedOpsTaskWorkspaceData(options), null);
-  assert.equal(session.getSetCount(), 1, "hydrating must not extend the persisted TTL");
+  assert.equal(session.getSetCount(), 2, "hydration rewrites a safe projection for rolling legacy cache compatibility");
+  assert.equal(JSON.parse(session.storage.getItem(cacheKey)).expiresAt, beforeHydration.expiresAt, "sanitizing must not extend the persisted TTL");
+  assert.equal(persisted.tasks[0].registration.schoolName, "합성 학교");
+  assert.doesNotMatch(JSON.stringify(persisted), /010-0000|parentPhone|studentPhone/);
 
   const revalidation = reloadHarness.loadOpsTaskWorkspaceData(options);
   assert.equal(reloadHarness.counts.taskQueries, 1, "persisted data must not suppress revalidation");
-  assert.equal(session.getSetCount(), 1, "only a successful network read may refresh the TTL");
+  assert.equal(session.getSetCount(), 2, "only a successful network read may refresh the TTL");
   reloadHarness.releaseTasks([{ id: "fresh-registration-task" }]);
   const fresh = await revalidation;
   assert.equal(fresh.tasks[0].id, "fresh-registration-task");
-  assert.equal(session.getSetCount(), 2);
+  assert.equal(session.getSetCount(), 3);
 
   reloadHarness.triggerRegistrationMutation();
   assert.equal(session.storage.length, 0, "mutations must discard persisted registration snapshots");

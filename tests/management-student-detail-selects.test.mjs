@@ -38,9 +38,11 @@ test("student detail keeps only actionable student fields", async () => {
   const studentDetailFieldsEnd = source.indexOf("];", studentDetailFieldsStart) + 2;
   const studentDetailFieldsSource = source.slice(studentDetailFieldsStart, studentDetailFieldsEnd);
 
-  assert.match(source, /\{ name: "uid", label: "메이크에듀 원생고유번호"/);
+  assert.match(source, /\{ name: "uid", label: "원생번호"/);
+  assert.doesNotMatch(source, /\{ name: "makeeduDetailUrl"|label: "MakeEdu 상세 URL"/);
   assert.notEqual(studentDetailFieldsStart, -1);
   assert.doesNotMatch(studentDetailFieldsSource, /"enrollDate"/);
+  assert.doesNotMatch(source, /\{ name: "(?:contact|parentContact)"/);
   assert.match(source, /\{kind !== "students" \? \(\s*<section className="space-y-2">/);
   assert.match(source, /\{kind !== "students" \? \(\s*<section className="border-y py-3">/);
   assert.match(source, /\{kind !== "students" \? <div className="text-sm font-semibold">/);
@@ -61,11 +63,11 @@ test("student fields keep natural DOM order across the three, two, and one-colum
 
   assert.deepEqual(
     [...detailSource.matchAll(/^\s+"([^"]+)",?$/gm)].map((match) => match[1]),
-    ["name", "uid", "school_category", "school", "grade", "contact", "parentContact"],
+    ["name", "uid", "school_category", "school", "grade"],
   );
   assert.deepEqual(
     [...studentFieldsSource.matchAll(/\{ name: "([^"]+)"/g)].map((match) => match[1]),
-    ["name", "uid", "school_category", "school", "grade", "contact", "parentContact", "enrollDate"],
+    ["name", "uid", "school_category", "school", "grade", "enrollDate"],
   );
   assert.match(source, /kind === "students" \? "student-fields" : kind === "classes" \? "class-fields sm:grid-cols-2" : "sm:grid-cols-2"/);
   assert.match(styles, /\.student-fields \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
@@ -77,7 +79,7 @@ test("student fields keep natural DOM order across the three, two, and one-colum
 test("student detail uses student-specific labels without redundant badges", async () => {
   const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
-  assert.match(source, /\{ name: "contact", label: "학생 연락처"/);
+  assert.doesNotMatch(source, /학생 연락처|학부모 연락처/);
   assert.match(source, /kind === "students"\s*\? `\$\{selectedRow\?\.title \|\| ""\} 학생정보`/);
   assert.match(source, /\{kind !== "students" \? \(\s*<div className="flex flex-wrap items-center gap-2">\s*<Badge>\{selectedRow\.badge\}<\/Badge>/);
   assert.match(source, /kind === "students" \? "수강 추가" : "등록 추가"/);

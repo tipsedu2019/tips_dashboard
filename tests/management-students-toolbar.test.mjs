@@ -91,12 +91,13 @@ test("student management opens with active students before withdrawn records", a
   assert.match(source, /sortingFn: kind === "students"[\s\S]*compareStudentStatusForTable/);
 });
 
-test("student edit dialog optimizes first entry and phone fields", async () => {
+test("student edit dialog preserves first entry and the student number without a MakeEdu URL input", async () => {
   const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
-  assert.match(source, /inputMode\?: "text" \| "search" \| "tel"/);
-  assert.match(source, /name: "contact"[\s\S]*inputMode: "tel"[\s\S]*autoComplete: "tel"/);
-  assert.match(source, /name: "parentContact"[\s\S]*inputMode: "tel"[\s\S]*autoComplete: "tel"/);
+  assert.match(source, /\{ name: "uid", label: "원생번호"/);
+  assert.doesNotMatch(source, /\{ name: "makeeduDetailUrl"|label: "MakeEdu 상세 URL"/);
+  assert.doesNotMatch(source, /\{ name: "(?:contact|parentContact)"/);
+  assert.doesNotMatch(source, /autoComplete: "tel"/);
   assert.match(source, /autoFocus=\{scope === "form" && field\.name === FORM_FIELDS\[kind\]\[0\]\?\.name\}/);
   assert.match(source, /name=\{field\.name\}/);
   assert.match(source, /autoComplete=\{field\.autoComplete \|\| "off"\}/);
@@ -260,7 +261,8 @@ test("student management uses mobile cards instead of a clipped wide table", asy
   assert.match(source, /aria-label=\{`\$\{emptyLabel\} 모바일 학생 목록`\}/);
   assert.match(source, /data-testid=\{`student-mobile-card-\$\{row\.id\}`\}/);
   assert.match(source, /<StudentEnrollmentStatusCell[^>]*row=\{record\}/);
-  assert.match(source, /parent_contact \|\| raw\.parentContact/);
+  assert.doesNotMatch(source, /id: "(?:contact|parentContact)"/);
+  assert.doesNotMatch(source, /formatStudentContact|getStudentContactHref|학생 연락처|학부모 연락처/);
   assert.match(source, /\(kind === "classes" \|\| kind === "students"\) && "hidden md:block"/);
 });
 

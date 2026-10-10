@@ -153,7 +153,7 @@ select throws_ok(format('select public.list_management_numbered_page_v1(''classe
   '22023','management_sort_invalid','derived sort stays disabled: '||column_id)
 from (values ('enrollmentStatus'),('weeklyHours')) columns(column_id);
 with columns(kind,ids) as (values
-  ('students',array['title','status','school','grade','contact','parentContact']),
+  ('students',array['title','status','school','grade','uid']),
   ('classes',array['title','status','subject','grade','schedule','teacher','classroom','capacity','tuition']),
   ('textbooks',array['title','status','subject','publisher','price','updatedAt'])
 )

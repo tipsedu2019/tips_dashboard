@@ -4,6 +4,7 @@ import { Children, useCallback, useEffect, useMemo, useRef, useState, type React
 
 import { Button } from "@/components/ui/button"
 import { RegistrationSelect } from "./registration-select"
+import { RegistrationStudentBinding } from "./registration-student-binding"
 import { RegistrationManagementNotificationActions } from "./registration-management-notification-actions"
 import { supabase } from "@/lib/supabase"
 
@@ -71,6 +72,7 @@ import {
   type RegistrationTrackDirectorSectionHandle,
 } from "./registration-application-track-actions"
 import { RegistrationAppointmentEditor } from "./registration-appointment-editor"
+import { stripRegistrationTaskContact, type RegistrationCaseContactState } from "./registration-contact-client.ts"
 import { RegistrationSaveButton } from "./registration-save-button"
 import { clearRegistrationEnrollmentDrafts } from "./registration-enrollment-editor"
 import { RegistrationAdmissionPanel } from "./registration-enrollment-editor"
@@ -117,9 +119,10 @@ import {
   cancelRegistrationAppointment,
   saveRegistrationConsultationDetails,
   saveRegistrationPhoneConsultation,
-  syncRegistrationCaseSubjects,
+  getRegistrationCaseContactReceipt,
+  saveRegistrationCaseInquiry,
   setRegistrationWorkflowStatus,
-  updateRegistrationCaseCommon,
+
   isOpsRegistrationWorkflowStatus,
   type OpsRegistrationAppointment,
   type OpsRegistrationCaseDetail,
@@ -300,13 +303,13 @@ function RegistrationTrackSectionFrame({
 
 export function RegistrationApplication({
   task,
-  detail,
+  detail: sourceDetail,
   focusTrackId,
   viewerId,
   viewerRole,
   onFocusTrack,
   onRequestLocalNavigation,
-  onReload,
+  onReload: sourceReload,
   onWarning,
   onAppointmentSaved,
   profiles = [],
@@ -325,7 +328,23 @@ export function RegistrationApplication({
   observationUnavailableMessage = "청강 신청 기능을 사용할 수 없습니다. 등록 정보를 다시 불러와 주세요.",
   deepLinkedAttempt = null,
   closeAction,
-}: RegistrationApplicationProps) {
+ }: RegistrationApplicationProps) {
+  const [contactOverride, setContactOverride] = useState<RegistrationCaseContactState | null>(null)
+  const [blockedContactSnapshot, setBlockedContactSnapshot] = useState("")
+  const sourceContactKey = `${sourceDetail.task.id}:${sourceDetail.contactState?.revision ?? "unavailable"}`
+  const receipt = contactOverride?.taskId === sourceDetail.task.id ? contactOverride : null
+  const availableContactState = receipt && (!sourceDetail.contactState || BigInt(receipt.revision) > BigInt(sourceDetail.contactState.revision)) ? receipt : sourceDetail.contactState
+  const contactState = blockedContactSnapshot === sourceContactKey ? null : availableContactState
+  const detail = useMemo(() => {
+    const safeTask = stripRegistrationTaskContact(sourceDetail.task)
+    return { ...sourceDetail, contactState, task: { ...safeTask, studentId: contactState ? contactState.studentId ?? "" : safeTask.studentId, registration: { ...safeTask.registration, ...(contactState?.phase === "open" && !contactState.allPhasesClosed && contactState.parentPhone !== null ? { parentPhone: contactState.parentPhone } : {}) } } }
+  }, [sourceDetail, contactState])
+  const onReload = useCallback(async (...args: Parameters<RegistrationApplicationProps["onReload"]>) => {
+    const latest = getRegistrationCaseContactReceipt(sourceDetail.task.id)
+    if (latest) setContactOverride(latest)
+    await sourceReload(...args)
+    setBlockedContactSnapshot("")
+  }, [sourceDetail.task.id, sourceReload])
   const [customerMessageTarget, setCustomerMessageTarget] = useState<RegistrationCustomerMessageTarget | null>(null)
   const customerMessageTriggerRef = useRef<HTMLElement | null>(null)
   const customerMessageReloadGenerationRef = useRef(0)
@@ -429,7 +448,6 @@ export function RegistrationApplication({
     activeDeepLinkedAttempt
     && ["completed", "no_show", "canceled"].includes(activeDeepLinkedAttempt.status),
   )
-  const activeDeepLinkedAttemptCanceled = activeDeepLinkedAttempt?.status === "canceled"
   const deepLinkedObservationHistoryEligible = activeDeepLinkedAttemptTerminal
     && canManageActiveObservation
   const activeObservationTrackIdRef = useRef(activeTrack?.id || null)
@@ -1057,17 +1075,21 @@ export function RegistrationApplication({
     onWarning("")
     try {
       const receipt = await setRegistrationWorkflowStatus({
+        taskId: detail.task.id,
+        contactState: detail.contactState,
         trackId: activeGenericTrack.id,
         workflowStatus: nextOption.value as OpsRegistrationWorkflowStatus,
         expectedWorkflowRevision: activeGenericTrack.workflowRevision,
         requestKey: `registration-workflow-status:${activeGenericTrack.id}:${crypto.randomUUID()}`,
       })
+      if (receipt.contactState) setContactOverride(receipt.contactState)
       if (nextOption.value === "registered" && receipt.sourceEventIds.length > 0) {
         const delivery = await dispatchRegistrationSubjectNotificationSources(receipt.sourceEventIds, notificationToken)
         if (delivery.failedSourceEventIds.length > 0) onWarning("등록 상태를 저장했습니다. 과목팀 알림 전달 결과를 확인해 주세요.")
       }
       await onReload(activeGenericTrack.id)
     } catch (error) {
+      if (errorMessage(error, "").includes("registration_contact_")) setBlockedContactSnapshot(sourceContactKey)
       onWarning(errorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
     } finally {
       setWorkflowStatusSaving(false)
@@ -1128,50 +1150,27 @@ export function RegistrationApplication({
 
   async function saveInquiry(draft: RegistrationInquiryDraft, requestKey: string) {
     if (!canManageCase) throw new Error("등록 정보를 수정할 권한이 없습니다.")
-    const writes = await Promise.allSettled([
-      updateRegistrationCaseCommon({
-        taskId: detail.task.id,
-        studentName: draft.studentName.trim(),
-        schoolGrade: draft.schoolGrade.trim(),
-        schoolName: draft.schoolName.trim(),
-        parentPhone: draft.parentPhone.trim(),
-        studentPhone: draft.studentPhone.trim(),
-        campus: draft.campus.trim(),
-        inquiryAt: draft.inquiryAt,
-        requestNote: draft.requestNote.trim(),
-        priority: draft.priority,
-        expectedCommonRevision: detail.commonRevision,
-        requestKey: `${requestKey}:facts`,
-      }),
-      syncRegistrationCaseSubjects({
-        taskId: detail.task.id,
-        subjects: draft.subjects,
-        expectedSubjects: detail.tracks.map((track) => track.subject),
-        requestKey: `${requestKey}:subjects`,
-      }),
-    ])
-    const rejectedWrites = writes.filter((result): result is PromiseRejectedResult => (
-      result.status === "rejected"
-    ))
-    if (rejectedWrites.some(({ reason }) => {
-      const message = errorMessage(reason, "")
-      return message.includes("registration_common_revision_conflict")
-        || message.includes("registration_subjects_conflict")
-    })) {
-      return "conflict" as const
-    }
-    if (rejectedWrites.length === 0) return "saved" as const
-    if (rejectedWrites.length === 2) throw rejectedWrites[0].reason
-
-    onWarning(writes[0].status === "rejected"
-      ? "과목은 저장됐지만 문의 정보는 저장하지 못했습니다. 성공한 저장은 유지하며 최신 내용을 다시 불러옵니다."
-      : "문의 정보는 저장됐지만 과목은 저장하지 못했습니다. 성공한 저장은 유지하며 최신 내용을 다시 불러옵니다.")
     try {
-      await onReload()
-    } catch {
-      onWarning("일부 변경은 저장됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      const receipt = await saveRegistrationCaseInquiry({
+        taskId: detail.task.id, contactState: detail.contactState,
+        studentName: draft.studentName.trim(), schoolGrade: draft.schoolGrade.trim(), schoolName: draft.schoolName.trim(),
+        parentPhone: draft.parentPhone.trim(), campus: draft.campus.trim(), inquiryAt: draft.inquiryAt,
+        requestNote: draft.requestNote.trim(), priority: draft.priority,
+        expectedCommonRevision: detail.commonRevision, subjects: draft.subjects,
+        expectedSubjects: detail.tracks.map((track) => track.subject), requestKey,
+      })
+      if (receipt.contactState) setContactOverride(receipt.contactState)
+      return "saved" as const
+    } catch (error) {
+      setBlockedContactSnapshot(sourceContactKey)
+      const message = errorMessage(error, "")
+      if (message.includes("registration_common_revision_conflict") || message.includes("registration_subjects_conflict")
+        || message.includes("registration_contact_revision_conflict") || message.includes("registration_contact_generation_conflict") || message.includes("registration_contact_conflict")) {
+        setBlockedContactSnapshot(sourceContactKey)
+        return "conflict" as const
+      }
+      throw error
     }
-    return "partial" as const
   }
 
   function handleSubjectTabChange(trackId: string) {
@@ -1518,12 +1517,8 @@ export function RegistrationApplication({
       <RegistrationObservationFeedbackPanel
         key={activeFeedbackObservationId}
         detail={observationFeedbackDetail}
-        canRecordAttendance={!activeDeepLinkedAttemptTerminal
-          && canManageCase
-          && !activeFeedbackHistoryOnlyMode}
-        canDecide={!activeDeepLinkedAttemptCanceled
-          && !activeFeedbackHistoryOnlyMode
-          && canManageCase}
+        canRecordAttendance={false}
+        canDecide={false}
         actions={registrationObservationFeedbackActions}
         onSaved={handleObservationFeedbackSaved}
         onReload={reloadObservationFeedback}
@@ -1532,14 +1527,34 @@ export function RegistrationApplication({
     ) : observationFeedbackError ? (
       <p role="alert" className="text-sm text-destructive">{observationFeedbackError}</p>
     ) : observationFeedbackLoading ? (
-      <p className="text-sm text-muted-foreground">청강 확인 정보를 불러오는 중입니다.</p>
+      <p className="text-sm text-muted-foreground">청강 이력을 불러오는 중입니다.</p>
     ) : null
 
+  const workflowView = getRegistrationWorkflowViewKey(activeGenericTrack?.workflowStatus)
+  const studentBinding = (
+    <RegistrationStudentBinding
+      key={`${detail.task.id}:${viewerId}:${viewerRole}`}
+      taskId={detail.task.id}
+      studentName={detail.task.studentName}
+      viewerId={viewerId}
+      viewerRole={viewerRole}
+      contactState={contactState ?? null}
+      onDirtyChange={dirty => setDirty("placement:student-binding", dirty)}
+      onBound={async saved => {
+        setContactOverride(saved.contactState)
+        setDirty("placement:student-binding", false)
+        try { await onReload() } catch {
+          onWarning("학생은 연결되었습니다. 최신 등록 정보를 다시 불러와 주세요.")
+        }
+      }}
+    />
+  )
   const registrationSection = (
     <RegistrationApplicationPlacementSection
       editable={registrationState.editable}
       fields={(
         <div className="grid gap-3">
+          {workflowView !== "waiting" ? studentBinding : null}
           {renderTrackFrames("placement", "registration")}
         </div>
       )}
@@ -1564,7 +1579,6 @@ export function RegistrationApplication({
       ) : null}
     </div>
   ) : null
-  const workflowView = getRegistrationWorkflowViewKey(activeGenericTrack?.workflowStatus)
   const managementNotificationSection = workflowView === "level_test" ? "level_test"
     : workflowView === "consultation_requested" || workflowView === "consultation_completed" ? "consultation"
     : workflowView === "waiting" ? "waiting"
@@ -1812,6 +1826,7 @@ export function RegistrationApplication({
           editable={waitingState.editable}
           fields={(
             <div className="grid gap-3">
+              {workflowView === "waiting" ? studentBinding : null}
               {renderTrackFrames("placement", "waiting")}
             </div>
           )}

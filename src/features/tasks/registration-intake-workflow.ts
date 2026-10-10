@@ -69,7 +69,7 @@ export type RegistrationCreateCommonInput = {
   schoolGrade: string
   schoolName: string
   parentPhone: string
-  studentPhone: string
+  studentPhone?: string
   campus: string
   inquiryAt: string
   subjects: RegistrationSubject[]
@@ -255,7 +255,6 @@ function normalizedCreateCommon(input: RegistrationCreateCommonInput): Registrat
     schoolGrade: trimmed(input.schoolGrade),
     schoolName: trimmed(input.schoolName),
     parentPhone: trimmed(input.parentPhone),
-    studentPhone: trimmed(input.studentPhone),
     campus: trimmed(input.campus),
     inquiryAt: trimmed(input.inquiryAt),
     subjects: orderedSubjects(input.subjects),

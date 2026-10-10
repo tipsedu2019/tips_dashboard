@@ -69,8 +69,8 @@ test("bounded list rows preserve every currently rendered scalar field", async (
   assert.match(migration, /'price'/);
 
   const student = normalizeStudentManagementRecord({ id: "s1", name: "학생", school: "학교", grade: "중2", contact: "010-1", parentContact: "010-2", status: "재원" });
-  assert.match(student.metaSummary, /010-1/);
-  assert.match(student.metaSummary, /010-2/);
+  assert.doesNotMatch(JSON.stringify(student), /010-1|010-2|parentContact|contact/);
+  assert.match(student.subtitle, /학교.*중2/);
 
   const classRow = normalizeClassManagementRecord({
     id: "c1", name: "수학 10", subject: "수학", status: "수강", grade: "중2", schedule: "월 18:00-20:00",

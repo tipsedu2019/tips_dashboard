@@ -1,8 +1,16 @@
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { posix, resolve } from "node:path"
 import ts from "typescript"
+import {
+  REGISTRATION_RPC_CALL_SITES,
+  REGISTRATION_RPC_SOURCE_DEPENDENCIES,
+  REGISTRATION_RPC_SOURCE_MANIFEST,
+  inspectRegistrationRpcCallContract,
+  registrationRpcSourceAssurance,
+  verifyRegistrationRpcSourceClosure,
+} from "./registration-rpc-source-contract.js"
 
 export const QUERY_SURFACES = Object.freeze(["tasks", "management", "operations", "academic", "public"])
 const BASELINE_SHA = "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101"
@@ -379,9 +387,10 @@ function queryBudgetError(code) {
   return error
 }
 
-function git(root, args) {
+function git(root, args, { preserveBytes = false } = {}) {
   try {
-    return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+    const output = execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    return preserveBytes ? output : output.trim()
   } catch (error) {
     throw queryBudgetError(`query_surface_git_${String(error?.status ?? "failed")}`)
   }
@@ -456,6 +465,96 @@ function primitiveConstants(node, use) {
     else if (ts.isNumericLiteral(value)) values.set(declaration.name.text, Number(value.text))
   }
   return values
+}
+
+const IMPORTED_PRIMITIVES = new WeakMap()
+const IMPORT_CODE_PATH = /^src\/(?!.*(?:^|\/)node_modules\/).+\.(?:js|mjs|ts|tsx)$/u
+
+function codeImportPath(file, specifier) {
+  if (typeof specifier !== "string" || !specifier.startsWith(".")) return null
+  const path = posix.normalize(posix.join(posix.dirname(file), specifier))
+  return IMPORT_CODE_PATH.test(path) && !/\.d\.ts$/u.test(path) ? path : null
+}
+
+function codeImports(file, sourceFile) {
+  return sourceFile.statements.flatMap((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
+      || statement.importClause?.isTypeOnly) return []
+    const path = codeImportPath(file, statement.moduleSpecifier.text)
+    return path ? [{ statement, path }] : []
+  })
+}
+
+function literalExports(path, source) {
+  const exports = new Map()
+  if (typeof source !== "string") return exports
+  const exporter = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true)
+  for (const item of exporter.statements) {
+      if (!ts.isVariableStatement(item) || !item.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+        || item.modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword)
+        || !(item.declarationList.flags & ts.NodeFlags.Const)) continue
+      for (const declaration of item.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || !declaration.initializer
+          || lexicalBindingsAt(declaration.name).length !== 1 || hasLexicalWrite(declaration.name)) continue
+        const value = unwrap(declaration.initializer)
+        if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) exports.set(declaration.name.text, value.text)
+        else if (ts.isNumericLiteral(value)) exports.set(declaration.name.text, Number(value.text))
+      }
+  }
+  return exports
+}
+
+function importedPrimitiveBindings(file, sourceFile, sources) {
+  const bindings = new Map()
+  for (const { statement, path } of codeImports(file, sourceFile)) {
+    const named = statement.importClause?.namedBindings
+    const source = sources?.get(path)
+    if (!named || !ts.isNamedImports(named) || typeof source !== "string") continue
+    const exports = literalExports(path, source)
+    for (const item of named.elements) {
+      if (item.isTypeOnly || hasLexicalWrite(item.name)) continue
+      const name = item.propertyName?.text ?? item.name.text
+      if (exports.has(name)) bindings.set(item.name, exports.get(name))
+    }
+  }
+  return bindings
+}
+
+function importedPrimitiveValue(expression, seen = new Set()) {
+  const value = unwrap(expression)
+  if (!value || !ts.isIdentifier(value)) return undefined
+  const bindings = lexicalBindingsAt(value)
+  if (bindings.length !== 1 || seen.has(bindings[0])) return undefined
+  const binding = bindings[0]
+  const imported = IMPORTED_PRIMITIVES.get(value.getSourceFile())
+  if (imported?.has(binding)) return imported.get(binding)
+  const declaration = binding.parent
+  if (!ts.isVariableDeclaration(declaration) || declaration.name !== binding || !declaration.initializer
+    || !isImmutableConst(declaration) || declaration.end > value.pos || hasLexicalWrite(binding)) return undefined
+  return importedPrimitiveValue(declaration.initializer, new Set([...seen, binding]))
+}
+
+function queryReadsImportedBindings(query, names) {
+  if (!names?.size) return false
+  const seen = new Set()
+  const depends = (node) => {
+    if (ts.isIdentifier(node)) {
+      const bindings = lexicalBindingsAt(node)
+      if (bindings.length !== 1 || seen.has(bindings[0])) return false
+      const binding = bindings[0]
+      if (ts.isImportSpecifier(binding.parent)) return names.has(binding.text)
+      const declaration = binding.parent
+      if (ts.isVariableDeclaration(declaration) && declaration.initializer && declaration.name === binding
+        && declaration.end < node.pos) {
+        seen.add(binding)
+        return depends(declaration.initializer)
+      }
+    }
+    let affected = false
+    ts.forEachChild(node, (child) => { if (depends(child)) affected = true })
+    return affected
+  }
+  return [...(query.entryArguments ?? query.entry.arguments), ...query.operations.flatMap((operation) => [...operation.arguments])].some(depends)
 }
 
 function isImmutableConst(declaration) {
@@ -541,7 +640,7 @@ function argumentValue(argument, constants) {
   if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) return value.text
   if (ts.isNumericLiteral(value)) return Number(value.text)
   if (ts.isPrefixUnaryExpression(value) && value.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(value.operand)) return -Number(value.operand.text)
-  if (ts.isIdentifier(value)) return constants.get(value.text)
+  if (ts.isIdentifier(value)) return constants.has(value.text) ? constants.get(value.text) : importedPrimitiveValue(value)
   return undefined
 }
 
@@ -1260,6 +1359,9 @@ function lexicalLiteralValue(expression, seen = new Set()) {
   if (value.kind === ts.SyntaxKind.FalseKeyword) return false
   if (ts.isIdentifier(value)) {
     if (value.text === "undefined" && lexicalBindingsAt(value).length === 0) return undefined
+    const bindings = lexicalBindingsAt(value)
+    const imported = IMPORTED_PRIMITIVES.get(value.getSourceFile())
+    if (bindings.length === 1 && imported?.has(bindings[0])) return imported.get(bindings[0])
     const alias = immutableLexicalInitializer(value, seen)
     if (alias) return lexicalLiteralValue(alias.initializer, alias.seen)
   }
@@ -1564,7 +1666,7 @@ function scopeLineSpan(scope) {
   }
 }
 
-function analyzeChain({ surface, file, symbol, scope, query }) {
+function analyzeChain({ surface, file, symbol, scope, query, registrationProof }) {
   const constants = primitiveConstants(scope, query.entry)
   const optionBindings = immutableConstInitializers(scope, query.entry)
   const legacyFullCompatibility = isLegacyPublicFullCompatibilityQuery({ surface, file, symbol, query, constants })
@@ -1617,8 +1719,11 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   if (query.directMethod === "rpc") {
     const entryArguments = query.entryArguments ?? query.entry.arguments
     const rpcName = entryArguments[0] && argumentValue(entryArguments[0], constants)
+    const registrationContract = inspectRegistrationRpcCallContract({ proof: registrationProof, file, symbol, scope, query, rpcName })
+    reasons.push(...registrationContract.reasons)
     const exactNonpageableRpc = typeof rpcName === "string"
-      && (EXACT_SCALAR_RPC_NAMES.has(rpcName) || EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES.has(rpcName) || EXACT_TIMETABLE_CONTEXT_RPC_NAMES.has(rpcName))
+      && (EXACT_SCALAR_RPC_NAMES.has(rpcName) || EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES.has(rpcName) || EXACT_TIMETABLE_CONTEXT_RPC_NAMES.has(rpcName)
+        || registrationContract.valid)
     const argument = entryArguments[1] ? unwrap(entryArguments[1]) : null
     const numberedContract = entryArguments[0] && EXACT_NUMBERED_RPC_CONTRACTS.get(lexicalLiteralValue(entryArguments[0]))
     const hasSpread = argument && ts.isObjectLiteralExpression(argument) && argument.properties.some((property) => ts.isSpreadAssignment(property))
@@ -1669,7 +1774,7 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
   )
 }
 
-function analyzeScope({ surface, file, scope, symbol }) {
+function analyzeScope({ surface, file, scope, symbol, registrationProof, changedImportNames }) {
   const provenanceAssignments = aliasProvenanceAssignments(scope)
   const queryAliases = new Map()
   const operationAliases = new Map()
@@ -1845,18 +1950,24 @@ function analyzeScope({ surface, file, scope, symbol }) {
       queryAliases.set(name, record)
     }
   }
-  return records.filter((query) => !query.usedAsReceiver).flatMap((query) => analyzeChain({ surface, file, symbol, scope, query }))
+  return records.filter((query) => !query.usedAsReceiver).flatMap((query) => analyzeChain({ surface, file, symbol, scope, query, registrationProof })
+    .map((violation) => {
+      // Keep the non-enumerable occurrence proof used by exact legacy debt.
+      if (queryReadsImportedBindings(query, changedImportNames)) Object.defineProperty(violation, "importedDependencyAffected", { value: true })
+      return violation
+    }))
 }
 
-export function inspectQuerySurfaceSource({ surface, file, source }) {
+export function inspectQuerySurfaceSource({ surface, file, source, registrationProof, importSources, changedImportNames }) {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, scriptKind(file))
+  IMPORTED_PRIMITIVES.set(sourceFile, importedPrimitiveBindings(file, sourceFile, importSources))
   const scopes = [{ symbol: "module", scope: sourceFile }]
   const visit = (node) => {
     if (ts.isFunctionLike(node)) scopes.push({ symbol: functionSymbol(node), scope: node })
     ts.forEachChild(node, visit)
   }
   ts.forEachChild(sourceFile, visit)
-  return scopes.flatMap(({ symbol, scope }) => analyzeScope({ surface, file, symbol, scope }))
+  return scopes.flatMap(({ symbol, scope }) => analyzeScope({ surface, file, symbol, scope, registrationProof, changedImportNames }))
 }
 
 function countedViolations(source, surface, file) {
@@ -1883,11 +1994,59 @@ function exactDebtKey({ surface, file, symbol, reason }) {
 async function sourceAt({ root, file, revision, includeWorktree }) {
   if (includeWorktree) return readFile(resolve(root, file), "utf8")
   try {
-    return git(root, ["show", `${revision}:${file}`])
+    // Contract pins hash the actual blob, including leading/trailing whitespace.
+    return git(root, ["show", `${revision}:${file}`], { preserveBytes: true })
   } catch (error) {
     if (error.code?.startsWith("query_surface_git_")) return null
     throw error
   }
+}
+
+async function importedSourceGraph({ root, baseSha, revision, includeWorktree, surfaces, changed }) {
+  const tracked = includeWorktree
+    ? git(root, ["ls-files", "src"]).split("\n")
+    : git(root, ["ls-tree", "-r", "--name-only", revision, "src"]).split("\n")
+  const paths = includeWorktree
+    ? [...new Set([...tracked, ...git(root, ["ls-files", "--others", "--exclude-standard", "src"]).split("\n")])]
+    : tracked
+  const consumers = paths.filter((file) => IMPORT_CODE_PATH.test(file)
+    && surfaces.some((surface) => isSurfacePath(surface, file)))
+  const sources = new Map(await Promise.all(consumers.map(async (file) => {
+    try { return [file, await sourceAt({ root, file, revision, includeWorktree })] } catch (error) {
+      if (error?.code === "ENOENT") return [file, null]
+      throw error
+    }
+  })))
+  const imports = new Map(consumers.flatMap((file) => {
+    const source = sources.get(file)
+    if (typeof source !== "string") return []
+    const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, scriptKind(file))
+    return [[file, codeImports(file, parsed)]]
+  }))
+  const dependencies = [...new Set([...imports.values()].flat().map(({ path }) => path))].filter((file) => !sources.has(file))
+  for (const [file, source] of await Promise.all(dependencies.map(async (file) => {
+    try { return [file, await sourceAt({ root, file, revision, includeWorktree })] } catch (error) {
+      if (error?.code === "ENOENT") return [file, null]
+      throw error
+    }
+  }))) sources.set(file, source)
+  const changedSet = new Set(changed)
+  const changedDependencies = [...new Set([...imports.values()].flat().map(({ path }) => path))].filter((file) => changedSet.has(file))
+  const priorSources = new Map(await Promise.all(changedDependencies.map(async (file) => [file,
+    await sourceAt({ root, file, revision: baseSha, includeWorktree: false })])))
+  const dependentConsumers = new Map([...imports].flatMap(([file, dependencies]) => {
+    const names = new Set(dependencies.flatMap(({ path, statement }) => {
+      if (!changedSet.has(path)) return []
+      const named = statement.importClause?.namedBindings
+      if (!named || !ts.isNamedImports(named)) return []
+      const current = literalExports(path, sources.get(path))
+      const prior = literalExports(path, priorSources.get(path))
+      return named.elements.filter((item) => !item.isTypeOnly
+        && (current.has(item.propertyName?.text ?? item.name.text) || prior.has(item.propertyName?.text ?? item.name.text))).map((item) => item.name.text)
+    }))
+    return names.size ? [[file, names]] : []
+  }))
+  return { sources, consumers: dependentConsumers }
 }
 
 function changedFiles({ root, baseSha, headSha, includeWorktree }) {
@@ -1925,6 +2084,33 @@ function publicViolation({ file, symbol, surface, reason }) {
   return { file, symbol, surface, reason }
 }
 
+async function registrationSourceContract({ root, baseSha, headSha, includeWorktree, surfaces, files }) {
+  if (!surfaces.includes("tasks")) return { active: false, proof: null, reasons: [] }
+  const readSource = async (file, revision = headSha, worktree = includeWorktree) => {
+    try { return await sourceAt({ root, file, revision, includeWorktree: worktree }) } catch (error) {
+      if (error?.code === "ENOENT") return null
+      throw error
+    }
+  }
+  const manifestSource = await readSource(REGISTRATION_RPC_SOURCE_MANIFEST)
+  const priorManifest = await readSource(REGISTRATION_RPC_SOURCE_MANIFEST, baseSha, false)
+  const callerFiles = [...new Set(REGISTRATION_RPC_CALL_SITES.map(({ file }) => file))]
+  const callers = await Promise.all(callerFiles.map(async (file) => [file, await readSource(file)]))
+  const importsContract = callers.some(([file, source]) => files.includes(file)
+    && typeof source === "string" && source.includes("../../../lib/registration-nonpageable-rpc-contract.js"))
+  if (manifestSource === null && priorManifest === null && !importsContract) return { active: false, proof: null, reasons: [] }
+  if (manifestSource === null) return { active: true, proof: null, reasons: ["registration_rpc_contract_manifest_missing"] }
+  let manifest
+  try { manifest = JSON.parse(manifestSource) } catch { return { active: true, proof: null, reasons: ["registration_rpc_contract_manifest_invalid"] } }
+  const sources = new Map(await Promise.all(REGISTRATION_RPC_SOURCE_DEPENDENCIES.map(async (file) => [file, await readSource(file)])))
+  const migrationFiles = includeWorktree
+    ? [...new Set([...git(root, ["ls-files", "supabase/migrations"]).split("\n"), ...git(root, ["ls-files", "--others", "--exclude-standard", "supabase/migrations"]).split("\n")])]
+    : git(root, ["ls-tree", "-r", "--name-only", headSha, "supabase/migrations"]).split("\n")
+  const migrations = await Promise.all(migrationFiles.filter((file) => /^supabase\/migrations\/[^/]+\.sql$/u.test(file))
+    .map(async (file) => [file, await readSource(file)]))
+  return { active: true, ...verifyRegistrationRpcSourceClosure({ manifest, sources, migrations }) }
+}
+
 /**
  * Checks query chains touched by a changed owned source file. Existing debt is
  * accepted only by its exact manifest fingerprint; unchanged legacy chains are
@@ -1938,6 +2124,12 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
 
   const surfaces = selectedSurfaces(surface)
   const files = changedFiles({ root, baseSha, headSha, includeWorktree })
+  const registration = await registrationSourceContract({ root, baseSha, headSha, includeWorktree, surfaces, files })
+  const imports = await importedSourceGraph({ root, baseSha, revision: headSha, includeWorktree, surfaces, changed: files })
+  // Auth, schema, validator or manifest-only edits must recheck the unchanged
+  // exact callers. Ordinary legacy diff/debt handling is otherwise untouched.
+  const forcedCallers = registration.active ? new Set(REGISTRATION_RPC_CALL_SITES.map(({ file }) => file)) : new Set()
+  const candidateFiles = [...new Set([...files, ...forcedCallers, ...imports.consumers.keys()])]
   if (!Array.isArray(debtManifest)) throw queryBudgetError("query_surface_debt_manifest_invalid")
   const manifestDebt = new Map()
   for (const entry of debtManifest.filter((candidate) => surfaces.includes(candidate.surface))) {
@@ -1961,18 +2153,25 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
       occurrenceContext: manifestViolation.occurrenceContext,
     })
   }
-  const violations = []
-  for (const file of files) {
+  const violations = registration.reasons.map((reason) => ({
+    file: REGISTRATION_RPC_SOURCE_MANIFEST, symbol: "registrationNonpageableSourceContract", surface: "tasks", reason,
+  }))
+  for (const file of candidateFiles) {
     const owner = surfaces.find((candidate) => isSurfacePath(candidate, file))
     if (!owner) continue
-    const source = await sourceAt({ root, file, revision: headSha, includeWorktree })
+    let source
+    try { source = await sourceAt({ root, file, revision: headSha, includeWorktree }) } catch (error) {
+      if (forcedCallers.has(file) && error?.code === "ENOENT") continue
+      throw error
+    }
     if (source === null) continue
     const baselineSource = await sourceAt({ root, file, revision: baseSha, includeWorktree: false })
     const ranges = changedLineRanges({ root, baseSha, headSha, includeWorktree, file, baselineExists: baselineSource !== null })
     const baseDebt = baselineSource === null ? new Map() : countedViolations(baselineSource, owner, file)
     const baseOccurrences = baselineSource === null ? new Set() : occurrenceKeys(baselineSource, owner, file)
     const baseViolations = baselineSource === null ? [] : inspectQuerySurfaceSource({ surface: owner, file, source: baselineSource })
-    const sourceViolations = inspectQuerySurfaceSource({ surface: owner, file, source })
+    const sourceViolations = inspectQuerySurfaceSource({ surface: owner, file, source, registrationProof: registration.proof,
+      importSources: imports.sources, changedImportNames: imports.consumers.get(file) })
     const sourceDebt = countedViolations(source, owner, file)
     for (const violation of sourceViolations) {
         const key = exactDebtKey(violation)
@@ -1993,12 +2192,16 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
         // module-only edit cannot silently remove a previously proven bound.
         const newlyUnboundedAbort = violation.reason === "list_abort_signal_missing"
           && !baseOccurrences.has(`${key}\u0000${violation.occurrenceFingerprint}`)
-        if ((overlapsChangedRange(violation, ranges) || newlyUnboundedAbort) && !allowedDebt) violations.push(violation)
+        const registrationViolation = forcedCallers.has(file) && REGISTRATION_RPC_CALL_SITES.some((site) => site.file === file && site.symbol === violation.symbol)
+        const importedDependencyViolation = violation.importedDependencyAffected
+        if ((overlapsChangedRange(violation, ranges) || newlyUnboundedAbort || registrationViolation || importedDependencyViolation) && !allowedDebt) violations.push(violation)
     }
   }
   violations.sort((left, right) => exactDebtKey(left).localeCompare(exactDebtKey(right)))
   return {
     ok: violations.length === 0,
     violations: violations.map(publicViolation),
+    ...(registration.active ? { registrationSourceContract: registrationRpcSourceAssurance(registration.proof)
+      ?? { assurance: "blocked", databaseRuntimeVerified: false, sqlApplied: false } } : {}),
   }
 }

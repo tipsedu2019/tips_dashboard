@@ -3,6 +3,13 @@ import { createHash, timingSafeEqual } from "node:crypto"
 import type { RegistrationCustomerMessageStatus } from "../registration-customer-message-contract.ts"
 import type { RegistrationCustomerMessageButton } from "./registration-customer-message-catalog.ts"
 import type { RegistrationCustomerMessageProviderResult } from "./registration-customer-message-solapi.ts"
+import {
+  assertRegistrationCustomerMessageContactAttemptGrant,
+  assertRegistrationCustomerMessageContactUse,
+  parseRegistrationCustomerMessageContactFence,
+  type RegistrationCustomerMessageContactFence,
+} from "./registration-customer-message-contact-fence.ts"
+import type { RegistrationContactMessageRequestDigest } from "../registration-contact-message-policy.ts"
 
 type JsonRecord = Record<string, unknown>
 
@@ -15,6 +22,7 @@ export type RegistrationCustomerReminderClaim = Readonly<{
   sourceRevision: number
   scheduledFor: string
   requestKey: string
+  contactFence?: RegistrationCustomerMessageContactFence
 }>
 
 export type RegistrationCustomerReminderPrepared = Readonly<{
@@ -24,6 +32,8 @@ export type RegistrationCustomerReminderPrepared = Readonly<{
   buttons: ReadonlyArray<RegistrationCustomerMessageButton>
   contract: Readonly<JsonRecord>
   readinessContract: Readonly<JsonRecord>
+  contactFence?: RegistrationCustomerMessageContactFence
+  requestDigest?: RegistrationContactMessageRequestDigest
 }>
 
 export type RegistrationCustomerReminderBegin = Readonly<{
@@ -37,6 +47,7 @@ export type RegistrationCustomerReminderBegin = Readonly<{
     | "source_dirty"
     | "duplicate_locked"
     | "canceled"
+  contactGrant?: unknown
 }>
 
 type RegistrationCustomerReminderWorkerDependencies = Readonly<{
@@ -144,6 +155,14 @@ export function createRegistrationCustomerReminderWorker(
       }
       const prepare = async () => {
         try {
+          if (!claim.contactFence) throw new RegistrationCustomerReminderSourceIneligibleError()
+          const fence = parseRegistrationCustomerMessageContactFence(claim.contactFence, {
+            taskId: claim.contactFence.taskId,
+            messageKind: claim.messageKind,
+            sourceId: claim.messageKind === "observation_reminder" ? claim.observationId ?? "" : claim.appointmentId,
+          })
+          assertRegistrationCustomerMessageContactUse({ fence, action: "preview",
+            expectedContactGeneration: fence.contactGeneration, request: null })
           return await dependencies.prepare(claim)
         } catch (error) {
           if (error instanceof RegistrationCustomerReminderSourceIneligibleError) {
@@ -169,8 +188,18 @@ export function createRegistrationCustomerReminderWorker(
 
       let prepared = initialPrepared
       let begin: RegistrationCustomerReminderBegin
+      const beginPrepared = async () => {
+        if (!claim.contactFence || !prepared.contactFence || !prepared.requestDigest) {
+          throw new Error("registration_customer_message_contact_fence_invalid")
+        }
+        const fence = parseRegistrationCustomerMessageContactFence(prepared.contactFence, claim.contactFence)
+        assertRegistrationCustomerMessageContactUse({ fence, action: "attempt", claimed: true,
+          expectedContactGeneration: claim.contactFence.contactGeneration,
+          request: { requestKey: claim.requestKey, digest: prepared.requestDigest } })
+        return dependencies.begin({ claim, prepared })
+      }
       try {
-        begin = await dependencies.begin({ claim, prepared })
+        begin = await beginPrepared()
       } catch {
         try {
           await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" })
@@ -185,7 +214,7 @@ export function createRegistrationCustomerReminderWorker(
         if ("outcome" in refreshedPrepared) return refreshedPrepared
         prepared = refreshedPrepared
         try {
-          begin = await dependencies.begin({ claim, prepared })
+          begin = await beginPrepared()
         } catch {
           try {
             await dependencies.release({ claim, errorCode: "pre_send_preparation_failed" })
@@ -197,6 +226,20 @@ export function createRegistrationCustomerReminderWorker(
       }
 
       if (!begin.allowed) return result("skipped", false)
+
+      try {
+        if (!claim.contactFence || !prepared.contactFence || !prepared.requestDigest
+          || !begin.messageId || !begin.dispatchToken) throw new Error("contact_grant_missing")
+        assertRegistrationCustomerMessageContactAttemptGrant(begin.contactGrant, {
+          scope: claim.contactFence, contactGeneration: claim.contactFence.contactGeneration,
+          messageId: begin.messageId, dispatchToken: begin.dispatchToken,
+          request: { requestKey: claim.requestKey, digest: prepared.requestDigest },
+        })
+      } catch {
+        // The DB may already have committed an attempt marker. Do not release
+        // it into a retryable state or call the provider without its receipt.
+        return result("held", false)
+      }
 
       let provider: RegistrationCustomerMessageProviderResult
       try {

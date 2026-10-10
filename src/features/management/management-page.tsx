@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { formatStudentContact } from "@/lib/student-contact-display";
+import { omitStudentContactFields } from "./student-master-privacy.js";
 import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
 import {
   ACADEMIC_SUBJECTS,
@@ -160,7 +160,7 @@ type Field = {
 type DeleteRequest = { rows: ManagementRow[] };
 const CLASS_STATUS_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 const CLASS_SCHEDULE_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
-const CLASS_ROSTER_GRID_CLASS_NAME = "grid gap-3 px-3 lg:grid-cols-[minmax(8rem,1.1fr)_minmax(6.5rem,.7fr)_minmax(4rem,.45fr)_minmax(8rem,.85fr)_minmax(8rem,.85fr)_9.5rem] lg:items-center";
+const CLASS_ROSTER_GRID_CLASS_NAME = "grid gap-3 px-3 lg:grid-cols-[minmax(8rem,1.1fr)_minmax(6.5rem,.7fr)_minmax(4rem,.45fr)_9.5rem] lg:items-center";
 const CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME = "grid gap-2 md:grid-cols-[repeat(5,minmax(0,1fr))_2.5rem]";
 const CLASS_TUITION_UNIT_WON = 10000;
 const CLASS_DETAIL_TABS = [
@@ -188,19 +188,15 @@ const STUDENT_DETAIL_FIELD_NAMES = [
   "school_category",
   "school",
   "grade",
-  "contact",
-  "parentContact",
 ];
 
 const FORM_FIELDS: Record<ManagementKind, Field[]> = {
   students: [
     { name: "name", label: "학생명", placeholder: "김학생", required: true, autoComplete: "off" },
-    { name: "uid", label: "메이크에듀 원생고유번호", placeholder: "S-001", autoComplete: "off" },
+    { name: "uid", label: "원생번호", placeholder: "S-001", autoComplete: "off" },
     { name: "school_category", label: "학교 구분", placeholder: "학교 구분" },
     { name: "school", label: "학교", placeholder: "학교" },
     { name: "grade", label: "학년", placeholder: "학년" },
-    { name: "contact", label: "학생 연락처", placeholder: "010-0000-0000", inputMode: "tel", autoComplete: "tel" },
-    { name: "parentContact", label: "학부모 연락처", placeholder: "010-0000-0000", inputMode: "tel", autoComplete: "tel" },
     { name: "enrollDate", label: "등록일", type: "date" },
   ],
   classes: [
@@ -727,7 +723,6 @@ function scrollClassDetailTargetIntoView(target: HTMLElement) {
 function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormState {
   const raw = (row?.raw || {}) as Record<string, unknown>;
   const valueFor = (name: string) => {
-    if (name === "parentContact") return text(raw.parent_contact || raw.parentContact);
     if (name === "enrollDate") return text(raw.enroll_date || raw.enrollDate).slice(0, 10);
     if (name === "name") return text(raw.name || raw.class_name || raw.className || row?.title);
     if (name === "school_category") return getStudentSchoolCategoryFromRaw(raw);
@@ -758,7 +753,7 @@ function serializeManagementDraft(form: FormState, kind: ManagementKind, include
 
 function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow | null): Record<string, unknown> {
   const payload: Record<string, unknown> = {
-    ...(row?.raw || {}),
+    ...(kind === "students" ? omitStudentContactFields(row?.raw || {}) : row?.raw || {}),
     id: row?.id,
     ...Object.fromEntries(Object.entries(formState).map(([key, value]) => [key, value.trim()])),
   };
@@ -766,7 +761,6 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
   delete payload.classGroupIds;
   delete payload.textbookIds;
   delete payload.textbookUsage;
-  if (payload.parentContact) payload.parent_contact = payload.parentContact;
   if (payload.classroom) payload.room = payload.classroom;
   if (payload.name && kind === "classes") {
     payload.class_name = payload.name;
@@ -1112,13 +1106,6 @@ function formatHistoryDate(value: unknown) {
     return "-";
   }
   return normalized.replace("T", " ").slice(0, 16);
-}
-
-function getStudentContactValue(record: RelatedRecord | undefined, kind: "student" | "parent") {
-  if (!record) return "";
-  return kind === "parent"
-    ? text(record.parent_contact || record.parentContact || record.guardian_contact || record.guardianContact)
-    : text(record.contact || record.phone || record.student_contact || record.studentContact);
 }
 
 function renderStudentTimelineList(
@@ -1870,7 +1857,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   ) => {
     const visibleIds = kind === "classes" ? ids.filter((id) => {
       const record = resolveRelatedRecord(id);
-      return matchesClassRosterSearch(classRosterQuery, [resolveRelatedTitle(id), getStudentSchoolValue(record), getStudentGradeValue(record), getStudentContactValue(record, "student"), getStudentContactValue(record, "parent")]);
+      return matchesClassRosterSearch(classRosterQuery, [resolveRelatedTitle(id), getStudentSchoolValue(record), getStudentGradeValue(record)]);
     }) : ids;
     return (
     <section
@@ -1891,16 +1878,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 <div>학생</div>
                 <div>학교</div>
                 <div>학년</div>
-                <div>학생 연락처</div>
-                <div>학부모 연락처</div>
                 <div className="text-right">관리</div>
               </div>
               {visibleIds.map((id) => {
                 const record = resolveRelatedRecord(id);
                 const school = getStudentSchoolValue(record);
                 const grade = getStudentGradeValue(record);
-                const studentContact = getStudentContactValue(record, "student");
-                const parentContact = getStudentContactValue(record, "parent");
                 const isFocusedRosterStudent = requestedClassDetailStudentId === id;
 
                 return (
@@ -1933,14 +1916,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학년</div>
                       <div className="whitespace-normal break-words text-sm leading-5">{grade || "—"}</div>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs text-muted-foreground lg:hidden">학생 연락처</div>
-                      <div className="whitespace-normal break-words text-sm leading-5">{formatStudentContact(studentContact)}</div>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs text-muted-foreground lg:hidden">학부모 연락처</div>
-                      <div className="whitespace-normal break-words text-sm leading-5">{formatStudentContact(parentContact)}</div>
                     </div>
                     <DataTableRowActions
                       label={`${resolveRelatedTitle(id)} 학생 관리`}
@@ -2485,7 +2460,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           );
           return (
             <Fragment key={field.name}>
-              {kind === "students" && (field.name === "school_category" || field.name === "contact") ? (
+              {kind === "students" && field.name === "school_category" ? (
                 <div className="student-field-divider" role="separator" />
               ) : null}
               <div className={fieldWrapperClassName}>
@@ -3579,7 +3554,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           <>
             <h3 className="text-sm font-semibold">학생 명단</h3>
             <DataTableSearchField value={classRosterQuery} onValueChange={setClassRosterQuery}
-              label="명단 학생 검색" placeholder="이름, 학교, 학년, 연락처 검색" />
+              label="명단 학생 검색" placeholder="이름, 학교, 학년 검색" />
             {getRelationPage(selectedRow, "registered_students").hasMore || getRelationPage(selectedRow, "waitlisted_students").hasMore ? (
               <p className="text-xs text-muted-foreground">불러온 학생에서 검색합니다. 각 명단 아래에서 더 불러올 수 있습니다.</p>
             ) : null}

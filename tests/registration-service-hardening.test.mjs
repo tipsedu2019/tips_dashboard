@@ -34,17 +34,14 @@ function assertIncludesAll(source, snippets) {
   for (const snippet of snippets) assert.ok(source.includes(snippet), `missing source contract: ${snippet}`);
 }
 
-function loadRegistrationIdentityMatcher() {
-  const textSource = sourceBetween(
-    "function text(value: unknown)",
-    "function bool(value: unknown)",
-  );
-  const matcherSource = sourceBetween(
-    "function matchesOpsRegistrationStudent",
-    "async function resolveOpsRegistrationStudent",
-  );
+function loadRegistrationIdentityResolver(supabase) {
+  const syntax = ts.createSourceFile("ops-task-service.ts", serviceSource, ts.ScriptTarget.Latest, true);
+  const names = new Set(["text", "isMissingRelationError", "isMissingColumnError", "isOpsRegistrationStudentId",
+    "projectOpsRegistrationStudent", "selectOpsRegistrationStudentById", "resolveOpsRegistrationStudent"]);
+  const actual = syntax.statements.filter(node => ts.isFunctionDeclaration(node) && names.has(node.name?.text))
+    .map(node => node.getText(syntax)).join("\n");
   const compiled = ts.transpileModule(
-    `${textSource}\n${matcherSource}\nmodule.exports = { matchesOpsRegistrationStudent }`,
+    `${actual}\nmodule.exports = { resolveOpsRegistrationStudent }`,
     {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
@@ -53,8 +50,8 @@ function loadRegistrationIdentityMatcher() {
     },
   ).outputText;
   const sandboxModule = { exports: {} };
-  vm.runInNewContext(compiled, { module: sandboxModule, exports: sandboxModule.exports });
-  return sandboxModule.exports.matchesOpsRegistrationStudent;
+  vm.runInNewContext(compiled, { module: sandboxModule, exports: sandboxModule.exports, supabase, AbortSignal });
+  return sandboxModule.exports.resolveOpsRegistrationStudent;
 }
 
 function loadUpdateRegistrationOpsTaskWithMocks(mocks) {
@@ -218,35 +215,28 @@ function loadWaitlistDeleteRollbackWithMocks(mocks) {
   return sandboxModule.exports.rollbackRegistrationWaitlistRemovalAfterFailure;
 }
 
-test("registration identity matching rejects a persisted student with a different name or contact", () => {
-  const matches = loadRegistrationIdentityMatcher();
-  const input = {
-    studentName: "김다미",
-    registration: {
-      schoolName: "중앙여고",
-      studentPhone: "010-1111-2222",
-      parentPhone: "010-3333-4444",
-    },
-  };
-
-  assert.equal(matches({
-    name: "김다미",
-    school: "중앙여고",
-    contact: "01011112222",
-    parent_contact: "01033334444",
-  }, input), true);
-  assert.equal(matches({
-    name: "동명이인",
-    school: "중앙여고",
-    contact: "010-1111-2222",
-    parent_contact: "010-3333-4444",
-  }, input), false);
-  assert.equal(matches({
-    name: "김다미",
-    school: "중앙여고",
-    contact: "010-9999-9999",
-    parent_contact: "010-3333-4444",
-  }, input), false);
+test("registration identity is the selected persisted UUID, independent of edited display/contact facts", async () => {
+  const studentId = "99490000-0000-4000-8000-000000000101";
+  let persisted = { id: studentId, name: "합성 원래 이름", school: "합성 원래 학교", contact: "SYNTHETIC-CONTACT", parent_contact: "SYNTHETIC-PARENT" };
+  const queries = [];
+  const resolve = loadRegistrationIdentityResolver({ from(table) {
+    const query = { table, operations: [] }; queries.push(query);
+    const builder = { then(done) { return Promise.resolve({ data: [persisted], error: null }).then(done); } };
+    for (const method of ["select", "eq", "order", "limit", "abortSignal", "retry"]) builder[method] = (...args) => { query.operations.push([method, ...args]); return builder; };
+    return builder;
+  } });
+  const input = { studentId, studentName: "수정한 표시 이름", registration: { schoolName: "수정한 학교", studentPhone: "OTHER", parentPhone: "OTHER" } };
+  const result = await resolve(input);
+  assert.equal(result.id, studentId);
+  assert.equal(Object.hasOwn(result, "contact"), false);
+  assert.equal(Object.hasOwn(result, "parent_contact"), false);
+  assert.equal(queries[0].table, "students");
+  assert.equal(queries[0].operations.find(([method]) => method === "select")[1].includes("contact"), false);
+  assert.deepEqual(queries[0].operations.find(([method]) => method === "eq"), ["eq", "id", studentId]);
+  persisted = { ...persisted, id: "99490000-0000-4000-8000-000000000102", name: input.studentName };
+  await assert.rejects(resolve(input), /연결된 학생 정보를 다시 선택/);
+  assert.equal(await resolve({ ...input, studentId: "" }), null);
+  assert.equal(queries.length, 2, "missing UUID never starts a same-name query");
 });
 
 test("registration lookup never falls back to an arbitrary same-name row and revalidates a persisted id", () => {
@@ -268,10 +258,11 @@ test("registration lookup never falls back to an arbitrary same-name row and rev
   );
 
   assert.match(findByNameSource, /input\.type === "registration"/);
-  assert.match(findByNameSource, /matchesOpsRegistrationStudent\(row, input\)/);
-  assert.match(resolverSource, /byId && matchesOpsRegistrationStudent\(byId, input\)/);
-  assert.match(resolverSource, /if \(persistedStudentId\)/);
-  assert.match(resolverSource, /throw new Error\("연결된 학생 정보가 등록 문의 정보와 일치하지 않습니다\."\)/);
+  assert.match(findByNameSource, /if \(input\.type === "registration"\) return resolveOpsRegistrationStudent\(input\)/);
+  assert.match(resolverSource, /isOpsRegistrationStudentId\(input\.studentId\)/);
+  assert.match(resolverSource, /selectOpsRegistrationStudentById\(input\.studentId\)/);
+  assert.match(resolverSource, /throw new Error\("연결된 학생 정보를 다시 선택하세요\."\)/);
+  assert.doesNotMatch(resolverSource, /studentName|parentPhone|studentPhone|contact|findOpsStudentByName/);
   assert.match(deleteCleanupSource, /const student = await resolveOpsRegistrationStudent\(input\)/);
   assert.match(syncSource, /const linkedStudent = shouldEnsureStudent \? existingStudent : await resolveOpsRegistrationStudent\(input\)/);
   assert.doesNotMatch(syncSource, /: await resolveOpsStudent\(input\)/);
@@ -413,7 +404,7 @@ test("registration waitlist update prepares an exact rollback before creating or
   assert.deepEqual(calls, ["prepare", "children", "parent", "rollback", "projection-rollback"]);
 });
 
-test("registration projection rollback deletes only its preallocated student id", async () => {
+test("registration projection rollback has no allocated student and preserves class/link/detail restoration", async () => {
   const calls = [];
   const targetClass = { id: "class-new", student_ids: [], waitlist_ids: [], textbook_ids: [] };
   const prepareRegistrationProjectionRollback = loadRegistrationProjectionRollbackWithMocks({
@@ -435,7 +426,10 @@ test("registration projection rollback deletes only its preallocated student id"
       const rejected = results.find((result) => result.status === "rejected");
       if (rejected) throw rejected.reason;
     },
-    deleteOpsRegistrationCreatedStudent: async (student, shouldDelete) => calls.push(`delete:${student?.id}:${shouldDelete}`),
+    deleteOpsRegistrationCreatedStudent: async (student, shouldDelete) => {
+      assert.equal(student, null); assert.equal(shouldDelete, false);
+      calls.push("no-student-delete");
+    },
     assertRegistrationProjectionSnapshotsRestored: async (_students, _classes, createdStudentId) => calls.push(`verify:${createdStudentId}`),
     restoreOpsTaskLinkSnapshot: async () => calls.push("restore-links"),
     restoreOpsTaskDetailSnapshot: async () => calls.push("restore-detail"),
@@ -447,13 +441,13 @@ test("registration projection rollback deletes only its preallocated student id"
     { id: "task-1", type: "registration", studentId: "", classId: "" },
     { type: "registration", studentId: "", classId: "class-new", registration: { pipelineStatus: "4-1. 현재반 대기 신청" } },
   );
-  assert.equal(prepared.createdStudentId, "created-student-fixed");
+  assert.equal(prepared.createdStudentId, "");
   await prepared.rollback();
   assert.deepEqual(calls, [
     "restore-roster:class-new",
     "restore-textbook:class-new",
-    "delete:created-student-fixed:true",
-    "verify:created-student-fixed",
+    "no-student-delete",
+    "verify:",
     "restore-links",
     "restore-detail",
     "rollback-history",
@@ -523,7 +517,7 @@ test("registration completion rolls detail projection back when a later write fa
   ]);
 });
 
-test("registration status updates synchronize the pipeline before closing the parent and reopen the parent first", () => {
+test("manual registration status does not infer enrollment; cancellation uses trusted contact closure and fails closed", async () => {
   const helperSource = sourceBetween(
     "async function updateRegistrationOpsTaskStatus",
     "export async function updateOpsTaskStatus",
@@ -536,15 +530,26 @@ test("registration status updates synchronize the pipeline before closing the pa
   assert.match(publicStatusSource, /currentTask\.type === "registration"/);
   assert.match(publicStatusSource, /await updateRegistrationOpsTaskStatus\(currentTask, status\)/);
   assert.match(publicStatusSource, /return/);
-  assert.match(helperSource, /const reopensTerminalTask/);
-  assert.match(helperSource, /await updateRegistrationOpsTask\(currentTask\.id, nextInput, currentTask\)/);
-  assert.match(helperSource, /if \(reopensTerminalTask\)/);
-  assert.match(helperSource, /const nextPipelineStatus = getRegistrationPipelineStatusForTaskStatus\(status, currentTask\.registration\?\.pipelineStatus\)/);
-  assert.match(helperSource, /pipelineStatus: nextPipelineStatus/);
-  assertInOrder(helperSource, [
-    "rollbackPipelineStatus = await syncRegistrationPipelineStatusForTaskStatus",
-    "await updateOpsTaskStatusRow",
-  ]);
+  assert.doesNotMatch(helperSource, /syncRegistrationPipelineStatus|updateRegistrationOpsTask\(|assignOpsStudent|nextPipelineStatus/);
+  const calls = [], runtime = { exports: {} };
+  let closureFailure = false;
+  vm.runInNewContext(ts.transpileModule(`${helperSource}\nmodule.exports={updateRegistrationOpsTaskStatus};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, { module: runtime, exports: runtime.exports,
+    createOpsId: () => "99490000-0000-4000-8000-000000000103",
+    closeRegistrationCaseContact: async (input) => { calls.push(["close", input]); if (closureFailure) throw new Error("trusted closure unavailable"); },
+    updateOpsTaskStatusRow: async (...args) => calls.push(["manual", ...args]),
+  });
+  const task = { id: "task-1", registration: { pipelineStatus: "0. 등록 문의" } };
+  await runtime.exports.updateRegistrationOpsTaskStatus(task, "done");
+  await runtime.exports.updateRegistrationOpsTaskStatus(task, "in_progress");
+  await runtime.exports.updateRegistrationOpsTaskStatus(task, "canceled");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["manual", "task-1", "done"], ["manual", "task-1", "in_progress"],
+    ["close", { taskId: "task-1", requestKey: "99490000-0000-4000-8000-000000000103" }]]);
+  closureFailure = true;
+  await assert.rejects(runtime.exports.updateRegistrationOpsTaskStatus(task, "canceled"), /trusted closure unavailable/);
+  assert.equal(calls.length, 4);
+  assert.equal(calls.at(-1)[0], "close", "failed closure never falls through to a generic parent-status write");
 });
 
 test("registration roster writes require both sides and a real affected row", () => {
@@ -571,7 +576,7 @@ test("registration completion rollback restores the class textbook projection", 
   );
 
   assertInOrder(rollbackSource, [
-    'selectOpsRowById("students", studentId)',
+    "selectOpsRegistrationStudentById(studentId)",
     "const previousMode = getOpsStudentClassMode(projectedStudent, classId)",
     "restoreOpsRegistrationStudentSnapshot",
   ]);
@@ -584,7 +589,7 @@ test("registration completion rollback records the projected mode that actually 
   const calls = [];
   const rollback = loadRegistrationCompletionRollbackWithMocks({
     text: (value) => String(value || "").trim(),
-    selectOpsRowById: async () => ({
+    selectOpsRegistrationStudentById: async () => ({
       id: "student-1",
       class_ids: ["class-1"],
       waitlist_class_ids: [],
@@ -768,8 +773,10 @@ test("created registration rollback is armed before waitlist or completion proje
   );
 
   assert.match(prepareSource, /isRegistrationWaitlistPipelineStatus\(input\.registration\?\.pipelineStatus\)/);
-  assert.match(prepareSource, /const registrationCreatedStudentId = originalStudent \? "" : createOpsId\(\)/);
-  assert.match(prepareSource, /selectOpsRowById\("students", studentId\)/);
+  assert.match(prepareSource, /assertResolvedManagementRecord\(originalStudent, "등록 명단 반영 전에 기존 학생 UUID를 연결하세요\."\)/);
+  assert.match(prepareSource, /const registrationCreatedStudentId = ""/);
+  assert.match(prepareSource, /selectOpsRegistrationStudentById\(studentId\)/);
+  assert.doesNotMatch(prepareSource, /createOpsId\(\)|\.from\("students"\)\.(?:insert|upsert)/);
   assertInOrder(createSource, [
     "const completionMutation = await prepareCreatedOpsCompletionSyncRollback",
     "rollbackCompletionSync = completionMutation.rollback",
@@ -795,7 +802,9 @@ test("completed registration cases cannot be deleted while their roster projecti
     "export async function addOpsTaskComment",
   );
 
-  assert.match(deleteSource, /task\.status === "done" \|\| isRegistrationCompletionImmutable\(task\.registration\?\.pipelineStatus\)/);
+  assert.match(deleteSource, /task\.type === "registration" && isRegistrationCompletionImmutable\(task\.registration\?\.pipelineStatus\)/);
+  assertInOrder(deleteSource, ["isRegistrationCompletionImmutable(task.registration?.pipelineStatus)", "if (isCanonicalRegistrationCase)", 'runIdempotentOpsTaskProducerRpc("delete_registration_case_v1"']);
+  assert.match(deleteSource, /persistedTask\.status === "done" \|\| isRegistrationCompletionImmutable\(persistedTask\.registration\?\.pipelineStatus\)/);
   assert.match(deleteSource, /등록 완료 건은 학생·수업·교재 연결을 유지해야 하므로 삭제할 수 없습니다\./);
 });
 
@@ -820,7 +829,7 @@ test("failed waitlist deletion re-reads the current roster before writing compen
   ]);
   assertInOrder(deleteCleanupSource, [
     "await removeOpsStudentFromClass",
-    'selectOpsRowById("students", text(student.id))',
+    "selectOpsRegistrationStudentById(text(student.id))",
     'selectOpsRowById("classes", text(classRow.id))',
     "assignOpsStudentToWaitlist(currentStudent, currentClass",
   ]);
@@ -845,9 +854,7 @@ test("waitlist delete history failure restores both roster snapshots before surf
   const originalError = new Error("history unavailable");
   const rollback = loadWaitlistDeleteRollbackWithMocks({
     text: (value) => String(value || "").trim(),
-    selectOpsRowById: async (table) => table === "students"
-      ? { id: "student-1", class_ids: [], waitlist_class_ids: [] }
-      : { id: "class-1", student_ids: [], waitlist_ids: [] },
+    selectOpsRegistrationStudentById: async () => ({ id: "student-1", class_ids: [], waitlist_class_ids: [] }),
     getOpsStudentClassMode: (student, classId) => student.waitlist_class_ids.includes(classId) ? "waitlist" : "",
     restoreOpsStudentRosterSnapshot: async () => calls.push("restore-student"),
     restoreOpsClassRosterSnapshot: async () => calls.push("restore-class"),

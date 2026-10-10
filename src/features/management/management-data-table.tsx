@@ -64,7 +64,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
-import { formatStudentContact, getStudentContactHref } from "@/lib/student-contact-display";
+import { MakeEduStudentNumber } from "./makeedu-student-number";
 import { DataTableSettings, DataTableSettingsSection, DataTableSettingsSelect, DataTableColumnSetting } from "@/components/data-table/data-table-settings";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import {
@@ -121,10 +121,9 @@ const STORAGE_VERSION = MANAGEMENT_TABLE_STORAGE_VERSION;
 const STUDENT_TABLE_COLUMN_IDS = [
   "select",
   "title",
+  "uid",
   "school",
   "grade",
-  "contact",
-  "parentContact",
   "status",
   "enrollmentStatus",
   "action",
@@ -269,8 +268,7 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   title: 220,
   school: 140,
   grade: 92,
-  contact: 148,
-  parentContact: 164,
+  uid: 160,
   subject: 112,
   schedule: 220,
   teacher: 120,
@@ -295,8 +293,7 @@ const STUDENT_COLUMN_WIDTHS: Record<string, number> = {
   title: 180,
   school: 120,
   grade: 88,
-  contact: 152,
-  parentContact: 152,
+  uid: 160,
   enrollmentStatus: 150,
   status: 120,
   action: 44,
@@ -430,8 +427,7 @@ function formatColumnLabel(columnId: string, badgeLabel: string, statusLabel: st
   if (columnId === "subject") return "과목";
   if (columnId === "school") return "학교";
   if (columnId === "grade") return "학년";
-  if (columnId === "contact") return "연락처";
-  if (columnId === "parentContact") return "학부모 연락처";
+  if (columnId === "uid") return "원생번호";
   if (columnId === "publisher") return "출판사";
   if (columnId === "price") return "가격";
   if (columnId === "updatedAt") return "수정일";
@@ -943,6 +939,11 @@ function sanitizePreferences(
   const columnOrder = [
     ...new Set([...(saved.columnOrder || []).filter((columnId) => allowedColumnIds.has(columnId)), ...columnIds]),
   ];
+  if (kind === "students" && !saved.columnOrder?.includes("uid") && columnOrder.includes("uid")) {
+    columnOrder.splice(columnOrder.indexOf("uid"), 1);
+    const titleIndex = columnOrder.indexOf("title");
+    columnOrder.splice(titleIndex >= 0 ? titleIndex + 1 : 1, 0, "uid");
+  }
   if (kind === "students" && !saved.columnOrder?.includes("enrollmentStatus") && columnOrder.includes("enrollmentStatus")) {
     columnOrder.splice(columnOrder.indexOf("enrollmentStatus"), 1);
     const statusIndex = columnOrder.indexOf("status");
@@ -1215,16 +1216,11 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         cell: ({ row }) => renderPlainCell((row.original.raw || {}).school || "—", "whitespace-normal break-words text-sm leading-5 text-foreground"),
       },
       {
-        id: "contact",
-        accessorFn: (row) => normalizeScalar((row.raw || {}).contact),
-        header: "학생 연락처",
-        cell: ({ row }) => renderPlainCell(formatStudentContact((row.original.raw || {}).contact)),
-      },
-      {
-        id: "parentContact",
-        accessorFn: (row) => normalizeScalar((row.raw || {}).parent_contact || (row.raw || {}).parentContact),
-        header: "학부모 연락처",
-        cell: ({ row }) => renderPlainCell(formatStudentContact((row.original.raw || {}).parent_contact || (row.original.raw || {}).parentContact)),
+        id: "uid",
+        accessorFn: (row) => normalizeScalar((row.raw || {}).uid),
+        header: "원생번호",
+        enableSorting: false,
+        cell: ({ row }) => <MakeEduStudentNumber uid={row.original.raw?.uid} makeeduDetailId={row.original.raw?.makeeduDetailId} />,
       },
       {
         id: "publisher",
@@ -2602,8 +2598,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           const raw = record.raw || {};
           const school = normalizeScalar(raw.school);
           const grade = normalizeScalar(raw.grade);
-          const contact = formatStudentContact(raw.contact);
-          const parentContact = formatStudentContact(raw.parent_contact || raw.parentContact);
 
           return (
             <article
@@ -2641,20 +2635,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
               </div>
 
               <div className="mt-2 pl-11"><StudentEnrollmentStatusCell key={`${record.id}:${record.metrics.classCount}:${record.metrics.waitlistCount}:${record.raw?.updated_at || ""}`} row={record} onLoad={actions.onLoadStudentEnrollments} /></div>
-              {contact === "—" && parentContact === "—" ? (
-                <p className="mt-2 pl-11 text-xs text-muted-foreground">연락처 없음</p>
-              ) : (
-                <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-border/70 pt-2 text-sm">
-                  {([["학생", raw.contact, contact], ["학부모", raw.parent_contact || raw.parentContact, parentContact]] as const).map(([label, value, display]) => (
-                    display !== "—" ? <div key={label} className="grid min-w-0 gap-0.5">
-                      <dt className="text-xs text-muted-foreground">{label}</dt>
-                      <dd className="min-w-0 tabular-nums [overflow-wrap:anywhere]">
-                        {getStudentContactHref(value) ? <a href={getStudentContactHref(value)} aria-label={`${record.title} ${label} ${display} 전화`} className="inline-flex min-h-11 items-center rounded-md text-foreground underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">{display}</a> : <span>{display}</span>}
-                      </dd>
-                    </div> : null
-                  ))}
-                </dl>
-              )}
+              <div className="mt-2 pl-11 text-sm"><span className="text-muted-foreground">원생번호 </span><MakeEduStudentNumber uid={raw.uid} makeeduDetailId={raw.makeeduDetailId} /></div>
             </article>
           );
         })

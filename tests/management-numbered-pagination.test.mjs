@@ -703,6 +703,8 @@ test("new student enrollment column preserves saved visibility, size and order",
   assert.equal(headers[1].style.width, "240px");
   assert.equal(headers.at(-3).style.width, "88px");
   assert.ok(!headers.some(el => el.textContent === "학교"));
+  assert.equal(headers[2].textContent, "원생번호");
+  assert.ok(!headers.some(el => /연락처/.test(el.textContent)));
 });
 
 test("class detail totals remain exact beyond the 30-row relation page and missing totals stay unknown", async t => {

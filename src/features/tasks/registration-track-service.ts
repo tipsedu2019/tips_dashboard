@@ -1,4 +1,8 @@
 import { supabase } from "@/lib/supabase"
+import { canUseRegistrationParentContact, normalizeRegistrationCaseContact, stripRegistrationTaskContact, type RegistrationCaseContactState } from "./registration-contact-client.ts"
+import { createRegistrationContactTransport, type RegistrationContactMutation } from "./registration-contact-transport.ts"
+import { readRegistrationContactEvents } from "./registration-contact-event-reader"
+import { createRegistrationStudentCandidateService, type RegistrationStudentCandidateRequest, type RegistrationStudentBindingInput, type RegistrationStudentBindingResult } from "./registration-student-binding-service.ts"
 import {
   createRegistrationDetailObservation,
   type RegistrationDetailKind,
@@ -140,6 +144,7 @@ export type OpsRegistrationWorkflowStatus =
   | "waiting_current_class"
   | "waiting_new_class"
   | "waiting_next_opening"
+  | "observation_requested"
   | "enrollment_requested"
   | "payment_in_progress"
   | "registered"
@@ -154,6 +159,7 @@ const OPS_REGISTRATION_WORKFLOW_STATUSES: readonly OpsRegistrationWorkflowStatus
   "waiting_current_class",
   "waiting_new_class",
   "waiting_next_opening",
+  "observation_requested",
   "enrollment_requested",
   "payment_in_progress",
   "registered",
@@ -411,6 +417,7 @@ type OpsRegistrationCaseDetailFields<
   TTrack extends OpsRegistrationTrackSummary | OpsRegistrationObservationTrackSummary,
 > = {
   task: OpsTask
+  contactState?: RegistrationCaseContactState | null
   commonRevision: number
   admissionApplicationMessageId: string | null
   admissionApplicationMessageStatus: "" | "pending" | "accepted" | "unknown" | "failed_hold"
@@ -468,6 +475,7 @@ export type OpsRegistrationWorkspaceOptionData = {
 }
 
 export type RegistrationCaseCreateResponse = {
+  contactState?: RegistrationCaseContactState | null
   taskId: string
   commonRevision: number
   subjects: RegistrationSubject[]
@@ -486,6 +494,7 @@ export type RegistrationSubjectSyncResponse = {
 }
 
 export type RegistrationCommonUpdateResponse = {
+  contactState?: RegistrationCaseContactState | null
   taskId: string
   commonRevision: number
 }
@@ -496,7 +505,8 @@ export type RegistrationCaseInquirySaveInput = {
   schoolGrade: string
   schoolName: string
   parentPhone: string
-  studentPhone: string
+  studentPhone?: string
+  contactState?: RegistrationCaseContactState | null
   campus: string
   inquiryAt: string
   requestNote: string
@@ -534,6 +544,7 @@ export type RegistrationWaitingDetailsSaveResponse = {
 }
 
 export type RegistrationWorkflowStatusMutationResponse = {
+  contactState?: RegistrationCaseContactState | null
   sourceEventIds: string[]
   trackId: string
   workflowStatus: OpsRegistrationWorkflowStatus
@@ -745,7 +756,7 @@ export type RegistrationEnrollmentRowInput = Readonly<{
 
 export type CreateRegistrationCaseInput = {
   studentName: string; schoolGrade: string; schoolName: string; parentPhone: string
-  studentPhone: string; campus: string; inquiryAt: string; subjects: RegistrationSubject[]
+  studentPhone?: string; campus: string; inquiryAt: string; subjects: RegistrationSubject[]
   requestNote: string; priority: string; requestKey: string
 }
 export type RegistrationCaseCreateWithInitialWorkflowInput =
@@ -755,7 +766,7 @@ export type SyncRegistrationCaseSubjectsInput = {
 }
 export type UpdateRegistrationCaseCommonInput = {
   taskId: string; studentName: string; schoolGrade: string; schoolName: string
-  parentPhone: string; studentPhone: string; campus: string; inquiryAt: string
+  parentPhone?: string; studentPhone?: string; contactState?: RegistrationCaseContactState | null; campus: string; inquiryAt: string
   requestNote: string; priority: string; expectedCommonRevision: number; requestKey: string
 }
 export type RouteRegistrationInquiryInput = {
@@ -876,11 +887,13 @@ type QueryBuilder = PromiseLike<QueryResult> & {
 export type RegistrationTrackClient = {
   from: (table: string) => QueryBuilder
   rpc: (name: string, args: Record<string, unknown>) => PromiseLike<QueryResult> & {
+    abortSignal: (signal: AbortSignal) => PromiseLike<QueryResult> & { retry: (enabled: boolean) => PromiseLike<QueryResult> }
     retry?: (enabled: boolean) => PromiseLike<QueryResult>
   }
 }
 
 export type RegistrationTrackServiceOptions = {
+  mutateContact?: (input: RegistrationContactMutation) => Promise<Record<string, unknown>>
   probeRuntime: () => Promise<RegistrationRuntimeState>
   probeIntakeRuntime: () => Promise<RegistrationIntakeRuntimeState>
   probeObservationRuntime?: () => Promise<RegistrationObservationRuntimeState>
@@ -959,9 +972,7 @@ const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
   "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
 ].join(",")
 
-const PARENT_DETAIL_COLUMNS = "*,ops_registration_details(*),ops_task_comments(*),ops_task_attachments(*)"
-const EVENT_COLUMNS = "id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at"
-const MESSAGE_COLUMNS = "id,status,claim_active,template_key,request_key,updated_at"
+const PARENT_DETAIL_COLUMNS = "*,ops_registration_details(task_id,pipeline_status,inquiry_at,school_grade,school_name,request_note,admission_notice_sent,common_revision,admission_checklist,level_test_place,level_test_material_link,level_test_result,visit_consultation_place),ops_task_comments(*),ops_task_attachments(*)"
 const REGISTRATION_APPOINTMENT_CALENDAR_COLUMNS = [
   "appointment_id",
   "task_id",
@@ -1606,6 +1617,32 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
   const outerEventType = exactRegistrationTrackEventType(
     value(row, "event_type", "eventType"),
   )
+  if (["registration_fact_saved", "registration_common_info_updated", "registration_subjects_synced", "registration_subject_removed"].includes(outerEventType)) {
+    const payload = parseJsonRecord(value(row, "after_value", "afterValue"))
+    const actorId = nullableText(value(row, "actor_id", "actorId"))
+    return {
+      id: text(value(row, "id")),
+      taskId: text(value(row, "task_id", "taskId")),
+      trackId: nullableText(payload?.trackId),
+      eventType: outerEventType,
+      subject: outerEventType === "registration_subject_removed" ? parseAcademicSubject(payload?.subject) : null,
+      source: null,
+      destination: null,
+      reason: null,
+      // Audit payloads can contain contact details; the timeline only needs
+      // the saved fact's kind, not a second copy of the input values.
+      metadata: outerEventType === "registration_fact_saved"
+        ? { factType: text(payload?.factType) }
+        : {},
+      actorId,
+      actorKind: actorId ? "user" : null,
+      systemSource: null,
+      reasonCode: null,
+      payloadVersion: registrationTrackEventPayloadVersion(payload) || 1,
+      occurredAt: text(value(row, "created_at", "createdAt")),
+      legacyText: null,
+    }
+  }
   const rawPayload = outerEventType === "registration_track_event" || outerEventType === "registration_case_created"
     ? parseJsonRecord(value(row, "after_value", "afterValue"))
     : null
@@ -1853,8 +1890,6 @@ function mapTask(row: Row, detail: Row, comments: OpsTaskComment[], attachments:
       inquiryAt: text(value(detail, "inquiry_at", "inquiryAt")),
       schoolGrade: text(value(detail, "school_grade", "schoolGrade")),
       schoolName: text(value(detail, "school_name", "schoolName")),
-      parentPhone: text(value(detail, "parent_phone", "parentPhone")),
-      studentPhone: text(value(detail, "student_phone", "studentPhone")),
       requestNote: text(value(detail, "request_note", "requestNote")),
       admissionNoticeSent: bool(value(detail, "admission_notice_sent", "admissionNoticeSent")),
     },
@@ -2489,7 +2524,7 @@ export function createRegistrationTrackService(
       detailInFlight.delete(cacheKey)
     }
     const cached = detailCache.get(cacheKey)
-    if (cached) return measure("registration:case-detail", true, async () => cached)
+    if (cached) return measure("registration:case-detail", true, async (metrics) => applyContact(cached, await readContact(safeTaskId, metrics)))
     const pending = detailInFlight.get(cacheKey)
     if (pending) return pending
     const generation = cacheGeneration
@@ -2657,24 +2692,29 @@ export function createRegistrationTrackService(
       const otherRowsRequests = [
         loadScheduledAppointmentPage(),
         loadAppointmentHistoryRows(),
-        queryRows(
-          client.from("ops_task_events")
-            .select(EVENT_COLUMNS)
-            .eq("task_id", safeTaskId)
-            .eq("registration_task_event_shared_visible", true),
-          metrics,
-          signal,
-          "events",
-        ),
+        (async () => {
+          metrics.queryCount += 1
+          observation?.begin("events", metrics.detailSignal)
+          let ok = false
+          try {
+            const eventRows = await readRegistrationContactEvents(client, safeTaskId, true, signal)
+            ok = true
+            return eventRows
+          } finally {
+            observation?.end("events", ok)
+          }
+        })(),
         queryRows(
           client.from("ops_registration_messages")
-            .select(MESSAGE_COLUMNS)
+            .select("id,status,claim_active,template_key,request_key,updated_at")
             .eq("task_id", safeTaskId)
             .eq("template_key", "admission_application")
             .eq("claim_active", true)
-            .limit(1),
+            .order("id").limit(1)
+            .abortSignal(signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000))
+            .retry(false),
           metrics,
-          signal,
+          undefined,
           "admission_message",
         ),
         queryCustomerReminderSummaries(safeTaskId, metrics),
@@ -2729,6 +2769,7 @@ export function createRegistrationTrackService(
           )
         const phaseOneResult = await phaseOneRequest
         if (!phaseOneResult.ok) throw phaseOneResult.error
+        if (signal?.aborted) throw new Error("registration_query_timeout")
         const phaseOne = phaseOneResult.phaseOne
         const [
           parentRow,
@@ -2809,10 +2850,12 @@ export function createRegistrationTrackService(
         decoding = null
         const dependentRowsResult = await dependentRowsRequest
         if (!dependentRowsResult.ok) throw dependentRowsResult.error
+        if (signal?.aborted) throw new Error("registration_query_timeout")
         decoding = "detail_decode"
         observation?.begin(decoding)
         const [[currentEnrollmentPage, enrollmentHistoryRows], summaryResult] = dependentRowsResult.result
         const enrollmentRows = mergeRowsById(currentEnrollmentPage.rows, enrollmentHistoryRows)
+        const contactState = await readContact(safeTaskId, metrics)
         const detailRow = firstRow(value(parentRow, "ops_registration_details")) || {}
         const comments = rows(value(parentRow, "ops_task_comments")).map(mapComment)
         const attachments = rows(value(parentRow, "ops_task_attachments")).map(mapAttachment)
@@ -2826,6 +2869,7 @@ export function createRegistrationTrackService(
           TTrack extends OpsRegistrationTrackSummary | OpsRegistrationObservationTrackSummary,
         >(tracks: TTrack[]): OpsRegistrationCaseDetailFields<TTrack> {
           return {
+            contactState,
             task: mapTask(parentRow, detailRow, comments, attachments),
             commonRevision: numberValue(value(detailRow, "common_revision", "commonRevision")),
             admissionApplicationMessageId: nullableText(value(activeMessage, "id")),
@@ -2875,7 +2919,7 @@ export function createRegistrationTrackService(
         }
 
         if (!observationAware) {
-          const detail = buildDetail(trackRows.map((row) => mapTrack(row)))
+          const detail = applyContact(buildDetail(trackRows.map((row) => mapTrack(row))), contactState)
           decodeOk = true
           return detail
         }
@@ -2891,7 +2935,7 @@ export function createRegistrationTrackService(
           }
           return mapRegistrationObservationTrackSummary(row, true)
         })
-        const detail = buildDetail(tracks)
+        const detail = applyContact(buildDetail(tracks), contactState)
         decodeOk = true
         return detail
       } catch (error) {
@@ -2915,10 +2959,11 @@ export function createRegistrationTrackService(
       })
     })
       .then((result) => {
+        if (result.contactState) result = applyContact(result, result.contactState)
         if (
           generation === cacheGeneration
           && requestEpoch === (detailEpochs.get(cacheKey) || 0)
-        ) detailCache.set(cacheKey, result)
+        ) detailCache.set(cacheKey, { ...result, task: stripRegistrationTaskContact(result.task), contactState: result.contactState ? { ...result.contactState, parentPhone: null } : null })
         return result
       })
       .finally(() => {
@@ -3188,77 +3233,106 @@ export function createRegistrationTrackService(
     return data
   }
 
-  async function createRegistrationCase(input: {
-    studentName: string
-    schoolGrade: string
-    schoolName: string
-    parentPhone: string
-    studentPhone: string
-    campus: string
-    inquiryAt: string
-    subjects: RegistrationSubject[]
-    requestNote: string
-    priority: string
-    requestKey: string
-  }): Promise<RegistrationCaseCreateResponse> {
-    const result = await callRpc<RegistrationCaseCreateResponse>(
-      "create_registration_case",
-      {
-        p_student_name: input.studentName,
-        p_school_grade: input.schoolGrade,
-        p_school_name: input.schoolName,
-        p_parent_phone: input.parentPhone,
-        p_student_phone: input.studentPhone,
-        p_campus: input.campus,
-        p_inquiry_at: nullableRegistrationDateTime(input.inquiryAt),
-        p_subjects: input.subjects,
-        p_request_note: input.requestNote,
-        p_priority: input.priority,
-        p_request_key: requireRequestKey(input.requestKey),
-      },
-      { runtimeChecked: true },
-    )
-    return {
-      ...result,
-      tracks: rows(value(result as unknown as Row, "tracks")).map((row) => mapTrack(row)),
-    }
+  function contactRequestKey(key: string) {
+    const match = key.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+    if (!match) throw new Error("registration_contact_request_key_invalid")
+    return match[0]
   }
 
+  const contactReceipts = new Map<string, RegistrationCaseContactState>()
+  function rememberContact(state: RegistrationCaseContactState) {
+    const prior = contactReceipts.get(state.taskId)
+    if (!prior || BigInt(state.revision) >= BigInt(prior.revision)) contactReceipts.set(state.taskId, { ...state, parentPhone: null })
+  }
+  function applyContact<T extends OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail>(detail: T, state: RegistrationCaseContactState): T {
+    const receipt = contactReceipts.get(state.taskId)
+    const current = receipt && BigInt(receipt.revision) > BigInt(state.revision) ? receipt : state
+    const task = stripRegistrationTaskContact(detail.task)
+    return { ...detail, contactState: current, task: { ...task, registration: { ...task.registration, ...(canUseRegistrationParentContact(current) && current.parentPhone !== null ? { parentPhone: current.parentPhone } : {}) } } }
+  }
+  function getContactReceipt(taskId: string) { return contactReceipts.get(taskId) ?? null }
+  async function readContact(taskId: string, metrics?: { queryCount: number }): Promise<RegistrationCaseContactState> {
+    if (metrics) metrics.queryCount += 1
+    const request = client.rpc("get_registration_case_contact_v1", { p_task_id: taskId, p_limit: 1 })
+      .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+    const response = await withRegistrationRequestTimeout(request, requestTimeoutMs, "registration_contact_query_timeout")
+    if (response.error) throw response.error
+    const state = normalizeRegistrationCaseContact(response.data, taskId)
+    rememberContact(state)
+    return state
+  }
+  async function mutateContact(
+    command: RegistrationContactMutation["command"], taskId: string | null, requestKey: string,
+    state: RegistrationCaseContactState | null | undefined, payload: Record<string, unknown>,
+    validateResult?: (result: Record<string, unknown> & { contactState: RegistrationCaseContactState }) => void,
+  ): Promise<Record<string, unknown> & { contactState: RegistrationCaseContactState }> {
+    if (!options.mutateContact) throw new Error("registration_contact_runtime_unavailable")
+    if (taskId && (!state || state.taskId !== taskId)) throw new Error("registration_contact_snapshot_required")
+    const key = contactRequestKey(requestKey)
+    const envelope = await options.mutateContact({ command, taskId, requestKey: key, expectedGeneration: state?.generation ?? null, expectedRevision: state?.revision ?? null, payload })
+    if (envelope.version !== 1 || envelope.command !== command || envelope.requestKey !== key || typeof envelope.replayed !== "boolean"
+      || typeof envelope.taskId !== "string" || (taskId !== null && envelope.taskId !== taskId)
+      || !envelope.result || typeof envelope.result !== "object" || Array.isArray(envelope.result)) throw new Error("registration_contact_receipt_invalid")
+    const result = envelope.result as Record<string, unknown>
+    const resolvedTaskId = envelope.taskId
+    if (result.taskId !== undefined && result.taskId !== resolvedTaskId) throw new Error("registration_contact_receipt_invalid")
+    const contactState = normalizeRegistrationCaseContact(result.contactState, resolvedTaskId, { allowMissingParentPhone: true })
+    if (contactState.parentPhone !== null) throw new Error("registration_contact_mutation_response_invalid")
+    const acknowledged = { ...result, taskId: resolvedTaskId, contactState }
+    validateResult?.({ ...result, contactState })
+    rememberContact(contactState)
+    clearCaches()
+    try { options.onMutationSuccess?.() } catch { /* The server mutation is already committed. */ }
+    return acknowledged
+  }
+  async function bindRegistrationStudent(input: RegistrationStudentBindingInput): Promise<RegistrationStudentBindingResult> {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const { studentId, taskId, requestKey } = input
+    if (typeof studentId !== "string" || studentId.length !== 36 || !uuid.test(studentId)
+      || typeof requestKey !== "string" || requestKey.length !== 36 || !uuid.test(requestKey)) {
+      throw new Error("registration_student_binding_request_invalid")
+    }
+    if (!input.contactState) throw new Error("registration_contact_snapshot_required")
+    const opened = normalizeRegistrationCaseContact({ ...input.contactState, parentPhone: null }, taskId)
+    if (opened.studentId !== null && opened.studentId.toLowerCase() !== studentId.toLowerCase()) {
+      throw new Error("registration_student_binding_immutable")
+    }
+    const result = await mutateContact("bind_student", taskId, requestKey, opened, { studentId }, (receipt) => {
+      const state = receipt.contactState
+      const selected = studentId.toLowerCase()
+      const trackIds = (ids: readonly string[]) => ids.map((id) => id.toLowerCase()).sort().join("|")
+      if (receipt.taskId !== taskId || typeof receipt.studentId !== "string" || receipt.studentId.toLowerCase() !== selected
+        || state.studentId?.toLowerCase() !== selected || typeof receipt.changed !== "boolean"
+        || state.generation !== opened.generation || state.phase !== opened.phase
+        || state.closureReason !== opened.closureReason || state.allPhasesClosed !== opened.allPhasesClosed
+        || state.commonRevision !== opened.commonRevision || trackIds(state.currentTrackIds) !== trackIds(opened.currentTrackIds)
+        || BigInt(state.revision) <= BigInt(opened.revision)) {
+        throw new Error("registration_student_binding_response_invalid")
+      }
+    })
+    return { taskId, studentId: result.studentId as string, changed: result.changed as boolean, contactState: result.contactState }
+  }
+  async function closeRegistrationCaseContact(input: { taskId: string; contactState?: RegistrationCaseContactState | null; requestKey: string }) {
+    const state = input.contactState ?? await readContact(input.taskId)
+    const result = await mutateContact("close", input.taskId, input.requestKey, state, { reason: "whole_case_cancelled" })
+    if (result.contactState.phase !== "closed" || result.contactState.closureReason !== "whole_case_cancelled") throw new Error("registration_contact_close_response_invalid")
+    return result
+  }
+  function commonContactPayload(input: CreateRegistrationCaseInput | UpdateRegistrationCaseCommonInput | RegistrationCaseInquirySaveInput) {
+    return { studentName: input.studentName, schoolGrade: input.schoolGrade, schoolName: input.schoolName,
+      ...(Object.prototype.hasOwnProperty.call(input, "parentPhone") ? { parentPhone: input.parentPhone } : {}), campus: input.campus, inquiryAt: nullableRegistrationDateTime(input.inquiryAt),
+      requestNote: input.requestNote, priority: input.priority }
+  }
+  async function createRegistrationCase(input: CreateRegistrationCaseInput): Promise<RegistrationCaseCreateResponse> {
+    const result = await mutateContact("create", null, input.requestKey, null, { ...commonContactPayload(input), subjects: orderedRegistrationSubjects(input.subjects) })
+    return { ...(result as unknown as RegistrationCaseCreateResponse), tracks: rows(result.tracks).map((row) => mapTrack(row)) }
+  }
   async function createRegistrationCaseWithInitialWorkflow(
-    input: RegistrationCaseCreateWithInitialWorkflowInput,
+    _input: RegistrationCaseCreateWithInitialWorkflowInput,
   ): Promise<RegistrationCaseCreateWithInitialWorkflowResponse> {
-    const normalizedInput = normalizeRegistrationInitialLevelTestAppointment(input)
-    await requireReadyRuntime()
-    const intakeRuntime = await options.probeIntakeRuntime()
-    if (intakeRuntime.available !== true || intakeRuntime.version !== 1) {
-      throw new Error("registration_intake_runtime_mismatch")
-    }
-    const result = await callRpc<RegistrationCaseCreateWithInitialWorkflowResponse>(
-      "create_registration_case_with_initial_workflow_v1",
-      {
-        p_student_name: normalizedInput.studentName,
-        p_school_grade: normalizedInput.schoolGrade,
-        p_school_name: normalizedInput.schoolName,
-        p_parent_phone: normalizedInput.parentPhone,
-        p_student_phone: normalizedInput.studentPhone,
-        p_campus: normalizedInput.campus,
-        p_inquiry_at: normalizedInput.inquiryAt,
-        p_subjects: normalizedInput.subjects,
-        p_request_note: normalizedInput.requestNote,
-        p_priority: normalizedInput.priority,
-        p_subject_plans: normalizedInput.subjectPlans,
-        p_level_test_appointment: normalizedInput.levelTestAppointment,
-        p_visit_appointment: normalizedInput.visitAppointment,
-        p_director_overrides: normalizedInput.directorOverrides,
-        p_request_key: requireRequestKey(normalizedInput.requestKey),
-      },
-      { runtimeChecked: true },
-    )
-    return {
-      ...result,
-      tracks: rows(value(result as unknown as Row, "tracks")).map((row) => mapTrack(row)),
-      appointments: rows(value(result as unknown as Row, "appointments")).map(mapAppointment),
-    }
+    // No old raw-contact writer fallback while the atomic privacy driver is unavailable.
+    void _input
+    throw new Error("registration_contact_initial_workflow_unsupported")
   }
 
   async function syncRegistrationCaseSubjects(input: {
@@ -3283,73 +3357,21 @@ export function createRegistrationTrackService(
     }
   }
 
-  async function saveRegistrationCaseInquiry(
-    input: RegistrationCaseInquirySaveInput,
-  ): Promise<RegistrationCaseInquirySaveResponse> {
-    const expectedSubjects = orderedRegistrationSubjects(input.expectedSubjects)
+  async function saveRegistrationCaseInquiry(input: RegistrationCaseInquirySaveInput): Promise<RegistrationCaseInquirySaveResponse> {
     const subjects = orderedRegistrationSubjects(input.subjects)
-    const result = await callRpc<RegistrationCaseInquirySaveResponse>("save_registration_case_inquiry_v1", {
-      p_task_id: input.taskId,
-      p_student_name: input.studentName,
-      p_school_grade: input.schoolGrade,
-      p_school_name: nullableText(input.schoolName),
-      p_parent_phone: input.parentPhone,
-      p_student_phone: nullableText(input.studentPhone),
-      p_campus: input.campus,
-      p_inquiry_at: input.inquiryAt,
-      p_request_note: nullableText(input.requestNote),
-      p_priority: input.priority,
-      p_expected_common_revision: input.expectedCommonRevision,
-      p_expected_subjects: expectedSubjects,
-      p_subjects: subjects,
-      p_request_key: requireRequestKey(input.requestKey),
+    const result = await mutateContact("save_inquiry", input.taskId, input.requestKey, input.contactState, {
+      ...commonContactPayload(input), expectedCommonRevision: input.expectedCommonRevision,
+      expectedSubjects: orderedRegistrationSubjects(input.expectedSubjects), subjects,
     })
-    const tracks = rows(value(result as unknown as Row, "tracks"))
-      .map((row) => mapTrack(row))
-      .sort((left, right) => (
-        (["영어", "수학", "과학"] as RegistrationSubject[]).indexOf(left.subject)
-          - (["영어", "수학", "과학"] as RegistrationSubject[]).indexOf(right.subject)
-        || left.id.localeCompare(right.id)
-      ))
-    return {
-      ...result,
-      subjects,
-      tracks,
-    }
+    const tracks = rows(result.tracks).map((row) => mapTrack(row)).sort((left, right) => (
+      (["영어", "수학", "과학"] as RegistrationSubject[]).indexOf(left.subject) - (["영어", "수학", "과학"] as RegistrationSubject[]).indexOf(right.subject) || left.id.localeCompare(right.id)
+    ))
+    return { ...(result as unknown as RegistrationCaseInquirySaveResponse), subjects, tracks }
   }
-
-  async function updateRegistrationCaseCommon(input: {
-    taskId: string
-    studentName: string
-    schoolGrade: string
-    schoolName: string
-    parentPhone: string
-    studentPhone: string
-    campus: string
-    inquiryAt: string
-    requestNote: string
-    priority: string
-    expectedCommonRevision: number
-    requestKey: string
-  }): Promise<RegistrationCommonUpdateResponse> {
-    return callRpc<RegistrationCommonUpdateResponse>(
-      "update_registration_case_common",
-      {
-        p_task_id: input.taskId,
-        p_student_name: input.studentName,
-        p_school_grade: input.schoolGrade,
-        p_school_name: nullableText(input.schoolName),
-        p_parent_phone: input.parentPhone,
-        p_student_phone: nullableText(input.studentPhone),
-        p_campus: input.campus,
-        p_inquiry_at: nullableRegistrationDateTime(input.inquiryAt),
-        p_request_note: nullableText(input.requestNote),
-        p_priority: input.priority,
-        p_expected_common_revision: input.expectedCommonRevision,
-        p_request_key: requireRequestKey(input.requestKey),
-      },
-      { runtimeChecked: true },
-    )
+  async function updateRegistrationCaseCommon(input: UpdateRegistrationCaseCommonInput): Promise<RegistrationCommonUpdateResponse> {
+    return await mutateContact("update_common", input.taskId, input.requestKey, input.contactState, {
+      ...commonContactPayload(input), expectedCommonRevision: input.expectedCommonRevision,
+    }) as unknown as RegistrationCommonUpdateResponse
   }
 
   async function routeRegistrationInquiry(input: {
@@ -3643,21 +3665,16 @@ export function createRegistrationTrackService(
   }
 
   async function setRegistrationWorkflowStatus(input: {
+    taskId: string
+    contactState?: RegistrationCaseContactState | null
     trackId: string
     workflowStatus: OpsRegistrationWorkflowStatus
     expectedWorkflowRevision: number
     requestKey: string
   }): Promise<RegistrationWorkflowStatusMutationResponse> {
-    const result = await callRpc<Row>(
-      "set_registration_workflow_status_v1",
-      {
-        p_track_id: input.trackId,
-        p_workflow_status: input.workflowStatus,
-        p_expected_workflow_revision: input.expectedWorkflowRevision,
-        p_request_key: requireRequestKey(input.requestKey),
-      },
-      { runtimeChecked: true },
-    )
+    const result = await mutateContact("set_workflow_status", input.taskId, input.requestKey, input.contactState, {
+      trackId: input.trackId, workflowStatus: input.workflowStatus, expectedWorkflowRevision: input.expectedWorkflowRevision,
+    })
     const status = text(value(result, "workflow_status", "workflowStatus"))
     if (!isOpsRegistrationWorkflowStatus(status)) {
       throw new Error("registration_workflow_status_response_invalid")
@@ -3665,6 +3682,7 @@ export function createRegistrationTrackService(
     const rawFinalization = parseJsonRecord(value(result, "enrollment_finalization", "enrollmentFinalization"))
     const rawEnrollmentIds = rawFinalization?.enrollmentIds
     return {
+      contactState: result.contactState,
       trackId: text(value(result, "track_id", "trackId")),
       sourceEventIds: Array.from(new Set(stringList(value(result, "source_event_ids", "sourceEventIds")))),
       workflowStatus: status,
@@ -3724,6 +3742,11 @@ export function createRegistrationTrackService(
     })
   }
 
+  function contactForTrack(trackId: string) {
+    const state = [...contactReceipts.values()].find((candidate) => candidate.currentTrackIds.includes(trackId))
+    if (!state) throw new Error("registration_contact_snapshot_required")
+    return state
+  }
   async function saveRegistrationWaitingDetails(input: {
     trackId: string
     waitingKind: RegistrationWaitingKind
@@ -3731,12 +3754,10 @@ export function createRegistrationTrackService(
     retakeDecision: "" | "required" | "not_required"
     requestKey: string
   }): Promise<RegistrationWaitingDetailsSaveResponse> {
-    const result = await callRpc<Row>("save_registration_waiting_details_v2", {
-      p_track_id: input.trackId,
-      p_waiting_kind: input.waitingKind || null,
-      p_class_id: normalizeUuid(input.classId),
-      p_retake_decision: input.retakeDecision || null,
-      p_request_key: requireRequestKey(input.requestKey),
+    const state = contactForTrack(input.trackId)
+    const result = await mutateContact("waiting_details", state.taskId, input.requestKey, state, {
+      trackId: input.trackId, waitingKind: input.waitingKind || null,
+      classId: normalizeUuid(input.classId), retakeDecision: input.retakeDecision || null,
     })
     return {
       trackId: text(value(result, "track_id", "trackId")),
@@ -4038,12 +4059,10 @@ export function createRegistrationTrackService(
     reason: string
     requestKey: string
   }): Promise<RegistrationTrackTransitionResponse> {
-    return callRpc<RegistrationTrackTransitionResponse>("reopen_registration_track", {
-      p_track_id: input.trackId,
-      p_destination: input.destination,
-      p_reason: input.reason,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    const state = contactForTrack(input.trackId)
+    return await mutateContact("reopen", state.taskId, input.requestKey, state, {
+      trackId: input.trackId, destination: input.destination, reason: input.reason,
+    }) as unknown as RegistrationTrackTransitionResponse
   }
 
   async function setStudentClassRosterMode(input: {
@@ -4063,6 +4082,10 @@ export function createRegistrationTrackService(
   }
 
   return {
+    bindRegistrationStudent,
+    closeRegistrationCaseContact,
+    readContact,
+    getContactReceipt,
     probeRuntime,
     clearCaches,
     createLegacyTrackSummaries,
@@ -4169,6 +4192,11 @@ export function setRegistrationTrackMutationCacheInvalidator(
 const defaultRegistrationTrackService = createRegistrationTrackService(
   supabase as unknown as RegistrationTrackClient,
   {
+    mutateContact: createRegistrationContactTransport({ getAccessToken: async () => {
+      if (!supabase) return null
+      const { data, error } = await supabase.auth.getSession()
+      return error ? null : data.session?.access_token ?? null
+    } }),
     probeRuntime: probeRegistrationSubjectTrackRuntime,
     probeIntakeRuntime: probeRegistrationIntakeWorkflowRuntime,
     probeObservationRuntime: probeRegistrationObservationRuntime,
@@ -4187,6 +4215,28 @@ const defaultRegistrationTrackService = createRegistrationTrackService(
         },
   },
 )
+
+export function closeRegistrationCaseContact(input: { taskId: string; contactState?: RegistrationCaseContactState | null; requestKey: string }) {
+  return defaultRegistrationTrackService.closeRegistrationCaseContact(input)
+}
+
+export function bindRegistrationStudent(input: RegistrationStudentBindingInput): Promise<RegistrationStudentBindingResult> {
+  return defaultRegistrationTrackService.bindRegistrationStudent(input)
+}
+
+const defaultRegistrationStudentCandidateService = createRegistrationStudentCandidateService({ supabase })
+
+export function searchRegistrationStudentCandidates(input: RegistrationStudentCandidateRequest) {
+  return defaultRegistrationStudentCandidateService.searchRegistrationStudentCandidates(input)
+}
+
+export function getRegistrationCaseContactReceipt(taskId: string): RegistrationCaseContactState | null {
+  return defaultRegistrationTrackService.getContactReceipt(taskId)
+}
+
+export function loadRegistrationCaseContact(taskId: string): Promise<RegistrationCaseContactState> {
+  return defaultRegistrationTrackService.readContact(taskId)
+}
 
 export function clearRegistrationTrackServiceCaches() {
   defaultRegistrationTrackService.clearCaches()
@@ -4283,11 +4333,10 @@ export function loadRegistrationCaseDetail(
 ): Promise<OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail> {
   const fixture = loadRegistrationSubjectTrackFixtureCase(taskId)
   if (fixture) {
-    return fixture.then((detail) => (
-      options.observationAware
-        ? toObservationAwareCaseDetail(detail)
-        : withoutBookingOnlyRegistrationObservationDetail(detail)
-    ))
+    return fixture.then((detail) => {
+      const safeDetail = { ...detail, task: stripRegistrationTaskContact(detail.task), contactState: null }
+      return options.observationAware ? toObservationAwareCaseDetail(safeDetail) : withoutBookingOnlyRegistrationObservationDetail(safeDetail)
+    })
   }
   const loadOptions = { force: options.force }
   return options.observationAware
@@ -4331,6 +4380,8 @@ export function loadAssignedScienceConsultationClassOptions(
 export function createRegistrationCase(
   input: Parameters<typeof defaultRegistrationTrackService.createRegistrationCase>[0],
 ): Promise<RegistrationCaseCreateResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationCaseCreateResponse>("createRegistrationCase", input)
+  if (fixture !== null) return fixture
   return defaultRegistrationTrackService.createRegistrationCase(input)
 }
 

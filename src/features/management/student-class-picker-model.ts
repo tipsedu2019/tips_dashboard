@@ -131,7 +131,7 @@ export function filterClassStudentCandidates<T extends Record<string, unknown>>(
     if (selectedSchool && text(student.school) !== selectedSchool) return false;
     if (!query) return true;
 
-    return [student.name, student.school, student.grade, student.contact, student.parent_contact]
+    return [student.name, student.school, student.grade, student.uid]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()

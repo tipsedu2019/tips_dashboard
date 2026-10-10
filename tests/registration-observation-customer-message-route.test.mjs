@@ -183,6 +183,11 @@ function sendResult(state, overrides = {}) {
   }
 }
 
+function contactFence() {
+  return { version: 1, taskId: IDS.task, sourceId: IDS.observation, messageKind: "observation_booking",
+    contactPhase: "open", contactGeneration: "1", allPhasesClosed: false, sourcePhaseOpen: true,
+    canonicalAppointmentKind: "observation_class" }
+}
 function createObservationProductionHarness({
   runtimeVersion = 0,
   activationMode = "off",
@@ -190,11 +195,14 @@ function createObservationProductionHarness({
   providerOutcome = "accepted",
   interleavedHistory = false,
   historyTableDenied = false,
+  readFence = () => ({ data: contactFence(), error: null }),
 } = {}) {
   const calls = {
     actorTables: [],
     authorizedTaskIds: [],
     rpcNames: [],
+    fenceRequests: [],
+    fenceControls: [],
     providerSend: 0,
     marker: 0,
     release: 0,
@@ -336,8 +344,39 @@ function createObservationProductionHarness({
       }
       throw new Error(`unexpected observation production table: ${table}`)
     },
-    async rpc(name, args) {
+    rpc(name, args) {
       calls.rpcNames.push(name)
+      if (name === "read_registration_contact_message_fence_v1") {
+        assert.deepEqual(args, {
+          p_actor_profile_id: IDS.actor,
+          p_message_kind: "observation_booking",
+          p_source_id: IDS.observation,
+        })
+        calls.fenceRequests.push(structuredClone(args))
+        let signal
+        return {
+          abortSignal(value) {
+            assert.equal(value instanceof AbortSignal, true)
+            signal = value
+            calls.fenceControls.push("abortSignal")
+            return this
+          },
+          retry(value) {
+            assert.equal(value, false)
+            assert.ok(signal)
+            calls.fenceControls.push("retry:false")
+            return readFence(signal)
+          },
+        }
+      }
+      if (name === "read_registration_contact_message_request_replay_v1") {
+        const saved = messages.get(args.p_request_key)
+        if (!saved) return { data: null, error: null }
+        assert.equal(saved.previewId, args.p_preview_id)
+        assert.deepEqual(saved.requestDigest, args.p_request_digest)
+        assert.equal(args.p_contact_generation, "1")
+        return { data: sendResult(saved, { idempotent: true, owner: false }), error: null }
+      }
       if (name === "resolve_registration_customer_message_source_v1") {
         assert.equal(args.p_message_kind, "observation_booking")
         assert.equal(args.p_source_id, IDS.observation)
@@ -463,14 +502,19 @@ function createObservationProductionHarness({
       }
       if (name === "read_registration_customer_message_preview_target_v1") {
         if (!previews.has(args.p_preview_id)) return { data: null, error: { code: "P0002" } }
-        return { data: { ...OBSERVATION_BOOKING_TARGET, taskId: IDS.task }, error: null }
+        return { data: { ...OBSERVATION_BOOKING_TARGET, taskId: IDS.task, contactGeneration: "1" }, error: null }
       }
       if (name === "claim_registration_customer_message_v1") {
         const replay = messages.get(args.p_request_key)
         if (replay) return { data: sendResult(replay, { idempotent: true, owner: false }), error: null }
         const preview = previews.get(args.p_preview_id)
         if (!preview) return { data: null, error: { code: "P0002" } }
-        if (JSON.stringify(preview.contract) !== JSON.stringify(args.p_contract)) {
+        const previewFacts = { ...preview.contract }
+        delete previewFacts.requestDigest
+        const { requestDigest: sendDigest, ...sendFacts } = args.p_contract
+        assert.equal("parentPhoneDigits" in args.p_contract, false)
+        assert.match(sendDigest.digest, /^[a-f0-9]{64}$/u)
+        if (JSON.stringify(previewFacts) !== JSON.stringify(sendFacts)) {
           return { data: null, error: { code: "40001", message: "registration_customer_message_preview_stale" } }
         }
         const state = {
@@ -479,6 +523,7 @@ function createObservationProductionHarness({
           claimToken: nextClaimId,
           dispatchToken: nextDispatchId,
           sourceFingerprint: args.p_contract.sourceFingerprint,
+          previewId: args.p_preview_id, requestDigest: args.p_contract.requestDigest,
         }
         messages.set(args.p_request_key, state)
         return {
@@ -508,6 +553,8 @@ function createObservationProductionHarness({
             messageId: args.p_message_id,
             currentStatus: "pending",
             dispatchToken: args.p_dispatch_token,
+            contactGrant: { version: 1, action: "attempt", linearization: "registration_contact_case_lock_v1",
+              messageId: args.p_message_id, dispatchToken: args.p_dispatch_token, contactFence: contactFence() },
           },
           error: null,
         }
@@ -620,6 +667,8 @@ test("production observation preview uses only the observation ID, canonical tas
   assert.deepEqual(harness.calls.actorTables, [])
   assert.deepEqual(harness.calls.authorizedTaskIds, [])
   assert.equal(harness.calls.providerSend, 0)
+  assert.deepEqual(harness.calls.fenceControls, ["abortSignal", "retry:false"])
+  assert.equal(harness.calls.fenceRequests.length, 1)
   const serialized = JSON.stringify(preview)
   for (const forbidden of [
     "01012345678",
@@ -631,6 +680,156 @@ test("production observation preview uses only the observation ID, canonical tas
     "map.naver.com/p/",
     "local-test-api-secret",
   ]) assert.equal(serialized.includes(forbidden), false, forbidden)
+})
+
+test("production contact fence supplies the exact 8-second deadline and scoped arguments", async (context) => {
+  const deadlines = []
+  const timeout = AbortSignal.timeout.bind(AbortSignal)
+  context.mock.method(AbortSignal, "timeout", (duration) => {
+    deadlines.push(duration)
+    return timeout(duration)
+  })
+  const harness = createObservationProductionHarness()
+  const response = await harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+  assert.equal(response.status, 200)
+  assert.deepEqual(deadlines, [8_000])
+  assert.deepEqual(harness.calls.fenceControls, ["abortSignal", "retry:false"])
+  assert.equal(harness.calls.fenceRequests.length, 1)
+  assert.equal(harness.calls.providerSend, 0)
+})
+
+test("production contact fence RPC failures stop before source fallback, claim, or provider", async () => {
+  for (const code of ["PGRST202", "42501", "57014"]) {
+    const harness = createObservationProductionHarness({
+      runtimeVersion: 1, activationMode: "live",
+      readFence: () => ({ data: contactFence(), error: { code, message: "synthetic_private_error" } }),
+    })
+    const response = await harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+    assert.equal(response.status, 503, code)
+    assert.deepEqual(await response.json(), { ok: false, code: "registration_customer_message_runtime_unavailable" })
+    assert.deepEqual(harness.calls.rpcNames, ["read_registration_contact_message_fence_v1"])
+    assert.deepEqual(harness.calls.fenceControls, ["abortSignal", "retry:false"])
+    assert.equal(harness.calls.providerSend, 0)
+    assert.equal(harness.calls.marker, 0)
+    assert.equal(harness.calls.release, 0)
+  }
+})
+
+test("production contact fence transport rejection stays fail-closed without retry or source fallback", async () => {
+  const harness = createObservationProductionHarness({
+    runtimeVersion: 1, activationMode: "live",
+    readFence: () => Promise.reject(new Error("synthetic_private_transport_error")),
+  })
+  const response = await harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { ok: false, code: "registration_customer_message_runtime_unavailable" })
+  assert.deepEqual(harness.calls.rpcNames, ["read_registration_contact_message_fence_v1"])
+  assert.deepEqual(harness.calls.fenceControls, ["abortSignal", "retry:false"])
+  assert.equal(harness.calls.providerSend, 0)
+  assert.equal(harness.calls.marker, 0)
+})
+
+test("production contact fence cancellation reaches the in-flight query and makes no second request", async (context) => {
+  const deadline = new AbortController()
+  const deadlines = []
+  context.mock.method(AbortSignal, "timeout", (duration) => {
+    deadlines.push(duration)
+    return deadline.signal
+  })
+  let started
+  const inFlight = new Promise((resolve) => { started = resolve })
+  const harness = createObservationProductionHarness({
+    runtimeVersion: 1, activationMode: "live",
+    readFence: (signal) => new Promise((_, reject) => {
+      assert.equal(signal, deadline.signal)
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+      started()
+    }),
+  })
+  const pending = harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+  await inFlight
+  deadline.abort(new DOMException("synthetic_deadline", "TimeoutError"))
+  const response = await pending
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { ok: false, code: "registration_customer_message_runtime_unavailable" })
+  assert.deepEqual(deadlines, [8_000])
+  assert.deepEqual(harness.calls.rpcNames, ["read_registration_contact_message_fence_v1"])
+  assert.deepEqual(harness.calls.fenceControls, ["abortSignal", "retry:false"])
+  assert.equal(harness.calls.providerSend, 0)
+  assert.equal(harness.calls.marker, 0)
+})
+
+test("a closed production contact fence keeps preview before source and provider boundaries", async () => {
+  const harness = createObservationProductionHarness({
+    runtimeVersion: 1, activationMode: "live",
+    readFence: () => ({ data: { ...contactFence(), contactPhase: "closed", allPhasesClosed: true }, error: null }),
+  })
+  const response = await harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+  assert.equal(response.status, 409)
+  assert.deepEqual(await response.json(), { ok: false, code: "registration_customer_message_source_ineligible" })
+  assert.deepEqual(harness.calls.rpcNames, ["read_registration_contact_message_fence_v1"])
+  assert.deepEqual(harness.calls.fenceControls, ["abortSignal", "retry:false"])
+  assert.equal(harness.calls.providerSend, 0)
+  assert.equal(harness.calls.marker, 0)
+})
+
+test("production send rechecks a failed or closed contact fence before claim and provider", async () => {
+  for (const [nextFence, expectedStatus, expectedCode] of [
+    [{ data: contactFence(), error: { code: "PGRST202" } }, 503, "registration_customer_message_runtime_unavailable"],
+    [{ data: { ...contactFence(), contactPhase: "closed", allPhasesClosed: true }, error: null }, 409, "registration_customer_message_source_ineligible"],
+  ]) {
+    let fenceResult = { data: contactFence(), error: null }
+    const harness = createObservationProductionHarness({
+      runtimeVersion: 1, activationMode: "live", readFence: () => fenceResult,
+    })
+    const previewResponse = await harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+    const preview = await previewResponse.json()
+    assert.equal(previewResponse.status, 200)
+    assert.ok(preview.previewId)
+    const beforeSend = harness.calls.rpcNames.length
+    fenceResult = nextFence
+    const response = await harness.handlers.send(operatorRequest("/send", {
+      previewId: preview.previewId, requestKey: IDS.request,
+    }))
+    assert.equal(response.status, expectedStatus)
+    assert.deepEqual(await response.json(), { ok: false, code: expectedCode })
+    assert.deepEqual(harness.calls.rpcNames.slice(beforeSend), [
+      "read_registration_customer_message_preview_target_v1",
+      "read_registration_contact_message_request_replay_v1",
+      "read_registration_contact_message_fence_v1",
+    ])
+    assert.deepEqual(harness.calls.fenceControls, ["abortSignal", "retry:false", "abortSignal", "retry:false"])
+    assert.equal(harness.calls.providerSend, 0)
+    assert.equal(harness.calls.marker, 0)
+    assert.equal(harness.calls.release, 0)
+  }
+})
+
+test("a post-claim production contact fence failure releases the claim without marker or provider", async () => {
+  let fenceReads = 0
+  const harness = createObservationProductionHarness({
+    runtimeVersion: 1, activationMode: "live",
+    readFence: () => (++fenceReads === 3
+      ? { data: null, error: { code: "57014" } }
+      : { data: contactFence(), error: null }),
+  })
+  const previewResponse = await harness.handlers.preview(operatorRequest("/preview", OBSERVATION_BOOKING_TARGET))
+  const preview = await previewResponse.json()
+  assert.equal(previewResponse.status, 200)
+  const response = await harness.handlers.send(operatorRequest("/send", {
+    previewId: preview.previewId, requestKey: IDS.request,
+  }))
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { ok: false, code: "registration_customer_message_pre_send_failed" })
+  assert.equal(fenceReads, 3)
+  assert.deepEqual(harness.calls.fenceControls, Array(3).fill(["abortSignal", "retry:false"]).flat())
+  assert.deepEqual(harness.calls.rpcNames.slice(-2), [
+    "read_registration_contact_message_fence_v1", "release_registration_customer_message_pre_send_claim_v1",
+  ])
+  assert.equal(harness.calls.rpcNames.filter((name) => name === "claim_registration_customer_message_v1").length, 1)
+  assert.equal(harness.calls.release, 1)
+  assert.equal(harness.calls.marker, 0)
+  assert.equal(harness.calls.providerSend, 0)
 })
 
 test("production observation confirmation calls the exact provider endpoint once and exact replay calls it zero more times", async () => {

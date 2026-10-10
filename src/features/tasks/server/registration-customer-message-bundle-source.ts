@@ -40,11 +40,13 @@ export type RegistrationCustomerMessageBundleSource = Readonly<{
   items: ReadonlyArray<RegistrationCustomerMessageBundleSourceItem>
 }>
 
+export type RegistrationCustomerMessageBundlePreviewSource = Omit<RegistrationCustomerMessageBundleSource, "parentPhoneDigits">
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const HASH = /^[a-f0-9]{64}$/u
 const PHONE = /^01(?:0|1|[6-9])[0-9]{7,8}$/u
 const DATE = /^\d{4}-\d{2}-\d{2}$/u
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/u
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/u
 const kinds = new Set<RegistrationCustomerMessageBundleKind>([
   "level_test_booking_bundle", "visit_consultation_booking_bundle", "observation_booking_bundle",
   "level_test_reminder_bundle", "visit_consultation_reminder_bundle", "observation_reminder_bundle",
@@ -62,7 +64,7 @@ function timestamp(value: unknown) {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : invalid()
 }
 
-function templateKind(source: RegistrationCustomerMessageBundleSource): RegistrationCustomerMessageSingleSourceKind {
+function templateKind(source: Pick<RegistrationCustomerMessageBundleSource, "reservationKind" | "deliveryKind">): RegistrationCustomerMessageSingleSourceKind {
   if (source.reservationKind === "level_test") {
     return source.deliveryKind === "booking" ? "level_test_booking" : "appointment_reminder"
   }
@@ -88,8 +90,10 @@ function sharedOrPerSubject(
   return items.map((item) => `${value(item)}(${item.subject})`).join(", ")
 }
 
-export function parseRegistrationCustomerMessageBundleSource(value: unknown): RegistrationCustomerMessageBundleSource {
-  if (!record(value) || !exact(value, ["messageKind", "sourceId", "bundleId", "bundleRevision", "taskId", "reservationKind", "deliveryKind", "serviceDate", "recipientRevision", "sourceFingerprint", "studentName", "parentPhoneDigits", "items"])) invalid()
+function parseBundleSource(value: unknown, metadataOnly: boolean): RegistrationCustomerMessageBundleSource | RegistrationCustomerMessageBundlePreviewSource {
+  const keys = ["messageKind", "sourceId", "bundleId", "bundleRevision", "taskId", "reservationKind", "deliveryKind", "serviceDate", "recipientRevision", "sourceFingerprint", "studentName", "items"]
+  if (!metadataOnly) keys.push("parentPhoneDigits")
+  if (!record(value) || !exact(value, keys)) invalid()
   if (typeof value.messageKind !== "string" || !kinds.has(value.messageKind as RegistrationCustomerMessageBundleKind)) invalid()
   const messageKind = value.messageKind as RegistrationCustomerMessageBundleKind
   const taskId = uuid(value.taskId)
@@ -99,7 +103,8 @@ export function parseRegistrationCustomerMessageBundleSource(value: unknown): Re
   if ((reservationKind !== "level_test" && reservationKind !== "visit_consultation" && reservationKind !== "observation") || (deliveryKind !== "booking" && deliveryKind !== "reminder")) invalid()
   if (!messageKind.startsWith(`${reservationKind}_`) || messageKind.endsWith("reminder_bundle") !== (deliveryKind === "reminder")) invalid()
   if (!Number.isSafeInteger(value.bundleRevision) || (value.bundleRevision as number) < 1 || !Number.isSafeInteger(value.recipientRevision) || (value.recipientRevision as number) < 1) invalid()
-  if (typeof value.sourceFingerprint !== "string" || !HASH.test(value.sourceFingerprint) || typeof value.parentPhoneDigits !== "string" || !PHONE.test(value.parentPhoneDigits)) invalid()
+  if (typeof value.sourceFingerprint !== "string" || !HASH.test(value.sourceFingerprint)
+    || (!metadataOnly && (typeof value.parentPhoneDigits !== "string" || !PHONE.test(value.parentPhoneDigits)))) invalid()
   if ((value.serviceDate !== null && (typeof value.serviceDate !== "string" || !DATE.test(value.serviceDate))) || (deliveryKind === "reminder" && value.serviceDate === null) || !Array.isArray(value.items) || value.items.length < 1 || value.items.length > 3) invalid()
   const subjects = new Set<string>()
   const items = value.items.map((item) => {
@@ -108,16 +113,28 @@ export function parseRegistrationCustomerMessageBundleSource(value: unknown): Re
     subjects.add(item.subject)
     return Object.freeze({ sourceKind: item.sourceKind as RegistrationCustomerMessageBundleSourceItem["sourceKind"], sourceId: uuid(item.sourceId), sourceRevision: Object.freeze({ ...item.sourceRevision }), trackId: uuid(item.trackId), activityId: item.activityId === null ? null : uuid(item.activityId), subject: item.subject as RegistrationCustomerMessageBundleSourceItem["subject"], scheduledAt: timestamp(item.scheduledAt), serviceDate: item.serviceDate, place: item.place as RegistrationCustomerMessageBundleSourceItem["place"], className: item.className === null ? null : text(item.className), teacherName: item.teacherName === null ? null : text(item.teacherName), sourceFactHash: item.sourceFactHash })
   })
-  return Object.freeze({ messageKind, taskId, bundleId: uuid(value.bundleId), bundleRevision: value.bundleRevision as number, reservationKind, deliveryKind, serviceDate: value.serviceDate as string | null, recipientRevision: value.recipientRevision as number, sourceFingerprint: value.sourceFingerprint, studentName: text(value.studentName), parentPhoneDigits: value.parentPhoneDigits, items: Object.freeze(items) })
+  return Object.freeze({ messageKind, taskId, bundleId: uuid(value.bundleId), bundleRevision: value.bundleRevision as number, reservationKind, deliveryKind, serviceDate: value.serviceDate as string | null, recipientRevision: value.recipientRevision as number, sourceFingerprint: value.sourceFingerprint, studentName: text(value.studentName),
+    ...(metadataOnly ? {} : { parentPhoneDigits: value.parentPhoneDigits as string }), items: Object.freeze(items) })
 }
 
-export function createRegistrationCustomerMessageBundleSourceResolver(dependencies: Readonly<{
+export function parseRegistrationCustomerMessageBundleSource(value: unknown): RegistrationCustomerMessageBundleSource {
+  return parseBundleSource(value, false) as RegistrationCustomerMessageBundleSource
+}
+
+/** Preview has no recipient contact field; reject a legacy private source instead of discarding it. */
+export function parseRegistrationCustomerMessageBundlePreviewSource(value: unknown): RegistrationCustomerMessageBundlePreviewSource {
+  return parseBundleSource(value, true)
+}
+
+type BundleResolverDependencies = Readonly<{
   catalog: RegistrationCustomerMessageCatalog
   resolveSource(input: Readonly<{ messageKind: RegistrationCustomerMessageBundleKind; sourceId: string }>): Promise<unknown>
-}>) {
+}>
+
+function createBundleSourceResolver(dependencies: BundleResolverDependencies, parseSource: (value: unknown) => RegistrationCustomerMessageBundlePreviewSource) {
   return Object.freeze({
     async resolve(input: Readonly<{ messageKind: RegistrationCustomerMessageBundleKind; sourceId: string }>) {
-      const source = parseRegistrationCustomerMessageBundleSource(await dependencies.resolveSource(input))
+      const source = parseSource(await dependencies.resolveSource(input))
       if (source.messageKind !== input.messageKind || source.taskId !== input.sourceId) invalid()
       const items = orderedItems(source.items)
       const kind = templateKind(source)
@@ -171,4 +188,12 @@ export function createRegistrationCustomerMessageBundleSourceResolver(dependenci
       })
     },
   })
+}
+
+export function createRegistrationCustomerMessageBundleSourceResolver(dependencies: BundleResolverDependencies) {
+  return createBundleSourceResolver(dependencies, parseRegistrationCustomerMessageBundleSource)
+}
+
+export function createRegistrationCustomerMessageBundlePreviewSourceResolver(dependencies: BundleResolverDependencies) {
+  return createBundleSourceResolver(dependencies, parseRegistrationCustomerMessageBundlePreviewSource)
 }

@@ -16,6 +16,7 @@ import {
   settleRegistrationConflictComparison,
   type RegistrationConflictComparison,
 } from "./registration-application-model"
+import { canUseRegistrationParentContact, getRegistrationContactScopeKey, reconcileRegistrationInquiryContactDraft, stripRegistrationInquiryContact } from "./registration-contact-client.ts"
 import { RegistrationSubjectPicker } from "./registration-subject-picker"
 import { RegistrationSaveButton } from "./registration-save-button"
 import {
@@ -35,7 +36,6 @@ export type RegistrationInquiryDraft = {
   schoolGrade: string
   schoolName: string
   parentPhone: string
-  studentPhone: string
   campus: string
   inquiryAt: string
   requestNote: string
@@ -50,7 +50,6 @@ const REGISTRATION_INQUIRY_FIELD_LABELS: Record<keyof RegistrationInquiryDraft, 
   schoolGrade: "학년",
   schoolName: "학교",
   parentPhone: "학부모 전화",
-  studentPhone: "학생 전화",
   campus: "캠퍼스",
   inquiryAt: "문의 일시",
   requestNote: "요청 사항",
@@ -147,13 +146,14 @@ export function RegistrationInquiryEditor({
   onDirtyChange?: (dirty: boolean) => void
 }) {
   const registration = detail.task.registration || {}
+  const canonicalContactOpen = canUseRegistrationParentContact(detail.contactState)
+  const canonicalContactScopeKey = getRegistrationContactScopeKey(detail.contactState)
   const canonicalSubjects = sortAcademicSubjects(detail.tracks.map((track) => track.subject)) as RegistrationSubject[]
   const canonicalDraft: RegistrationInquiryDraft = {
     studentName: detail.task.studentName || "",
     schoolGrade: registration.schoolGrade || "",
     schoolName: registration.schoolName || "",
-    parentPhone: registration.parentPhone || "",
-    studentPhone: registration.studentPhone || "",
+    parentPhone: canonicalContactOpen ? detail.contactState?.parentPhone || "" : "",
     campus: detail.task.campus || "본관",
     inquiryAt: toRegistrationInquiryDateTimeLocal(registration.inquiryAt),
     requestNote: registration.requestNote || "",
@@ -166,11 +166,17 @@ export function RegistrationInquiryEditor({
   const requestKeysRef = useRef(new Map<string, string>())
   const sectionRef = useRef<HTMLElement | null>(null)
   const [draft, setDraft] = useState<RegistrationInquiryDraft>(() => canonicalDraft)
+  const addedSubjects = draft.subjects.filter((subject) => !canonicalSubjects.includes(subject))
+  const freshSubjectPurpose = detail.contactState?.phase === "closed" && detail.contactState.closureReason !== "whole_case_cancelled" && addedSubjects.length > 0
+  const showParentContact = canonicalContactOpen || freshSubjectPurpose
+  const contactScopeKey = `${canonicalContactScopeKey}${freshSubjectPurpose ? `:new-subject:${sortAcademicSubjects(addedSubjects).join("|")}` : ""}`
+  const contactScopeKeyRef = useRef(contactScopeKey)
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const [validationError, setValidationError] = useState("")
   const [conflictAttempt, setConflictAttempt] = useState<RegistrationConflictComparison<RegistrationInquiryDraft> | null>(null)
-  const dirty = JSON.stringify(draft) !== canonicalDraftValue || Boolean(conflictAttempt)
+  const visibleDraft = reconcileRegistrationInquiryContactDraft(draft, canonicalDraft, contactScopeKeyRef.current, contactScopeKey, showParentContact)
+  const dirty = JSON.stringify(visibleDraft) !== canonicalDraftValue || Boolean(conflictAttempt)
   useOwnedDirtyState(dirty && !refreshPending, onDirtyChange)
 
   useEffect(() => {
@@ -182,12 +188,17 @@ export function RegistrationInquiryEditor({
         nextCanonicalDraft: JSON.parse(canonicalDraftValue) as RegistrationInquiryDraft,
       })
       canonicalDraftKeyRef.current = reconciled.canonicalKey
-      return reconciled.draft
+      return reconcileRegistrationInquiryContactDraft(reconciled.draft, JSON.parse(canonicalDraftValue), contactScopeKeyRef.current, contactScopeKey, showParentContact)
     })
-  }, [canonicalDraftKey, canonicalDraftValue])
+    if (contactScopeKeyRef.current !== contactScopeKey || !showParentContact) {
+      requestKeysRef.current.clear()
+      setConflictAttempt((current) => current ? { ...current, attempted: stripRegistrationInquiryContact(current.attempted, true) } : null)
+    }
+    contactScopeKeyRef.current = contactScopeKey
+  }, [canonicalDraftKey, canonicalDraftValue, contactScopeKey, showParentContact])
 
   const conflictRows = conflictAttempt?.latestReady
-    ? registrationInquiryConflictRows(conflictAttempt.attempted, canonicalDraft)
+    ? registrationInquiryConflictRows(stripRegistrationInquiryContact(conflictAttempt.attempted, !showParentContact || contactScopeKeyRef.current !== contactScopeKey), canonicalDraft).filter((row) => showParentContact || row.field !== "parentPhone")
     : []
 
   function update<K extends keyof RegistrationInquiryDraft>(field: K, value: RegistrationInquiryDraft[K]) {
@@ -209,18 +220,19 @@ export function RegistrationInquiryEditor({
   async function submit() {
     if (!canEdit || saving || refreshPending || conflictAttempt) return
     const attemptedDraft: RegistrationInquiryDraft = {
-      ...draft,
+      ...visibleDraft,
       studentName: draft.studentName.trim(),
       schoolGrade: draft.schoolGrade.trim(),
       schoolName: draft.schoolName.trim(),
-      parentPhone: draft.parentPhone.trim(),
-      studentPhone: draft.studentPhone.trim(),
+      parentPhone: showParentContact ? visibleDraft.parentPhone.trim() : "",
       campus: draft.campus.trim(),
       requestNote: draft.requestNote.trim(),
       subjects: sortAcademicSubjects(draft.subjects) as RegistrationSubject[],
     }
     const payloadKey = JSON.stringify({
       taskId: detail.task.id,
+      expectedContactGeneration: detail.contactState?.generation,
+      expectedContactRevision: detail.contactState?.revision,
       expectedCommonRevision: detail.commonRevision,
       expectedSubjects: canonicalSubjects,
       ...attemptedDraft,
@@ -236,7 +248,7 @@ export function RegistrationInquiryEditor({
       const outcome = await onSave(attemptedDraft, requestKey)
       requestKeysRef.current.delete(logicalKey)
       if (outcome === "conflict") {
-        const comparison = beginRegistrationConflictComparison(attemptedDraft)
+        const comparison = beginRegistrationConflictComparison(stripRegistrationInquiryContact(attemptedDraft, true))
         setConflictAttempt(comparison)
         try {
           await onReload()
@@ -261,6 +273,7 @@ export function RegistrationInquiryEditor({
     } catch (error) {
       const message = errorMessage(error, "문의 정보를 저장하지 못했습니다.")
       setValidationError(message)
+      if (message.includes("registration_contact_")) setRefreshPending(true)
       onWarning(message)
     } finally {
       setSaving(false)
@@ -332,7 +345,7 @@ export function RegistrationInquiryEditor({
                   setConflictAttempt(null)
                 }}>최신 값 사용</Button>
                 <Button type="button" size="sm" onClick={() => {
-                  setDraft({ ...conflictAttempt.attempted })
+                  setDraft(stripRegistrationInquiryContact(conflictAttempt.attempted, !showParentContact || contactScopeKeyRef.current !== contactScopeKey))
                   setConflictAttempt(null)
                   focusFirstInvalid(sectionRef.current, "[data-common-field]")
                 }}>내 입력 다시 적용</Button>
@@ -349,7 +362,8 @@ export function RegistrationInquiryEditor({
         onToggle={toggleSubject}
       />
       <RegistrationInquiryCommonFields
-        values={draft}
+        values={visibleDraft}
+        showParentContact={showParentContact}
         disabled={!canEdit || saving || refreshPending || Boolean(conflictAttempt)}
         onChange={updateInquiryField}
       />

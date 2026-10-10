@@ -27,12 +27,12 @@ const PROVIDER_PAYLOAD_CHECKSUM = "a".repeat(64)
 const ACTIVATION_EVIDENCE_ID = "00000000-0000-4000-8000-000000000009"
 
 const TARGET = Object.freeze({
-  messageKind: "waiting_notice",
+  messageKind: "level_test_booking",
   sourceId: IDS.source,
 })
 
 const SOURCE = Object.freeze({
-  messageKind: "waiting_notice",
+  messageKind: "level_test_booking",
   sourceId: IDS.source,
   taskId: IDS.task,
   sourceRevision: 3,
@@ -54,7 +54,7 @@ const PRIVATE_SOURCE = Object.freeze({
   sourceFingerprint: "source-fingerprint",
   sourceFactsChecksum: "facts-checksum",
   rendered: Object.freeze({
-    kind: "waiting_notice",
+    kind: "level_test_booking",
     body: SOURCE.body,
     variables: Object.freeze({ 학생명: "김팁스", 과목: "수학", 대기종류: "현재반 대기", 대기내용: "중2 수학 A" }),
     buttons: Object.freeze([]),
@@ -65,7 +65,7 @@ const PRIVATE_SOURCE = Object.freeze({
     parentPhoneDigits: "01012345678",
     sourceFingerprint: "source-fingerprint",
     recipientHash: "recipient-hash",
-    templateKey: "waiting_notice",
+    templateKey: "level_test_booking",
     templateRevision: 1,
     templateChecksum: "template-checksum",
     renderedVariablesChecksum: "variables-checksum",
@@ -113,7 +113,7 @@ const TEACHER_HISTORY_READINESS = Object.freeze({
 
 const HISTORY = Object.freeze([{
   messageId: IDS.message,
-  messageKind: "waiting_notice",
+  messageKind: "level_test_booking",
   currentStatus: "pending",
   confirmedByName: "김관리",
   confirmedAt: "2026-08-05T00:05:00.000Z",
@@ -279,6 +279,152 @@ function request(path, init = {}) {
   })
 }
 
+const CONTACT_DIGEST = Object.freeze({ version: 1, digest: "a".repeat(64) })
+function contactFenceFor(target = TARGET) {
+  return { version: 1, ...target, taskId: IDS.task, contactPhase: "open", contactGeneration: "1",
+    allPhasesClosed: false, sourcePhaseOpen: true,
+    canonicalAppointmentKind: target.messageKind.startsWith("observation_") ? "observation_class" : "level_test" }
+}
+function contactGrantFor(target = TARGET) {
+  return { version: 1, action: "attempt", linearization: "registration_contact_case_lock_v1",
+    messageId: IDS.message, dispatchToken: IDS.dispatch, contactFence: contactFenceFor(target) }
+}
+
+function createAdmissionProductionHarness({ fenceChanges = {}, sourceError = null, rawChanges = {}, role = "staff" } = {}) {
+  const target = { messageKind: "admission_application", sourceId: IDS.task }
+  const calls = { rpc: [], controls: [], provider: 0, authorizedTaskIds: [] }
+  const trackId = "00000000-0000-4000-8000-000000000010"
+  const raw = {
+    ...target, taskId: IDS.task, trackId: null, appointmentId: null, sourceRevision: 9,
+    studentName: "합성 학생", parentPhoneDigits: "01000000001", subjects: ["영어"],
+    tracks: [{ trackId, subject: "영어", workflowStatus: "enrollment_requested", workflowRevision: 3, pipelineStatus: "enrollment_decided" }],
+    enrollmentPlans: [{ enrollmentId: "00000000-0000-4000-8000-000000000011", trackId, subject: "영어", sortOrder: 0,
+      workflowStatus: "enrollment_requested", workflowRevision: 3, enrollmentUpdatedAt: "2026-10-09T00:00:00.000000Z",
+      classId: "00000000-0000-4000-8000-000000000012", classSubject: "영어", className: "합성 영어반",
+      classUpdatedAt: "2026-10-09T00:00:01.000000Z", textbookId: null, textbookName: null, textbookUpdatedAt: null,
+      runtimeVersion: 0, storageMode: "legacy", authority: "legacy", scheduleRevision: 4, scheduleHash: "a".repeat(64),
+      slots: [{ slotId: null, weekday: 1, startTime: "18:00", endTime: "20:00", teacherName: "합성 교사",
+        classroomName: "본관 301호", sortOrder: 0, updatedAt: null }],
+      firstLesson: { sessionId: null, sessionKey: "2030-01-07:1", sessionDate: "2030-01-07", scheduleState: "active",
+        startTime: "18:00", endTime: "20:00", revision: null, updatedAt: null } }],
+    ...rawChanges,
+  }
+  const serviceClient = {
+    rpc(name, args) {
+      calls.rpc.push({ name, args: structuredClone(args) })
+      if (name === "read_registration_contact_message_fence_v1") {
+        assert.deepEqual(args, { p_actor_profile_id: IDS.actor, p_message_kind: target.messageKind, p_source_id: IDS.task })
+        let signal
+        return {
+          abortSignal(value) { assert.ok(value instanceof AbortSignal); signal = value; calls.controls.push("abortSignal"); return this },
+          retry(value) {
+            assert.equal(value, false); assert.ok(signal); calls.controls.push("retry:false")
+            return Promise.resolve({ data: { version: 1, ...target, taskId: IDS.task, contactPhase: "open", contactGeneration: "1",
+              allPhasesClosed: false, sourcePhaseOpen: true, canonicalAppointmentKind: null, ...fenceChanges }, error: null })
+          },
+        }
+      }
+      if (name === "resolve_registration_customer_message_source_v1") {
+        assert.deepEqual(args, { p_actor_profile_id: IDS.actor, p_message_kind: target.messageKind, p_source_id: IDS.task })
+        return { data: sourceError ? null : structuredClone(raw), error: sourceError }
+      }
+      if (name === "get_registration_customer_solapi_readiness_v1") {
+        assert.equal(args.p_actor_profile_id, IDS.actor)
+        assert.equal(args.p_message_kind, target.messageKind)
+        assert.equal(args.p_source_id, IDS.task)
+        return { data: { ...ACTIVE_READINESS, activationMode: "off", activationEligible: false, sendAllowed: false, blockers: ["activation_off"] }, error: null }
+      }
+      if (name === "list_registration_customer_messages_v1") {
+        assert.deepEqual(args, { p_actor_profile_id: IDS.actor, p_message_kind: target.messageKind, p_source_id: IDS.task, p_limit: 1 })
+        return { data: [], error: null }
+      }
+      throw new Error(`unexpected synthetic admission RPC: ${name}`)
+    },
+  }
+  return {
+    target, calls,
+    handlers: createProductionRegistrationCustomerMessageRouteHandlers({
+      environment: PRODUCTION_HISTORY_ENV,
+      auth: {
+        async authenticate() { return { actorProfileId: IDS.actor, role, actorClient: {}, serviceClient } },
+        async authorizeTask(_context, taskId) { assert.equal(taskId, IDS.task); calls.authorizedTaskIds.push(taskId); return true },
+      },
+      async providerFetch() { calls.provider += 1; throw new Error("synthetic_preview_must_not_call_provider") },
+    }),
+  }
+}
+
+test("production registration guidance preview uses canonical saved plans and the case UUID without activating sends", async (context) => {
+  const deadlines = []
+  const timeout = AbortSignal.timeout.bind(AbortSignal)
+  context.mock.method(AbortSignal, "timeout", (ms) => { deadlines.push(ms); return timeout(ms) })
+  const harness = createAdmissionProductionHarness()
+  const response = await harness.handlers.preview(request("/preview", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(harness.target),
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.messageKind, "admission_application")
+  assert.equal(body.studentName, "합성 학생")
+  assert.equal(body.recipientLast4, "0001")
+  assert.equal(body.previewId, null)
+  assert.equal(body.readiness.sendAllowed, false)
+  assert.deepEqual(harness.calls.authorizedTaskIds, [IDS.task])
+  assert.deepEqual(harness.calls.rpc.map(({ name }) => name), ["read_registration_contact_message_fence_v1",
+    "resolve_registration_customer_message_source_v1", "get_registration_customer_solapi_readiness_v1", "list_registration_customer_messages_v1"])
+  assert.deepEqual(harness.calls.controls, ["abortSignal", "retry:false"])
+  assert.deepEqual(deadlines, [8_000])
+  assert.equal(harness.calls.provider, 0)
+  assert.doesNotMatch(JSON.stringify(body), /01000000001|parentPhoneDigits|recipientHash|sourceFingerprint|local-api-secret/u)
+})
+
+test("production registration guidance closed or canonically ineligible sources stop before the private resolver", async () => {
+  for (const fenceChanges of [{ contactPhase: "closed" }, { allPhasesClosed: true }, { sourcePhaseOpen: false }]) {
+    const harness = createAdmissionProductionHarness({ fenceChanges })
+    const response = await harness.handlers.preview(request("/preview", { method: "POST", body: JSON.stringify(harness.target) }))
+    assert.equal(response.status, 409)
+    assert.deepEqual(harness.calls.rpc.map(({ name }) => name), ["read_registration_contact_message_fence_v1"])
+    assert.equal(harness.calls.provider, 0)
+  }
+})
+
+test("production registration guidance rejects a forged appointment kind and another task's fence", async () => {
+  for (const [fenceChanges, status, expectedRpcs] of [
+    [{ canonicalAppointmentKind: "level_test" }, 409, ["read_registration_contact_message_fence_v1"]],
+    [{ taskId: IDS.source }, 503, ["read_registration_contact_message_fence_v1", "resolve_registration_customer_message_source_v1"]],
+  ]) {
+    const harness = createAdmissionProductionHarness({ fenceChanges })
+    const response = await harness.handlers.preview(request("/preview", { method: "POST", body: JSON.stringify(harness.target) }))
+    assert.equal(response.status, status)
+    assert.deepEqual(harness.calls.rpc.map(({ name }) => name), expectedRpcs)
+    assert.equal(harness.calls.provider, 0)
+    assert.doesNotMatch(JSON.stringify(await response.json()), /01000000001|parentPhoneDigits/u)
+  }
+})
+
+test("production registration guidance missing saved schedules fails without readiness, preview, or provider fallback", async () => {
+  for (const options of [{ rawChanges: { enrollmentPlans: [] } },
+    { sourceError: { code: "22023", message: "registration_customer_message_source_ineligible: synthetic private details" } }]) {
+    const harness = createAdmissionProductionHarness(options)
+    const response = await harness.handlers.preview(request("/preview", { method: "POST", body: JSON.stringify(harness.target) }))
+    assert.equal(response.status, 422)
+    assert.deepEqual(harness.calls.rpc.map(({ name }) => name), ["read_registration_contact_message_fence_v1", "resolve_registration_customer_message_source_v1"])
+    assert.equal(harness.calls.provider, 0)
+    assert.doesNotMatch(JSON.stringify(await response.json()), /synthetic private details|01000000001/u)
+  }
+})
+
+test("production registration guidance keeps unauthorized roles outside the contact reader", async () => {
+  const harness = createAdmissionProductionHarness({ role: "teacher" })
+  const response = await harness.handlers.preview(request("/preview", { method: "POST", body: JSON.stringify(harness.target) }))
+  assert.equal(response.status, 403)
+  assert.deepEqual(harness.calls.rpc, [])
+  assert.equal(harness.calls.provider, 0)
+})
+function safeContactContract(sourceContract = PRIVATE_SOURCE.previewContract) {
+  const { parentPhoneDigits, ...checksums } = sourceContract
+  return { ...checksums, version: 1, contactGeneration: "1", recipientLast4: parentPhoneDigits.slice(-4), requestDigest: CONTACT_DIGEST }
+}
 function makeDeps(overrides = {}) {
   const calls = {
     auth: 0,
@@ -303,6 +449,9 @@ function makeDeps(overrides = {}) {
     observationReadiness: 0,
   }
   const deps = {
+    readContactFence: async ({ messageKind, sourceId }) => contactFenceFor({ messageKind, sourceId }),
+    createRequestDigest: () => CONTACT_DIGEST,
+    readRequestReplay: async () => null,
     now: () => new Date("2026-08-05T00:00:00.000Z"),
     async authenticate() {
       calls.auth += 1
@@ -344,11 +493,11 @@ function makeDeps(overrides = {}) {
       calls.createPreview += 1
       assert.equal(input.actorProfileId, IDS.actor)
       assert.equal(input.taskId, IDS.task)
-      assert.deepEqual(input.contract, PRIVATE_SOURCE.previewContract)
+      assert.deepEqual(input.contract, safeContactContract())
       return {
         previewId: IDS.preview,
         expiresAt: "2026-08-05T00:10:00.000Z",
-        messageKind: "waiting_notice",
+        messageKind: TARGET.messageKind,
         recipientLast4: "5678",
       }
     },
@@ -360,7 +509,7 @@ function makeDeps(overrides = {}) {
     async readPreviewTarget(input) {
       calls.readPreviewTarget += 1
       assert.equal(input.previewId, IDS.preview)
-      return { ...TARGET, taskId: IDS.task }
+      return { ...TARGET, taskId: IDS.task, contactGeneration: "1" }
     },
     async claimMessage(input) {
       calls.claim += 1
@@ -390,7 +539,7 @@ function makeDeps(overrides = {}) {
       calls.marker += 1
       assert.equal(input.claimToken, IDS.claim)
       assert.equal(input.dispatchToken, IDS.dispatch)
-      return { allowed: true, messageId: IDS.message, currentStatus: "pending", dispatchToken: IDS.dispatch }
+      return { allowed: true, messageId: IDS.message, currentStatus: "pending", dispatchToken: IDS.dispatch, contactGrant: contactGrantFor() }
     },
     async sendProvider(input) {
       calls.providerSend += 1
@@ -885,7 +1034,7 @@ test("history uses strict query input and masks teacher-only fields", async () =
   for (const [role, expected] of [
     ["staff", HISTORY],
     ["teacher", [{
-      messageKind: "waiting_notice",
+      messageKind: TARGET.messageKind,
       currentStatus: "pending",
       confirmedByName: "김관리",
       confirmedAt: "2026-08-05T00:05:00.000Z",
@@ -1077,7 +1226,7 @@ test("teacher history stays masked and skips operator-only source and readiness 
     messageKind: TARGET.messageKind,
     readiness: TEACHER_HISTORY_READINESS,
     history: [{
-      messageKind: "waiting_notice",
+      messageKind: TARGET.messageKind,
       currentStatus: "pending",
       confirmedByName: "김관리",
       confirmedAt: "2026-08-05T00:05:00.000Z",
@@ -1233,142 +1382,30 @@ test("send binds the provider payload checksum to the finalize RPC boundary", as
   assert.equal(finalizedInput.providerPayloadChecksum, PROVIDER_PAYLOAD_CHECKSUM)
 })
 
-test("all five legacy kinds preserve the same preview and provider sequence without an observation-runtime dependency", async () => {
-  for (const messageKind of [
-    "level_test_booking",
-    "visit_consultation_booking",
-    "appointment_reminder",
-    "waiting_notice",
-    "admission_application",
-  ]) {
+test("allowed legacy kinds retain the provider sequence while outside-purpose and admission candidates fail closed", async () => {
+  for (const messageKind of ["level_test_booking", "appointment_reminder", "visit_consultation_booking", "waiting_notice", "admission_application"]) {
     const target = { messageKind, sourceId: IDS.source }
     const source = { ...SOURCE, messageKind }
-    const order = []
-    const { deps } = makeDeps({
-      async resolveTaskId(input) {
-        assert.deepEqual({ messageKind: input.messageKind, sourceId: input.sourceId }, target)
-        return IDS.task
-      },
-      async resolveSource(input) {
-        order.push("canonical-source")
-        assert.deepEqual({ messageKind: input.messageKind, sourceId: input.sourceId }, target)
-        return source
-      },
-      readPrivateSource(input) {
-        assert.equal(input, source)
-        return PRIVATE_SOURCE
-      },
-      async listHistory() {
-        return []
-      },
-      async createPreview() {
-        order.push("create-preview")
-        return {
-          previewId: IDS.preview,
-          expiresAt: "2026-08-05T00:10:00.000Z",
-          messageKind,
-          recipientLast4: "5678",
-        }
-      },
-      async readPreviewTarget() {
-        return { ...target, taskId: IDS.task }
-      },
-      async claimMessage() {
-        order.push("claim")
-        return {
-          ok: false,
-          messageId: IDS.message,
-          messageKind,
-          currentStatus: "pending",
-          recipientLast4: "5678",
-          confirmedByName: "김관리",
-          confirmedAt: "2026-08-05T00:05:00.000Z",
-          updatedAt: "2026-08-05T00:05:00.000Z",
-          canCheck: false,
-          idempotent: false,
-          owner: true,
-          claimToken: IDS.claim,
-          dispatchToken: IDS.dispatch,
-        }
-      },
-      async markAttemptStarted() {
-        order.push("marker")
-        return {
-          allowed: true,
-          messageId: IDS.message,
-          currentStatus: "pending",
-          dispatchToken: IDS.dispatch,
-        }
-      },
-      async sendProvider() {
-        order.push("provider")
-        return {
-          outcome: "accepted",
-          providerPayloadChecksum: PROVIDER_PAYLOAD_CHECKSUM,
-          evidence: {
-            providerMessageId: "provider-message-1",
-            statusCode: "2000",
-            statusMessage: "접수",
-            observedAt: "2026-08-05T00:06:00.000Z",
-            requestKeyMatched: true,
-          },
-        }
-      },
-      async finalizeMessage() {
-        order.push("finalize")
-        return {
-          ok: true,
-          messageId: IDS.message,
-          messageKind,
-          currentStatus: "accepted",
-          recipientLast4: "5678",
-          confirmedByName: "김관리",
-          confirmedAt: "2026-08-05T00:05:00.000Z",
-          updatedAt: "2026-08-05T00:06:00.000Z",
-          canCheck: false,
-          idempotent: false,
-        }
-      },
+    const { deps, calls } = makeDeps({
+      resolveSource: async () => { calls.resolve += 1; return source },
+      readPrivateSource: () => PRIVATE_SOURCE,
+      readPreviewTarget: async () => ({ ...target, taskId: IDS.task, contactGeneration: "1" }),
+      markAttemptStarted: async () => { calls.marker += 1; return { allowed: true, messageId: IDS.message,
+        currentStatus: "pending", dispatchToken: IDS.dispatch, contactGrant: contactGrantFor(target) } },
+      claimMessage: async () => ({ ok: false, messageId: IDS.message, messageKind, currentStatus: "pending",
+        recipientLast4: "5678", confirmedByName: "김관리", confirmedAt: "2026-08-05T00:05:00Z",
+        updatedAt: "2026-08-05T00:05:00Z", canCheck: false, idempotent: false, owner: true,
+        claimToken: IDS.claim, dispatchToken: IDS.dispatch }),
+      finalizeMessage: async () => ({ ok: true, messageId: IDS.message, messageKind, currentStatus: "accepted",
+        recipientLast4: "5678", confirmedByName: "김관리", confirmedAt: "2026-08-05T00:05:00Z",
+        updatedAt: "2026-08-05T00:06:00Z", canCheck: false, idempotent: false }),
     })
-    const handlers = createRegistrationCustomerMessageRouteHandlers(deps)
-    const preview = await json(await handlers.preview(request("/preview", {
-      method: "POST",
-      body: JSON.stringify(target),
-    })))
-    assert.equal(preview.response.status, 200, messageKind)
-    assert.equal(
-      JSON.stringify(preview.body),
-      JSON.stringify({
-        ok: true,
-        previewId: IDS.preview,
-        expiresAt: "2026-08-05T00:10:00.000Z",
-        messageKind,
-        studentName: "김팁스",
-        recipientLast4: "5678",
-        facts: SOURCE.facts,
-        body: SOURCE.body,
-        buttons: [],
-        readiness: ACTIVE_READINESS,
-        latestMessage: null,
-      }),
-      messageKind,
-    )
-    const send = await json(await handlers.send(request("/send", {
-      method: "POST",
-      body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }),
-    })))
-    assert.equal(send.response.status, 200, messageKind)
-    assert.equal(send.body.currentStatus, "accepted", messageKind)
-    assert.deepEqual(order, [
-      "canonical-source",
-      "create-preview",
-      "canonical-source",
-      "claim",
-      "canonical-source",
-      "marker",
-      "provider",
-      "finalize",
-    ], messageKind)
+    const result = await json(await createRegistrationCustomerMessageRouteHandlers(deps).send(
+      request("/send", { method: "POST", body: JSON.stringify({ previewId: IDS.preview, requestKey: IDS.request }) })))
+    const allowed = ["level_test_booking", "appointment_reminder"].includes(messageKind)
+    assert.equal(result.response.status, allowed ? 200 : 409, messageKind)
+    assert.equal(calls.providerSend, allowed ? 1 : 0, messageKind)
+    assert.equal(calls.resolve, allowed ? 2 : 0, messageKind)
   }
 })
 

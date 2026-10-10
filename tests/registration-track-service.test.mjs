@@ -7,8 +7,10 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 import ts from "typescript";
+import { canUseRegistrationParentContact, normalizeRegistrationCaseContact, stripRegistrationTaskContact } from "../src/features/tasks/registration-contact-client.ts";
 import { createRegistrationDetailObservation } from "../src/features/tasks/registration-detail-observation.ts";
 import { buildRegistrationSubjectHistory } from "../src/features/tasks/registration-track-history.js";
+import { readRegistrationContactEvents } from "../src/features/tasks/registration-contact-event-reader.ts";
 
 import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
 import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
@@ -24,6 +26,277 @@ import {
   REGISTRATION_WORKFLOW_STATUSES,
   getRegistrationWorkflowStatusFromLegacyTrack,
 } from "../src/features/tasks/registration-workflow-status.js";
+
+const CONTACT_TASK = "73000000-0000-4000-8000-000000000001";
+const CONTACT_TRACK = "73000000-0000-4000-8000-000000000030";
+const CONTACT_KEY = "73000000-0000-4000-8000-000000000090";
+const EVENT_ACTOR = "74000000-0000-4000-8000-000000000090";
+const EVENT_FIXTURE_IDS = Object.freeze({
+  canonical: "74000000-0000-4000-8000-000000000001",
+  legacy: "74000000-0000-4000-8000-000000000002",
+  observationReason: "74000000-0000-4000-8000-000000000003",
+  observationLegacy: "74000000-0000-4000-8000-000000000004",
+  observationV1: "74000000-0000-4000-8000-000000000005",
+  publicV2: "74000000-0000-4000-8000-000000000006",
+  legacyNull: "74000000-0000-4000-8000-000000000007",
+  nonTrack: "74000000-0000-4000-8000-000000000008",
+  outerWhitespace: "74000000-0000-4000-8000-000000000009",
+  innerWhitespace: "74000000-0000-4000-8000-00000000000a",
+  innerArray: "74000000-0000-4000-8000-00000000000b",
+  malformed: "74000000-0000-4000-8000-00000000000c",
+  jsonNonV2: "74000000-0000-4000-8000-00000000000d",
+  stringVersionNearMiss: "74000000-0000-4000-8000-00000000000e",
+});
+function contactState(overrides = {}) { return {version:1,taskId:CONTACT_TASK,revision:"1",generation:"1",phase:"open",closureReason:null,closedAt:null,parentPhone:null,studentId:null,commonRevision:3,allPhasesClosed:false,currentTrackIds:[CONTACT_TRACK],...overrides}; }
+function contactEnvelope(mutation,result = {}) { return {version:1,taskId:CONTACT_TASK,command:mutation.command,requestKey:mutation.requestKey,replayed:false,result:{taskId:CONTACT_TASK,contactState:contactState({revision:"2"}),...result}}; }
+function commonContactInput(overrides = {}) { return {taskId:CONTACT_TASK,contactState:contactState(),studentName:"합성학생",schoolGrade:"중2",schoolName:"합성학교",parentPhone:"01000000000",studentPhone:"RETIRED_STUDENT_CANARY",campus:"본관",inquiryAt:"2026-09-01T18:49",requestNote:"업무메모",priority:"normal",expectedCommonRevision:3,requestKey:CONTACT_KEY,...overrides}; }
+const BIND_STUDENT = "73000000-0000-4000-8000-000000000081";
+function bindingResult(overrides = {}) { return { studentId: BIND_STUDENT, changed: true,
+  contactState: contactState({ revision: "2", studentId: BIND_STUDENT }), ...overrides }; }
+
+test("explicit student binding sends only the selected UUID with original exact counters and acknowledges metadata", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const calls = [];
+  let invalidations = 0;
+  const harness = createClient();
+  const opened = contactState({ generation: "9007199254740993", revision: "9007199254740994", parentPhone: "01000000000" });
+  const state = contactState({ generation: opened.generation, revision: "9007199254740995", studentId: BIND_STUDENT });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    mutateContact: async (command) => { calls.push(command); return contactEnvelope(command, bindingResult({ contactState: state })); },
+    onMutationSuccess: () => invalidations++,
+  }));
+  const receipt = await service.bindRegistrationStudent({ taskId: CONTACT_TASK, studentId: BIND_STUDENT,
+    contactState: opened, requestKey: CONTACT_KEY });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ command: "bind_student", taskId: CONTACT_TASK,
+    requestKey: CONTACT_KEY, expectedGeneration: opened.generation, expectedRevision: opened.revision, payload: { studentId: BIND_STUDENT } }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(receipt)), { taskId: CONTACT_TASK, ...bindingResult({ contactState: state }) });
+  assert.equal(JSON.stringify(calls).includes("01000000000"), false);
+  assert.equal(JSON.stringify(receipt).includes("01000000000"), false);
+  assert.equal(service.getContactReceipt(CONTACT_TASK).studentId, BIND_STUDENT);
+  assert.equal(service.getContactReceipt(CONTACT_TASK).parentPhone, null);
+  assert.equal(invalidations, 1);
+  assert.equal(harness.queries.length, 0);
+  assert.equal(harness.rpcCalls.length, 0);
+  assert.equal(opened.parentPhone, "01000000000");
+});
+
+test("closed case UUID binding materializes its closure timestamp without opening a contact generation", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const opened = contactState({ phase: "closed", closureReason: "all_current_tracks_terminal", allPhasesClosed: true, closedAt: null });
+  const after = { ...opened, revision: "2", studentId: BIND_STUDENT, closedAt: "2026-10-09T12:00:00Z" };
+  const service = createRegistrationTrackService(createClient().client, readyOptions({
+    mutateContact: async (command) => contactEnvelope(command, bindingResult({ contactState: after })),
+  }));
+  const receipt = await service.bindRegistrationStudent({ taskId: CONTACT_TASK, studentId: BIND_STUDENT,
+    contactState: opened, requestKey: CONTACT_KEY });
+  assert.equal(receipt.contactState.phase, "closed");
+  assert.equal(receipt.contactState.generation, opened.generation);
+  assert.equal(receipt.contactState.parentPhone, null);
+  assert.equal(receipt.contactState.closedAt, after.closedAt);
+});
+
+test("malformed identity, missing snapshot and a different previously bound UUID fail before HTTP", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let calls = 0;
+  const service = createRegistrationTrackService(createClient().client, readyOptions({ mutateContact: async () => { calls++; assert.fail("unexpected mutation"); } }));
+  const base = { taskId: CONTACT_TASK, studentId: BIND_STUDENT, contactState: contactState(), requestKey: CONTACT_KEY };
+  for (const patch of [{ studentId: "DISPLAY-081" }, { studentId: BIND_STUDENT + "\n" },
+    { requestKey: `prefix:${CONTACT_KEY}` }, { contactState: null },
+    { contactState: contactState({ generation: "01" }) }, { contactState: contactState({ taskId: BIND_STUDENT }) },
+    { contactState: contactState({ studentId: "73000000-0000-4000-8000-000000000082" }) }]) {
+    await assert.rejects(service.bindRegistrationStudent({ ...base, ...patch }), /registration_(student_binding|contact_)/);
+  }
+  assert.equal(calls, 0);
+  assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+});
+
+test("binding receipt identity and scope must agree before cache notification or metadata acknowledgement", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const other = "73000000-0000-4000-8000-000000000082";
+  const badStates = [{ studentId: other }, { generation: "2" }, { revision: "1" }, { commonRevision: 4 },
+    { currentTrackIds: [other] }, { allPhasesClosed: true },
+    { phase: "closed", closureReason: "whole_case_cancelled", closedAt: null }, { parentPhone: "01000000000" }];
+  const badResults = [{ taskId: undefined }, { studentId: other }, { studentId: null }, { changed: "false" }, { changed: undefined },
+    ...badStates.map((patch) => ({ contactState: contactState({ revision: "2", studentId: BIND_STUDENT, ...patch }) }))];
+  for (const patch of badResults) {
+    let notifications = 0;
+    const service = createRegistrationTrackService(createClient().client, readyOptions({
+      mutateContact: async (command) => contactEnvelope(command, bindingResult(patch)), onMutationSuccess: () => notifications++,
+    }));
+    await assert.rejects(service.bindRegistrationStudent({ taskId: CONTACT_TASK, studentId: BIND_STUDENT,
+      contactState: contactState(), requestKey: CONTACT_KEY }), /registration_(student_binding_response_invalid|contact_mutation_response_invalid)/);
+    assert.equal(notifications, 0);
+    assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+  }
+});
+
+test("an explicitly repeated same-student binding accepts changed=false without rebinding identity", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const service = createRegistrationTrackService(createClient().client, readyOptions({
+    mutateContact: async (command) => ({ ...contactEnvelope(command, bindingResult({ changed: false })), replayed: true }),
+  }));
+  const result = await service.bindRegistrationStudent({ taskId: CONTACT_TASK, studentId: BIND_STUDENT,
+    contactState: contactState({ studentId: BIND_STUDENT }), requestKey: CONTACT_KEY });
+  assert.equal(result.changed, false);
+  assert.equal(result.studentId, BIND_STUDENT);
+});
+
+test("binding timeout leaves no acknowledgement and an explicit replay retains the original intent", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const calls = [];
+  let notifications = 0;
+  const service = createRegistrationTrackService(createClient().client, readyOptions({ mutateContact: async (command) => {
+    calls.push(command);
+    if (calls.length === 1) throw new Error("registration_contact_mutation_timeout");
+    return { ...contactEnvelope(command, bindingResult()), replayed: true };
+  }, onMutationSuccess: () => notifications++ }));
+  const input = { taskId: CONTACT_TASK, studentId: BIND_STUDENT, contactState: contactState(), requestKey: CONTACT_KEY };
+  await assert.rejects(service.bindRegistrationStudent(input), /registration_contact_mutation_timeout/);
+  assert.equal(calls.length, 1);
+  assert.equal(notifications, 0);
+  assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+  await service.bindRegistrationStudent(input);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), JSON.parse(JSON.stringify(calls[1])));
+  assert.equal(notifications, 1);
+});
+
+test("pending binding captures selection, key and contact scope before the caller object changes", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const pending = deferred();
+  let sent;
+  const service = createRegistrationTrackService(createClient().client, readyOptions({ mutateContact: async (command) => {
+    sent = command; await pending.promise; return contactEnvelope(command, bindingResult());
+  } }));
+  const input = { taskId: CONTACT_TASK, studentId: BIND_STUDENT, contactState: contactState(), requestKey: CONTACT_KEY };
+  const result = service.bindRegistrationStudent(input);
+  input.studentId = "73000000-0000-4000-8000-000000000082";
+  input.requestKey = "73000000-0000-4000-8000-000000000083";
+  input.contactState.generation = "2";
+  input.contactState.revision = "9";
+  pending.resolve();
+  assert.equal((await result).studentId, BIND_STUDENT);
+  assert.equal(sent.payload.studentId, BIND_STUDENT);
+  assert.equal(sent.requestKey, CONTACT_KEY);
+  assert.equal(sent.expectedGeneration, "1");
+  assert.equal(sent.expectedRevision, "1");
+});
+
+test("business detail joins omit typed phones and cached detail reauthorizes the temporary recipient", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let revision = "1", phone = "01000000000", reads = 0;
+  const harness = createClient({ queryHandler: query => detailRows(query.table), contactHandler: () => { reads++; return {data:contactState({revision,parentPhone:phone}),error:null}; } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const first = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(first.task.registration.parentPhone, phone);
+  assert.equal(Object.hasOwn(first.task.registration, "studentPhone"), false);
+  const businessReads = harness.queries.length;
+  const parent = harness.queries.find(query => query.table === "ops_tasks");
+  assert.doesNotMatch(parent.columns, /parent_phone|student_phone|ops_registration_details\(\*\)/);
+  revision = "2"; phone = "01000000001";
+  const second = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(reads, 2); assert.equal(harness.queries.length, businessReads);
+  assert.equal(second.task.registration.parentPhone, phone);
+  assert.equal(service.getContactReceipt(CONTACT_TASK).parentPhone, null);
+  revision = "3";
+  harness.client.rpc = () => ({abortSignal(){return this},retry(){return this},then(resolve,reject){return Promise.resolve({data:contactState({revision,phase:"closed",allPhasesClosed:true,closureReason:"all_current_tracks_terminal",closedAt:null,parentPhone:null}),error:null}).then(resolve,reject)}});
+  const closed = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(Object.hasOwn(closed.task.registration, "parentPhone"), false);
+  assert.equal(closed.contactState.parentPhone, null);
+});
+
+test("a committed closing receipt fences an older in-flight contact detail even when its reload has not happened", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const enrollments = deferred();
+  const harness = createClient({queryHandler: query => query.table === "ops_registration_enrollments" ? enrollments.promise.then(() => detailRows(query.table)) : detailRows(query.table),contactHandler:()=>({data:contactState({parentPhone:"01000000000"}),error:null})});
+  const service = createRegistrationTrackService(harness.client,readyOptions({mutateContact:async mutation=>contactEnvelope(mutation,{trackId:CONTACT_TRACK,workflowStatus:"registered",workflowRevision:2,contactState:contactState({revision:"2",phase:"closed",closureReason:"all_current_tracks_terminal",closedAt:"2026-10-09T09:00:00Z",allPhasesClosed:true,parentPhone:null})})}));
+  const pending = service.loadCaseDetail(CONTACT_TASK,"viewer-1");
+  await new Promise(setImmediate);
+  await service.setRegistrationWorkflowStatus({taskId:CONTACT_TASK,contactState:contactState(),trackId:CONTACT_TRACK,workflowStatus:"registered",expectedWorkflowRevision:1,requestKey:CONTACT_KEY});
+  enrollments.resolve();
+  const stale = await pending;
+  assert.equal(stale.contactState.phase,"closed");assert.equal(stale.contactState.revision,"2");
+  assert.equal(Object.hasOwn(stale.task.registration,"parentPhone"),false);
+});
+
+test("a failed current-contact read cannot reuse the cached open phone", async () => {
+  const {createRegistrationTrackService}=await loadFactory();let fail=false;
+  const harness=createClient({queryHandler:query=>detailRows(query.table),contactHandler:()=>fail?{data:null,error:Error("synthetic read unavailable")}:{data:contactState({parentPhone:"01000000000"}),error:null}});
+  const service=createRegistrationTrackService(harness.client,readyOptions());
+  await service.loadCaseDetail(CONTACT_TASK,"viewer-1");fail=true;
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK,"viewer-1"),/synthetic read unavailable/);
+  assert.equal(service.getContactReceipt(CONTACT_TASK).parentPhone,null);
+});
+
+test("real receipt envelope identity and metadata are validated before a contact write is accepted", async () => {
+  const {createRegistrationTrackService}=await loadFactory();
+  for(const change of [value=>({...value,requestKey:"wrong"}),value=>({...value,command:"create"}),value=>({...value,taskId:"73000000-0000-4000-8000-000000000099"}),value=>({...value,replayed:"false"}),value=>({...value,result:[]}),value=>({...value,result:{...value.result,contactState:contactState({parentPhone:"01000000000"})}})]) {
+    const service=createRegistrationTrackService(createClient().client,readyOptions({mutateContact:async mutation=>change(contactEnvelope(mutation))}));
+    await assert.rejects(service.updateRegistrationCaseCommon(commonContactInput()),/registration_contact_(receipt|mutation_response)_invalid/);
+    assert.equal(service.getContactReceipt(CONTACT_TASK),null);
+  }
+});
+
+test("lost-response retries keep the scoped UUID and opened revisions rather than refreshing stale contact authority", async () => {
+  const {createRegistrationTrackService}=await loadFactory();const calls=[];const harness=createClient();
+  const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async mutation=>{calls.push(mutation);if(calls.length===1)throw Error("registration_contact_mutation_unavailable");return {...contactEnvelope(mutation),replayed:true};}}));
+  const input=commonContactInput({requestKey:`registration-common:${CONTACT_TASK}:${CONTACT_KEY}`});
+  await assert.rejects(service.updateRegistrationCaseCommon(input),/registration_contact_mutation_unavailable/);
+  assert.equal(calls.length,1);await service.updateRegistrationCaseCommon(input);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])),JSON.parse(JSON.stringify(calls[1])));
+  assert.equal(calls[0].requestKey,CONTACT_KEY);assert.equal(calls[0].expectedRevision,"1");assert.equal(harness.rpcCalls.length,0);
+});
+
+test("whole-case cancellation reads a bounded snapshot and atomically closes without a legacy task status write", async () => {
+  const {createRegistrationTrackService}=await loadFactory();const calls=[];const harness=createClient();
+  const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async mutation=>{calls.push(mutation);return contactEnvelope(mutation,{contactState:contactState({revision:"2",phase:"closed",closureReason:"whole_case_cancelled",closedAt:"2026-10-09T09:00:00Z",parentPhone:null})});}}));
+  const receipt=await service.closeRegistrationCaseContact({taskId:CONTACT_TASK,requestKey:CONTACT_KEY});
+  assert.equal(harness.queries.length,0);assert.equal(harness.rpcCalls.length,1);assert.equal(harness.rpcCalls[0][0],"get_registration_case_contact_v1");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])),{command:"close",taskId:CONTACT_TASK,requestKey:CONTACT_KEY,expectedGeneration:"1",expectedRevision:"1",payload:{reason:"whole_case_cancelled"}});
+  assert.equal(receipt.contactState.phase,"closed");assert.equal(service.getContactReceipt(CONTACT_TASK).parentPhone,null);
+});
+
+test("metadata-only common edits omit the contact field instead of blanking or resubmitting a hidden draft", async () => {
+  const {createRegistrationTrackService}=await loadFactory();const calls=[];
+  const service=createRegistrationTrackService(createClient().client,readyOptions({mutateContact:async mutation=>{calls.push(mutation);return contactEnvelope(mutation);}}));
+  const input=commonContactInput();delete input.parentPhone;
+  await service.updateRegistrationCaseCommon(input);
+  assert.equal(Object.hasOwn(calls[0].payload,"parentPhone"),false);
+  assert.equal(Object.hasOwn(calls[0].payload,"studentPhone"),false);
+  assert.equal(calls[0].payload.requestNote,"업무메모");
+});
+
+test("a canceled case nonterminal selection keeps opened revisions and records fresh-generation metadata without contact restoration", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const studentId = "73000000-0000-4000-8000-000000000080";
+  const opened = contactState({ revision: "8", generation: "3", phase: "closed",
+    closureReason: "whole_case_cancelled", closedAt: null, studentId });
+  const harness = createClient();
+  const calls = [];
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    mutateContact: async (command) => {
+      calls.push(command);
+      return contactEnvelope(command, {
+        trackId: CONTACT_TRACK, workflowStatus: "level_test_requested", workflowRevision: 5,
+        sourceEventIds: [], enrollmentFinalization: null,
+        contactState: contactState({ revision: "9", generation: "4", studentId }),
+      });
+    },
+  }));
+  const receipt = await service.setRegistrationWorkflowStatus({ taskId: CONTACT_TASK, contactState: opened,
+    trackId: CONTACT_TRACK, workflowStatus: "level_test_requested", expectedWorkflowRevision: 4, requestKey: CONTACT_KEY });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ command: "set_workflow_status", taskId: CONTACT_TASK,
+    requestKey: CONTACT_KEY, expectedGeneration: "3", expectedRevision: "8",
+    payload: { trackId: CONTACT_TRACK, workflowStatus: "level_test_requested", expectedWorkflowRevision: 4 } }]);
+  assert.equal(receipt.contactState.generation, "4");
+  assert.equal(receipt.contactState.phase, "open");
+  assert.equal(receipt.contactState.parentPhone, null);
+  assert.equal(receipt.contactState.studentId, studentId);
+  assert.deepEqual(Array.from(receipt.sourceEventIds), []);
+  assert.equal(receipt.enrollmentFinalization, null);
+  assert.equal(service.getContactReceipt(CONTACT_TASK).parentPhone, null);
+  assert.equal(harness.queries.length, 0);
+  assert.equal(harness.rpcCalls.length, 0);
+});
 
 const serviceUrl = new URL(
   "../src/features/tasks/registration-track-service.ts",
@@ -91,6 +364,8 @@ async function loadFactory(extraGlobals = {}) {
     normalizeRegistrationObservationSummary,
     loadRegistrationObservationFeedback,
     loadRegistrationObservationManagerDetail,
+    canUseRegistrationParentContact, normalizeRegistrationCaseContact, stripRegistrationTaskContact,
+    readRegistrationContactEvents,
     parseAcademicSubject,
     REGISTRATION_WORKFLOW_STATUSES,
     getRegistrationWorkflowStatusFromLegacyTrack,
@@ -106,19 +381,19 @@ test("subject saves send the opened snapshot and keep the same request after a l
   const harness = createClient({ rpcHandler() {
     attempt += 1;
     if (attempt === 1) return { data: null, error: new Error("response lost") };
-    return { data: { taskId: "task-1", subjects: ["영어", "수학"], tracks: [] }, error: null };
+    return { data: { taskId: "73000000-0000-4000-8000-000000000001", subjects: ["영어", "수학"], tracks: [] }, error: null };
   } });
   const service = createRegistrationTrackService(harness.client, readyOptions());
   const input = {
-    taskId: "task-1", expectedSubjects: ["영어"], subjects: ["수학", "영어"], requestKey: "subject-replay",
+    taskId: "73000000-0000-4000-8000-000000000001", expectedSubjects: ["영어"], subjects: ["수학", "영어"], requestKey: "subject-replay",
   };
   await assert.rejects(service.syncRegistrationCaseSubjects(input), /response lost/);
   assert.equal(harness.rpcCalls.length, 1, "a failed save must not retry automatically");
   const result = await service.syncRegistrationCaseSubjects(input);
-  assert.equal(result.taskId, "task-1");
+  assert.equal(result.taskId, "73000000-0000-4000-8000-000000000001");
   assert.deepEqual(harness.rpcCalls.map(([name, args]) => [name, JSON.parse(JSON.stringify(args))]), [
-    ["sync_registration_case_subjects_v2", { p_task_id: "task-1", p_subjects: ["영어", "수학"], p_expected_subjects: ["영어"], p_request_key: "subject-replay" }],
-    ["sync_registration_case_subjects_v2", { p_task_id: "task-1", p_subjects: ["영어", "수학"], p_expected_subjects: ["영어"], p_request_key: "subject-replay" }],
+    ["sync_registration_case_subjects_v2", { p_task_id: "73000000-0000-4000-8000-000000000001", p_subjects: ["영어", "수학"], p_expected_subjects: ["영어"], p_request_key: "subject-replay" }],
+    ["sync_registration_case_subjects_v2", { p_task_id: "73000000-0000-4000-8000-000000000001", p_subjects: ["영어", "수학"], p_expected_subjects: ["영어"], p_request_key: "subject-replay" }],
   ]);
 });
 
@@ -234,9 +509,9 @@ test("observation summary types are broad while generic mutations stay narrow", 
       PublicGenericDetailStatus,
       OpsRegistrationWorkflowStatus
     >>;
-    type ObservationStatusCannotUseGenericMutation = Assert<Equal<
+    type ManualObservationStatusCanUseGenericMutation = Assert<Equal<
       Extract<"observation_requested", GenericMutationStatus>,
-      never
+      "observation_requested"
     >>;
   `);
 
@@ -248,7 +523,7 @@ test("track summaries prefer the manual workflow status and preserve its revisio
 
   const explicit = mapTrack({
     id: "track-1",
-    task_id: "task-1",
+    task_id: "73000000-0000-4000-8000-000000000001",
     subject: "영어",
     pipeline_status: "waiting",
     workflow_status: "waiting_next_opening",
@@ -257,7 +532,7 @@ test("track summaries prefer the manual workflow status and preserve its revisio
   });
   const legacy = mapTrack({
     id: "track-2",
-    task_id: "task-1",
+    task_id: "73000000-0000-4000-8000-000000000001",
     subject: "수학",
     pipeline_status: "waiting",
     waiting_kind: "current_class",
@@ -292,7 +567,7 @@ test("version-2 event parser preserves explicit user, system, and migration acto
 
   const mapped = actorFixtures.map((fixture, index) => mapTrackEvent({
     id: `event-v2-${index + 1}`,
-    task_id: "task-1",
+    task_id: "73000000-0000-4000-8000-000000000001",
     actor_id: fixture.actorProfileId,
     event_type: "registration_track_event",
     field_name: "registration_track:track-1",
@@ -343,7 +618,7 @@ test("historical version-1 null actor stays unknown without current-owner infere
   const { mapTrackEvent } = await loadFactory();
   const event = mapTrackEvent({
     id: "event-v1-unknown",
-    task_id: "task-1",
+    task_id: "73000000-0000-4000-8000-000000000001",
     actor_id: "current-owner-must-not-be-inferred",
     event_type: "registration_track_event",
     field_name: "registration_track:track-1",
@@ -533,9 +808,10 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function createClient({ queryHandler, rpcHandler } = {}) {
+function createClient({ queryHandler, rpcHandler, contactHandler, eventHandler } = {}) {
   const queries = [];
   const rpcCalls = [];
+  const rpcRequests = [];
   let activeQueries = 0;
   let maxActiveQueries = 0;
   let abortedQueries = 0;
@@ -641,12 +917,22 @@ function createClient({ queryHandler, rpcHandler } = {}) {
   return {
     queries,
     rpcCalls,
+    rpcRequests,
     getAbortedQueryCount: () => abortedQueries,
     getMaxActiveQueries: () => maxActiveQueries,
     client: {
       from: builder,
-      async rpc(name, args) {
+      rpc(name, args) {
+        const rpcRequest = { name, args, signal: null, retryEnabled: null };
+        const run = async () => {
         rpcCalls.push([name, args]);
+        rpcRequests.push(rpcRequest);
+        if (name === "read_registration_contact_events_v1") {
+          assert.deepEqual({ ...args }, { p_task_id: CONTACT_TASK, p_limit: 30, p_shared_only: true });
+          return eventHandler ? eventHandler(args) : eventRpcResult(detailRows("ops_task_events").data);
+        }
+        if (name === "get_registration_case_contact_v1" && contactHandler) return contactHandler(args);
+        if (name === "get_registration_case_contact_v1") return { data: { version: 1, taskId: args.p_task_id, revision: "1", generation: "1", phase: "open", closureReason: null, closedAt: null, parentPhone: null, studentId: null, commonRevision: 1, allPhasesClosed: false, currentTrackIds: ["73000000-0000-4000-8000-000000000030"] }, error: null };
         if (rpcHandler) return rpcHandler(name, args);
         if (name === "get_registration_customer_reminder_summaries_v1") {
           return {
@@ -661,6 +947,13 @@ function createClient({ queryHandler, rpcHandler } = {}) {
           };
         }
         return { data: { ok: true }, error: null };
+        };
+        const request = {
+          abortSignal(signal) { rpcRequest.signal = signal; return request; },
+          retry(enabled) { rpcRequest.retryEnabled = enabled; return request; },
+          then(resolve, reject) { return run().then(resolve, reject); },
+        };
+        return request;
       },
     },
   };
@@ -717,7 +1010,7 @@ const observationSummaryObjectKeys = [
 function summaryRowForProjection(columns) {
   return {
     id: "track-1",
-    task_id: "task-1",
+    task_id: "73000000-0000-4000-8000-000000000001",
     subject: "영어",
     pipeline_status: "consultation_waiting",
     workflow_status: "consultation_completed",
@@ -743,7 +1036,7 @@ test("generic summary never probes observation runtime and survives a rejected p
   }));
 
   const result = await service.loadLegacyCompatibleTrackSummaries(
-    ["task-1"],
+    ["73000000-0000-4000-8000-000000000001"],
     "shared-viewer",
   );
 
@@ -776,15 +1069,15 @@ test("a rejected observation probe cannot poison a later generic or observation 
   }));
 
   await assert.rejects(
-    service.loadTrackSummaries(["task-1"], "same-viewer"),
+    service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "same-viewer"),
     /observation probe rejected/,
   );
   const generic = await service.loadLegacyCompatibleTrackSummaries(
-    ["task-1"],
+    ["73000000-0000-4000-8000-000000000001"],
     "same-viewer",
   );
   rejectObservationProbe = false;
-  const observation = await service.loadTrackSummaries(["task-1"], "same-viewer");
+  const observation = await service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "same-viewer");
 
   assert.equal(observationProbeCalls, 2);
   assert.equal(harness.queries.length, 2);
@@ -815,9 +1108,9 @@ test("observation summary refreshes an unforced same-viewer cache when runtime c
     recordMeasure: (measure) => measures.push({ ...measure }),
   }));
 
-  const unavailable = await service.loadTrackSummaries(["task-1"], "same-viewer");
+  const unavailable = await service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "same-viewer");
   observationRuntimeVersion = 1;
-  const available = await service.loadTrackSummaries(["task-1"], "same-viewer");
+  const available = await service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "same-viewer");
 
   assert.equal(unavailable.tracks[0].observationSummaryVisible, false);
   assert.equal(available.tracks[0].observationSummaryVisible, true);
@@ -860,10 +1153,10 @@ test("observation runtime identity separates an unavailable in-flight read from 
     },
   }));
 
-  const unavailable = service.loadTrackSummaries(["task-1"], "same-viewer");
+  const unavailable = service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "same-viewer");
   await unavailableQueryStarted.promise;
   observationRuntimeVersion = 1;
-  const available = service.loadTrackSummaries(["task-1"], "same-viewer");
+  const available = service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "same-viewer");
   const probeCallsBeforeRelease = observationProbeCalls;
   unavailableQueryGate.resolve();
   const [unavailableResult, availableResult] = await Promise.all([unavailable, available]);
@@ -896,8 +1189,8 @@ test("generic and observation summary modes isolate projection cache inflight ep
       recordMeasure: (measure) => measures.push({ ...measure }),
     }));
     const invoke = (mode, force = false) => mode === "generic"
-      ? service.loadLegacyCompatibleTrackSummaries(["task-1"], "shared-viewer", { force })
-      : service.loadTrackSummaries(["task-1"], "shared-viewer", { force });
+      ? service.loadLegacyCompatibleTrackSummaries(["73000000-0000-4000-8000-000000000001"], "shared-viewer", { force })
+      : service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "shared-viewer", { force });
 
     await invoke(order[0]);
     if (order[0] === "generic") observationRuntimeVersion = 1;
@@ -943,98 +1236,24 @@ test("generic and observation summary modes isolate projection cache inflight ep
   }
 });
 
-function initialWorkflowCreateInput() {
-  return {
-    studentName: "김다미",
-    schoolGrade: "고1",
-    schoolName: "중앙고",
-    parentPhone: "01012345678",
-    studentPhone: "",
-    campus: "본관",
-    inquiryAt: "2026-07-16T01:00:00Z",
-    subjects: ["영어"],
-    requestNote: "",
-    priority: "normal",
-    subjectPlans: { 영어: "inquiry" },
-    levelTestAppointment: null,
-    visitAppointment: null,
-    directorOverrides: {},
-    requestKey: "runtime-guard-request",
-  };
-}
 
-test("manual workflow status uses only its dedicated revisioned RPC", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const harness = createClient({
-    rpcHandler(name, args) {
-      assert.equal(name, "set_registration_workflow_status_v1");
-      assert.deepEqual({ ...args }, {
-        p_track_id: "track-1",
-        p_workflow_status: "payment_in_progress",
-        p_expected_workflow_revision: 3,
-        p_request_key: "workflow-request",
-      });
-      return {
-        data: {
-          trackId: "track-1",
-          workflowStatus: "payment_in_progress",
-          workflowRevision: 4,
-          workflowStatusEnteredAt: "2026-08-01T03:00:00.000Z",
-        },
-        error: null,
-      };
-    },
-  });
-  let invalidations = 0;
-  const service = createRegistrationTrackService(harness.client, readyOptions({
-    onMutationSuccess: () => { invalidations += 1; },
-  }));
+test("manual workflow status uses the bearer contact command with the opened revisions", async () => {
 
-  const result = await service.setRegistrationWorkflowStatus({
-    trackId: "track-1",
-    workflowStatus: "payment_in_progress",
-    expectedWorkflowRevision: 3,
-    requestKey: "workflow-request",
-  });
+  const {createRegistrationTrackService}=await loadFactory(); const harness=createClient(); const calls=[]; let invalidations=0;
+  const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async command=>{calls.push(command);return contactEnvelope(command,{trackId:CONTACT_TRACK,workflowStatus:"payment_in_progress",workflowRevision:4,workflowStatusEnteredAt:"2026-08-01T03:00:00Z"});},onMutationSuccess:()=>invalidations++}));
+  const result=await service.setRegistrationWorkflowStatus({taskId:CONTACT_TASK,contactState:contactState(),trackId:CONTACT_TRACK,workflowStatus:"payment_in_progress",expectedWorkflowRevision:3,requestKey:CONTACT_KEY});
+  assert.equal(harness.rpcCalls.length,0); assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{command:"set_workflow_status",taskId:CONTACT_TASK,requestKey:CONTACT_KEY,expectedGeneration:"1",expectedRevision:"1",payload:{trackId:CONTACT_TRACK,workflowStatus:"payment_in_progress",expectedWorkflowRevision:3}}]);
+  assert.equal(result.workflowStatus,"payment_in_progress");assert.equal(result.workflowRevision,4);assert.equal(result.enrollmentFinalization,null);assert.deepEqual(Array.from(result.sourceEventIds),[]);assert.equal(invalidations,1);
 
-  assert.equal(result.trackId, "track-1");
-  assert.equal(result.workflowStatus, "payment_in_progress");
-  assert.equal(result.workflowRevision, 4);
-  assert.equal(result.workflowStatusEnteredAt, "2026-08-01T03:00:00.000Z");
-  assert.equal(result.enrollmentFinalization, null);
-  assert.deepEqual(Array.from(result.sourceEventIds), []);
-  assert.equal(invalidations, 1);
 });
 
-test("registered workflow preserves completion source receipts without enrollment finalization", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const harness = createClient({
-    rpcHandler(name) {
-      assert.equal(name, "set_registration_workflow_status_v1");
-      return {
-        data: {
-          trackId: "track-registered",
-          workflowStatus: "registered",
-          workflowRevision: 2,
-          workflowStatusEnteredAt: "2026-08-26T03:00:00.000Z",
-          sourceEventIds: ["source-registration", "source-registration"],
-          enrollmentFinalization: null,
-        },
-        error: null,
-      };
-    },
-  });
-  const service = createRegistrationTrackService(harness.client, readyOptions());
+test("registered contact command preserves source receipts without enrolling automatically", async () => {
 
-  const result = await service.setRegistrationWorkflowStatus({
-    trackId: "track-registered",
-    workflowStatus: "registered",
-    expectedWorkflowRevision: 1,
-    requestKey: "workflow-register-receipt",
-  });
+  const {createRegistrationTrackService}=await loadFactory();const harness=createClient();
+  const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async command=>contactEnvelope(command,{trackId:CONTACT_TRACK,workflowStatus:"registered",workflowRevision:2,sourceEventIds:["source-registration","source-registration"],enrollmentFinalization:null,contactState:contactState({revision:"2",phase:"closed",allPhasesClosed:true,closureReason:"all_current_tracks_terminal",closedAt:"2026-10-09T09:00:00Z"})})}));
+  const result=await service.setRegistrationWorkflowStatus({taskId:CONTACT_TASK,contactState:contactState(),trackId:CONTACT_TRACK,workflowStatus:"registered",expectedWorkflowRevision:1,requestKey:CONTACT_KEY});
+  assert.equal(result.enrollmentFinalization,null);assert.deepEqual(Array.from(result.sourceEventIds),["source-registration"]);assert.equal(result.contactState.phase,"closed");assert.equal(service.getContactReceipt(CONTACT_TASK).parentPhone,null);assert.equal(harness.rpcCalls.length,0);
 
-  assert.equal(result.enrollmentFinalization, null);
-  assert.deepEqual(Array.from(result.sourceEventIds), ["source-registration"]);
 });
 
 test("admission checklist saves one independent item through its dedicated RPC", async () => {
@@ -1043,14 +1262,14 @@ test("admission checklist saves one independent item through its dedicated RPC",
     rpcHandler(name, args) {
       assert.equal(name, "set_registration_admission_checklist_item_v1");
       assert.deepEqual({ ...args }, {
-        p_task_id: "task-1",
+        p_task_id: "73000000-0000-4000-8000-000000000001",
         p_item: "registrationCompleted",
         p_checked: true,
         p_request_key: "checklist-request",
       });
       return {
         data: {
-          taskId: "task-1",
+          taskId: "73000000-0000-4000-8000-000000000001",
           checklist: {
             applicationSent: false,
             makeeduRegistered: false,
@@ -1066,14 +1285,14 @@ test("admission checklist saves one independent item through its dedicated RPC",
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
   const result = await service.setRegistrationAdmissionChecklistItem({
-    taskId: "task-1",
+    taskId: "73000000-0000-4000-8000-000000000001",
     item: "registrationCompleted",
     checked: true,
     requestKey: "checklist-request",
   });
 
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    taskId: "task-1",
+    taskId: "73000000-0000-4000-8000-000000000001",
     checklist: {
       applicationSent: false,
       makeeduRegistered: false,
@@ -1275,7 +1494,7 @@ function detailRows(table) {
   if (table === "ops_tasks") {
     return {
       data: {
-        id: "task-1",
+        id: "73000000-0000-4000-8000-000000000001",
         title: "김다미 등록",
         type: "registration",
         status: "in_progress",
@@ -1286,7 +1505,7 @@ function detailRows(table) {
         created_at: "2026-07-12T01:00:00Z",
         updated_at: "2026-07-12T02:00:00Z",
         ops_registration_details: {
-          task_id: "task-1",
+          task_id: "73000000-0000-4000-8000-000000000001",
           common_revision: 3,
           pipeline_status: "2. 상담",
           school_grade: "고1",
@@ -1298,14 +1517,14 @@ function detailRows(table) {
         },
         ops_task_comments: [{
           id: "comment-1",
-          task_id: "task-1",
+          task_id: "73000000-0000-4000-8000-000000000001",
           author_id: "profile-1",
           body: "확인",
           created_at: "2026-07-12T01:10:00Z",
         }],
         ops_task_attachments: [{
           id: "attachment-1",
-          task_id: "task-1",
+          task_id: "73000000-0000-4000-8000-000000000001",
           file_name: "성적표.pdf",
           file_kind: "pdf",
           drive_file_id: "drive-1",
@@ -1321,7 +1540,7 @@ function detailRows(table) {
     return {
       data: [{
         id: "track-1",
-        task_id: "task-1",
+        task_id: "73000000-0000-4000-8000-000000000001",
         subject: "영어",
         pipeline_status: "consultation_waiting",
         observation_attempt_count: 0,
@@ -1362,7 +1581,7 @@ function detailRows(table) {
   if (table === "ops_registration_appointments") {
     return { data: [{
       id: "appointment-1",
-      task_id: "task-1",
+      task_id: "73000000-0000-4000-8000-000000000001",
       kind: "visit_consultation",
       scheduled_at: "2026-07-13T01:00:00Z",
       place: "상담실",
@@ -1374,7 +1593,7 @@ function detailRows(table) {
   }
   if (table === "ops_registration_admission_batches") {
     return { data: [{
-      id: "batch-1", task_id: "task-1", revision_number: 1, status: "draft",
+      id: "batch-1", task_id: "73000000-0000-4000-8000-000000000001", revision_number: 1, status: "draft",
       invoice_sent_at: null, payment_confirmed_at: null,
       created_at: "2026-07-12T01:00:00Z", updated_at: "2026-07-12T02:00:00Z",
     }], error: null };
@@ -1382,11 +1601,11 @@ function detailRows(table) {
   if (table === "ops_task_events") {
     return { data: [
       {
-        id: "event-canonical", task_id: "task-1", actor_id: "profile-1",
+        id: EVENT_FIXTURE_IDS.canonical, task_id: "73000000-0000-4000-8000-000000000001", actor_id: EVENT_ACTOR,
         event_type: "registration_track_event", field_name: "registration_track:track-1",
         before_value: null,
         after_value: JSON.stringify({
-          version: 1, eventType: "consultation_completed", actorId: "profile-1",
+          version: 1, eventType: "consultation_completed", actorId: EVENT_ACTOR,
           trackId: "track-1", subject: "영어", source: "consultation_waiting",
           destination: "enrollment_decided", reason: null,
           metadata: { consultationId: "consultation-1" },
@@ -1395,11 +1614,11 @@ function detailRows(table) {
         created_at: "2026-07-12T01:59:00Z",
       },
       {
-        id: "event-legacy", task_id: "task-1", actor_id: "profile-1",
+        id: EVENT_FIXTURE_IDS.legacy, task_id: "73000000-0000-4000-8000-000000000001", actor_id: EVENT_ACTOR,
         event_type: "future_event", field_name: "future", before_value: null,
         after_value: "plain future history", created_at: "2026-07-12T02:00:00Z",
       },
-    ], error: null };
+    ].sort(compareEventFixtureRows), error: null };
   }
   if (table === "ops_registration_messages") {
     return { data: [{
@@ -1448,6 +1667,52 @@ function toPostgresJsonbText(value) {
   return JSON.stringify(value).replaceAll('\":', '\": ');
 }
 
+function compareEventFixtureRows(left, right) {
+  return Date.parse(right.created_at) - Date.parse(left.created_at) || left.id.localeCompare(right.id);
+}
+
+function eventRpcResult(events, legacyImport = null) {
+  return { data: { events, legacyImport }, error: null };
+}
+
+function legacyImportEventFixture(overrides = {}) {
+  return {
+    id: "76000000-0000-4000-8000-000000000090", task_id: CONTACT_TASK, actor_id: null,
+    event_type: "legacy_registration_imported", field_name: "registration_legacy",
+    before_value: JSON.stringify({ pipelineStatus: "5. 등록 결정", studentId: BIND_STUDENT,
+      classId: "76000000-0000-4000-8000-000000000091", textbookId: "76000000-0000-4000-8000-000000000092" }),
+    after_value: JSON.stringify({ version: 1, eventType: "legacy_registration_imported", trackId: CONTACT_TRACK,
+      timestamps: { levelTestAt: "2026-07-01T01:00:00Z", classStartDate: "2026-07-20", classStartSession: "1회차" },
+      legacyBooleans: { admissionNoticeSent: false, makeeduRegistered: false, makeeduInvoiceSent: false, paymentChecked: false } }),
+    created_at: "2026-07-01T02:00:00Z", ...overrides,
+  };
+}
+
+function latestThirtyEventFixtures() {
+  const canonical = detailRows("ops_task_events").data.find((row) => row.id === EVENT_FIXTURE_IDS.canonical);
+  return Array.from({ length: 30 }, (_, index) => ({ ...canonical,
+    id: `76000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}`,
+  }));
+}
+
+function migrationReviewQueryFixture(query) {
+  const result = detailRows(query.table);
+  if (query.table === "ops_registration_subject_tracks") {
+    return { ...result, data: result.data.map((row) => ({ ...row, migration_review_required: true })) };
+  }
+  return result;
+}
+
+// The response fixture models the existing server shared-visibility predicate.
+// The imported host reader validates these RPC rows; the mock does no redaction.
+function sharedEventRpcFixture(args) {
+  assert.deepEqual({ ...args }, { p_task_id: CONTACT_TASK, p_limit: 30, p_shared_only: true });
+  const result = detailRowsWithObservationSecrets({ table: "ops_task_events", filters: [
+    ["eq", "task_id", args.p_task_id], ["eq", "registration_task_event_shared_visible", args.p_shared_only],
+  ] });
+  return { ...result, data: { events: result.data, legacyImport: null } };
+}
+
 function detailRowsWithObservationSecrets(query) {
   const result = detailRows(query.table);
   const hasExactFilter = (expected) => query.filters.some((filter) => (
@@ -1479,7 +1744,7 @@ function detailRowsWithObservationSecrets(query) {
         ...result.data,
         {
           id: "appointment-observation-private",
-          task_id: "task-1",
+          task_id: "73000000-0000-4000-8000-000000000001",
           kind: "observation_class",
           scheduled_at: caseDetailObservationSecrets.scheduledAt,
           place: caseDetailObservationSecrets.place,
@@ -1490,7 +1755,7 @@ function detailRowsWithObservationSecrets(query) {
         },
         {
           id: "appointment-observation-canceled",
-          task_id: "task-1",
+          task_id: "73000000-0000-4000-8000-000000000001",
           kind: "observation_class",
           scheduled_at: "2026-08-13T08:00:00+09:00",
           place: "취소된 청강 교실",
@@ -1508,16 +1773,16 @@ function detailRowsWithObservationSecrets(query) {
       data: [
         ...result.data,
         {
-          id: "event-observation-reason-private",
-          task_id: "task-1",
-          actor_id: "profile-1",
+          id: EVENT_FIXTURE_IDS.observationReason,
+          task_id: "73000000-0000-4000-8000-000000000001",
+          actor_id: EVENT_ACTOR,
           event_type: "registration_track_event",
           field_name: "registration_observation:track-1",
           before_value: null,
           after_value: toPostgresJsonbText({
             version: 2,
             event_type: "registration_observation_withdrawn",
-            actor_profile_id: "profile-1",
+            actor_profile_id: EVENT_ACTOR,
             actor_kind: "user",
             system_source: null,
             track_id: "track-1",
@@ -1534,9 +1799,9 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:00:00Z",
         },
         {
-          id: "event-observation-legacy-private",
-          task_id: "task-1",
-          actor_id: "profile-1",
+          id: EVENT_FIXTURE_IDS.observationLegacy,
+          task_id: "73000000-0000-4000-8000-000000000001",
+          actor_id: EVENT_ACTOR,
           event_type: "registration_observation_audit_payload",
           field_name: "registration_observation:track-1",
           before_value: null,
@@ -1544,16 +1809,16 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:01:00Z",
         },
         {
-          id: "event-observation-v1-private",
-          task_id: "task-1",
-          actor_id: "profile-1",
+          id: EVENT_FIXTURE_IDS.observationV1,
+          task_id: "73000000-0000-4000-8000-000000000001",
+          actor_id: EVENT_ACTOR,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
           before_value: null,
           after_value: JSON.stringify({
             version: 1,
             eventType: "registration_observation_withdrawn",
-            actorId: "profile-1",
+            actorId: EVENT_ACTOR,
             trackId: "track-1",
             subject: "영어",
             source: "observation_feedback_pending",
@@ -1565,16 +1830,16 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:01:30Z",
         },
         {
-          id: "event-public-v2",
-          task_id: "task-1",
-          actor_id: "profile-1",
+          id: EVENT_FIXTURE_IDS.publicV2,
+          task_id: "73000000-0000-4000-8000-000000000001",
+          actor_id: EVENT_ACTOR,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
           before_value: null,
           after_value: toPostgresJsonbText({
             version: 2,
             event_type: "registration_consultation_completed",
-            actor_profile_id: "profile-1",
+            actor_profile_id: EVENT_ACTOR,
             actor_kind: "user",
             system_source: null,
             track_id: "track-1",
@@ -1594,8 +1859,8 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:02:00Z",
         },
         {
-          id: "event-legacy-null",
-          task_id: "task-1",
+          id: EVENT_FIXTURE_IDS.legacyNull,
+          task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "legacy_history_marker",
           field_name: "legacy",
@@ -1604,8 +1869,8 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:00Z",
         },
         {
-          id: "event-non-track-observation-shaped",
-          task_id: "task-1",
+          id: EVENT_FIXTURE_IDS.nonTrack,
+          task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "customer_message_sent",
           field_name: "customer_message",
@@ -1617,8 +1882,8 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:30Z",
         },
         {
-          id: "event-outer-whitespace-observation-shaped",
-          task_id: "task-1",
+          id: EVENT_FIXTURE_IDS.outerWhitespace,
+          task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: " registration_observation_reference_only",
           field_name: "legacy_whitespace",
@@ -1627,8 +1892,8 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:40Z",
         },
         {
-          id: "event-inner-whitespace-observation-shaped",
-          task_id: "task-1",
+          id: EVENT_FIXTURE_IDS.innerWhitespace,
+          task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
@@ -1640,8 +1905,8 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:50Z",
         },
         {
-          id: "event-inner-array-observation-shaped",
-          task_id: "task-1",
+          id: EVENT_FIXTURE_IDS.innerArray,
+          task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
@@ -1653,8 +1918,8 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:55Z",
         },
         {
-          id: "event-malformed-non-v2",
-          task_id: "task-1",
+          id: EVENT_FIXTURE_IDS.malformed,
+          task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
@@ -1663,8 +1928,8 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:04:00Z",
         },
         {
-          id: "event-json-non-v2",
-          task_id: "task-1",
+          id: EVENT_FIXTURE_IDS.jsonNonV2,
+          task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
@@ -1677,8 +1942,8 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:05:00Z",
         },
         {
-          id: "event-json-string-version-near-miss",
-          task_id: "task-1",
+          id: EVENT_FIXTURE_IDS.stringVersionNearMiss,
+          task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
@@ -1692,9 +1957,9 @@ function detailRowsWithObservationSecrets(query) {
       ].filter((row) => {
         if (usesSharedVisibilityComputedField) {
           return ![
-            "event-observation-reason-private",
-            "event-observation-legacy-private",
-            "event-observation-v1-private",
+            EVENT_FIXTURE_IDS.observationReason,
+            EVENT_FIXTURE_IDS.observationLegacy,
+            EVENT_FIXTURE_IDS.observationV1,
           ].includes(row.id);
         }
         if (usesLegacyTextRegex) {
@@ -1707,7 +1972,7 @@ function detailRowsWithObservationSecrets(query) {
           ) return false;
         }
         return true;
-      }),
+      }).sort(compareEventFixtureRows),
     };
   }
   return result;
@@ -1715,15 +1980,15 @@ function detailRowsWithObservationSecrets(query) {
 
 function assertCaseDetailOmitsObservationSecrets(detail) {
   const payload = JSON.stringify(detail);
-  const publicV2 = detail.events.find((event) => event.id === "event-public-v2");
-  const legacyNull = detail.events.find((event) => event.id === "event-legacy-null");
+  const publicV2 = detail.events.find((event) => event.id === EVENT_FIXTURE_IDS.publicV2);
+  const legacyNull = detail.events.find((event) => event.id === EVENT_FIXTURE_IDS.legacyNull);
   const nonTrack = detail.events.find(
-    (event) => event.id === "event-non-track-observation-shaped",
+    (event) => event.id === EVENT_FIXTURE_IDS.nonTrack,
   );
-  const malformed = detail.events.find((event) => event.id === "event-malformed-non-v2");
-  const jsonNonV2 = detail.events.find((event) => event.id === "event-json-non-v2");
+  const malformed = detail.events.find((event) => event.id === EVENT_FIXTURE_IDS.malformed);
+  const jsonNonV2 = detail.events.find((event) => event.id === EVENT_FIXTURE_IDS.jsonNonV2);
   const stringVersionNearMiss = detail.events.find(
-    (event) => event.id === "event-json-string-version-near-miss",
+    (event) => event.id === EVENT_FIXTURE_IDS.stringVersionNearMiss,
   );
   assert.deepEqual({
     appointmentIds: Array.from(detail.appointments, (appointment) => appointment.id),
@@ -1771,17 +2036,17 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
   }, {
     appointmentIds: ["appointment-1"],
     eventIds: [
-      "event-canonical",
-      "event-legacy",
-      "event-public-v2",
-      "event-legacy-null",
-      "event-non-track-observation-shaped",
-      "event-outer-whitespace-observation-shaped",
-      "event-inner-whitespace-observation-shaped",
-      "event-inner-array-observation-shaped",
-      "event-malformed-non-v2",
-      "event-json-non-v2",
-      "event-json-string-version-near-miss",
+      EVENT_FIXTURE_IDS.stringVersionNearMiss,
+      EVENT_FIXTURE_IDS.jsonNonV2,
+      EVENT_FIXTURE_IDS.malformed,
+      EVENT_FIXTURE_IDS.innerArray,
+      EVENT_FIXTURE_IDS.innerWhitespace,
+      EVENT_FIXTURE_IDS.outerWhitespace,
+      EVENT_FIXTURE_IDS.nonTrack,
+      EVENT_FIXTURE_IDS.legacyNull,
+      EVENT_FIXTURE_IDS.publicV2,
+      EVENT_FIXTURE_IDS.legacy,
+      EVENT_FIXTURE_IDS.canonical,
     ],
     observationAppointmentKinds: [],
     observationEventTypes: [],
@@ -1851,26 +2116,27 @@ function assertCaseDetailUsesServerPrivacyFilters(harness) {
   const appointmentHistoryQuery = appointmentQueries.find((query) => (
     hasQueryFilter(query, "in", "status", ["completed", "canceled"])
   ));
-  const eventQuery = harness.queries.find((query) => query.table === "ops_task_events");
+  const eventRequest = harness.rpcRequests.find((request) => request.name === "read_registration_contact_events_v1");
+  assert.ok(eventRequest, "shared history must use the bounded event RPC");
+  assert.equal(eventRequest.retryEnabled, false);
+  assert.ok(eventRequest.signal instanceof AbortSignal);
+  assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false, "no raw event-table fallback");
   assert.deepEqual(JSON.parse(JSON.stringify({
     scheduledAppointmentFilters: scheduledAppointmentQuery?.filters,
     appointmentHistoryFilters: appointmentHistoryQuery?.filters,
-    eventFilters: eventQuery.filters,
+    eventArguments: eventRequest.args,
   })), {
     scheduledAppointmentFilters: [
-      ["eq", "task_id", "task-1"],
+      ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
       ["neq", "kind", "observation_class"],
       ["in", "status", ["scheduled"]],
     ],
     appointmentHistoryFilters: [
-      ["eq", "task_id", "task-1"],
+      ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
       ["neq", "kind", "observation_class"],
       ["in", "status", ["completed", "canceled"]],
     ],
-    eventFilters: [
-      ["eq", "task_id", "task-1"],
-      ["eq", "registration_task_event_shared_visible", true],
-    ],
+    eventArguments: { p_task_id: CONTACT_TASK, p_limit: 30, p_shared_only: true },
   });
 }
 
@@ -1880,7 +2146,7 @@ test("track summary loader uses the exact safe projection and skips profile look
     queryHandler(query) {
       assert.equal(query.table, "ops_registration_subject_track_summaries");
       return { data: [{
-        id: "track-1", task_id: "task-1", subject: "영어",
+        id: "track-1", task_id: "73000000-0000-4000-8000-000000000001", subject: "영어",
         pipeline_status: "visit_consultation_scheduled", director_profile_id: null,
         workflow_status: "observation_feedback_pending",
         observation_return_workflow_status: "consultation_completed",
@@ -1912,12 +2178,12 @@ test("track summary loader uses the exact safe projection and skips profile look
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
+  const result = await service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1");
 
   assert.equal(result.mode, "ready");
   const { enrollmentDetailRows, ...track } = result.tracks[0];
   assert.deepEqual({ ...track }, {
-    id: "track-1", taskId: "task-1", subject: "영어",
+    id: "track-1", taskId: "73000000-0000-4000-8000-000000000001", subject: "영어",
     status: "visit_consultation_scheduled", workflowStatus: "observation_feedback_pending",
     workflowRevision: 1, workflowStatusEnteredAt: "", observationReturnWorkflowStatus: "consultation_completed", legacy: false, directorProfileId: null,
     directorName: "", directorAssignmentSource: "", directorAssignmentRuleKey: "",
@@ -1947,7 +2213,7 @@ test("track summary loader uses the exact safe projection and skips profile look
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
     "id,task_id,subject,pipeline_status,workflow_status,workflow_revision,workflow_status_entered_at,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,level_test_scheduled_at,level_test_place,visit_scheduled_at,visit_place,enrollment_detail_rows,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name),observation_return_workflow_status,observation_attempt_count,observation_current_id,observation_current_status,observation_current_appointment_id,observation_nearest_scheduled_at,observation_nearest_place,observation_notification_revision,observation_revision,observation_feedback_revision");
-  assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
+  assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["73000000-0000-4000-8000-000000000001"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
 });
@@ -1957,7 +2223,7 @@ test("an exact all-null observation summary is concealed while partial null rema
   let partial = false;
   const harness = createClient({
     queryHandler: () => ({ data: [{
-      id: "track-1", task_id: "task-1", subject: "영어",
+      id: "track-1", task_id: "73000000-0000-4000-8000-000000000001", subject: "영어",
       pipeline_status: "consultation_waiting",
       workflow_status: "observation_requested",
       observation_attempt_count: null,
@@ -1973,7 +2239,7 @@ test("an exact all-null observation summary is concealed while partial null rema
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const concealed = await service.loadTrackSummaries(["task-1"], "viewer-1", { force: true });
+  const concealed = await service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1", { force: true });
   assert.equal(concealed.tracks[0].observationSummaryVisible, false);
   assert.deepEqual(
     Object.fromEntries(Object.keys(EMPTY_REGISTRATION_OBSERVATION_SUMMARY).map((key) => [key, concealed.tracks[0][key]])),
@@ -1982,7 +2248,7 @@ test("an exact all-null observation summary is concealed while partial null rema
 
   partial = true;
   await assert.rejects(
-    service.loadTrackSummaries(["task-1"], "viewer-1", { force: true }),
+    service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1", { force: true }),
     /registration_observation_summary_invalid/,
   );
 });
@@ -1992,17 +2258,17 @@ test("generic summary reads fail closed before observation workflow states reach
   const harness = createClient({
     queryHandler: () => ({ data: [{
       id: "track-1",
-      task_id: "task-1",
+      task_id: "73000000-0000-4000-8000-000000000001",
       subject: "영어",
       pipeline_status: "visit_consultation_scheduled",
-      workflow_status: "observation_requested",
+      workflow_status: "observation_feedback_pending",
       ...inertObservationSummaryRow,
     }], error: null }),
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
   await assert.rejects(
-    service.loadLegacyCompatibleTrackSummaries(["task-1"], "viewer-1"),
+    service.loadLegacyCompatibleTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1"),
     /registration_observation_ui_not_ready/,
   );
 });
@@ -2021,7 +2287,7 @@ test("track summary loader falls back to the pre-intake projection when only pho
         return { data: null, error: missingPhoneReadinessColumn };
       }
       return { data: [{
-        id: "track-1", task_id: "task-1", subject: "영어",
+        id: "track-1", task_id: "73000000-0000-4000-8000-000000000001", subject: "영어",
         pipeline_status: "inquiry", director_profile_id: null,
         director_assignment_source: "", director_assignment_rule_key: "",
         waiting_kind: null, level_test_retake_decision: null,
@@ -2042,7 +2308,7 @@ test("track summary loader falls back to the pre-intake projection when only pho
     },
   }));
 
-  const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
+  const result = await service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1");
 
   assert.equal(result.mode, "ready");
   assert.equal(result.tracks.length, 1);
@@ -2053,7 +2319,7 @@ test("track summary loader falls back to the pre-intake projection when only pho
   assert.equal(harness.queries.length, 2);
   assert.match(harness.queries[0].columns, /phone_ready_at,phone_ready_source/);
   assert.doesNotMatch(harness.queries[1].columns, /phone_ready_at|phone_ready_source/);
-  assert.deepEqual(harness.queries[1].filters, [["in", "task_id", ["task-1"]]]);
+  assert.deepEqual(harness.queries[1].filters, [["in", "task_id", ["73000000-0000-4000-8000-000000000001"]]]);
 });
 
 test("runtime-ready observation columns fail visibly instead of using an old projection", async () => {
@@ -2077,7 +2343,7 @@ test("runtime-ready observation columns fail visibly instead of using an old pro
   }));
 
   await assert.rejects(
-    service.loadTrackSummaries(["task-1"], "viewer-1"),
+    service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1"),
     (error) => error.code === "REGISTRATION_RUNTIME_INTEGRITY_ERROR"
       && error.cause === missingObservationColumn,
   );
@@ -2091,7 +2357,7 @@ test("runtime-ready summary rows cannot omit the observation scalar payload", as
   const harness = createClient({
     queryHandler: () => ({ data: [{
       id: "track-1",
-      task_id: "task-1",
+      task_id: "73000000-0000-4000-8000-000000000001",
       subject: "영어",
       pipeline_status: "inquiry",
       workflow_status: "observation_requested",
@@ -2100,7 +2366,7 @@ test("runtime-ready summary rows cannot omit the observation scalar payload", as
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
   await assert.rejects(
-    service.loadTrackSummaries(["task-1"], "viewer-1"),
+    service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1"),
     /registration_observation_summary_invalid/,
   );
   assert.equal(harness.queries.length, 1);
@@ -2128,7 +2394,7 @@ test("track summary loader does not fall back for an unrelated missing summary c
   }));
 
   await assert.rejects(
-    service.loadTrackSummaries(["task-1"], "viewer-1"),
+    service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1"),
     (error) => error.code === "REGISTRATION_RUNTIME_INTEGRITY_ERROR" && error.cause === unrelatedMissingColumn,
   );
   assert.equal(invalidations, 1);
@@ -2146,7 +2412,7 @@ test("track summary loader embeds director names without a profile lookup waterf
         "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
       );
       return { data: ["track-1", "track-2"].map((id) => ({
-        id, task_id: "task-1", subject: id === "track-1" ? "영어" : "수학",
+        id, task_id: "73000000-0000-4000-8000-000000000001", subject: id === "track-1" ? "영어" : "수학",
         pipeline_status: "inquiry", director_profile_id: "director-1",
         director: embedsDirector ? { id: "director-1", name: "강부희" } : null,
         director_assignment_source: "default", director_assignment_rule_key: "rule",
@@ -2158,7 +2424,7 @@ test("track summary loader embeds director names without a profile lookup waterf
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
+  const result = await service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1");
 
   assert.deepEqual(result.tracks.map((track) => track.directorName), ["강부희", "강부희"]);
   assert.equal(harness.queries.length, 1);
@@ -2174,7 +2440,7 @@ test("workspace track summary loader reads all visible tracks without waiting fo
     queryHandler(query) {
       assert.equal(query.table, "ops_registration_subject_track_summaries");
       return { data: [{
-        id: "track-1", task_id: "task-1", subject: "영어",
+        id: "track-1", task_id: "73000000-0000-4000-8000-000000000001", subject: "영어",
         pipeline_status: "inquiry", director_profile_id: null,
         director_assignment_source: "", director_assignment_rule_key: "",
         waiting_kind: null, level_test_retake_decision: null,
@@ -2203,7 +2469,7 @@ test("workspace track summary read overlaps a delayed runtime readiness check", 
     queryHandler(query) {
       assert.equal(query.table, "ops_registration_subject_track_summaries");
       return { data: [{
-        id: "track-1", task_id: "task-1", subject: "영어",
+        id: "track-1", task_id: "73000000-0000-4000-8000-000000000001", subject: "영어",
         pipeline_status: "inquiry", director_profile_id: null,
         director_assignment_source: "", director_assignment_rule_key: "",
         waiting_kind: null, level_test_retake_decision: null,
@@ -2240,14 +2506,14 @@ test("legacy and maintenance are explicit and legacy summaries remain per subjec
     const service = createRegistrationTrackService(harness.client, readyOptions({
       probeRuntime: async () => state,
     }));
-    const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
+    const result = await service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1");
     assert.deepEqual({ mode: result.mode, tracks: [...result.tracks] }, { mode: state.mode, tracks: [] });
     assert.equal(harness.queries.length, 0);
   }
 
   const service = createRegistrationTrackService(createClient().client, readyOptions());
   const legacy = service.createLegacyTrackSummaries([{
-    taskId: "task-1", subjects: ["영어", "수학"], status: "waiting",
+    taskId: "73000000-0000-4000-8000-000000000001", subjects: ["영어", "수학"], status: "waiting",
     directorName: "강부희", stageEnteredAt: "2026-07-12T01:00:00Z",
   }]);
   assert.deepEqual(legacy.map((track) => [
@@ -2273,7 +2539,7 @@ test("a missing child relation after ready invalidates and throws integrity inst
   }));
 
   await assert.rejects(
-    service.loadTrackSummaries(["task-1"], "viewer-1"),
+    service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], "viewer-1"),
     (error) => error.code === "REGISTRATION_RUNTIME_INTEGRITY_ERROR" && error.cause === missing,
   );
   assert.equal(invalidations, 1);
@@ -2291,11 +2557,11 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
     probeRuntime: () => runtimeGate.promise,
   }));
 
-  const pending = service.loadCaseDetail("task-1", "viewer-1", { force: true });
+  const pending = service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { force: true });
   await Promise.resolve();
 
   try {
-    assert.equal(harness.queries.length, 8);
+    assert.equal(harness.queries.length, 7);
     assert.deepEqual(harness.queries.map((query) => query.table).sort(), [
       "ops_registration_admission_batches",
       "ops_registration_admission_batches",
@@ -2303,15 +2569,18 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
       "ops_registration_appointments",
       "ops_registration_messages",
       "ops_registration_subject_tracks",
-      "ops_task_events",
       "ops_tasks",
     ]);
+    assert.deepEqual(harness.rpcCalls.map(([name]) => name).sort(), [
+      "get_registration_customer_reminder_summaries_v1", "read_registration_contact_events_v1",
+    ]);
+    assertCaseDetailUsesServerPrivacyFilters(harness);
   } finally {
     runtimeGate.resolve({ mode: "ready", version: 1 });
   }
 
   const detail = await pending;
-  assert.equal(detail.task.id, "task-1");
+  assert.equal(detail.task.id, "73000000-0000-4000-8000-000000000001");
   assert.deepEqual(detail.tracks.map((track) => track.id), ["track-1"]);
 });
 
@@ -2323,7 +2592,7 @@ test("reminder summary is merged into the matching registration appointment", as
     },
     rpcHandler(name, args) {
       assert.equal(name, "get_registration_customer_reminder_summaries_v1");
-      assert.deepEqual({ ...args }, { p_task_id: "task-1" });
+      assert.deepEqual({ ...args }, { p_task_id: "73000000-0000-4000-8000-000000000001" });
       return {
         data: [{
           appointment_id: "appointment-1",
@@ -2338,9 +2607,9 @@ test("reminder summary is merged into the matching registration appointment", as
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1", { force: true });
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { force: true });
 
-  assert.equal(harness.rpcCalls.length, 1);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_customer_reminder_summaries_v1").length, 1);
   assert.deepEqual({ ...detail.appointments[0].customerReminder }, {
     state: "scheduled",
     scheduledFor: "2026-07-13T01:00:00.000Z",
@@ -2355,12 +2624,196 @@ test("case detail excludes observation rows at the server query boundary", async
     queryHandler(query) {
       return detailRowsWithObservationSecrets(query);
     },
+    eventHandler: sharedEventRpcFixture,
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  await service.loadCaseDetail("task-1", "viewer-1");
+  await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("case detail preserves contact-free structured event business notes through the actual RPC reader", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const canonical = detailRows("ops_task_events").data.find((row) => row.id === EVENT_FIXTURE_IDS.canonical);
+  const payload = JSON.parse(canonical.after_value);
+  const metadata = { consultationId: "consultation-1", note: "synthetic 01000000000 remains a business note", changes: [{ summary: "합성 업무 기록" }] };
+  const harness = createClient({ queryHandler: (query) => detailRows(query.table), eventHandler: () => eventRpcResult(
+    [{ ...canonical, after_value: toPostgresJsonbText({ ...payload, metadata }) }],
+  ) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.deepEqual(JSON.parse(JSON.stringify(detail.events[0].metadata)), metadata);
+  assert.equal(detail.events[0].actorId, EVENT_ACTOR);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("case detail rejects unsanitized or invalid event RPC rows before caching or a raw-table fallback", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const canonical = detailRows("ops_task_events").data.find((row) => row.id === EVENT_FIXTURE_IDS.canonical);
+  const invalidPages = [
+    [{ ...canonical, after_value: JSON.stringify({ version: 1, metadata: [{ parentPhone: "SYNTHETIC_RAW_CONTACT_CANARY" }] }) }],
+    [{ ...canonical, task_id: CONTACT_TRACK }],
+    [{ ...canonical, id: "event-not-a-uuid" }],
+    [{ ...canonical, unexpected: "extra" }],
+    [canonical, { ...canonical }],
+    Array.from({ length: 31 }, (_, index) => ({ ...canonical, id: `75000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}` })),
+    detailRows("ops_task_events").data.toReversed(),
+  ];
+  for (const data of invalidPages) {
+    const harness = createClient({ queryHandler: (query) => detailRows(query.table), eventHandler: () => eventRpcResult(data) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), /registration_contact_event_read_response_invalid/);
+    assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+    assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+    assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  }
+});
+
+test("case detail propagates an event RPC permission denial without retrying or reading the raw table", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const denied = Object.assign(new Error("synthetic event read permission denied"), { code: "42501" });
+  const harness = createClient({ queryHandler: (query) => detailRows(query.table), eventHandler: () => ({ data: null, error: denied }) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), (error) => error === denied);
+  assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+  assert.equal(harness.rpcRequests.find((request) => request.name === "read_registration_contact_events_v1").retryEnabled, false);
+});
+
+test("one bounded event RPC preserves a migration snapshot older than the latest thirty events", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const events = latestThirtyEventFixtures();
+  const legacyImport = legacyImportEventFixture();
+  assert.equal(events.length, 30);
+  assert.ok(events.every((event) => Date.parse(event.created_at) > Date.parse(legacyImport.created_at)));
+  const response = eventRpcResult(events, legacyImport);
+  const originalResponse = structuredClone(response);
+  const harness = createClient({ queryHandler: migrationReviewQueryFixture, eventHandler: () => response });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(detail.events.length, 31);
+  assert.equal(new Set(Array.from(detail.events, (event) => event.id)).size, 31);
+  assert.equal(detail.events.filter((event) => event.id === legacyImport.id).length, 1);
+  assert.equal(detail.migrationLegacy.snapshotMissing, false);
+  assert.equal(detail.migrationLegacy.studentId, BIND_STUDENT);
+  assert.equal(detail.migrationLegacy.classId, "76000000-0000-4000-8000-000000000091");
+  assert.equal(detail.migrationLegacy.textbookId, "76000000-0000-4000-8000-000000000092");
+  assert.equal(detail.migrationLegacy.levelTestAt, "2026-07-01T01:00:00Z");
+  assert.equal(detail.migrationLegacy.classStartSession, "1회차");
+  assert.equal(detail.migrationLegacy.groups.placement, true);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+  assert.deepEqual(response, originalResponse, "the reader must not rewrite the server response");
+});
+
+test("a legacy snapshot already in the latest event page is deduplicated without another RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const legacyImport = legacyImportEventFixture();
+  const events = [...latestThirtyEventFixtures().slice(0, 29), legacyImport];
+  const harness = createClient({ queryHandler: migrationReviewQueryFixture,
+    eventHandler: () => eventRpcResult(events, { ...legacyImport }) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(detail.events.length, 30);
+  assert.equal(detail.events.filter((event) => event.id === legacyImport.id).length, 1);
+  assert.equal(detail.migrationLegacy.snapshotMissing, false);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("newer malformed and version-two timeline imports do not mask the older valid migration anchor", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const legacyImport = legacyImportEventFixture();
+  const events = [...latestThirtyEventFixtures().slice(0, 28),
+    legacyImportEventFixture({ id: "76000000-0000-4000-8000-000000000071",
+      created_at: "2026-07-10T02:00:00Z", after_value: JSON.stringify({ version: 2 }) }),
+    legacyImportEventFixture({ id: "76000000-0000-4000-8000-000000000072",
+      created_at: "2026-07-09T02:00:00Z", after_value: "{malformed legacy" })];
+  const harness = createClient({ queryHandler: migrationReviewQueryFixture,
+    eventHandler: () => eventRpcResult(events, legacyImport) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(detail.events.length, 31);
+  assert.deepEqual(Array.from(detail.events, (event) => event.id), [...events.map((event) => event.id), legacyImport.id]);
+  assert.equal(detail.migrationLegacy.snapshotMissing, false);
+  assert.equal(detail.migrationLegacy.studentId, BIND_STUDENT);
+  assert.equal(detail.migrationLegacy.levelTestAt, "2026-07-01T01:00:00Z");
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("missing or noncanonical timeline imports keep migration provenance unavailable", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const timelineImport of [null, legacyImportEventFixture({ after_value: "{malformed legacy" }),
+    legacyImportEventFixture({ after_value: JSON.stringify({ version: 2, timestamps: { classStartDate: "2026-07-20" } }) })]) {
+    const harness = createClient({ queryHandler: (query) => {
+      const result = migrationReviewQueryFixture(query);
+      return query.table === "ops_tasks" ? { ...result, data: { ...result.data, student_id: BIND_STUDENT,
+        class_id: CONTACT_TRACK, textbook_id: CONTACT_KEY } } : result;
+    }, eventHandler: () => eventRpcResult(timelineImport
+      ? [...latestThirtyEventFixtures().slice(0, 29), timelineImport] : latestThirtyEventFixtures()) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+    assert.equal(detail.migrationLegacy.snapshotMissing, true);
+    assert.equal(detail.migrationLegacy.studentId, "");
+    assert.equal(detail.migrationLegacy.classId, "");
+    assert.equal(detail.migrationLegacy.textbookId, "");
+    assert.equal(detail.migrationLegacy.currentStudentId, BIND_STUDENT);
+    assert.equal(detail.migrationLegacy.currentClassId, CONTACT_TRACK);
+    assert.equal(detail.migrationLegacy.currentTextbookId, CONTACT_KEY);
+    assert.equal(detail.migrationLegacy.groups.placement, false);
+    assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+    assertCaseDetailUsesServerPrivacyFilters(harness);
+  }
+});
+
+test("malformed event envelopes and unsafe legacy supplements are rejected before caching", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const legacy = legacyImportEventFixture();
+  const invalidEnvelopes = [[], { events: [] }, { legacyImport: null }, { events: [], legacyImport: null, extra: null },
+    { events: [], legacyImport: [] }, { events: [], legacyImport: { ...legacy, task_id: CONTACT_TRACK } },
+    { events: [], legacyImport: { ...legacy, event_type: "future_event" } },
+    { events: [], legacyImport: { ...legacy, after_value: "{malformed legacy" } },
+    { events: [], legacyImport: { ...legacy, after_value: JSON.stringify({ version: 2 }) } },
+    { events: [], legacyImport: { ...legacy, after_value: JSON.stringify({ version: 1, metadata: { parentPhone: "SYNTHETIC_RAW_CONTACT_CANARY" } }) } },
+    { events: [legacy], legacyImport: { ...legacy, before_value: "different immutable snapshot" } }];
+  for (const data of invalidEnvelopes) {
+    const harness = createClient({ queryHandler: migrationReviewQueryFixture, eventHandler: () => ({ data, error: null }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), /registration_contact_event_read_response_invalid/);
+    assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+    assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+    assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+    assert.equal(harness.rpcRequests.find((request) => request.name === "read_registration_contact_events_v1").retryEnabled, false);
+  }
+});
+
+test("an unavailable event RPC invalidates ready runtime without a raw event read or partial cache", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const code of ["PGRST202", "42883"]) {
+    const unavailable = Object.assign(new Error("synthetic read_registration_contact_events_v1 unavailable"), { code });
+    let invalidations = 0;
+    const harness = createClient({ queryHandler: migrationReviewQueryFixture,
+      eventHandler: () => ({ data: null, error: unavailable }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions({
+      invalidateRuntimeAfterReadyFailure(error) {
+        invalidations++;
+        throw Object.assign(new Error("runtime integrity failure"), { code: "REGISTRATION_RUNTIME_INTEGRITY_ERROR", cause: error });
+      },
+    }));
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"),
+      (error) => error.code === "REGISTRATION_RUNTIME_INTEGRITY_ERROR" && error.cause === unavailable);
+    assert.equal(invalidations, 1);
+    assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+    assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+    assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+    const request = harness.rpcRequests.find((entry) => entry.name === "read_registration_contact_events_v1");
+    assert.ok(request.signal instanceof AbortSignal);
+    assert.equal(request.signal.aborted, true);
+    assert.equal(request.retryEnabled, false);
+  }
 });
 
 test("case detail bounds the active subject-track read and disables automatic retries", async () => {
@@ -2372,14 +2825,14 @@ test("case detail bounds the active subject-track read and disables automatic re
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  await service.loadCaseDetail("task-1", "viewer-1");
+  await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   const tracks = harness.queries.find(
     (query) => query.table === "ops_registration_subject_tracks",
   );
   assert.ok(tracks);
   assert.deepEqual(tracks.filters, [
-    ["eq", "task_id", "task-1"],
+    ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
     ["is", "archived_at", null],
     ["in", "active_level_tests.status", ["scheduled", "in_progress"]],
     ["in", "level_test_history.status", ["completed", "absent", "canceled"]],
@@ -2420,7 +2873,7 @@ test("case detail keeps a scheduled appointment outside the terminal history win
   // because 30 newer completed/canceled rows occupy the bounded history page.
   const { createRegistrationTrackService } = await loadFactory();
   const scheduled = {
-    id: "appointment-current", task_id: "task-1", kind: "level_test",
+    id: "appointment-current", task_id: "73000000-0000-4000-8000-000000000001", kind: "level_test",
     scheduled_at: "2026-08-10T01:00:00Z", place: "본관", status: "scheduled",
     notification_revision: 7, created_at: "2026-07-01T01:00:00Z", updated_at: "2026-07-01T01:00:00Z",
   };
@@ -2461,7 +2914,7 @@ test("case detail keeps a scheduled appointment outside the terminal history win
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assert.deepEqual(Array.from(detail.appointments, (appointment) => appointment.id), [
     scheduled.id,
@@ -2506,7 +2959,7 @@ test("case detail preserves factual editing and marks more than 30 scheduled app
       return {
         data: Array.from({ length: 30 }, (_, index) => ({
           id: `appointment-current-${index}`,
-          task_id: "task-1",
+          task_id: "73000000-0000-4000-8000-000000000001",
           kind: "level_test",
           scheduled_at: "2026-08-10T01:00:00Z",
           place: "본관",
@@ -2535,7 +2988,7 @@ test("case detail preserves factual editing and marks more than 30 scheduled app
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assert.equal(detail.appointments.length, 30);
   assert.deepEqual(JSON.parse(JSON.stringify(detail.collectionWindows.scheduledAppointments)), {
@@ -2548,7 +3001,7 @@ test("case detail preserves factual editing and marks more than 30 scheduled app
 test("case detail keeps the one open admission batch outside terminal history", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const open = {
-    id: "batch-open", task_id: "task-1", revision_number: 2, status: "draft",
+    id: "batch-open", task_id: "73000000-0000-4000-8000-000000000001", revision_number: 2, status: "draft",
     invoice_sent_at: null, payment_confirmed_at: null,
     created_at: "2026-07-01T01:00:00Z", updated_at: "2026-07-01T01:00:00Z",
   };
@@ -2570,7 +3023,7 @@ test("case detail keeps the one open admission batch outside terminal history", 
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assert.deepEqual(Array.from(detail.admissionBatches, (batch) => batch.id), [open.id, terminal.id]);
   const batchQueries = harness.queries.filter(
@@ -2648,7 +3101,7 @@ test("case detail bounds active and historical embedded children independently",
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assert.deepEqual(Array.from(detail.levelTests, (row) => row.id), [activeLevelTest.id, historyLevelTest.id]);
   assert.deepEqual(Array.from(detail.consultations, (row) => row.id), [activeConsultation.id, historyConsultation.id]);
@@ -2731,7 +3184,7 @@ test("case detail keeps a recently corrected consultation inside the 30-row hist
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assert.equal(detail.consultations.length, 30);
   assert.equal(detail.consultations.some((row) => row.id === recentlyCorrected.id), true);
@@ -2774,7 +3227,7 @@ test("case detail keeps current enrollments separate from bounded terminal histo
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assert.deepEqual(Array.from(detail.enrollments, (row) => row.id), [current.id, terminal.id]);
   const enrollmentQueries = harness.queries.filter(
@@ -2829,7 +3282,7 @@ test("case detail preserves factual editing and marks more than 30 current enrol
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assert.equal(detail.enrollments.length, 30);
   assert.deepEqual(JSON.parse(JSON.stringify(detail.collectionWindows.currentEnrollments)), {
@@ -2855,9 +3308,9 @@ test("case detail keeps factual editing available when exact current counts are 
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
-  assert.equal(detail.task.id, "task-1");
+  assert.equal(detail.task.id, "73000000-0000-4000-8000-000000000001");
   assert.deepEqual(JSON.parse(JSON.stringify(detail.collectionWindows)), {
     scheduledAppointments: {
       loadedCount: 1,
@@ -2878,10 +3331,11 @@ test("generic case detail preserves nested observation-like and version20 histor
     queryHandler(query) {
       return detailRowsWithObservationSecrets(query);
     },
+    eventHandler: sharedEventRpcFixture,
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assertCaseDetailOmitsObservationSecrets(detail);
   assertCaseDetailUsesServerPrivacyFilters(harness);
@@ -2893,10 +3347,11 @@ test("observation-aware case detail preserves shared nested and malformed histor
     queryHandler(query) {
       return detailRowsWithObservationSecrets(query);
     },
+    eventHandler: sharedEventRpcFixture,
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const detail = await service.loadCaseDetail("task-1", "viewer-1", {
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", {
     observationAware: true,
   });
 
@@ -3103,7 +3558,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
         const track = detailRows("ops_registration_subject_tracks").data[0];
         return { data: [{
           ...track,
-          workflow_status: "observation_requested",
+          workflow_status: "observation_feedback_pending",
           workflow_revision: 5,
           ...inertObservationSummaryRow,
         }], error: null };
@@ -3114,7 +3569,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
           ...result,
           data: result.data.map((row) => ({
             ...row,
-            workflow_status: "observation_requested",
+            workflow_status: "observation_feedback_pending",
             workflow_revision: 5,
             observation_attempt_count: 0,
           })),
@@ -3125,10 +3580,10 @@ test("observation-aware detail is broad while default detail fails closed and ca
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const broad = await service.loadCaseDetail("task-1", "viewer-1", {
+  const broad = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", {
     observationAware: true,
   });
-  assert.equal(broad.tracks[0].workflowStatus, "observation_requested");
+  assert.equal(broad.tracks[0].workflowStatus, "observation_feedback_pending");
   assert.equal(broad.tracks[0].workflowRevision, 5);
   assert.equal(broad.tracks[0].observationSummaryVisible, true);
   assert.equal(
@@ -3138,7 +3593,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
   );
 
   await assert.rejects(
-    service.loadCaseDetail("task-1", "viewer-1"),
+    service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1"),
     /registration_observation_ui_not_ready/,
   );
   assert.equal(
@@ -3161,7 +3616,7 @@ test("observation-aware detail fails closed when its required summary row is mis
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
   await assert.rejects(
-    service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }),
+    service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { observationAware: true }),
     /registration_observation_summary_invalid/,
   );
   assert.equal(
@@ -3182,28 +3637,47 @@ function dependentDetailQueries(harness) {
   ].includes(table));
 }
 
+async function assertReauthorizedCachedDetail(service, harness, expected) {
+  const tableReads = harness.queries.length;
+  const eventReads = harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length;
+  const contactReads = harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length;
+  const cached = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+  assert.deepEqual(cached, expected);
+  assert.notStrictEqual(cached, expected, "cached business detail reauthorizes contact and returns a fresh object");
+  assert.equal(harness.queries.length, tableReads);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, eventReads);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, contactReads + 1);
+}
+
 test("detail starts track-dependent reads before unrelated collections finish, but never returns partial detail", async (t) => {
   const { createRegistrationTrackService } = await loadFactory();
-  for (const delayed of ["ops_task_events", "ops_registration_messages", "ops_registration_appointments", "ops_registration_admission_batches", "reminders"]) {
+  for (const delayed of ["read_registration_contact_events_v1", "ops_registration_messages", "ops_registration_appointments", "ops_registration_admission_batches", "reminders"]) {
     await t.test(delayed, async () => {
       const gate = deferred();
       const harness = createClient({
         queryHandler: (query) => query.table === delayed
           ? gate.promise.then(() => schedulingDetailRows(query.table)) : schedulingDetailRows(query.table),
-        ...(delayed === "reminders" ? { rpcHandler: () => gate.promise.then(() => ({ data: [{
+        ...(delayed === "read_registration_contact_events_v1" ? {
+          eventHandler: () => gate.promise.then(() => eventRpcResult(detailRows("ops_task_events").data)),
+        } : {}),
+        ...(delayed === "reminders" ? { rpcHandler: (name, args) => {
+          assert.equal(name, "get_registration_customer_reminder_summaries_v1");
+          assert.deepEqual({ ...args }, { p_task_id: CONTACT_TASK });
+          return gate.promise.then(() => ({ data: [{
           appointment_id: "appointment-1", state: "scheduled", scheduled_for: "2026-07-13T01:00:00.000Z",
           sent_at: null, updated_at: "2026-07-12T02:00:00.000Z",
-        }], error: null })) } : {}),
+          }], error: null }));
+        } } : {}),
       });
       const service = createRegistrationTrackService(harness.client, readyOptions());
-      const request = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+      const request = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
       let settled = false;
       request.then(() => { settled = true; }, () => { settled = true; });
       try {
         await new Promise(setImmediate);
         assert.equal(dependentDetailQueries(harness).length, 3);
         assert.equal(settled, false);
-        assert.strictEqual(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), request);
+        assert.strictEqual(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), request);
       } finally {
         gate.resolve();
       }
@@ -3211,8 +3685,9 @@ test("detail starts track-dependent reads before unrelated collections finish, b
       assert.equal(detail.enrollments.length, 1);
       assert.equal(detail.tracks[0].observationSummaryVisible, true);
       assert.equal(detail.appointments.length, 1);
-      assert.equal(harness.queries.length, 11);
-      assert.equal(harness.rpcCalls.length, 1);
+      assert.equal(harness.queries.length, 10);
+      assert.equal(harness.rpcCalls.length, 3);
+      assertCaseDetailUsesServerPrivacyFilters(harness);
     });
   }
 });
@@ -3231,7 +3706,7 @@ test("detail keeps parent existence, active tracks and ready runtime as prerequi
           ...(prerequisite === "runtime" ? { probeRuntime: () => gate.promise.then(() => ({ mode: "ready", version: 1 })) } : {}),
           probeObservationRuntime: async () => { observationProbes += 1; return { available: true, runtimeVersion: 1 }; },
         }));
-        const request = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+        const request = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
         const outcome = request.then((detail) => ({ detail }), (error) => ({ error }));
         try {
           await new Promise(setImmediate);
@@ -3246,7 +3721,7 @@ test("detail keeps parent existence, active tracks and ready runtime as prerequi
           assert.equal(dependentDetailQueries(harness).length, 0);
           assert.equal(observationProbes, 0);
         } else {
-          assert.equal(result.detail.task.id, "task-1");
+          assert.equal(result.detail.task.id, CONTACT_TASK);
           assert.equal(dependentDetailQueries(harness).length, 3);
         }
       });
@@ -3256,7 +3731,7 @@ test("detail keeps parent existence, active tracks and ready runtime as prerequi
     const harness = createClient({ queryHandler: ({ table }) => table === "ops_tasks"
       ? { data: null, error: null } : schedulingDetailRows(table) });
     const service = createRegistrationTrackService(harness.client, readyOptions());
-    await assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), /등록 업무를 찾을 수 없습니다/);
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), /등록 업무를 찾을 수 없습니다/);
     assert.equal(dependentDetailQueries(harness).length, 0);
   });
 });
@@ -3265,10 +3740,10 @@ test("an already failed initial collection blocks dependent reads after delayed 
   const { createRegistrationTrackService } = await loadFactory();
   const parent = deferred();
   const failure = new Error("initial events failed");
-  const harness = createClient({ queryHandler: ({ table }) => table === "ops_tasks" ? parent.promise
-    : table === "ops_task_events" ? { data: null, error: failure } : schedulingDetailRows(table) });
+  const harness = createClient({ queryHandler: ({ table }) => table === "ops_tasks" ? parent.promise : schedulingDetailRows(table),
+    eventHandler: () => ({ data: null, error: failure }) });
   const service = createRegistrationTrackService(harness.client, readyOptions());
-  await assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), (error) => error === failure);
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), (error) => error === failure);
   parent.resolve(schedulingDetailRows("ops_tasks"));
   await new Promise(setImmediate);
   assert.equal(dependentDetailQueries(harness).length, 0);
@@ -3283,26 +3758,25 @@ test("early dependent failures are observed while initial errors retain preceden
       const dependentError = new Error("summary failed first");
       let failing = true;
       const harness = createClient({ queryHandler: ({ table }) => {
-        if (failing && table === "ops_task_events") return events.promise;
         if (failing && table === "ops_registration_subject_track_summaries") return Promise.reject(dependentError);
         return schedulingDetailRows(table);
-      } });
+      }, eventHandler: () => failing ? events.promise : eventRpcResult(detailRows("ops_task_events").data) });
       const service = createRegistrationTrackService(harness.client, readyOptions());
       let settled = false;
-      const outcome = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true })
+      const outcome = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true })
         .then((detail) => { settled = true; return { detail }; }, (error) => { settled = true; return { error }; });
       try {
         await new Promise(setImmediate);
         assert.equal(dependentDetailQueries(harness).length, 3);
         assert.equal(settled, false);
       } finally {
-        if (initialFails) events.reject(initialError); else events.resolve(schedulingDetailRows("ops_task_events"));
+        if (initialFails) events.reject(initialError); else events.resolve(eventRpcResult(detailRows("ops_task_events").data));
       }
       assert.strictEqual((await outcome).error, initialFails ? initialError : dependentError);
       assert.ok(dependentDetailQueries(harness).filter(({ table }) => table === "ops_registration_enrollments")
         .every(({ signal }) => signal.aborted));
       failing = false;
-      assert.equal((await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true })).enrollments.length, 1);
+      assert.equal((await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true })).enrollments.length, 1);
       assert.equal(harness.queries.filter(({ table }) => table === "ops_tasks").length, 2);
     });
   }
@@ -3314,13 +3788,12 @@ test("initial schema failure still invalidates and observes late dependent rejec
   const children = deferred();
   const missing = { code: "42P01", message: "relation does not exist" };
   let invalidations = 0;
-  const harness = createClient({ queryHandler: ({ table }) => table === "ops_task_events" ? events.promise
-    : ["ops_registration_enrollments", "ops_registration_subject_track_summaries"].includes(table)
-      ? children.promise : schedulingDetailRows(table) });
+  const harness = createClient({ queryHandler: ({ table }) => ["ops_registration_enrollments", "ops_registration_subject_track_summaries"].includes(table)
+      ? children.promise : schedulingDetailRows(table), eventHandler: () => events.promise });
   const service = createRegistrationTrackService(harness.client, readyOptions({
     invalidateRuntimeAfterReadyFailure(error) { invalidations += 1; throw Object.assign(new Error("integrity"), { cause: error }); },
   }));
-  const rejection = assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), (error) => error.cause === missing);
+  const rejection = assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), (error) => error.cause === missing);
   await new Promise(setImmediate);
   assert.equal(dependentDetailQueries(harness).length, 3);
   events.resolve({ data: null, error: missing });
@@ -3339,25 +3812,29 @@ test("detail timeout prevents late prerequisites from starting dependent work or
       });
       const gate = deferred();
       let stale = true;
-      const harness = createClient({ queryHandler: ({ table }) => stale && table === delayed
-        ? gate.promise.then(() => schedulingDetailRows(table)) : schedulingDetailRows(table) });
+      const harness = createClient({ queryHandler: ({ table }) => {
+        const result = schedulingDetailRows(table);
+        const response = table === "ops_tasks" ? { ...result, data: { ...result.data, title: stale ? "old" : "fresh" } } : result;
+        return stale && table === delayed ? gate.promise.then(() => response) : response;
+      } });
       const service = createRegistrationTrackService(harness.client, readyOptions({
         probeRuntime: () => stale && delayed === "runtime" ? gate.promise.then(() => ({ mode: "ready", version: 1 }))
           : Promise.resolve({ mode: "ready", version: 1 }),
       }));
-      const rejection = assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }),
+      const rejection = assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }),
         (error) => error.code === "REGISTRATION_REQUEST_TIMEOUT");
       await new Promise(setImmediate);
       assert.equal(dependentDetailQueries(harness).length, 0);
       timers[0]();
       await rejection;
       stale = false;
-      const fresh = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true, force: true });
+      const fresh = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true, force: true });
+      assert.equal(fresh.task.title, "fresh");
       assert.equal(dependentDetailQueries(harness).length, 3);
       gate.resolve();
       await new Promise(setImmediate);
       assert.equal(dependentDetailQueries(harness).length, 3, "timed-out prerequisite completion must not start new reads");
-      assert.strictEqual(await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), fresh);
+      await assertReauthorizedCachedDetail(service, harness, fresh);
     });
   }
 });
@@ -3371,14 +3848,15 @@ test("overlapped child work stays aborted and cannot cache detail after its dead
   const children = deferred();
   let stale = true;
   const harness = createClient({ queryHandler: ({ table }) => {
-    if (stale && table === "ops_task_events") return events.promise.then(() => schedulingDetailRows(table));
     if (stale && ["ops_registration_enrollments", "ops_registration_subject_track_summaries"].includes(table)) {
       return children.promise.then(() => schedulingDetailRows(table));
     }
-    return schedulingDetailRows(table);
-  } });
+    const result = schedulingDetailRows(table);
+    return table === "ops_tasks" ? { ...result, data: { ...result.data, title: stale ? "old" : "fresh" } } : result;
+  }, eventHandler: () => stale ? events.promise.then(() => eventRpcResult(detailRows("ops_task_events").data))
+    : eventRpcResult(detailRows("ops_task_events").data) });
   const service = createRegistrationTrackService(harness.client, readyOptions());
-  const rejection = assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }),
+  const rejection = assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }),
     (error) => error.code === "REGISTRATION_REQUEST_TIMEOUT");
   await new Promise(setImmediate);
   assert.equal(dependentDetailQueries(harness).length, 3);
@@ -3387,12 +3865,54 @@ test("overlapped child work stays aborted and cannot cache detail after its dead
   assert.ok(dependentDetailQueries(harness).filter(({ table }) => table === "ops_registration_enrollments")
     .every(({ signal }) => signal.aborted));
   stale = false;
-  const fresh = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true, force: true });
+  const fresh = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true, force: true });
+  assert.equal(fresh.task.title, "fresh");
   events.resolve();
   children.resolve();
   await new Promise(setImmediate);
-  assert.strictEqual(await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), fresh);
+  await assertReauthorizedCachedDetail(service, harness, fresh);
   assert.equal(harness.queries.filter(({ table }) => table === "ops_tasks").length, 2);
+});
+
+test("a completed event read cannot trigger contact access after a timed-out child join", async () => {
+  const timers = [];
+  const { createRegistrationTrackService } = await loadFactory({
+    setTimeout(callback) { timers.push(callback); return callback; }, clearTimeout() {},
+  });
+  const children = deferred();
+  let stale = true;
+  const harness = createClient({ queryHandler: ({ table }) => {
+    const result = schedulingDetailRows(table);
+    const response = table === "ops_tasks" ? { ...result, data: { ...result.data, title: stale ? "old" : "fresh" } } : result;
+    return stale && ["ops_registration_enrollments", "ops_registration_subject_track_summaries"].includes(table)
+      ? children.promise.then(() => response) : response;
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const rejection = assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }),
+    (error) => error.code === "REGISTRATION_REQUEST_TIMEOUT");
+  await new Promise(setImmediate);
+  assert.equal(dependentDetailQueries(harness).length, 3);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, 0);
+  timers[0]();
+  await rejection;
+  assert.ok(dependentDetailQueries(harness).filter(({ table }) => table === "ops_registration_enrollments")
+    .every(({ signal }) => signal.aborted));
+  children.resolve();
+  await new Promise(setImmediate);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, 0,
+    "late child completion must not authorize a contact read");
+  assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+  stale = false;
+  const fresh = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+  assert.equal(fresh.task.title, "fresh");
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_tasks").length, 2,
+    "an unforced retry must reload business data instead of using timed-out detail");
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_enrollments").length, 4);
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_subject_track_summaries").length, 1,
+    "the separate successful summary cache remains reusable without publishing timed-out detail");
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, 1);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
 });
 
 test("overlapped detail preserves force and clear epochs after old children have already completed", async (t) => {
@@ -3400,31 +3920,31 @@ test("overlapped detail preserves force and clear epochs after old children have
   for (const refresh of ["force", "clear"]) {
     await t.test(refresh, async () => {
       const events = [deferred(), deferred()];
+      let eventReads = 0;
       const counts = new Map();
       const harness = createClient({ queryHandler: ({ table }) => {
         const index = counts.get(table) || 0;
         counts.set(table, index + 1);
         const result = schedulingDetailRows(table);
         if (table === "ops_tasks") return { ...result, data: { ...result.data, title: index === 0 ? "old" : "fresh" } };
-        if (table === "ops_task_events") return events[index].promise.then(() => result);
         return result;
-      } });
+      }, eventHandler: () => events[eventReads++].promise.then(() => eventRpcResult(detailRows("ops_task_events").data)) });
       const service = createRegistrationTrackService(harness.client, readyOptions());
-      const old = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+      const old = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
       await new Promise(setImmediate);
       assert.equal(dependentDetailQueries(harness).length, 3);
       if (refresh === "clear") service.clearCaches();
-      const fresh = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true, force: refresh === "force" });
+      const fresh = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true, force: refresh === "force" });
       await new Promise(setImmediate);
       assert.notStrictEqual(old, fresh);
-      assert.strictEqual(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), fresh);
+      assert.strictEqual(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), fresh);
       events[1].resolve();
       const currentDetail = await fresh;
       assert.equal(currentDetail.task.title, "fresh");
       events[0].resolve();
       assert.equal((await old).task.title, "old");
       const queriesAfterCompletion = harness.queries.length;
-      assert.strictEqual(await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), currentDetail);
+      await assertReauthorizedCachedDetail(service, harness, currentDetail);
       assert.equal(harness.queries.length, queriesAfterCompletion);
     });
   }
@@ -3449,7 +3969,7 @@ test("observation detail overlaps its required summary with enrollment reads and
     },
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
-  const request = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+  const request = service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { observationAware: true });
   let settled = false;
   request.then(() => { settled = true; }, () => { settled = true; });
   try {
@@ -3457,7 +3977,7 @@ test("observation detail overlaps its required summary with enrollment reads and
     assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_enrollments").length, 2);
     assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_subject_track_summaries").length, 1,
       "required summary must start before enrollment reads finish");
-    assert.equal(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), request,
+    assert.equal(service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { observationAware: true }), request,
       "same-viewer callers still share the complete in-flight detail");
     summary.resolve();
     await new Promise(setImmediate);
@@ -3469,8 +3989,9 @@ test("observation detail overlaps its required summary with enrollment reads and
   const detail = await request;
   assert.equal(detail.tracks[0].observationSummaryVisible, true);
   assert.equal(detail.enrollments.length, 1);
-  assert.equal(harness.queries.length, 11);
-  assert.equal(harness.rpcCalls.length, 1);
+  assert.equal(harness.queries.length, 10);
+  assert.equal(harness.rpcCalls.length, 3);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
 });
 
 test("a parallel observation summary failure aborts detail reads without caching partial detail", async () => {
@@ -3494,13 +4015,13 @@ test("a parallel observation summary failure aborts detail reads without caching
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
   try {
-    await assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), (error) => error === summaryError);
+    await assert.rejects(service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { observationAware: true }), (error) => error === summaryError);
     assert.ok(harness.queries.filter(({ table }) => table === "ops_registration_enrollments").every(({ signal }) => signal.aborted));
   } finally {
     enrollments.resolve();
   }
   failing = false;
-  const detail = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { observationAware: true });
   assert.equal(detail.enrollments.length, 1);
   assert.equal(harness.queries.filter(({ table }) => table === "ops_tasks").length, 2);
   assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_subject_track_summaries").length, 2);
@@ -3518,7 +4039,7 @@ test("an enrollment failure observes a later parallel summary rejection", async 
     },
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
-  await assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), (error) => error === enrollmentError);
+  await assert.rejects(service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { observationAware: true }), (error) => error === enrollmentError);
   assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_subject_track_summaries").length, 1);
   summary.reject(new Error("late summary read failed"));
   await new Promise(setImmediate);
@@ -3542,8 +4063,8 @@ test("parallel detail loading does not request unnecessary observation summaries
     const service = createRegistrationTrackService(harness.client, readyOptions({
       probeObservationRuntime: async () => { throw new Error("unnecessary observation runtime probe"); },
     }));
-    const detail = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: scenario !== "generic" });
-    assert.equal(detail.task.id, "task-1");
+    const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { observationAware: scenario !== "generic" });
+    assert.equal(detail.task.id, "73000000-0000-4000-8000-000000000001");
     assert.equal(detail.tracks.length, scenario === "no-tracks" ? 0 : 1);
   }
 });
@@ -3554,16 +4075,16 @@ test("a stalled case-detail read times out and a forced retry can start fresh", 
   let shouldStallEvents = true;
   const harness = createClient({
     queryHandler(query) {
-      if (query.table === "ops_task_events" && shouldStallEvents) return stalledEvents.promise;
       return detailRows(query.table);
     },
+    eventHandler: () => shouldStallEvents ? stalledEvents.promise : eventRpcResult(detailRows("ops_task_events").data),
   });
   const service = createRegistrationTrackService(harness.client, readyOptions({
     requestTimeoutMs: 5,
   }));
-  const firstDetail = service.loadCaseDetail("task-1", "viewer-1", { force: true });
+  const firstDetail = service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { force: true });
 
-  assert.strictEqual(service.loadCaseDetail("task-1", "viewer-1"), firstDetail);
+  assert.strictEqual(service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1"), firstDetail);
 
   const outcome = await Promise.race([
     firstDetail.then(
@@ -3578,13 +4099,18 @@ test("a stalled case-detail read times out and a forced retry can start fresh", 
   assert.match(outcome.error?.message || "", /registration_query_timeout/);
 
   shouldStallEvents = false;
-  const detail = await service.loadCaseDetail("task-1", "viewer-1", { force: true });
-  assert.equal(detail.task.id, "task-1");
-  assert.equal(harness.queries.filter((query) => query.table === "ops_task_events").length, 2);
-  stalledEvents.resolve(detailRows("ops_task_events"));
+  const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { force: true });
+  assert.equal(detail.task.id, "73000000-0000-4000-8000-000000000001");
+  const eventRequests = harness.rpcRequests.filter((request) => request.name === "read_registration_contact_events_v1");
+  assert.equal(eventRequests.length, 2);
+  assert.equal(eventRequests[0].signal.aborted, true);
+  assert.equal(eventRequests[1].signal.aborted, false);
+  assert.ok(eventRequests.every((request) => request.retryEnabled === false));
+  assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+  stalledEvents.resolve(eventRpcResult(detailRows("ops_task_events").data));
   await Promise.resolve();
-  assert.strictEqual(await service.loadCaseDetail("task-1", "viewer-1"), detail);
-  assert.equal(harness.queries.length, 20, "both attempts start the two enrollment reads before the event timeout");
+  assert.deepEqual(await service.loadCaseDetail(CONTACT_TASK, "viewer-1"), detail);
+  assert.equal(harness.queries.length, 18, "both attempts start the two enrollment reads before the event timeout");
 });
 
 test("a stalled appointment cancellation returns control to the editor", async () => {
@@ -3631,11 +4157,16 @@ test("a runtime-probe failure aborts the parallel case-detail reads", async () =
   }));
 
   await assert.rejects(
-    service.loadCaseDetail("task-1", "viewer-1", { force: true }),
+    service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { force: true }),
     (error) => error === runtimeError,
   );
-  assert.equal(harness.queries.length, 8);
-  assert.equal(harness.getAbortedQueryCount(), 8);
+  assert.equal(harness.queries.length, 7);
+  assert.equal(harness.getAbortedQueryCount(), 7);
+  const eventRequest = harness.rpcRequests.find((request) => request.name === "read_registration_contact_events_v1");
+  assert.ok(eventRequest.signal instanceof AbortSignal);
+  assert.equal(eventRequest.signal.aborted, true);
+  assert.equal(eventRequest.retryEnabled, false);
+  assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
 });
 
 test("detail loader bounds current and historical rows, maps them, and shares same-viewer in-flight work", async () => {
@@ -3661,13 +4192,14 @@ test("detail loader bounds current and historical rows, maps them, and shares sa
     recordMeasure: (entry) => measures.push({ ...entry }),
   }));
 
-  const left = service.loadCaseDetail("task-1", "viewer-1");
-  const right = service.loadCaseDetail("task-1", "viewer-1");
+  const left = service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
+  const right = service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
   assert.strictEqual(left, right);
   gate.resolve();
   const detail = await left;
 
-  assert.equal(harness.queries.length, 10);
+  assert.equal(harness.queries.length, 9);
+  assert.equal(harness.rpcCalls.length, 3);
   assert.equal(detail.commonRevision, 3);
   assert.equal(detail.tracks[0].directorName, "강부희");
   assert.equal(detail.tracks[0].phoneReadyAt, "2026-07-12T01:00:00Z");
@@ -3684,28 +4216,23 @@ test("detail loader bounds current and historical rows, maps them, and shares sa
     scheduledAppointments: { loadedCount: 1, totalCount: 1, overflow: false },
     currentEnrollments: { loadedCount: 1, totalCount: 1, overflow: false },
   });
-  assert.equal(detail.events[0].eventType, "consultation_completed");
-  assert.equal(detail.events[0].trackId, "track-1");
-  assert.deepEqual({ ...detail.events[0].metadata }, { consultationId: "consultation-1" });
-  assert.equal(detail.events[1].eventType, "future_event");
-  assert.equal(detail.events[1].legacyText, "plain future history");
-
-  const events = harness.queries.find((query) => query.table === "ops_task_events");
-  assert.deepEqual(events.filters, [
-    ["eq", "task_id", "task-1"],
-    ["eq", "registration_task_event_shared_visible", true],
-  ]);
-  assert.ok(!events.filters.some((filter) => filter[0] === "in" && filter[1] === "event_type"));
+  assert.deepEqual(Array.from(detail.events, (event) => event.id), [EVENT_FIXTURE_IDS.legacy, EVENT_FIXTURE_IDS.canonical]);
+  assert.equal(detail.events[1].eventType, "consultation_completed");
+  assert.equal(detail.events[1].trackId, "track-1");
+  assert.deepEqual({ ...detail.events[1].metadata }, { consultationId: "consultation-1" });
+  assert.equal(detail.events[0].eventType, "future_event");
+  assert.equal(detail.events[0].legacyText, "plain future history");
+  assertCaseDetailUsesServerPrivacyFilters(harness);
   const messages = harness.queries.find((query) => query.table === "ops_registration_messages");
   assert.deepEqual(messages.filters, [
-    ["eq", "task_id", "task-1"],
+    ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
     ["eq", "template_key", "admission_application"],
     ["eq", "claim_active", true],
   ]);
   assert.equal(messages.limit, 1);
   const tracks = harness.queries.find((query) => query.table === "ops_registration_subject_tracks");
   assert.deepEqual(tracks.filters, [
-    ["eq", "task_id", "task-1"],
+    ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
     ["is", "archived_at", null],
     ["in", "active_level_tests.status", ["scheduled", "in_progress"]],
     ["in", "level_test_history.status", ["completed", "absent", "canceled"]],
@@ -3723,14 +4250,18 @@ test("detail loader bounds current and historical rows, maps them, and shares sa
   assert.equal(harness.queries.filter(
     (query) => query.table === "ops_registration_enrollments",
   ).length, 2);
-  assert.deepEqual(measures, [{ name: "registration:case-detail", cacheHit: false, queryCount: 11, ok: true }]);
+  assert.deepEqual(measures, [{ name: "registration:case-detail", cacheHit: false, queryCount: 12, ok: true }]);
   assert.ok(performanceCalls.some((entry) => entry[0] === "measure" && entry[1] === "registration:case-detail"));
 
-  const cached = await service.loadCaseDetail("task-1", "viewer-1");
-  assert.strictEqual(cached, detail);
-  assert.equal(harness.queries.length, 10);
+  const cached = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
+  assert.deepEqual(cached, detail);
+  assert.notStrictEqual(cached, detail, "contacts are freshly authorized even when business data is cached");
+  assert.equal(harness.queries.length, 9);
+  assert.equal(harness.rpcCalls.length, 4);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, 2);
   assert.deepEqual(measures.at(-1), {
-    name: "registration:case-detail", cacheHit: true, queryCount: 0, ok: true,
+    name: "registration:case-detail", cacheHit: true, queryCount: 1, ok: true,
   });
   const detailPerformanceMeasures = performanceCalls.filter((entry) => entry[0] === "measure" && entry[1] === "registration:case-detail");
   assert.equal(detailPerformanceMeasures.length, 2);
@@ -3749,16 +4280,19 @@ test("detail caches are viewer-scoped, rejected reads are removed, and clear ign
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  await assert.rejects(service.loadCaseDetail("task-1", "viewer-1"), /temporary/);
+  await assert.rejects(service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1"), /temporary/);
   fail = false;
-  await service.loadCaseDetail("task-1", "viewer-1");
+  await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
   const afterViewerOne = harness.queries.length;
-  await service.loadCaseDetail("task-1", "viewer-2");
-  assert.equal(harness.queries.length, afterViewerOne + 10);
+  const afterViewerOneEvents = harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length;
+  await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-2");
+  assert.equal(harness.queries.length, afterViewerOne + 9);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, afterViewerOneEvents + 1);
 
   service.clearCaches();
-  await service.loadCaseDetail("task-1", "viewer-1");
-  assert.equal(harness.queries.length, afterViewerOne + 20);
+  await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
+  assert.equal(harness.queries.length, afterViewerOne + 18);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, afterViewerOneEvents + 2);
 });
 
 test("registration option loader starts five reads, includes schools, excludes students and inactive rows", async () => {
@@ -3932,7 +4466,7 @@ test("school catalog failure does not fail required registration options", async
   assert.deepEqual(Array.from(result.schools), []);
 });
 
-test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nullable UUIDs", async () => {
+test("business Task 3 wrappers preserve exact RPC names, stable keys, and nullable UUIDs", async () => {
   const { createRegistrationTrackService, createRegistrationMutationRequestKey } = await loadFactory();
   const enrollmentRow = {
     id: "enrollment-1", track_id: "track-1", student_id: null,
@@ -3949,14 +4483,14 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
       }
       if (name === "complete_registration_admission_batch") {
         return { data: {
-          batch: { id: "batch-1", task_id: "task-1", revision_number: 1, status: "completed", invoice_sent_at: "i", payment_confirmed_at: "p", created_at: "c", updated_at: "u" },
+          batch: { id: "batch-1", task_id: "73000000-0000-4000-8000-000000000001", revision_number: 1, status: "completed", invoice_sent_at: "i", payment_confirmed_at: "p", created_at: "c", updated_at: "u" },
           enrollments: [enrollmentRow],
         }, error: null };
       }
       if (name === "complete_registration_consultation") {
         return { data: {
           consultation: { id: "consultation-1", status: "completed", outcome: "waiting" },
-          track: { id: "track-1", task_id: "task-1", subject: "영어", pipeline_status: "waiting" },
+          track: { id: "track-1", task_id: "73000000-0000-4000-8000-000000000001", subject: "영어", pipeline_status: "waiting" },
         }, error: null };
       }
       return { data: { ok: true }, error: null };
@@ -3968,12 +4502,10 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   }));
   const key = "request-key";
 
-  await service.createRegistrationCase({ studentName: "김다미", schoolGrade: "고1", schoolName: "중앙여고", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "2026-07-12T01:00:00Z", subjects: ["영어", "수학"], requestNote: "", priority: "normal", requestKey: key });
-  await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: ["영어"], expectedSubjects: ["영어"], requestKey: key });
-  await service.updateRegistrationCaseCommon({ taskId: "task-1", studentName: "김다미", schoolGrade: "고1", schoolName: "", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "   ", requestNote: "", priority: "normal", expectedCommonRevision: 3, requestKey: key });
+  await service.syncRegistrationCaseSubjects({ taskId: "73000000-0000-4000-8000-000000000001", subjects: ["영어"], expectedSubjects: ["영어"], requestKey: key });
   await service.routeRegistrationInquiry({ trackId: "track-1", destination: "waiting", waitingKind: "current_term_opening", classId: "", requestKey: key });
   await service.assignRegistrationTrackDirector({ trackId: "track-1", directorProfileId: "", assignmentSource: "manual", ruleKey: "", expectedCommonRevision: 3, requestKey: key });
-  await service.saveRegistrationSharedAppointment({ appointmentId: "", taskId: "task-1", kind: "level_test", scheduledAt: "2026-07-13T01:00:00Z", place: "본관", trackIds: ["track-1"], replaceRemaining: false, expectedNotificationRevision: 0, requestKey: key });
+  await service.saveRegistrationSharedAppointment({ appointmentId: "", taskId: "73000000-0000-4000-8000-000000000001", kind: "level_test", scheduledAt: "2026-07-13T01:00:00Z", place: "본관", trackIds: ["track-1"], replaceRemaining: false, expectedNotificationRevision: 0, requestKey: key });
   await service.cancelRegistrationAppointment({ appointmentId: "appointment-1", expectedNotificationRevision: 1, reason: "변경", requestKey: key });
   await service.startRegistrationLevelTestAttempt({ attemptId: "attempt-1", requestKey: key });
   await service.completeRegistrationLevelTestAttempt({ attemptId: "attempt-1", status: "completed", materialLink: "https://drive.test", requestKey: key });
@@ -3982,22 +4514,21 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   await service.transitionRegistrationWaiting({ trackId: "track-1", action: "change_waiting_kind", waitingKind: "current_term_opening", classId: "", retakeDecision: "", reason: "", requestKey: key });
   await service.routeRegistrationEnrollmentDecision({ trackId: "track-1", destination: "waiting", waitingKind: "current_term_opening", classId: "", reason: "", requestKey: key });
   const saved = await service.saveRegistrationEnrollmentRows({ trackId: "track-1", rows: [{ id: "", classId: "class-1", textbookId: "", classStartDate: "", classStartSessionKey: "", classStartLessonSessionId: "10000000-0000-4000-8000-000000000011", classStartSession: "", sortOrder: 0 }], requestKey: key });
-  await service.claimRegistrationAdmissionMessage({ taskId: "task-1", messageRequestKey: "message-key" });
+  await service.claimRegistrationAdmissionMessage({ taskId: "73000000-0000-4000-8000-000000000001", messageRequestKey: "message-key" });
   await service.reconcileRegistrationAdmissionMessage({ messageId: "message-1", resolution: "accepted", providerEvidence: { observedState: "accepted", providerMessageId: "provider-1" }, reason: "확인", requestKey: key });
   await service.releaseRegistrationAdmissionMessageRetry({ messageId: "message-1", providerEvidence: { observedState: "closed", lookupRequestKey: "message-key" }, reason: "재발송", requestKey: key });
-  await service.markRegistrationAdmissionNoticeSent({ taskId: "task-1", messageRequestKey: "message-key", requestKey: key });
-  await service.startRegistrationAdmissionBatch({ taskId: "task-1", trackIds: ["track-1"], enrollmentIds: ["enrollment-1"], requestKey: key });
+  await service.markRegistrationAdmissionNoticeSent({ taskId: "73000000-0000-4000-8000-000000000001", messageRequestKey: "message-key", requestKey: key });
+  await service.startRegistrationAdmissionBatch({ taskId: "73000000-0000-4000-8000-000000000001", trackIds: ["track-1"], enrollmentIds: ["enrollment-1"], requestKey: key });
   await service.setRegistrationEnrollmentMakeedu({ enrollmentId: "enrollment-1", registered: true, requestKey: key });
   await service.advanceRegistrationAdmissionBatch({ batchId: "batch-1", action: "invoice_sent", requestKey: key });
   await service.cancelRegistrationAdmissionBatch({ batchId: "batch-1", resolutions: [], reason: "취소", requestKey: key });
   const completed = await service.completeRegistrationAdmissionBatch({ batchId: "batch-1", requestKey: key });
   await service.cancelRegistrationEnrollment({ enrollmentId: "enrollment-1", destination: "", waitingKind: "", classId: "", reason: "취소", requestKey: key });
-  await service.resolveRegistrationMigrationReview({ taskId: "task-1", assignments: [], trackStates: [], requestKey: key });
-  await service.reopenRegistrationTrack({ trackId: "track-1", destination: "inquiry", reason: "재개", requestKey: key });
+  await service.resolveRegistrationMigrationReview({ taskId: "73000000-0000-4000-8000-000000000001", assignments: [], trackStates: [], requestKey: key });
   await service.setStudentClassRosterMode({ studentId: "student-1", classId: "class-1", nextMode: "enrolled", expectedMode: "removed", memo: "등록" });
 
   assert.deepEqual(harness.rpcCalls.map(([name]) => name), [
-    "create_registration_case", "sync_registration_case_subjects_v2", "update_registration_case_common",
+    "sync_registration_case_subjects_v2",
     "route_registration_inquiry", "assign_registration_track_director",
     "save_registration_appointment_details_v1", "cancel_registration_appointment",
     "start_registration_level_test_attempt", "complete_registration_level_test_attempt",
@@ -4009,27 +4540,23 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
     "set_registration_enrollment_makeedu", "advance_registration_admission_batch",
     "cancel_registration_admission_batch", "complete_registration_admission_batch",
     "cancel_registration_enrollment", "resolve_registration_migration_review",
-    "reopen_registration_track", "set_student_class_roster_mode",
+    "set_student_class_roster_mode",
   ]);
-  assert.equal(harness.rpcCalls[4][1].p_director_profile_id, null);
-  assert.equal(harness.rpcCalls[2][1].p_school_name, null);
-  assert.equal(harness.rpcCalls[2][1].p_student_phone, null);
-  assert.equal(harness.rpcCalls[2][1].p_inquiry_at, null);
-  assert.equal(harness.rpcCalls[2][1].p_request_note, null);
-  assert.equal(harness.rpcCalls[5][1].p_appointment_id, null);
-  assert.equal(harness.rpcCalls[10][1].p_class_id, null);
-  assert.equal(harness.rpcCalls[13][1].p_rows[0].id, null);
-  assert.equal(harness.rpcCalls[13][1].p_rows[0].textbookId, null);
-  assert.equal(harness.rpcCalls[13][1].p_rows[0].classStartLessonSessionId, "10000000-0000-4000-8000-000000000011");
-  assert.equal(JSON.stringify(harness.rpcCalls[24][1].p_assignments), JSON.stringify({ assignments: [], trackStates: [] }));
-  assert.equal("p_track_states" in harness.rpcCalls[24][1], false);
-  assert.equal(harness.rpcCalls[23][1].p_destination, null);
+  assert.equal(harness.rpcCalls[2][1].p_director_profile_id, null);
+  assert.equal(harness.rpcCalls[3][1].p_appointment_id, null);
+  assert.equal(harness.rpcCalls[8][1].p_class_id, null);
+  assert.equal(harness.rpcCalls[11][1].p_rows[0].id, null);
+  assert.equal(harness.rpcCalls[11][1].p_rows[0].textbookId, null);
+  assert.equal(harness.rpcCalls[11][1].p_rows[0].classStartLessonSessionId, "10000000-0000-4000-8000-000000000011");
+  assert.equal(JSON.stringify(harness.rpcCalls[22][1].p_assignments), JSON.stringify({ assignments: [], trackStates: [] }));
+  assert.equal("p_track_states" in harness.rpcCalls[22][1], false);
+  assert.equal(harness.rpcCalls[21][1].p_destination, null);
   assert.equal(saved.rows[0].trackId, "track-1");
   assert.equal(saved.rows[0].textbookId, null);
-  assert.equal(completed.batch.taskId, "task-1");
+  assert.equal(completed.batch.taskId, "73000000-0000-4000-8000-000000000001");
   assert.equal(completed.enrollments[0].makeeduRegistered, true);
   assert.equal(createRegistrationMutationRequestKey("save", "track-1"), "save:track-1:uuid-from-crypto");
-  assert.equal(mutationInvalidations, 27, "every successful registration RPC must invalidate parent consumers");
+  assert.equal(mutationInvalidations, 24, "every successful registration RPC must invalidate parent consumers");
 });
 
 test("enrollment save omits a legacy schedule identifier from the normalized lesson-session field", async () => {
@@ -4075,7 +4602,7 @@ test("admission completion uses the injected post-commit public cache invalidato
       assert.equal(name, "complete_registration_admission_batch");
       return {
         data: {
-          batch: { id: "batch-1", task_id: "task-1", revision_number: 1, status: "completed", invoice_sent_at: "i", payment_confirmed_at: "p", created_at: "c", updated_at: "u" },
+          batch: { id: "batch-1", task_id: "73000000-0000-4000-8000-000000000001", revision_number: 1, status: "completed", invoice_sent_at: "i", payment_confirmed_at: "p", created_at: "c", updated_at: "u" },
           enrollments: [enrollment],
         },
         error: null,
@@ -4155,10 +4682,10 @@ test("registration core legacy bridge reads only stable source event IDs", async
   const harness = createClient({
     rpcHandler(name, args) {
       assert.equal(name, "list_registration_legacy_source_ids_v1");
-      assert.deepEqual({ ...args }, { p_task_id: "task-1" });
+      assert.deepEqual({ ...args }, { p_task_id: "73000000-0000-4000-8000-000000000001" });
       return {
         data: {
-          taskId: "task-1",
+          taskId: "73000000-0000-4000-8000-000000000001",
           sourceEventIds: ["event-1", "event-2", "", null],
           title: "must-not-leak",
         },
@@ -4169,7 +4696,7 @@ test("registration core legacy bridge reads only stable source event IDs", async
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
   assert.deepEqual(
-    Array.from(await service.listRegistrationLegacySourceIds("task-1")),
+    Array.from(await service.listRegistrationLegacySourceIds("73000000-0000-4000-8000-000000000001")),
     ["event-1", "event-2"],
   );
   assert.equal(harness.queries.length, 0);
@@ -4198,7 +4725,7 @@ test("consultation completion maps canonical readiness from camel-case RPC rows"
           },
           track: {
             id: "track-1",
-            taskId: "task-1",
+            taskId: "73000000-0000-4000-8000-000000000001",
             subject: "영어",
             status: "enrollment_decided",
             directorProfileId: "director-1",
@@ -4232,418 +4759,63 @@ test("consultation completion maps canonical readiness from camel-case RPC rows"
   assert.equal(result.track.phoneReadySource, "director_resolved");
 });
 
-test("initial workflow create uses the exact atomic payload and maps the complete response", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const notificationTargets = [{ appointmentId: "appointment-visit", notificationRevision: 1 }];
-  const response = {
-    taskId: "task-new",
-    commonRevision: 1,
-    subjects: ["영어", "수학"],
-    tracks: [
-      {
-        id: "track-english",
-        task_id: "task-new",
-        subject: "영어",
-        pipeline_status: "consultation_waiting",
-        director_profile_id: "director-1",
-        director_assignment_source: "default",
-        director_assignment_rule_key: "english:2026:high1",
-        waiting_kind: null,
-        level_test_retake_decision: null,
-        migration_review_required: false,
-        stage_entered_at: "2026-07-12T01:00:00Z",
-        phone_ready_at: "2026-07-12T01:00:00Z",
-        phone_ready_source: "inquiry",
-      },
-      {
-        id: "track-math",
-        taskId: "task-new",
-        subject: "수학",
-        status: "visit_consultation_scheduled",
-        directorProfileId: "director-2",
-        directorAssignmentSource: "manual",
-        directorAssignmentRuleKey: "override",
-        waitingKind: "current_term_opening",
-        levelTestRetakeDecision: "required",
-        migrationReviewRequired: false,
-        stageEnteredAt: "2026-07-12T02:00:00Z",
-        phoneReadyAt: null,
-        phoneReadySource: "future_source",
-      },
-    ],
-    appointments: [
-      {
-        id: "appointment-level",
-        task_id: "task-new",
-        kind: "level_test",
-        scheduled_at: "2026-07-14T01:00:00Z",
-        place: "본관",
-        status: "scheduled",
-        notification_revision: 0,
-        created_at: "2026-07-12T01:00:00Z",
-        updated_at: "2026-07-12T01:00:00Z",
-      },
-      {
-        id: "appointment-visit",
-        taskId: "task-new",
-        kind: "visit_consultation",
-        scheduledAt: "2026-07-15T02:00:00Z",
-        place: "상담실",
-        status: "scheduled",
-        notificationRevision: 1,
-        createdAt: "2026-07-12T01:00:00Z",
-        updatedAt: "2026-07-12T01:00:00Z",
-      },
-    ],
-    notificationTargets,
-  };
-  const harness = createClient({
-    rpcHandler(name) {
-      assert.equal(name, "create_registration_case_with_initial_workflow_v1");
-      return { data: response, error: null };
-    },
-  });
-  let mutationInvalidations = 0;
-  const service = createRegistrationTrackService(harness.client, readyOptions({
-    onMutationSuccess: () => { mutationInvalidations += 1; },
-  }));
-  const input = {
-    studentName: "김다미",
-    schoolGrade: "고1",
-    schoolName: "중앙여고",
-    parentPhone: "01012345678",
-    studentPhone: "01087654321",
-    campus: "본관",
-    inquiryAt: "2026-07-12T01:00:00Z",
-    subjects: ["영어", "수학"],
-    requestNote: "상담 요청",
-    priority: "high",
-    subjectPlans: { 영어: "level_test", 수학: "visit" },
-    levelTestAppointment: {
-      scheduledAt: "2026-07-14T01:00:00Z",
-      place: "본관",
-      subjects: ["영어"],
-    },
-    visitAppointment: {
-      scheduledAt: "2026-07-15T02:00:00Z",
-      place: "상담실",
-      subjects: ["수학"],
-    },
-    directorOverrides: { 수학: "director-2" },
-    requestKey: "  intake-request-key  ",
-  };
+test("unsupported initial-workflow create cannot fall back to a raw contact RPC", async () => {
 
-  const result = await service.createRegistrationCaseWithInitialWorkflow(input);
-  const [rpcName, rpcArgs] = harness.rpcCalls[0];
+  const {createRegistrationTrackService}=await loadFactory();const harness=createClient();let contactCalls=0;
+  const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async()=>{contactCalls++;throw Error("unexpected");}}));
+  for(const appointment of [null,{scheduledAt:"2026-10-09T01:00:00Z",place:"본관",subjects:["영어"]}]) await assert.rejects(service.createRegistrationCaseWithInitialWorkflow({...commonContactInput(),subjects:["영어"],levelTestAppointment:appointment,visitAppointment:appointment}),/registration_contact_initial_workflow_unsupported/);
+  assert.equal(harness.rpcCalls.length,0);assert.equal(contactCalls,0);
 
-  assert.equal(rpcName, "create_registration_case_with_initial_workflow_v1");
-  assert.deepEqual(Object.keys(rpcArgs), [
-    "p_student_name",
-    "p_school_grade",
-    "p_school_name",
-    "p_parent_phone",
-    "p_student_phone",
-    "p_campus",
-    "p_inquiry_at",
-    "p_subjects",
-    "p_request_note",
-    "p_priority",
-    "p_subject_plans",
-    "p_level_test_appointment",
-    "p_visit_appointment",
-    "p_director_overrides",
-    "p_request_key",
-  ]);
-  assert.deepEqual({ ...rpcArgs }, {
-    p_student_name: input.studentName,
-    p_school_grade: input.schoolGrade,
-    p_school_name: input.schoolName,
-    p_parent_phone: input.parentPhone,
-    p_student_phone: input.studentPhone,
-    p_campus: input.campus,
-    p_inquiry_at: input.inquiryAt,
-    p_subjects: input.subjects,
-    p_request_note: input.requestNote,
-    p_priority: input.priority,
-    p_subject_plans: input.subjectPlans,
-    p_level_test_appointment: input.levelTestAppointment,
-    p_visit_appointment: input.visitAppointment,
-    p_director_overrides: input.directorOverrides,
-    p_request_key: "intake-request-key",
-  });
-  assert.equal(result.taskId, "task-new");
-  assert.equal(result.commonRevision, 1);
-  assert.deepEqual(Array.from(result.subjects), ["영어", "수학"]);
-  assert.deepEqual(Array.from(result.tracks, (track) => ({ ...track })), [
-    {
-      id: "track-english",
-      taskId: "task-new",
-      subject: "영어",
-      status: "consultation_waiting",
-      workflowStatus: "consultation_requested",
-      workflowRevision: 1,
-      workflowStatusEnteredAt: "",
-      legacy: false,
-      directorProfileId: "director-1",
-      directorName: "",
-      directorAssignmentSource: "default",
-      directorAssignmentRuleKey: "english:2026:high1",
-      waitingKind: "",
-      waitingDetailKind: "",
-      waitingDetailClassId: null,
-      waitingDetailRetakeDecision: "",
-      levelTestRetakeDecision: "",
-      migrationReviewRequired: false,
-      stageEnteredAt: "2026-07-12T01:00:00Z",
-      phoneReadyAt: "2026-07-12T01:00:00Z",
-      phoneReadySource: "inquiry",
-      ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
-    },
-    {
-      id: "track-math",
-      taskId: "task-new",
-      subject: "수학",
-      status: "visit_consultation_scheduled",
-      workflowStatus: "consultation_requested",
-      workflowRevision: 1,
-      workflowStatusEnteredAt: "",
-      legacy: false,
-      directorProfileId: "director-2",
-      directorName: "",
-      directorAssignmentSource: "manual",
-      directorAssignmentRuleKey: "override",
-      waitingKind: "current_term_opening",
-      waitingDetailKind: "",
-      waitingDetailClassId: null,
-      waitingDetailRetakeDecision: "",
-      levelTestRetakeDecision: "required",
-      migrationReviewRequired: false,
-      stageEnteredAt: "2026-07-12T02:00:00Z",
-      phoneReadyAt: null,
-      phoneReadySource: null,
-      ...EMPTY_REGISTRATION_OBSERVATION_SUMMARY,
-    },
-  ]);
-  assert.deepEqual(Array.from(result.appointments, (appointment) => ({ ...appointment })), [
-    {
-      id: "appointment-level",
-      taskId: "task-new",
-      kind: "level_test",
-      scheduledAt: "2026-07-14T01:00:00Z",
-      place: "본관",
-      status: "scheduled",
-      notificationRevision: 0,
-      createdAt: "2026-07-12T01:00:00Z",
-      updatedAt: "2026-07-12T01:00:00Z",
-    },
-    {
-      id: "appointment-visit",
-      taskId: "task-new",
-      kind: "visit_consultation",
-      scheduledAt: "2026-07-15T02:00:00Z",
-      place: "상담실",
-      status: "scheduled",
-      notificationRevision: 1,
-      createdAt: "2026-07-12T01:00:00Z",
-      updatedAt: "2026-07-12T01:00:00Z",
-    },
-  ]);
-  assert.strictEqual(result.notificationTargets, notificationTargets);
-  assert.equal(mutationInvalidations, 1);
 });
 
-test("atomic initial workflow create rechecks both exact runtime markers before the business RPC", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const cases = [
-    {
-      name: "subject version 2",
-      options: { probeRuntime: async () => ({ mode: "ready", version: 2 }) },
-    },
-    {
-      name: "intake version 2",
-      options: { probeIntakeRuntime: async () => ({ available: true, version: 2 }) },
-    },
-    {
-      name: "malformed intake marker",
-      options: { probeIntakeRuntime: async () => ({ available: true, version: "1" }) },
-    },
-    {
-      name: "contradictory intake marker",
-      options: { probeIntakeRuntime: async () => ({ available: false, version: 1 }) },
-    },
-    {
-      name: "rejected intake probe",
-      options: { probeIntakeRuntime: async () => { throw new Error("permission denied") } },
-    },
-  ];
+test("initial-workflow create stays fail closed when the old runtime marker is available", async () => {
 
-  for (const entry of cases) {
-    const harness = createClient();
-    const service = createRegistrationTrackService(harness.client, readyOptions(entry.options));
-    await assert.rejects(
-      service.createRegistrationCaseWithInitialWorkflow(initialWorkflowCreateInput()),
-      undefined,
-      entry.name,
-    );
-    assert.equal(harness.rpcCalls.length, 0, `${entry.name} must not call the business RPC`);
-  }
+  const {createRegistrationTrackService}=await loadFactory();const harness=createClient();let contactCalls=0;
+  const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async()=>{contactCalls++;throw Error("unexpected");}}));
+  for(const appointment of [null,{scheduledAt:"2026-10-09T01:00:00Z",place:"본관",subjects:["영어"]}]) await assert.rejects(service.createRegistrationCaseWithInitialWorkflow({...commonContactInput(),subjects:["영어"],levelTestAppointment:appointment,visitAppointment:appointment}),/registration_contact_initial_workflow_unsupported/);
+  assert.equal(harness.rpcCalls.length,0);assert.equal(contactCalls,0);
+
 });
 
-test("atomic initial workflow create constrains only level-test places before RPC", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const harness = createClient();
-  const service = createRegistrationTrackService(harness.client, readyOptions());
-  const levelTestInput = {
-    ...initialWorkflowCreateInput(),
-    subjectPlans: { 영어: "level_test" },
-    levelTestAppointment: {
-      scheduledAt: "2026-07-18T01:00:00Z",
-      place: "본관 201호",
-      subjects: ["영어"],
-    },
-  };
+test("initial-workflow create never submits contact for either appointment shape", async () => {
 
-  await assert.rejects(
-    service.createRegistrationCaseWithInitialWorkflow(levelTestInput),
-    /registration_level_test_place_invalid/,
-  );
-  assert.equal(harness.rpcCalls.length, 0);
+  const {createRegistrationTrackService}=await loadFactory();const harness=createClient();let contactCalls=0;
+  const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async()=>{contactCalls++;throw Error("unexpected");}}));
+  for(const appointment of [null,{scheduledAt:"2026-10-09T01:00:00Z",place:"본관",subjects:["영어"]}]) await assert.rejects(service.createRegistrationCaseWithInitialWorkflow({...commonContactInput(),subjects:["영어"],levelTestAppointment:appointment,visitAppointment:appointment}),/registration_contact_initial_workflow_unsupported/);
+  assert.equal(harness.rpcCalls.length,0);assert.equal(contactCalls,0);
 
-  await service.createRegistrationCaseWithInitialWorkflow({
-    ...levelTestInput,
-    levelTestAppointment: { ...levelTestInput.levelTestAppointment, place: "  별관  " },
-  });
-  assert.equal(harness.rpcCalls[0][1].p_level_test_appointment.place, "별관");
-
-  await service.createRegistrationCaseWithInitialWorkflow({
-    ...initialWorkflowCreateInput(),
-    subjectPlans: { 영어: "visit" },
-    levelTestAppointment: null,
-    visitAppointment: {
-      scheduledAt: "2026-07-18T02:00:00Z",
-      place: "본관 201호",
-      subjects: ["영어"],
-    },
-    requestKey: "visit-free-text",
-  });
-  assert.equal(harness.rpcCalls[1][1].p_visit_appointment.place, "본관 201호");
 });
 
-test("receipt keys are required and maintenance blocks every new mutation before RPC", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const harness = createClient();
-  const ready = createRegistrationTrackService(harness.client, readyOptions());
+test("contact commands require transport and an opened snapshot without old-writer fallback", async () => {
 
-  await assert.rejects(
-    ready.updateRegistrationCaseCommon({ requestKey: "   " }),
-    /request key/i,
-  );
-  await assert.rejects(
-    ready.createRegistrationCaseWithInitialWorkflow({ requestKey: "   " }),
-    /request key/i,
-  );
-  await assert.rejects(
-    ready.claimRegistrationAdmissionMessage({ taskId: "task-1", messageRequestKey: "" }),
-    /message request key/i,
-  );
-  assert.equal(harness.rpcCalls.length, 0);
+  const {createRegistrationTrackService}=await loadFactory();const harness=createClient();let writes=0;
+  const absent=createRegistrationTrackService(harness.client,readyOptions());await assert.rejects(absent.updateRegistrationCaseCommon(commonContactInput()),/registration_contact_runtime_unavailable/);
+  const ready=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async()=>{writes++;throw Error("unexpected");}}));
+  await assert.rejects(ready.updateRegistrationCaseCommon(commonContactInput({contactState:null})),/registration_contact_snapshot_required/);
+  await assert.rejects(ready.updateRegistrationCaseCommon(commonContactInput({requestKey:"invalid"})),/registration_contact_request_key_invalid/);
+  await assert.rejects(ready.reopenRegistrationTrack({trackId:CONTACT_TRACK,destination:"inquiry",reason:"재개",requestKey:CONTACT_KEY}),/registration_contact_snapshot_required/);
+  await assert.rejects(ready.claimRegistrationAdmissionMessage({taskId:CONTACT_TASK,messageRequestKey:""}),/message request key/i);
+  assert.equal(writes,0);assert.equal(harness.rpcCalls.length,0);
 
-  const maintenance = createRegistrationTrackService(harness.client, readyOptions({
-    probeRuntime: async () => ({ mode: "maintenance", version: 0 }),
-  }));
-  await assert.rejects(
-    maintenance.reopenRegistrationTrack({ trackId: "track-1", destination: "inquiry", reason: "재개", requestKey: "key" }),
-    /데이터 전환 중/,
-  );
-  assert.equal(harness.rpcCalls.length, 0);
 });
 
-test("Notion-style fact mutations bypass runtime readiness while process mutations stay guarded", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  let runtimeProbeCalls = 0;
-  const harness = createClient({
-    rpcHandler(name) {
-      if (name === "create_registration_case") {
-        return { data: { taskId: "task-1", commonRevision: 1, tracks: [] }, error: null };
-      }
-      if (name === "sync_registration_case_subjects") {
-        return { data: { taskId: "task-1", subjects: [], tracks: [] }, error: null };
-      }
-      if (name === "update_registration_case_common") {
-        return { data: { taskId: "task-1", commonRevision: 2 }, error: null };
-      }
-      if (name === "set_registration_workflow_status_v1") {
-        return { data: {
-          trackId: "track-1",
-          workflowStatus: "inquiry",
-          workflowRevision: 2,
-          workflowStatusEnteredAt: "2026-09-01T10:00:00Z",
-          enrollmentFinalization: null,
-        }, error: null };
-      }
-      return { data: {}, error: null };
-    },
-  });
-  const service = createRegistrationTrackService(harness.client, readyOptions({
-    probeRuntime: async () => {
-      runtimeProbeCalls += 1;
-      throw new Error("runtime probe unavailable");
-    },
-  }));
+test("contact fact commands use their own server contract while roster processing remains guarded", async () => {
 
-  await service.createRegistrationCase({
-    studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
-    campus: "", inquiryAt: "", subjects: [], requestNote: "", priority: "normal", requestKey: "fact-create",
-  });
-  await service.updateRegistrationCaseCommon({
-    taskId: "task-1", studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
-    campus: "", inquiryAt: "", requestNote: "", priority: "normal", expectedCommonRevision: 1, requestKey: "fact-common",
-  });
-  await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: [], expectedSubjects: ["영어"], requestKey: "fact-subjects" });
-  await service.setRegistrationWorkflowStatus({
-    trackId: "track-1", workflowStatus: "inquiry", expectedWorkflowRevision: 1, requestKey: "fact-status",
-  });
+  const {createRegistrationTrackService}=await loadFactory();const harness=createClient();let probes=0;const writes=[];
+  const service=createRegistrationTrackService(harness.client,readyOptions({probeRuntime:async()=>{probes++;throw Error("runtime probe unavailable");},mutateContact:async command=>{writes.push(command);return contactEnvelope(command,{tracks:[],commonRevision:4});}}));
+  await service.createRegistrationCase({...commonContactInput(),subjects:["영어"]});await service.updateRegistrationCaseCommon(commonContactInput());
+  await service.setRegistrationWorkflowStatus({...commonContactInput(),trackId:CONTACT_TRACK,workflowStatus:"inquiry",expectedWorkflowRevision:1}).catch(error=>{assert.match(error.message,/response_invalid/)});
+  assert.equal(probes,0);assert.equal(writes.length,3);assert.equal(harness.rpcCalls.length,0);
+  await assert.rejects(service.startRegistrationAdmissionBatch({taskId:CONTACT_TASK,trackIds:[CONTACT_TRACK],enrollmentIds:[],requestKey:CONTACT_KEY}),/runtime probe unavailable/);assert.equal(probes,1);
 
-  assert.equal(runtimeProbeCalls, 0);
-  assert.deepEqual(harness.rpcCalls.map(([name]) => name), [
-    "create_registration_case",
-    "update_registration_case_common",
-    "sync_registration_case_subjects_v2",
-    "set_registration_workflow_status_v1",
-  ]);
-  assert.equal(harness.rpcCalls[0][1].p_inquiry_at, null, "blank create inquiryAt must be sent as SQL null");
-  assert.equal(harness.rpcCalls[1][1].p_inquiry_at, null, "blank common inquiryAt must be sent as SQL null");
-
-  await assert.rejects(
-    service.reopenRegistrationTrack({ trackId: "track-1", destination: "inquiry", reason: "재개", requestKey: "process" }),
-    /runtime probe unavailable/,
-  );
-  assert.equal(runtimeProbeCalls, 1);
 });
 
-test("inquiry datetime-local facts are serialized as Seoul instants", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const harness = createClient({
-    rpcHandler(name) {
-      if (name === "create_registration_case") {
-        return { data: { taskId: "task-1", commonRevision: 1, tracks: [] }, error: null };
-      }
-      return { data: { taskId: "task-1", commonRevision: 2 }, error: null };
-    },
-  });
-  const service = createRegistrationTrackService(harness.client, readyOptions());
+test("contact inquiry datetime-local facts serialize Seoul instants and omit student contact", async () => {
 
-  await service.createRegistrationCase({
-    studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
-    campus: "", inquiryAt: "2026-09-01T18:49", subjects: [], requestNote: "", priority: "normal", requestKey: "create-local-time",
-  });
-  await service.updateRegistrationCaseCommon({
-    taskId: "task-1", studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
-    campus: "", inquiryAt: "2026-09-01T18:49", requestNote: "", priority: "normal", expectedCommonRevision: 1, requestKey: "update-local-time",
-  });
+  const {createRegistrationTrackService}=await loadFactory();const calls=[];const service=createRegistrationTrackService(createClient().client,readyOptions({mutateContact:async command=>{calls.push(command);return contactEnvelope(command,{tracks:[],commonRevision:4});}}));
+  await service.createRegistrationCase({...commonContactInput(),subjects:["영어"]});await service.updateRegistrationCaseCommon(commonContactInput());
+  assert.equal(calls[0].payload.inquiryAt,"2026-09-01T09:49:00.000Z");assert.equal(calls[1].payload.inquiryAt,"2026-09-01T09:49:00.000Z");assert.doesNotMatch(JSON.stringify(calls),/studentPhone|RETIRED_STUDENT_CANARY/);
 
-  assert.equal(harness.rpcCalls[0][1].p_inquiry_at, "2026-09-01T09:49:00.000Z");
-  assert.equal(harness.rpcCalls[1][1].p_inquiry_at, "2026-09-01T09:49:00.000Z");
 });
 
 test("all cached registration reads require an authenticated viewer id", async () => {
@@ -4652,11 +4824,11 @@ test("all cached registration reads require an authenticated viewer id", async (
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
   assert.throws(
-    () => service.loadTrackSummaries(["task-1"], ""),
+    () => service.loadTrackSummaries(["73000000-0000-4000-8000-000000000001"], ""),
     /viewer id/i,
   );
   assert.throws(
-    () => service.loadCaseDetail("task-1", "   "),
+    () => service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "   "),
     /viewer id/i,
   );
   assert.throws(
@@ -4673,7 +4845,7 @@ test("appointment creation and director default clearing send nullable canonical
 
   await service.saveRegistrationSharedAppointment({
     appointmentId: null,
-    taskId: "task-1",
+    taskId: "73000000-0000-4000-8000-000000000001",
     kind: "level_test",
     scheduledAt: "2026-07-13T01:00:00Z",
     place: "본관",
@@ -4754,7 +4926,7 @@ test("appointment save constrains only level-test places", async () => {
   const service = createRegistrationTrackService(harness.client, readyOptions());
   const common = {
     appointmentId: null,
-    taskId: "task-1",
+    taskId: "73000000-0000-4000-8000-000000000001",
     scheduledAt: "2026-07-13T01:00:00Z",
     trackIds: ["track-1"],
     replaceRemaining: false,
@@ -4813,10 +4985,10 @@ test("a forced detail refresh cannot be overwritten by the stale request it supe
     queryHandler(query) {
       queryNumber += 1;
       const base = detailRows(query.table);
-      const stalePhaseOne = queryNumber <= 6;
-      const freshPhaseOne = queryNumber > 6 && queryNumber <= 12;
+      const stalePhaseOne = queryNumber <= 7;
+      const freshPhaseOne = queryNumber > 7 && queryNumber <= 14;
       const gate = stalePhaseOne ? staleGate : freshPhaseOne ? freshGate : null;
-      const title = stalePhaseOne || queryNumber > 15 ? "stale title" : "fresh title";
+      const title = stalePhaseOne ? "stale title" : "fresh title";
       const result = query.table === "ops_tasks"
         ? { ...base, data: { ...base.data, title } }
         : base;
@@ -4825,9 +4997,9 @@ test("a forced detail refresh cannot be overwritten by the stale request it supe
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  const stale = service.loadCaseDetail("task-1", "viewer-1");
+  const stale = service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
   await Promise.resolve();
-  const fresh = service.loadCaseDetail("task-1", "viewer-1", { force: true });
+  const fresh = service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { force: true });
   await Promise.resolve();
   freshGate.resolve();
   assert.equal((await fresh).task.title, "fresh title");
@@ -4835,7 +5007,7 @@ test("a forced detail refresh cannot be overwritten by the stale request it supe
   assert.equal((await stale).task.title, "stale title");
 
   const queryCount = harness.queries.length;
-  const cached = await service.loadCaseDetail("task-1", "viewer-1");
+  const cached = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
   assert.equal(cached.task.title, "fresh title");
   assert.equal(harness.queries.length, queryCount);
 });
@@ -4919,131 +5091,29 @@ test("science registration database contract preserves public RPC signatures and
   assert.match(migration, /write_registration_track_event_v2/);
 });
 
-test("unified inquiry save performs one sorted atomic RPC request", async () => {
-  const { createRegistrationTrackService } = await loadFactory()
-  const harness = createClient({
-    rpcHandler(name) {
-      assert.equal(name, "save_registration_case_inquiry_v1")
-      return {
-        data: {
-          taskId: "task-1",
-          commonRevision: 4,
-          tracks: [
-            { id: "track-english", task_id: "task-1", subject: "영어", pipeline_status: "inquiry" },
-            { id: "track-math", task_id: "task-1", subject: "수학", pipeline_status: "inquiry" },
-          ],
-        },
-        error: null,
-      }
-    },
-  })
-  const service = createRegistrationTrackService(harness.client, readyOptions())
-  const subjects = ["수학", "영어"]
-  const expectedSubjects = ["수학", "영어"]
+test("unified inquiry save sends one atomic HTTP command with original case revisions", async () => {
 
-  const result = await service.saveRegistrationCaseInquiry({
-    taskId: "task-1",
-    studentName: "김다미",
-    schoolGrade: "고1",
-    schoolName: "중앙여고",
-    parentPhone: "01012345678",
-    studentPhone: "",
-    campus: "본관",
-    inquiryAt: "2026-07-12T01:00:00Z",
-    requestNote: "통합 저장",
-    priority: "normal",
-    subjects,
-    expectedCommonRevision: 3,
-    expectedSubjects,
-    requestKey: "unified-inquiry-save",
-  })
+  const {createRegistrationTrackService}=await loadFactory();const harness=createClient();const calls=[];
+  const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async command=>{calls.push(command);return contactEnvelope(command,{commonRevision:4,tracks:[{id:CONTACT_TRACK,task_id:CONTACT_TASK,subject:"영어",pipeline_status:"inquiry"}]});}}));
+  const subjects=["수학","영어"],expectedSubjects=["영어"];const result=await service.saveRegistrationCaseInquiry({...commonContactInput(),subjects,expectedSubjects});
+  assert.equal(calls.length,1);assert.equal(harness.rpcCalls.length,0);assert.equal(calls[0].command,"save_inquiry");assert.equal(calls[0].expectedGeneration,"1");assert.equal(calls[0].expectedRevision,"1");assert.deepEqual(Array.from(calls[0].payload.subjects),["영어","수학"]);assert.deepEqual(Array.from(calls[0].payload.expectedSubjects),["영어"]);assert.equal(calls[0].payload.expectedCommonRevision,3);assert.equal(calls[0].payload.parentPhone,"01000000000");assert.doesNotMatch(JSON.stringify(calls),/studentPhone|RETIRED_STUDENT_CANARY/);assert.deepEqual(subjects,["수학","영어"]);assert.deepEqual(expectedSubjects,["영어"]);assert.equal(result.contactState.parentPhone,null);assert.equal(result.tracks[0].subject,"영어");
 
-  assert.equal(harness.rpcCalls.length, 1)
-  assert.deepEqual(JSON.parse(JSON.stringify(harness.rpcCalls[0])), ["save_registration_case_inquiry_v1", {
-    p_task_id: "task-1",
-    p_student_name: "김다미",
-    p_school_grade: "고1",
-    p_school_name: "중앙여고",
-    p_parent_phone: "01012345678",
-    p_student_phone: null,
-    p_campus: "본관",
-    p_inquiry_at: "2026-07-12T01:00:00Z",
-    p_request_note: "통합 저장",
-    p_priority: "normal",
-    p_expected_common_revision: 3,
-    p_expected_subjects: ["영어", "수학"],
-    p_subjects: ["영어", "수학"],
-    p_request_key: "unified-inquiry-save",
-  }])
-  assert.deepEqual(subjects, ["수학", "영어"])
-  assert.deepEqual(expectedSubjects, ["수학", "영어"])
-  assert.deepEqual(result.tracks.map((track) => track.subject), ["영어", "수학"])
-})
-
-test("waiting details use their dedicated nullable data-only RPC", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const harness = createClient({
-    rpcHandler(name, args) {
-      assert.equal(name, "save_registration_waiting_details_v2");
-      assert.deepEqual({ ...args }, {
-        p_track_id: "track-1",
-        p_waiting_kind: "current_class",
-        p_class_id: "10000000-0000-4000-8000-000000000010",
-        p_retake_decision: "required",
-        p_request_key: "waiting-details-request",
-      });
-      return { data: { trackId: "track-1", waitingKind: "current_class", classId: "10000000-0000-4000-8000-000000000010", retakeDecision: "required" }, error: null };
-    },
-  });
-  const service = createRegistrationTrackService(harness.client, readyOptions());
-
-  const result = await service.saveRegistrationWaitingDetails({
-    trackId: "track-1",
-    waitingKind: "current_class",
-    classId: "10000000-0000-4000-8000-000000000010",
-    retakeDecision: "required",
-    requestKey: "waiting-details-request",
-  });
-
-  assert.deepEqual({ ...result }, {
-    trackId: "track-1",
-    waitingKind: "current_class",
-    classId: "10000000-0000-4000-8000-000000000010",
-    retakeDecision: "required",
-  });
 });
 
-test("waiting details persist an explicit clear as nullable RPC input", async () => {
-  const { createRegistrationTrackService } = await loadFactory();
-  const harness = createClient({
-    rpcHandler(name, args) {
-      assert.equal(name, "save_registration_waiting_details_v2");
-      assert.deepEqual({ ...args }, {
-        p_track_id: "track-1",
-        p_waiting_kind: null,
-        p_class_id: null,
-        p_retake_decision: null,
-        p_request_key: "waiting-clear-request",
-      });
-      return { data: { trackId: "track-1", waitingKind: null, classId: null, retakeDecision: null }, error: null };
-    },
-  });
-  const service = createRegistrationTrackService(harness.client, readyOptions());
+test("waiting contact command uses observed case revisions with canonical class UUID", async () => {
 
-  const result = await service.saveRegistrationWaitingDetails({
-    trackId: "track-1",
-    waitingKind: "",
-    classId: "",
-    retakeDecision: "",
-    requestKey: "waiting-clear-request",
-  });
+ const {createRegistrationTrackService}=await loadFactory();const calls=[];const harness=createClient();const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async command=>{calls.push(command);return contactEnvelope(command,{trackId:CONTACT_TRACK,waitingKind:"current_class",classId:"73000000-0000-4000-8000-000000000010",retakeDecision:"required"});}}));
+ await service.readContact(CONTACT_TASK);const result=await service.saveRegistrationWaitingDetails({trackId:CONTACT_TRACK,waitingKind:"current_class",classId:"73000000-0000-4000-8000-000000000010",retakeDecision:"required",requestKey:CONTACT_KEY});
+ assert.equal(calls.length,1);assert.equal(calls[0].command,"waiting_details");assert.equal(calls[0].expectedGeneration,"1");assert.deepEqual(JSON.parse(JSON.stringify(calls[0].payload)),{trackId:CONTACT_TRACK,waitingKind:"current_class",classId:"73000000-0000-4000-8000-000000000010",retakeDecision:"required"});assert.equal(result.trackId,CONTACT_TRACK);assert.equal(result.classId,"73000000-0000-4000-8000-000000000010");assert.equal(harness.rpcCalls.length,1);
 
-  assert.deepEqual({ ...result }, {
-    trackId: "track-1",
-    waitingKind: "",
-    classId: "",
-    retakeDecision: "",
-  });
+});
+
+test("waiting contact command preserves explicit nullable clearing", async () => {
+
+ const {createRegistrationTrackService}=await loadFactory();const calls=[];const harness=createClient();const service=createRegistrationTrackService(harness.client,readyOptions({mutateContact:async command=>{calls.push(command);return contactEnvelope(command,{trackId:CONTACT_TRACK,waitingKind:"",classId:"",retakeDecision:""});}}));
+ await service.readContact(CONTACT_TASK);const result=await service.saveRegistrationWaitingDetails({trackId:CONTACT_TRACK,waitingKind:"",classId:"",retakeDecision:"",requestKey:CONTACT_KEY});
+ assert.equal(calls.length,1);assert.equal(calls[0].command,"waiting_details");assert.equal(calls[0].expectedGeneration,"1");assert.deepEqual(JSON.parse(JSON.stringify(calls[0].payload)),{trackId:CONTACT_TRACK,waitingKind:null,classId:null,retakeDecision:null});assert.equal(result.trackId,CONTACT_TRACK);assert.equal(result.classId,"");assert.equal(harness.rpcCalls.length,1);
+
 });
 
 test("level-test results use their dedicated data-only RPC", async () => {
@@ -5138,30 +5208,67 @@ test("enrollment detail save sends and hydrates every selected textbook, includi
   assert.deepEqual(Array.from(legacy.rows[0].textbookIds), [books[0]]);
 });
 
+test("fact audit mapper keeps the saved fact kind without copying private input values", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  const result = mapTrackEvent({ id: "event-fact", task_id: "task", actor_id: "staff", event_type: "registration_fact_saved", created_at: "2026-10-04T14:00:00Z", after_value: JSON.stringify({ version: 1, factType: "waiting_details", trackId: "track", payload: { parentPhone: "PRIVATE_SYNTHETIC_PHONE", waitingKind: "current_class" } }) });
+  assert.equal(result.eventType, "registration_fact_saved");
+  assert.equal(result.trackId, "track");
+  assert.equal(result.metadata.factType, "waiting_details");
+  assert.equal(result.actorKind, "user");
+  assert.ok(!JSON.stringify(result).includes("PRIVATE_SYNTHETIC_PHONE"));
+});
+
+
+test("real common v1/contact v2/subject envelopes retain row provenance through the timeline without private payloads", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  const row = (id, type, time, payload, actor = "staff") => ({
+    id, task_id: "task", actor_id: actor, event_type: type, created_at: time,
+    before_value: "PRIVATE_BEFORE", after_value: JSON.stringify(payload),
+  });
+  const events = [
+    row("common-v1", "registration_common_info_updated", "2026-10-04T14:00:00Z", {version: 1, commonRevision: 2, studentName: "PRIVATE_NAME", parentPhone: "PRIVATE_PHONE", requestNote: "PRIVATE_NOTE"}),
+    row("common-v2", "registration_common_info_updated", "2026-10-04T14:02:00Z", {version: 2, commonRevision: 3, parentContactPresent: true, studentContactPresent: false, requestNotePresent: true, changedFields: ["parentContact", "requestNote"], occurredAt: "2026-10-04T14:02:00Z"}),
+    row("subjects", "registration_subjects_synced", "2026-10-04T14:01:00Z", {version: 1, actorId: "staff", subjects: ["영어"], occurredAt: "2026-10-04T14:01:00Z"}),
+    row("removed", "registration_subject_removed", "2026-10-04T14:03:00Z", {version: 1, trackId: "track", subject: "영어", actorId: "staff", directorProfileId: "PRIVATE_DIRECTOR", occurredAt: "2026-10-04T14:03:00Z"}),
+    row("fact", "registration_fact_saved", "2026-10-04T13:00:00Z", {version: 1, factType: "waiting_details", trackId: "track", payload: {parentPhone: "PRIVATE_PHONE"}}),
+    row("unknown", "registration_common_info_updated", null, {version: 1, requestNote: "PRIVATE_NOTE"}, null),
+  ].map(mapTrackEvent);
+  const history = buildRegistrationSubjectHistory({tracks: [{id: "track", subject: "영어"}], events});
+  assert.deepEqual(history.map(item => item.id), ["event:removed", "event:common-v2", "event:subjects", "event:common-v1", "event:fact", "event:unknown"]);
+  assert.deepEqual(history.slice(0, 5).map(item => [item.actorId, item.actorKind, item.timeKind]), Array.from({length: 5}, () => ["staff", "user", "exact"]));
+  assert.equal(history[0].subjects[0], "영어");
+  assert.equal(history[1].occurredAt, "2026-10-04T14:02:00Z");
+  assert.equal(history.at(-1).actorKind, null);
+  assert.equal(history.at(-1).timeKind, "unavailable");
+  assert.doesNotMatch(JSON.stringify({events, history}), /PRIVATE_|parentPhone|requestNotePresent|changedFields/);
+});
+
 test("detail observations keep raw SDK failures private and preserve error identity, sharing and retries", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const privateError = { code: "SYNTHETIC", message: "FAKE_PRIVATE_STUDENT_TOKEN_URL", details: "FAKE_PRIVATE_BODY", hint: "FAKE_PRIVATE_HINT" };
   const outputs = [];
   let fail = true;
-  const harness = createClient({ queryHandler: query => query.table === "ops_task_events" && fail
-    ? { data: null, error: privateError }
-    : schedulingDetailRows(query.table) });
+  const harness = createClient({
+    queryHandler: query => schedulingDetailRows(query.table),
+    eventHandler: () => fail ? { data: null, error: privateError }
+      : eventRpcResult(detailRows("ops_task_events").data),
+  });
   const service = createRegistrationTrackService(harness.client, readyOptions({
     detailObservation: { now: () => 42, emit: rows => outputs.push(rows) },
   }));
-  const pending = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
-  assert.strictEqual(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), pending);
+  const pending = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+  assert.strictEqual(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), pending);
   await assert.rejects(pending, error => error === privateError);
   assert.equal(outputs.length, 1);
   assert.ok(outputs[0].some(row => row.kind === "events" && row.phase === "failure"));
   assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
-  assert.equal(JSON.stringify(outputs).includes("task-1"), false);
+  assert.equal(JSON.stringify(outputs).includes(CONTACT_TASK), false);
   assert.equal(JSON.stringify(outputs).includes("viewer-1"), false);
   for (const row of outputs[0]) assert.deepEqual(Object.keys(row), ["kind", "phase", "elapsedMs"]);
   fail = false;
-  const detail = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
   const count = harness.queries.length;
-  assert.strictEqual(await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), detail);
+  await assertReauthorizedCachedDetail(service, harness, detail);
   assert.equal(harness.queries.length, count);
   assert.equal(outputs.length, 1, "successful retry and cache hit are silent");
 });
@@ -5176,7 +5283,7 @@ test("detail observations report an initial-group failure without exposing remin
   const service = createRegistrationTrackService(harness.client, readyOptions({
     detailObservation: { now: () => 1, emit: rows => outputs.push(rows) },
   }));
-  await assert.rejects(service.loadCaseDetail("task-1", "viewer-1"), /registration_customer_reminder_summary_shape_invalid/);
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), /registration_customer_reminder_summary_shape_invalid/);
   assert.equal(outputs.length, 1);
   assert.ok(outputs[0].some(row => row.kind === "initial_rows" && row.phase === "failure"));
   assert.equal(outputs[0].some(row => row.kind.startsWith("reminder")), false,
@@ -5196,7 +5303,7 @@ test("detail observations record final DTO validation failure without making par
   const service = createRegistrationTrackService(harness.client, readyOptions({
     detailObservation: { now: () => 1, emit: rows => outputs.push(rows) },
   }));
-  await assert.rejects(service.loadCaseDetail("task-1", "viewer-1"), /registration_subject_unsupported/);
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), /registration_subject_unsupported/);
   assert.equal(outputs.length, 1);
   assert.ok(outputs[0].some(row => row.kind === "detail_decode" && row.phase === "failure"));
   assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
@@ -5210,12 +5317,15 @@ test("observation clock and output failures cannot replace a detail error or suc
     { now: () => 1, emit() { throw new Error("output unavailable"); } },
   ]) {
     let fail = true;
-    const harness = createClient({ queryHandler: query => fail && query.table === "ops_task_events"
-      ? { data: null, error } : schedulingDetailRows(query.table) });
+    const harness = createClient({
+      queryHandler: query => schedulingDetailRows(query.table),
+      eventHandler: () => fail ? { data: null, error }
+        : eventRpcResult(detailRows("ops_task_events").data),
+    });
     const service = createRegistrationTrackService(harness.client, readyOptions({ detailObservation: observation }));
-    await assert.rejects(service.loadCaseDetail("task-1", "viewer-1"), value => value === error);
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), value => value === error);
     fail = false;
-    assert.equal((await service.loadCaseDetail("task-1", "viewer-1")).task.id, "task-1");
+    assert.equal((await service.loadCaseDetail(CONTACT_TASK, "viewer-1")).task.id, CONTACT_TASK);
   }
 });
 
@@ -5231,13 +5341,19 @@ test("enabling detail observations preserves query order, filters, counts, resul
     const harness = createClient({ queryHandler: query => {
       sequence.push([query.table, tick]);
       return schedulingDetailRows(query.table);
+    }, eventHandler: () => {
+      sequence.push(["read_registration_contact_events_v1", tick]);
+      return eventRpcResult(detailRows("ops_task_events").data);
+    }, contactHandler: () => {
+      sequence.push(["get_registration_case_contact_v1", tick]);
+      return { data: contactState(), error: null };
     } });
     const service = createRegistrationTrackService(harness.client, readyOptions({
       detailObservation: enabled ? { now: () => tick, emit: rows => outputs.push(rows) } : undefined,
     }));
     queueMicrotask(pulse);
     try {
-      const detail = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+      const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
       assert.ok(tick < 1000, "synthetic microtask probe must stay bounded");
       variants.push({ detail: JSON.parse(JSON.stringify(detail)), sequence, ticks: tick,
         queries: harness.queries.map(({ signal, ...query }) => ({ ...query, signalPresent: Boolean(signal) })),
