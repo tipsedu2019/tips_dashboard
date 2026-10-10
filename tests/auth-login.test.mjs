@@ -384,7 +384,7 @@ test("assistant role cannot navigate search or directly access makeup while full
   assert.match(authGuardSource, /router\.replace\(defaultAdminPath\)/);
   assert.match(sidebarSource, /canUseAssistantOperations/);
   assert.match(commandSearchSource, /canUseAssistantOperations/);
-  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
+  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests, canUsePersonalApiSettings \}\)/);
 });
 
 test("forgot-password uses the receivable email reset flow", async () => {
