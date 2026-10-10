@@ -693,6 +693,9 @@ test('generic incoming taskId identifies a registration task and delegates to th
   await act(async () => page.finish(page.requests.indexOf(request), 1));
   const exact = page.tableRequests.find((r) => r.table === 'ops_tasks');
   await act(async () => exact.resolve({ error: null, data: { id: id(999), title: '등록 상세', type: 'registration', status: 'requested', priority: 'normal' } }));
+  const privacyEvents = page.requests.find((r) => r.name === 'read_registration_contact_events_v1');
+  assert.deepEqual(privacyEvents?.args, { p_task_id: id(999), p_limit: 30, p_shared_only: false });
+  await act(async () => privacyEvents.resolve({ error: null, data: { events: [], legacyImport: null } }));
   assert.equal(page.tableRequests.filter((r) => r.table === 'ops_tasks').length, 2);
   assert.ok(page.tableRequests.some((r) => r.table === 'ops_registration_subject_tracks' && r.filters.some((f) => f[0] === 'eq' && f[1] === 'task_id' && f[2] === id(999))));
   assert.equal(new URLSearchParams(window.location.search).get('taskId'), id(999));
