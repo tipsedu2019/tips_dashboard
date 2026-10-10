@@ -36,7 +36,7 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
   return <WorkspaceTabs value={tab} onValueChange={(value) => requestAppNavigation(() => setTab(value))}>
     <div className="px-4 sm:px-5 lg:px-6"><WorkspaceTabsList aria-label="API 설정"><WorkspaceTabsTrigger value="support">지원 기능</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="connections">연결 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="guide">사용 안내</WorkspaceTabsTrigger></WorkspaceTabsList></div>
     <WorkspaceTabsPanel>{personal
-      ? tab === "connections" ? <PersonalConnectionWorkspace key={user.id} ownerId={user.id} /> : tab === "guide" ? <PersonalConnectionGuide /> : <PersonalConnectionSupport />
+      ? tab === "connections" ? <PersonalConnectionWorkspace key={user.id} ownerId={user.id} apiEnabled={apiEnabled} /> : tab === "guide" ? <PersonalConnectionGuide /> : <PersonalConnectionSupport />
       : tab === "connections" ? <AgentConnectionWorkspace key={user.id} apiEnabled={apiEnabled} /> : tab === "guide" ? <ApiUsageGuide /> : <ApiSupportWorkspace apiEnabled={apiEnabled} />}</WorkspaceTabsPanel>
   </WorkspaceTabs>;
 }

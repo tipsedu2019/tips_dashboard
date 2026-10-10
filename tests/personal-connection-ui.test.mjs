@@ -124,3 +124,13 @@ test('paged target search retains selections past fifty rows and caps each grant
  await ui.flush(()=>document.querySelector('[aria-label="담당 수업 검색 결과"] [role="checkbox"]').click());
  assert.match(document.querySelector('[aria-label="선택한 담당 수업"]').textContent,/합성 수업 51/);
 });
+
+test('disabled API blocks new personal issuance while preserving list, refresh and revoke',async t=>{
+ const {state,service}=fixture();state.items=[{id:id(10),ownerId,label:'합성 기존 연결',classes:[{id:classId,name:'합성 담당 수업'}],schools:[],expiresAt:'2099-01-01T00:00:00.000Z',revokedAt:null,lastUsedAt:null}];
+ const ui=await mountApiSettings(t,{auth:{role:'teacher'},apiEnabled:false,personalService:service});await ui.tab('연결 키');
+ assert.match(document.body.textContent,/개인 읽기 API가 비활성화/);assert.match(document.body.textContent,/합성 기존 연결/);assert.equal(ui.button('새 개인 연결').disabled,true);
+ await ui.flush(()=>ui.button('새 개인 연결').click());assert.equal(state.calls.length,0);assert.equal(document.querySelector('[role="dialog"]'),null);
+ await ui.flush(()=>ui.button('목록 새로고침').click());assert.equal(ui.button('폐기').disabled,false);
+ await ui.flush(()=>ui.button('폐기').click());await ui.flush(()=>document.querySelector('[aria-label="개인 연결 폐기 폐기"]').click());
+ assert.equal(state.calls.length,1);assert.equal(state.calls[0].kind,'revoke');assert.match(document.body.textContent,/폐기됨/);
+});

@@ -19,10 +19,10 @@ const uncertainMessage = "처리 결과를 확인하지 못했습니다. 다시 
 
 import { personalConnectionService } from "./personal-connection-service";
 import { PersonalTargetPicker } from "./personal-target-picker";
-export function PersonalConnectionWorkspace({ ownerId, service = personalConnectionService }: { ownerId: string; service?: PersonalConnectionService }) {
-  return <PersonalConnectionSession key={ownerId} ownerId={ownerId} service={service} />;
+export function PersonalConnectionWorkspace({ ownerId, apiEnabled, service = personalConnectionService }: { ownerId: string; apiEnabled: boolean; service?: PersonalConnectionService }) {
+  return <PersonalConnectionSession key={ownerId} ownerId={ownerId} apiEnabled={apiEnabled} service={service} />;
 }
-function PersonalConnectionSession({ ownerId, service }: { ownerId: string; service: PersonalConnectionService }) {
+function PersonalConnectionSession({ ownerId, apiEnabled, service }: { ownerId: string; apiEnabled: boolean; service: PersonalConnectionService }) {
   const [snapshot, setSnapshot] = useState<PersonalSnapshot | null>(null);
   const [loading, setLoading] = useState(true), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [revision, setRevision] = useState(0), [page, setPage] = useState(1);
@@ -47,6 +47,7 @@ function PersonalConnectionSession({ ownerId, service }: { ownerId: string; serv
   }, [focusRevision]);
   const ready = snapshot?.status === "ready" ? snapshot : null;
   const canMutate = Boolean(ready && !loading && !pending && !busy && !error);
+  const canIssue = canMutate && apiEnabled;
 
   useEffect(() => {
     const current = ++generation.current;
@@ -83,7 +84,7 @@ function PersonalConnectionSession({ ownerId, service }: { ownerId: string; serv
 
   const refresh = () => { setSecret(""); setRevealed(false); setRevision(value => value + 1); };
   const openCreate = () => {
-    if (!canMutate) return;
+    if (!canIssue) return;
     setLabel(""); setDays("1"); setSelectedClasses([]); setSelectedSchools([]); setConfirmed(false); setNotice(""); setForm("edit");
   };
   const begin = (kind: PendingPersonalOperation["kind"]) => {
@@ -93,7 +94,7 @@ function PersonalConnectionSession({ ownerId, service }: { ownerId: string; serv
     return operation;
   };
   const issue = async () => {
-    if (!canMutate || !confirmed || !ready || busyRef.current || form !== "review") return;
+    if (!canIssue || !confirmed || !ready || busyRef.current || form !== "review") return;
     if (!label.trim() || label.trim().length > 80 || !["1", "7", "30"].includes(days)
       || classIds.length > 50 || schoolIds.length > 50 || !classIds.length && !schoolIds.length
       || Date.parse(expiresAt) <= Date.now()) { setForm("edit"); return; }
@@ -123,7 +124,8 @@ function PersonalConnectionSession({ ownerId, service }: { ownerId: string; serv
   const closeSecret = () => { focusAfterLoad.current = true; setSecret(""); setRevealed(false); setPage(1); setRevision(value => value + 1); };
 
   return <SettingsWorkspaceShell>
-    <SettingsMasterHeader filters={<span className="text-sm font-medium">내 개인 읽기 연결</span>} actions={<><Button ref={refreshRef} variant="outline" onClick={refresh} disabled={loading || busy}>{pending ? "처리 결과 확인" : "목록 새로고침"}</Button><Button ref={createRef} onClick={openCreate} disabled={!canMutate}>새 개인 연결</Button></>} />
+    <SettingsMasterHeader filters={<span className="text-sm font-medium">내 개인 읽기 연결</span>} actions={<><Button ref={refreshRef} variant="outline" onClick={refresh} disabled={loading || busy}>{pending ? "처리 결과 확인" : "목록 새로고침"}</Button><Button ref={createRef} onClick={openCreate} disabled={!canIssue}>새 개인 연결</Button></>} />
+    {!apiEnabled ? <p role="status" className="text-sm text-muted-foreground">개인 읽기 API가 비활성화되어 새 키를 발급할 수 없습니다. 기존 연결 조회·처리 결과 확인·폐기는 가능합니다.</p> : null}
     {loading ? <p role="status" className="text-sm">개인 연결 확인 중…</p> : null}
     {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     {pending ? <p role="status" className="text-sm">이전 요청의 결과를 확인해야 합니다. 확인 전에는 새 발급·폐기를 진행할 수 없습니다.</p> : null}
@@ -134,7 +136,7 @@ function PersonalConnectionSession({ ownerId, service }: { ownerId: string; serv
       {!ready.items.length ? <TableRow><TableCell colSpan={3} className={`${settingsTableCellClass} whitespace-normal`}>{ready.total === 0 ? "발급한 개인 읽기 연결이 없습니다." : "이 페이지에 연결이 없습니다. 앞 페이지를 확인하세요."}</TableCell></TableRow> : null}
     </TableBody></Table></SettingsTableFrame><DataTablePagination page={page} pageSize={pageSize} totalCount={ready.total} loading={loading || busy} onPageChange={setPage} onPageSizeChange={size => { setPreference(size); setPage(1); }} /></> : null}
     <Dialog open={form !== null} onOpenChange={open => { if (!open && !busyRef.current) setForm(null); }}>
-      <FormDialogContent title={form === "review" ? "개인 연결 범위 확인" : "새 개인 읽기 연결"} description="본인에게 허용된 읽기 범위와 만료를 확인합니다." returnFocusRef={createRef} onCancel={() => { if (!busyRef.current) setForm(null); }} cancelLabel="개인 연결 만들기 취소" submitLabel={form === "review" ? "확인하고 키 발급" : "범위 확인"} busy={busy} submitDisabled={form === "review" ? !confirmed || !canMutate : !label.trim() || classIds.length + schoolIds.length === 0 || !canMutate} onSubmit={event => { event.preventDefault(); if (form === "edit") { setExpiresAt(new Date(Date.now() + Number(days) * 86400000 - 60_000).toISOString()); setConfirmed(false); setForm("review"); } else void issue(); }}>
+      <FormDialogContent title={form === "review" ? "개인 연결 범위 확인" : "새 개인 읽기 연결"} description="본인에게 허용된 읽기 범위와 만료를 확인합니다." returnFocusRef={createRef} onCancel={() => { if (!busyRef.current) setForm(null); }} cancelLabel="개인 연결 만들기 취소" submitLabel={form === "review" ? "확인하고 키 발급" : "범위 확인"} busy={busy} submitDisabled={form === "review" ? !confirmed || !canIssue : !label.trim() || classIds.length + schoolIds.length === 0 || !canIssue} onSubmit={event => { event.preventDefault(); if (form === "edit") { setExpiresAt(new Date(Date.now() + Number(days) * 86400000 - 60_000).toISOString()); setConfirmed(false); setForm("review"); } else void issue(); }}>
         {form === "edit" ? <><div className="space-y-2"><Label htmlFor="personal-label">연결 이름 · 사용 목적</Label><Input id="personal-label" value={label} maxLength={80} autoComplete="off" onChange={event => setLabel(event.target.value)} placeholder="예: 내 수업 일정 확인" /></div><div className="space-y-2"><Label htmlFor="personal-expiry">만료</Label><NativeSelect id="personal-expiry" value={days} onChange={event => setDays(event.target.value)}><option value="1">1일</option><option value="7">7일</option><option value="30">30일</option></NativeSelect></div><PersonalTargetPicker ownerId={ownerId} service={service} kind="classes" title="담당 수업" selected={selectedClasses} onChange={setSelectedClasses} /><PersonalTargetPicker ownerId={ownerId} service={service} kind="schools" title="허용 학교" selected={selectedSchools} onChange={setSelectedSchools} /><p className="text-sm text-muted-foreground">선택한 대상만 읽을 수 있습니다. 수업·학교를 선택하지 않으면 해당 종류의 권한을 부여하지 않습니다.</p></> : <><dl className="space-y-3 text-sm"><div><dt className="font-medium">연결 이름 · 목적</dt><dd className="[overflow-wrap:anywhere]">{label.trim()}</dd></div><div><dt className="font-medium">만료 (한국 시각)</dt><dd>{expiresAt ? dateLabel(expiresAt) : ""}</dd></div><div><dt className="font-medium">허용 대상</dt><dd><ul className="list-disc pl-5">{selectedClasses.map(row => <li key={row.id}>수업 · {row.name}</li>)}{selectedSchools.map(row => <li key={row.id}>학교 · {row.name}</li>)}</ul></dd></div></dl><p className="text-sm">{classIds.length ? "선택한 담당 수업 일정 조회. " : ""}{schoolIds.length ? "선택한 학교 목록·학사일정 조회. " : ""}학생 명단·연락처·수강료와 업무 수정·발송 권한은 없습니다.</p><label className="flex items-start gap-2 text-sm"><Checkbox checked={confirmed} onCheckedChange={value => setConfirmed(value === true)} /><span>본인이 사용할 목적·대상·만료를 확인했고 키를 보안 입력란에 직접 넣겠습니다.</span></label><Button type="button" variant="outline" disabled={busy} onClick={() => { setConfirmed(false); setForm("edit"); }}>범위 수정</Button></>}
       </FormDialogContent>
     </Dialog>
