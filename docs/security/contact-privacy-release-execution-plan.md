@@ -2,7 +2,7 @@
 
 이 문서는 실행 준비 계약이다. 운영 SQL·권한 변경, 마스터 연락처 영구 NULL 처리, 병합·배포·발송을 승인하지 않는다. 최종 commit/tree, 실제 운영 release, 현재 catalog/ledger, 모든 SQL·staging·실행 및 복구 파일의 SHA256은 함께 전달하는 고정 manifest에 기록한다. 대상은 `tipsedu2019/tips_dashboard`, Supabase `slnjqlzzhewblvttiidk`다. `tipsedu.co.kr` 공개 라우터의 `/admin`·`/api`는 `tipsdashboard.vercel.app`의 내부 대시보드로 연결된다.
 
-최종 소스는 PR130 API UI와 PR131 등록 관측이 포함된 main 위에서 검증한다. 기존 PR96의 branch·draft·history는 보존하고 별도 정상 통합 PR을 사용한다. feature branch의 `vercel.json` deploymentEnabled=false로 검토용 push의 자동 preview 배포를 막는다. 이 설정은 main의 production 자동 배포를 막지 않으므로 승인 전 merge하지 않는다.
+최종 소스는 PR130 API UI, PR131 등록 관측과 PR134 등록 목록 빈 상태·수동 재조회 개선이 포함된 main `372c6a9930f0fe673433cbce90bb586ff9b33ead` 위에서 검증한다. 기존 PR96의 branch·draft·history는 보존하고 별도 정상 통합 PR을 사용한다. feature branch의 `vercel.json` deploymentEnabled=false로 검토용 push의 자동 preview 배포를 막는다. 이 설정은 main의 production 자동 배포를 막지 않으므로 승인 전 merge하지 않는다.
 
 ## 적용 창과 설치
 
