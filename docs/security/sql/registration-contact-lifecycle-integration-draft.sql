@@ -133,7 +133,8 @@ $$;
 create function dashboard_private.registration_case_contact_snapshot_v1(p_task_id uuid,p_include_parent boolean default false)
 returns jsonb language plpgsql stable security definer set search_path='' as $$
 declare detail public.ops_registration_details%rowtype; task public.ops_tasks%rowtype;
-  current_ids uuid[]; all_closed boolean; effective_closed boolean;
+  current_ids uuid[]; all_closed boolean; archived_only boolean; effective_closed boolean;
+  last_archived_at timestamptz;
 begin
   select source.* into detail from public.ops_registration_details source where source.task_id=p_task_id;
   if not found then raise exception 'registration_detail_required' using errcode='23514'; end if;
@@ -143,14 +144,24 @@ begin
     pg_catalog.count(*)>0 and coalesce(pg_catalog.bool_and(track.workflow_status in ('registered','not_registered','inquiry_only')),false)
     into current_ids,all_closed
     from public.ops_registration_subject_tracks track where track.task_id=p_task_id and track.archived_at is null;
-  effective_closed := detail.contact_phase='closed' or task.status='canceled' or all_closed;
+  -- An untouched empty intake has no completed/excluded scope. A legacy case
+  -- with only archived tracks has already excluded its last current track,
+  -- even when installation added the default open contact metadata later.
+  if pg_catalog.cardinality(current_ids)=0 then
+    select pg_catalog.max(track.archived_at) into last_archived_at
+      from public.ops_registration_subject_tracks track where track.task_id=p_task_id;
+  end if;
+  archived_only := last_archived_at is not null;
+  effective_closed := detail.contact_phase='closed' or task.status='canceled' or all_closed or archived_only;
   return pg_catalog.jsonb_build_object(
     'version',1,'taskId',p_task_id,'revision',detail.contact_revision::text,'generation',detail.contact_generation::text,
     'phase',case when effective_closed then 'closed' else 'open' end,
     'closureReason',case when detail.contact_phase='closed' then detail.contact_closure_reason
       when task.status='canceled' then 'whole_case_cancelled'
-      when all_closed then 'all_current_tracks_terminal' else null end,
-    'closedAt',detail.contact_closed_at,'commonRevision',detail.common_revision,
+      when all_closed then 'all_current_tracks_terminal'
+      when archived_only then 'last_current_track_excluded' else null end,
+    'closedAt',case when detail.contact_phase<>'closed' and task.status<>'canceled' and archived_only
+      then last_archived_at else detail.contact_closed_at end,'commonRevision',detail.common_revision,
     'allPhasesClosed',all_closed,'currentTrackIds',pg_catalog.to_jsonb(current_ids),'studentId',task.student_id,
     'parentPhone',case when p_include_parent and not effective_closed and pg_catalog.cardinality(current_ids)>0 then detail.parent_phone else null end
   );
@@ -692,6 +703,7 @@ begin
     and (not coalesce(sealed_cancel,false) or claim.command='reopen' and claim.parent_reopen_authorized)
     and (snapshot->>'allPhasesClosed')::boolean=false and pg_catalog.jsonb_array_length(snapshot->'currentTrackIds')>0;
   close_now:=not reopen_now and ((snapshot->>'allPhasesClosed')::boolean or claim.close_reason is not null
+    or coalesce(snapshot->>'closureReason'='last_current_track_excluded',false)
     or coalesce(sealed_cancel,false)
     or exists(select 1 from public.ops_tasks task where task.id=p_task_id and task.status='canceled')
     or pg_catalog.jsonb_array_length(snapshot->'currentTrackIds')=0 and claim.before_current_track_count>0

@@ -32,3 +32,11 @@ Privacy 설치가 commit된 뒤에는 고정 `registration-contact-runtime-acl-d
 이미 commit한 사건/master 번호 NULL, 미시작 preview/claim/job 종료 및 이후 audit에서 생략된 원문은 앱·권한 rollback이나 업무 재개로 복원하지 않는다. 기존 canceled 등록은 수동 상태만으로 연락처를 열지 않는다. 실제 업무 재개가 검증된 경우에도 빈 새 generation만 허용한다. 새 privacy_v3가 존재한 뒤 옛 audit writer/CHECK를 되살리거나 새 열·receipt를 삭제하는 inverse는 실행안에 없다. 원생·수업·회계·기존 history와 실제 시작/accepted/unknown provider 결과는 보존한다.
 
 현재 native operating connection이 사용 불가능하면 실행을 중단한다. 기존 승인된 세션을 사용해야 하며 새 자격증명 발급·키/권한 변경을 이 계획으로 대체 승인하지 않는다. Supabase 연결 앱의 성공한 catalog 읽기와 owned synthetic native CLI 성공을 운영 native 쓰기 연결의 성공으로 보고하지 않는다.
+
+## Legacy archived-only correction (2026-10-10)
+
+A legacy case whose last current subject was archived before installation must project a closed contact generation, even though newly installed metadata defaults to open. Its closure reason is `last_current_track_excluded`, with the latest existing track `archived_at` as the projected closure timestamp. Persisted closure and whole-case cancellation keep their existing precedence. An intake with no historical subjects remains open; an actual current open subject preserves its temporary parent contact.
+
+Restoring a nonterminal subject from this closed scope creates one new generation and clears previous contact. Restoring only terminal subjects remains closed. The first ordinary write to an archived-only scope seals it without reviving contact. No installation backfill, master-row deletion, or public RPC ACL expansion is included. The committed `docs/security/qa/` regression uses actual service-role RPC calls and verifies failure/replay atomicity and repeated cancellation/reopening.
+
+For this draft PR, the user's 2026-10-10 instruction replaces paid GitHub checks with recorded local checks and an independent review of the exact tested source; use the existing `[skip ci]` commit convention. This does not authorize merging, production SQL, RLS/permission changes, application deployment, permanent master contact NULL, payment, or branch-protection changes. Keep failing baseline evidence, current head/base/tree pins, raw local results, independent review, and release SQL input/output hashes in the approval package.

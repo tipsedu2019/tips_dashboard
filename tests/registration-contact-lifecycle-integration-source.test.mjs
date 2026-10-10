@@ -100,6 +100,16 @@ test('whole-case terminal predicate uses all current tracks and rejects empty va
   assert.doesNotMatch(body, /pipeline_status/)
   assert.match(body, /not effective_closed and pg_catalog\.cardinality\(current_ids\)>0/)
 })
+test('legacy archived-only closure uses recorded archive time while never-used intake stays open', () => {
+  const start = sql.indexOf('create function dashboard_private.registration_case_contact_snapshot_v1')
+  const body = sql.slice(start, sql.indexOf('$$;', start))
+  assert.match(body, /cardinality\(current_ids\)=0 then/)
+  assert.match(body, /max\(track\.archived_at\) into last_archived_at/)
+  assert.match(body, /archived_only := last_archived_at is not null/)
+  assert.match(body, /when archived_only then 'last_current_track_excluded'/)
+  assert.match(body, /then last_archived_at else detail\.contact_closed_at end/)
+  assert.doesNotMatch(body, /clock_timestamp|pg_catalog\.now\(/)
+})
 test('parent/tracks/detail/UUID row ordering is explicit; row guards add no parent locks', () => {
   const start = sql.indexOf('create function dashboard_private.lock_registration_contact_case_v1')
   const body = sql.slice(start, sql.indexOf('$$;', start))

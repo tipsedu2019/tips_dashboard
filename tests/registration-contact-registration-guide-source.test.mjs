@@ -118,7 +118,7 @@ test("purpose restoration adds neither ACL nor sender activation and preserves t
 })
 
 test("fresh open commands clear only the detail student phone while parent and student master remain protected", () => {
-  assert.equal(sha(lifecycle), "90620671fddb7f99d235aacdc7576f19ef431e764a6bd02885994356d0e3a85a")
+  assert.equal(sha(lifecycle), "a9c34fddf7190bf54493741818337009463a6d755f0e827e2dda4eabe584dec4")
   const refresh = body(lifecycle, "dashboard_private.refresh_registration_contact_case_v1")
   assert.match(refresh, /update public\.ops_registration_details source set/u)
   assert.match(refresh, /parent_phone=case when reopen_now or close_now or source\.contact_phase='closed' then null else source\.parent_phone end/u)
