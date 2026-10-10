@@ -1212,3 +1212,162 @@ for(const type of ['withdrawal','transfer']) test(`${type} failed search identif
   const alert=document.querySelector('[role="alert"]').textContent;
   assert.match(alert,/기존학생/);assert.doesNotMatch(alert,/새학생/);
 });
+
+
+const completedPatch = (n) => {
+  const patch = registrationPatch(n, '합성 완료 ' + n);
+  patch.registrationTracks = patch.registrationTracks.map((track, index) => ({
+    ...track, status: index === 0 ? 'registered' : 'not_registered',
+    workflowStatus: index === 0 ? 'registered' : 'not_registered',
+  }));
+  return patch;
+};
+const registrationReads = (page, name = 'list_ops_task_numbered_page_v1') => page.requests.filter(request => request.name === name);
+const finishRegistrationStats = (page, total, view = 'completed', byView = { completed: 44 }, metrics = {}) => {
+  const request = registrationReads(page, 'get_ops_task_list_stats_v1').findLast(request => request.args.p_filters.view === view);
+  assert.ok(request, 'requested stats scope exists');
+  request.resolve({ error: null, data: { total, byStatus: {}, byView, metrics, facets: {} } });
+};
+const assertNoRegistrationFalseEmpty = () => assert.doesNotMatch(document.body.textContent, /단계에 등록 업무가 없습니다/);
+function supportRegistrationRetryFocus() {
+  // React was imported before JSDOM; only these synthetic retry/focus cases
+  // need its legacy input-event fallback. Leave the shared harness unchanged.
+  window.HTMLElement.prototype.attachEvent = function (name, listener) { this.addEventListener(name.replace(/^on/, ''), listener); };
+  window.HTMLElement.prototype.detachEvent = function (name, listener) { this.removeEventListener(name.replace(/^on/, ''), listener); };
+}
+
+for (const order of ['stats-first', 'page-first']) test('registration completed count conflict is explicit and manual retry reloads both reads: ' + order, async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=completed' });
+  supportRegistrationRetryFocus();
+  const finishPage = () => page.finish(page.requests.indexOf(registrationReads(page)[0]), 0);
+  if (order === 'stats-first') {
+    await act(async () => finishRegistrationStats(page, 44));
+    await act(async () => finishPage());
+  } else {
+    await act(async () => finishPage());
+    await act(async () => finishRegistrationStats(page, 44));
+  }
+  assert.equal(document.querySelectorAll('[data-registration-case-row]').length, 0);
+  assert.ok(document.querySelector('[role="tab"][aria-selected="true"]').textContent.includes('44'));
+  assertNoRegistrationFalseEmpty();
+  const alert = document.querySelector('[role="alert"]');
+  assert.match(alert?.textContent || '', /목록.*건수.*일치하지/);
+  const before = page.requests.length;
+  const retry = [...alert.querySelectorAll('button')].find(button => button.textContent.includes('다시'));
+  await act(async () => retry.click());
+  assert.equal(document.activeElement, document.querySelector('input[type="search"]'));
+  assert.deepEqual(page.requests.slice(before).filter(r => ['list_ops_task_numbered_page_v1','get_ops_task_list_stats_v1'].includes(r.name)).map(r => r.name).sort(), ['get_ops_task_list_stats_v1', 'list_ops_task_numbered_page_v1']);
+  const next = registrationReads(page).at(-1);
+  assert.equal(next.args.p_page, 1);
+  assert.equal(next.args.p_filters.search, '');
+  await act(async () => page.finish(page.requests.indexOf(next), 44, Array.from({ length: 10 }, (_, i) => completedPatch(i + 1))));
+  await act(async () => finishRegistrationStats(page, 44));
+  for (const mirror of ['desktop', 'mobile']) assert.equal(document.querySelectorAll('[data-testid="registration-case-' + mirror + '-list"] [data-registration-case-row]').length, 10);
+  assert.equal(document.querySelector('[role="alert"]'), null);
+  assertNoRegistrationFalseEmpty();
+});
+
+for (const outcome of ['pending', 'failed']) test('registration empty previous stage never claims completed is empty while ' + outcome, async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=enrollment' });
+  await act(async () => page.finish(page.requests.indexOf(registrationReads(page)[0]), 0));
+  await act(async () => finishRegistrationStats(page, 0, 'enrollment'));
+  const completed = [...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.includes('완료44'));
+  await act(async () => clickTab(completed));
+  const read = registrationReads(page).at(-1);
+  await act(async () => finishRegistrationStats(page, 44));
+  if (outcome === 'failed') await act(async () => read.reject(new Error('synthetic private timeout')));
+  assertNoRegistrationFalseEmpty();
+  assert.equal(document.body.textContent.includes('synthetic private timeout'), false);
+  assert.match(document.body.textContent, outcome === 'pending' ? /갱신하는 중/ : /불러오지 못했습니다/);
+});
+
+for (const scope of ['empty', 'search', 'mine']) test('registration legitimate empty scope remains explained: ' + scope, async t => {
+  const page = await workspace(t, { workspace: 'registration', search: scope === 'mine' ? '?flow=consultation_requested' : '?flow=completed' });
+  if (scope === 'search') {
+    const input = document.querySelector('input[type="search"]');
+    await act(async () => input[Object.keys(input).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '일치없음' } }));
+  }
+  const read = registrationReads(page).at(-1);
+  await act(async () => page.finish(page.requests.indexOf(read), 0));
+  await act(async () => finishRegistrationStats(page, 0, read.args.p_filters.view,
+    scope === 'mine' ? { consultation_requested: 6, completed: 44 } : { completed: 0 }, { consultationMine: 0, consultationAll: 6 }));
+  assert.equal(document.querySelector('[role="alert"]'), null);
+  assert.match(document.body.textContent, scope === 'mine' ? /내 담당 상담 신청이 없습니다/ : scope === 'search' ? /검색 결과가 없습니다/ : /완료 단계에 등록 업무가 없습니다/);
+});
+
+for (const tracks of ['missing', 'wrong-stage']) test('registration nonempty page with no presentable completed track reports conflict: ' + tracks, async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=completed' });
+  const patch = registrationPatch(1, '합성 범위 불일치');
+  if (tracks === 'missing') patch.registrationTracks = [];
+  await act(async () => page.finish(page.requests.indexOf(registrationReads(page)[0]), 1, [patch]));
+  assertNoRegistrationFalseEmpty();
+  assert.match(document.querySelector('[role="alert"]')?.textContent || '', /목록.*건수.*일치하지/);
+  assert.equal(registrationReads(page).length, 1, 'never auto-retry a conflicting page');
+});
+
+test('registration late previous stats and rejected page cannot create a count conflict for a valid empty scope', async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=completed' });
+  const oldPage = registrationReads(page)[0];
+  const oldStats = registrationReads(page, 'get_ops_task_list_stats_v1')[0];
+  await act(async () => clickTab([...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent === '등록 신청')));
+  const nextPage = registrationReads(page).at(-1);
+  await act(async () => page.finish(page.requests.indexOf(nextPage), 0));
+  await act(async () => finishRegistrationStats(page, 0, 'enrollment'));
+  await act(async () => {
+    oldStats.resolve({ error: null, data: { total: 44, byView: { completed: 44 }, metrics: {}, facets: {} } });
+    oldPage.reject(new Error('obsolete private failure'));
+  });
+  assert.equal(document.querySelector('[role="alert"]'), null);
+  assert.match(document.body.textContent, /등록 신청 단계에 등록 업무가 없습니다/);
+  assert.equal(document.body.textContent.includes('obsolete private failure'), false);
+});
+
+test('registration completed 44 parents paginates 15 rows and accepts terminal workflow variants across resize', async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=enrollment' });
+  await act(async () => page.finish(page.requests.indexOf(registrationReads(page)[0]), 0));
+  await act(async () => finishRegistrationStats(page, 0, 'enrollment'));
+  await act(async () => clickTab([...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.includes('완료44'))));
+  await act(async () => currentComponentProps('DataTablePagination').onPageSizeChange(15));
+  const read = registrationReads(page).at(-1);
+  assert.equal(read.args.p_page, 1); assert.equal(read.args.p_page_size, 15);
+  const patches = Array.from({ length: 15 }, (_, i) => completedPatch(i + 1));
+  patches[0].registrationTracks[1] = { ...patches[0].registrationTracks[1], status: 'inquiry_closed', workflowStatus: 'inquiry_only' };
+  await act(async () => page.finish(page.requests.indexOf(read), 44, patches));
+  await act(async () => finishRegistrationStats(page, 44));
+  for (const width of [390, 1200]) {
+    Object.defineProperty(window, 'innerWidth', { value: width, configurable: true });
+    await act(async () => window.dispatchEvent(new window.Event('resize')));
+    for (const mirror of ['desktop', 'mobile']) assert.equal(document.querySelectorAll('[data-testid="registration-case-' + mirror + '-list"] [data-registration-case-row]').length, 15);
+    assert.match(document.body.textContent, /44건 · 1–15번째/);
+    assert.equal(document.querySelector('[role="alert"]'), null);
+  }
+  assert.equal(registrationReads(page).at(-1), read, 'viewport alone makes no new read');
+  await act(async () => document.querySelector('button[aria-label="3 페이지"]').click());
+  const last = registrationReads(page).at(-1);
+  await act(async () => page.finish(page.requests.indexOf(last), 44, Array.from({ length: 14 }, (_, i) => completedPatch(i + 31))));
+  assert.match(document.body.textContent, /44건 · 31–44번째/);
+});
+
+test('registration count conflict retry can confirm a genuinely empty completed scope', async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=completed' });
+  supportRegistrationRetryFocus();
+  await act(async () => finishRegistrationStats(page, 44));
+  await act(async () => page.finish(page.requests.indexOf(registrationReads(page)[0]), 0));
+  const retry = [...document.querySelector('[role="alert"]').querySelectorAll('button')].find(button => button.textContent.includes('다시'));
+  await act(async () => retry.click());
+  await act(async () => finishRegistrationStats(page, 0, 'completed', { completed: 0 }));
+  await act(async () => page.finish(page.requests.indexOf(registrationReads(page).at(-1)), 0));
+  assert.equal(document.querySelector('[role="alert"]'), null);
+  assert.match(document.body.textContent, /완료 단계에 등록 업무가 없습니다/);
+  assert.equal(document.querySelector('[role="tab"][aria-selected="true"]').textContent, '완료');
+});
+
+test('registration first-read permission failure remains an error despite completed stats', async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=completed', viewerRole: 'teacher' });
+  await act(async () => finishRegistrationStats(page, 44));
+  await act(async () => registrationReads(page)[0].resolve({ data: null, error: { code: '42501', message: 'private denied' } }));
+  assert.match(document.querySelector('[role="alert"]')?.textContent || '', /목록을 불러오지 못했습니다/);
+  assertNoRegistrationFalseEmpty();
+  assert.equal(document.body.textContent.includes('private denied'), false);
+  assert.equal(registrationReads(page).length, 1);
+});
