@@ -1054,6 +1054,7 @@ export function RegistrationEnrollmentTrackEditor({
   detail,
   track,
   viewerId,
+  active,
   permissions,
   classOptions,
   textbookOptions,
@@ -1064,6 +1065,7 @@ export function RegistrationEnrollmentTrackEditor({
   detail: OpsRegistrationCaseDetail
   track: OpsRegistrationTrackSummary
   viewerId: string
+  active: boolean
   permissions: RegistrationTrackActionPermissions
   classOptions: OpsClassOption[]
   textbookOptions: OpsTextbookOption[]
@@ -1076,6 +1078,7 @@ export function RegistrationEnrollmentTrackEditor({
       key={`enrollment:${track.id}`}
       taskId={detail.task.id}
       viewerId={viewerId}
+      active={active}
       track={track}
       enrollments={detail.enrollments}
       admissionBatches={detail.admissionBatches}
