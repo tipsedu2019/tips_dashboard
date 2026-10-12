@@ -1217,6 +1217,7 @@ export function RegistrationApplication({
           detail={genericDetail}
           track={track}
           viewerId={viewerId || ""}
+          active={activeTrackId === track.id}
           permissions={currentEnrollmentWindowComplete
             ? permissions
             : { ...permissions, canManage: false, canCompleteConsultation: false, readOnly: true }}

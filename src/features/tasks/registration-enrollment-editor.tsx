@@ -309,6 +309,7 @@ function enrollmentHistoryLabel(enrollment: OpsRegistrationEnrollment) {
 export type RegistrationEnrollmentEditorProps = {
   taskId: string
   viewerId: string
+  active?: boolean
   track: OpsRegistrationTrackSummary
   enrollments: OpsRegistrationEnrollment[]
   admissionBatches: OpsRegistrationAdmissionBatch[]
@@ -323,6 +324,7 @@ export type RegistrationEnrollmentEditorProps = {
 export function RegistrationEnrollmentEditor({
   taskId,
   viewerId,
+  active = true,
   track,
   enrollments,
   admissionBatches,
@@ -387,6 +389,7 @@ export function RegistrationEnrollmentEditor({
     : null
   const sectionRef = useRef<HTMLElement | null>(null)
   const observationLoadOwnerRef = useRef(createRegistrationEnrollmentStartLoadOwner())
+  const loadedObservationScopeRef = useRef<{ trackId: string; feedbackRevision: number | null } | null>(null)
   const initialDraftRowsRef = useRef(cachedEnrollmentDraft?.baseline || JSON.stringify(draftRows))
   const canonicalKeyRef = useRef(cachedEnrollmentDraft?.canonicalKey || canonicalEnrollmentKey)
   const submissionKeys = useSubmissionKeys()
@@ -468,13 +471,22 @@ export function RegistrationEnrollmentEditor({
   useEffect(() => {
     const owner = observationLoadOwnerRef.current
     const token = owner.begin(track.id)
-    setMatchingObservation(null)
     if (!permissions.canManage) {
+      loadedObservationScopeRef.current = null
+      setMatchingObservation(null)
       return () => owner.release(token)
     }
+    // Hidden subject forms stay mounted to preserve their drafts and completed reads.
+    const loadedScope = loadedObservationScopeRef.current
+    if (!active || (loadedScope?.trackId === track.id && loadedScope.feedbackRevision === observationFeedbackRevision)) {
+      return () => owner.release(token)
+    }
+    loadedObservationScopeRef.current = null
+    setMatchingObservation(null)
 
     void loadRegistrationEnrollmentStartObservation({ trackId: track.id }).then((detail) => {
       if (!owner.owns(token, track.id)) return
+      loadedObservationScopeRef.current = { trackId: track.id, feedbackRevision: observationFeedbackRevision }
       setMatchingObservation(detail)
       if (!detail) return
       const observationOption = getRegistrationEnrollmentStartOptions({
@@ -492,7 +504,7 @@ export function RegistrationEnrollmentEditor({
     })
 
     return () => owner.release(token)
-  }, [observationFeedbackRevision, permissions.canManage, track.id])
+  }, [active, observationFeedbackRevision, permissions.canManage, track.id])
 
   useEffect(() => {
     const missingClassIds = selectedClassIds.filter((classId) => !(classId in classDetailById))
