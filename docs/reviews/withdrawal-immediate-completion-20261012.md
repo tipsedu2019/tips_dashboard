@@ -1,10 +1,10 @@
 # 수업 종료 후 퇴원 완료와 기존 예약 전환
 
-검토 기준 main: `372c6a9930f0fe673433cbce90bb586ff9b33ead`. 성능 통합 #137, 운영자/API #133 등과 별도 브랜치이며 병합·운영배포는 부모가 조율한다.
+최초 기준 main은 `372c6a9930f0fe673433cbce90bb586ff9b33ead`이며, 성능 통합 #137이 반영된 최신 main `5dbce0da9cb325d57d2ef7d464de21020b6c0867`을 정상 merge했다. 해당 성능 변경을 보존하며 운영자/API #133 등과 별도 브랜치다. 병합·운영배포는 부모가 조율한다.
 
 사용자가 확인한 업무 계약은 **마지막 수업 당일까지 수업을 마친 뒤 퇴원서를 제출**하는 것이다. 제출과 관리자의 완료는 별개다. 제출 시 명부를 제외하지 않는다. 완료는 서울 날짜 기준 당일 또는 과거일에만 가능하며, 해당 수업의 명부와 정확한 활성 등록 소유권을 같은 트랜잭션에서 제외한다. 이미 제외된 학생은 다시 추가하지 않고 완료하며 수업료·교재비 확인/실제 회계는 독립적으로 보존한다. 미래 날짜 완료는 `23514 / withdrawal_last_lesson_date_in_future`로 거부하고 데이터와 receipt를 전부 보존한다. 수업 종료 시각 자체는 저장하지 않으므로 당일 수업을 마쳤다는 운영자의 완료 동작을 전제로 한다.
 
-기존 최종 core는 `20261006090000` 예약 patch와 `20261007141548` 완료 patch에 의해 명부가 있는 당일/미래 건을 예약했다. 새 migration `20261012102015_withdrawal_immediate_completion.sql`은 그 branch만 제거한다. 기존 인증·권한·부모→track→학생→batch→claim→class 잠금, reciprocal 배열 검사, 등록 세대 보호, wrapper/notification source, request/mutation receipt replay, 두 실제 동시성 `40001`은 유지한다. public runtime은 `withdrawal_immediate_completion_v3`로 변경된다. 새 앱은 이전 runtime에서 완료를 거부한다. 이전 앱은 새 runtime에서 완료를 거부하므로 **SQL 설치와 앱 배포 사이 완료 편집을 정지하고 stale 탭을 새로고침**한다.
+기존 최종 core는 `20261006090000` 예약 patch와 `20261007141548` 완료 patch에 의해 명부가 있는 당일/미래 건을 예약했다. 새 migration `20261012102015_withdrawal_immediate_completion.sql`은 그 branch만 제거한다. 기존 인증·권한·부모→track→학생→batch→claim→class 잠금, reciprocal 배열 검사, 등록 세대 보호, wrapper/notification source, request/mutation receipt replay, 두 실제 동시성 `40001`은 유지한다. public runtime은 `withdrawal_immediate_completion_v3`로 변경된다. 새 앱은 이전 runtime에서 완료를 거부한다. 이전 앱은 새 runtime에서 완료를 거부하므로 **SQL 설치와 앱 배포 사이 완료·비용확인 편집을 정지하고 stale 탭을 새로고침**한다.
 
 ## 보존과 cron 전환
 
@@ -36,4 +36,16 @@ pending>0이면 기존 exact cron이 실제 active/ready인지 먼저 확인한�
 
 ## 검증 기록
 
-격리 PostgreSQL과 Node 결과, exact source 독립 리뷰는 아래 최종 실행 결과로 갱신한다. 합성 증거는 운영 권한/실제 학생 처리/실제 발송/운영 적용 성공을 대신하지 않는다. 운영 DB 조회·migration·pending batch 실행·merge·manual deploy는 수행하지 않는다.
+검증 소스는 `84e5bee57093bdcfa9c5bca8b299a56a5ee0ae02` / tree `94bee091a7f4695403b138e8bd2273ba9a6b08e5` / base `5dbce0da9cb325d57d2ef7d464de21020b6c0867`이다. 후속 문서 기록은 제품·SQL·테스트를 변경하지 않는다.
+
+- 새 migration SHA256: `4283c5a46522d473a710913ffe564bb2796ebc80a200210055165cc88abc8eac`; rollback: `e68ccffa8c538ca187b1666e20354da99e0f84d0cce9c75b5dd553f19c791d2d`.
+- 격리 PostgreSQL 17.11, 실제 pgTAP 1.3.3/pg_cron 1.6.5/pg_net 0.19.5, socket 전용, TCP·cron 자동 실행·pg_net 발송 worker 차단. immutable baseline과 합성 prerequisite 뒤 166 migration 순서대로 재생했다.
+- 최종 SQL 566/566 통과: 당일/과거/미래/이미 제외/비용 조합/실제 authenticated 역할/중복/취소/late failure/완료 rollback/기존 pending/INSERT fence/cron command·schedule drift/다른 cron 불변을 포함한 퇴원 372개, 기존 transfer 194개.
+- checked-in rollback→재적용 실제 실행, 이전 165 migration 전체 chain과 core/worker/runtime definition·owner·ACL·config byte-identical 비교 통과. 합성 학생 4/기존 due·future·backoff pending 3/새 완료 1과 관련 12 table digest가 전후 동일하다. installer가 실제 due pending도 실행하지 않으며, pending이 있으면 cron 전체 metadata를 보존한다. 새로 완료한 학생은 rollback에도 재추가하지 않는다.
+- 실제 두 세션 worker lock 및 scheduler-name lock 경쟁에서 retire=`busy`, cron·전체 데이터 보존 통과. 구형 public V3→cached old core의 뒤늦은 INSERT가 `23514`로 거부되고 전체 업무 데이터가 보존됨을 실제 두 세션/pgTAP 11개로 확인했다. 구형 미커밋 INSERT가 CREATE TRIGGER의 ShareRowExclusiveLock을 실제로 대기시키고 5.012초 뒤 `55P03`으로 installer 전체 rollback된 뒤, 원래 INSERT commit 후 재설치 시 pending·오류·backoff·cron이 보존됨을 pgTAP 10개로 확인했다.
+- 최신 main 기준 관련 Node 94/94 및 타입 검사 통과. 변경 파일 ESLint 0 error/기존 warning 3. SQLSTATE/layout/immutable-final manifest/query-surface diff 검사 통과. 이전 기준의 확장 Node 134/134(layout mutation 검증 포함)도 통과했으며 최신 검증과 구분한다.
+- 기존 `withdrawal-completion-without-settlement` Node fixture는 현재 main에서 이미 허용된 transfer의 제외 명부를 여전히 차단한다고 기대해 원본 main과 변경본 모두 실패했다. 실제 제품 transfer를 변경하지 않고 fixture의 기대만 현재 계약에 맞췄으며 별도 기존 transfer SQL 194개를 통과했다. 초기 SQL alias/중간 timezone 변경 fixture 실패는 수정 후 전체 대상 suite를 재실행했다. timezone 변경은 기존 audit hash 규칙에 영향을 주므로 최종 suite는 처음부터 Pacific/Kiritimati를 유지해 서울 날짜 계산을 검증했다.
+
+공식 Supabase provider image를 로컬 Docker에 준비하는 시도는 공개 다운로드 제한/daemon 디스크 부족으로 실패했다. 무료 native PG로 대체하여 제품 객체를 검증했지만 최소 합성 Auth/Storage adapter와 실제 Supabase ledger 부재로 baseline catalog parity 27/1,923 및 baseline smoke 1/14 차이가 남았다. 이를 공식 `supabase-schema-contract` 전체 통과나 운영 호환성 증거로 계산하지 않는다. 원래 checker/assertion, CI workflow, ACL/RLS 또는 timeout을 약화하지 않았다. GitHub 추가 유료 실행이나 결제 변경을 요청하지 않으며 `[skip ci]`는 hosted required checks 통과를 의미하지 않는다.
+
+합성 증거는 운영 권한·실제 학생 처리·실제 발송·운영 적용 성공을 대신하지 않는다. 운영 DB 조회·migration·pending batch 실행·main merge·manual deploy는 수행하지 않는다. 독립 reviewer는 위 exact HEAD/tree와 실제 경합·rollback 원자료를 검토하고 이전 전환 경합/cron schedule 지적의 해소 및 blocking finding 0을 확인했다. 별도 독립 Node 35/35 통과. 나머지 local static gates 결과와 최종 문서 commit의 제품·SQL·테스트 동일성은 인계 문서/PR에 기록한다.
