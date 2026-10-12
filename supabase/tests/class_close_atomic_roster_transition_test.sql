@@ -670,6 +670,153 @@ select is(
   'fixture starts with one immutable roster history row for every target student'
 );
 
+-- Admit only the completed owner fixture, before the tested close writes.
+-- This retains existing unknown legacy occupancy; it is not a new-unknown save.
+do $class_close_fixture_boundary$
+declare
+  fixture_class_ids text[] := array[
+    '87000000-0000-4000-8000-000000000101',
+    '87000000-0000-4000-8000-000000000102',
+    '87000000-0000-4000-8000-000000000103',
+    '87000000-0000-4000-8000-000000000104'
+  ];
+  old_reference jsonb;
+  fixture_reference jsonb;
+  weekly_unknowns bigint;
+  dated_unknowns bigint;
+  introduced_unknowns bigint;
+  outside_fixture_unknowns bigint;
+  admitted_baselines bigint;
+begin
+  if current_user is distinct from 'postgres' then
+    raise exception 'class_close_fixture_owner_required' using errcode = '23514';
+  end if;
+  select reference into old_reference
+  from dashboard_private.timetable_operating_write_baselines
+  where transaction_id = pg_catalog.txid_current();
+  if old_reference is null then
+    raise exception 'class_close_fixture_baseline_missing' using errcode = '23514';
+  end if;
+  fixture_reference := dashboard_private.read_timetable_operating_reference_v1();
+  select count(*) into weekly_unknowns
+  from pg_catalog.jsonb_array_elements(fixture_reference -> 'unresolvedOccupancies') row_value
+  where row_value ->> 'classId' = any(fixture_class_ids);
+  select count(*) into dated_unknowns
+  from pg_catalog.jsonb_array_elements(fixture_reference -> 'datedUnresolvedOccupancies') row_value
+  where row_value ->> 'classId' = any(fixture_class_ids);
+  with introduced as (
+    select row_value - 'label' as occupancy
+    from pg_catalog.jsonb_array_elements(
+      (fixture_reference -> 'unresolvedOccupancies')
+      || (fixture_reference -> 'datedUnresolvedOccupancies')
+    ) row_value
+    except
+    select row_value - 'label'
+    from pg_catalog.jsonb_array_elements(
+      (old_reference -> 'unresolvedOccupancies')
+      || (old_reference -> 'datedUnresolvedOccupancies')
+    ) row_value
+  )
+  select count(*), count(*) filter (
+    where not coalesce(occupancy ->> 'classId' = any(fixture_class_ids), false)
+  ) into introduced_unknowns, outside_fixture_unknowns
+  from introduced;
+  if weekly_unknowns <> 4 or dated_unknowns <> 4
+    or introduced_unknowns <> 8 or outside_fixture_unknowns <> 0
+  then
+    raise exception 'class_close_fixture_unknown_precondition' using errcode = '23514';
+  end if;
+  update dashboard_private.timetable_operating_write_baselines
+  set reference = fixture_reference
+  where transaction_id = pg_catalog.txid_current();
+  get diagnostics admitted_baselines = row_count;
+  if admitted_baselines <> 1 then
+    raise exception 'class_close_fixture_baseline_scope' using errcode = '23514';
+  end if;
+end;
+$class_close_fixture_boundary$;
+
+set constraints dashboard_private.timetable_operating_finalize immediate;
+set constraints dashboard_private.timetable_operating_finalize deferred;
+select is(
+  (select count(*) from dashboard_private.timetable_operating_write_baselines
+   where transaction_id = pg_catalog.txid_current()),
+  0::bigint,
+  'owner fixture boundary flush clears only its current transaction baseline'
+);
+
+-- The owner admission is one-time fixture setup, not permission to introduce
+-- another unknown occupancy through an authenticated operational write.
+create function pg_temp.class_close_fixture_state_v1()
+returns jsonb
+language sql
+stable
+as $class_close_fixture_state$
+  select pg_catalog.jsonb_build_object(
+    'reference', dashboard_private.read_timetable_operating_reference_v1(),
+    'classes', (select pg_catalog.md5(coalesce(
+      pg_catalog.jsonb_agg(pg_catalog.to_jsonb(fixture_row) order by fixture_row.id)::text,
+      '[]')) from public.classes fixture_row),
+    'students', (select pg_catalog.md5(coalesce(
+      pg_catalog.jsonb_agg(pg_catalog.to_jsonb(fixture_row) order by fixture_row.id)::text,
+      '[]')) from public.students fixture_row),
+    'enrollments', (select pg_catalog.md5(coalesce(
+      pg_catalog.jsonb_agg(pg_catalog.to_jsonb(fixture_row) order by fixture_row.id)::text,
+      '[]')) from public.ops_registration_enrollments fixture_row),
+    'history', (select pg_catalog.md5(coalesce(
+      pg_catalog.jsonb_agg(pg_catalog.to_jsonb(fixture_row) order by fixture_row.id)::text,
+      '[]')) from public.student_class_enrollment_history fixture_row),
+    'receipts', (select pg_catalog.md5(coalesce(
+      pg_catalog.jsonb_agg(pg_catalog.to_jsonb(fixture_row)
+        order by fixture_row.actor_profile_id, fixture_row.operation, fixture_row.request_key)::text,
+      '[]')) from dashboard_private.class_schedule_mutation_receipts fixture_row),
+    'invalidation', (select pg_catalog.md5(coalesce(
+      pg_catalog.jsonb_agg(pg_catalog.to_jsonb(fixture_row) order by fixture_row.id)::text,
+      '[]')) from public.timetable_invalidation_signals fixture_row)
+  );
+$class_close_fixture_state$;
+
+create temporary table class_close_fixture_state_before
+on commit drop
+as select pg_temp.class_close_fixture_state_v1() as state;
+
+set local role authenticated;
+select pg_temp.class_close_set_actor('87000000-0000-4000-8000-000000000001');
+select throws_ok(
+  $$
+    select public.update_class_operational_v1(
+      '87000000-0000-4000-8000-000000000101',
+      '{"schedule":"월 18:01"}'::jsonb,
+      '87000000-0000-4000-8000-000000000799',
+      null
+    )
+  $$,
+  '23P01',
+  'timetable_resource_conflict',
+  'a newly introduced unknown is still rejected after the owner fixture boundary'
+);
+set local role postgres;
+select ok(
+  pg_temp.class_close_fixture_state_v1() = (
+    select state from class_close_fixture_state_before
+  ),
+  'rejected new unknown preserves the full reference, roster, claims, history, receipts and invalidation'
+);
+select is(
+  (select count(*) from dashboard_private.class_schedule_mutation_receipts
+   where actor_profile_id = '87000000-0000-4000-8000-000000000001'
+     and operation = 'update_class_operational_v1'
+     and request_key = '87000000-0000-4000-8000-000000000799'),
+  0::bigint,
+  'rejected new unknown does not record a successful operational receipt'
+);
+select is(
+  (select count(*) from dashboard_private.timetable_operating_write_baselines
+   where transaction_id = pg_catalog.txid_current()),
+  0::bigint,
+  'rejected new unknown rolls back its newly captured transaction baseline'
+);
+
 set local role authenticated;
 select pg_temp.class_close_set_actor('87000000-0000-4000-8000-000000000001');
 

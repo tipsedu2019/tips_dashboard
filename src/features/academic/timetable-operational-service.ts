@@ -18,6 +18,14 @@ export function createTimetableOperationalMutation({ requestKey, rpc, refresh }:
         p_expected_schedule_plan: input.expectedSchedulePlan ?? null,
       });
       if (error) throw error;
+      if (input.patch.status === "종강") {
+        const receipt = data as { closeResult?: { id?: string; classId?: string; status?: string }; classRow?: { id?: string; status?: string } } | null;
+        const close = receipt?.closeResult;
+        if (!close || close.id !== input.classId || close.classId !== input.classId || close.status !== "종강"
+          || (receipt?.classRow && (receipt.classRow.id !== input.classId || receipt.classRow.status !== "종강"))) {
+          throw Object.assign(new Error("class_operational_receipt_invalid"), { code: "CLASS_OPERATIONAL_RECEIPT_INVALID" });
+        }
+      }
       try {
         const receipt = await refresh?.();
         return { data, refreshStatus: (receipt as { status?: string } | undefined)?.status === "pending" ? "pending" as const : "complete" as const };
@@ -39,7 +47,8 @@ export function timetableOperationalErrorMessage(error: unknown, fallback: strin
   if (value?.code === "57014") {
     return "일정 확인에 시간이 오래 걸려 저장이 중단되었습니다. 잠시 후 다시 저장해 주세요.";
   }
-  if (value?.name === "TimeoutError" || value?.name === "AbortError"
+  if (value?.code === "CLASS_OPERATIONAL_RECEIPT_INVALID"
+    || value?.name === "TimeoutError" || value?.name === "AbortError"
     || /^(TimeoutError|AbortError):/.test(value?.message || "")) {
     return "저장 결과를 확인하지 못했습니다. 입력은 유지되었으니 다시 저장해 주세요.";
   }

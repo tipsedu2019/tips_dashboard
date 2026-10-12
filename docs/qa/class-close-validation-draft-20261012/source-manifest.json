@@ -1,0 +1,58 @@
+{
+  "baselineMain": "dc1e142df9d95bd69799d953f77077a572ad2d12",
+  "branch": "codex/class-close-timeout-20261012",
+  "sourceFiles": [
+    {
+      "path": "src/features/academic/timetable-operational-service.ts",
+      "sha256": "e4cdd5e4494fb453e36842d78e2ada920432b4d46fd41833b1b1ac943015f495"
+    },
+    {
+      "path": "supabase/migrations/20261012155755_timetable_validation_date_reuse.sql",
+      "sha256": "83ec63aad313c61b6c2205ce4748a0707b1f478a424e5e6c67d92fb4b27c9e82"
+    },
+    {
+      "path": "supabase/tests/timetable_validation_date_reuse_test.sql",
+      "sha256": "27d0e2de2167887aa645a9fa54612afae35ac80aa2cbcf7ba3f8641ac0ac9fad"
+    },
+    {
+      "path": "tests/management-class-close-recovery.test.mjs",
+      "sha256": "f66419bf25d819ae8978a64cfb137f766f406e07bf24e4b50c3964051fe8eb23"
+    },
+    {
+      "path": "tests/helpers/timetable-validation-probe.mjs",
+      "sha256": "89a28aa150a602e3da03a4d6aa78ad39b1cfef940b638b8e9f7173a3a690ed6d"
+    },
+    {
+      "path": "supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
+      "sha256": "eaa9624dc31092204ae9a08e4cb360e23b53c73e3b5b8bb4c889cf55309ec1f1"
+    },
+    {
+      "path": ".github/workflows/free-tier-guardrails.yml",
+      "sha256": "4410140a7b20cec70ef65fd9394021087deb0330a542f42fcc6efda72e9e1aef"
+    },
+    {
+      "path": ".github/workflows/supabase-sql-review.yml",
+      "sha256": "5121ff0e1bf1382d2b71412d99e1e372aa1908fd01a93b76f7e99d0e7994a480"
+    },
+    {
+      "path": ".github/workflows/supabase-db-push.yml",
+      "sha256": "c2ebb1d241788e01c876bffca55d13858b96ce3351147a0cf155107a9c88984d"
+    },
+    {
+      "path": "scripts/lib/ai-producer-receipt.mjs",
+      "sha256": "82c19b37cb51f5f6096d7e3697a6138e3f103b4664cb8f7291af98971ff83cd0"
+    },
+    {
+      "path": "scripts/verify-supabase-migration-layout.mjs",
+      "sha256": "37bfc85fdba9593dd711fda20ea4bea3f0d2ed4c5e8e25873bf90fb0a6f89301"
+    },
+    {
+      "path": "tests/helpers/ai-producer-receipt.test.mjs",
+      "sha256": "51ac69f663e726a31abc94548f0d88400a58eeaeaa663e15f38ea48dac29d7de"
+    },
+    {
+      "path": "tests/supabase-migration-layout.test.mjs",
+      "sha256": "bd44d4919e7eb1567aa0e3c5c9855fbbfffbe3db6bc88ff94323774f5ef83e01"
+    }
+  ]
+}
