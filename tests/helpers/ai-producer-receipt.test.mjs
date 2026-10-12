@@ -151,7 +151,7 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,165);
+  assert.equal(original.orderedNewMigrations.length,166);
   const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && !CURRENT_PR126_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
@@ -205,7 +205,7 @@ test('current migration identity preserves the six accepted pins and rejects can
 
 
 test('reviewed withdrawal pins admit the final ordered chain and reject each manifest/source drift',async()=>{
- assert.equal(CURRENT_WITHDRAWAL_MIGRATIONS.length,5);
+ assert.equal(CURRENT_WITHDRAWAL_MIGRATIONS.length,6);
  const current=await snapshotAiSource();
  assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS,'AI receipt migration protocol stays unchanged');
  for(const pin of CURRENT_WITHDRAWAL_MIGRATIONS){

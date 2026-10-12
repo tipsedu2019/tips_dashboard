@@ -82,12 +82,12 @@ test("service validates exact IDs without requiring roster membership or resolvi
   await assert.rejects(ready({ ...input, studentId: "", studentName: student.name }), /기존 학생을 다시 선택/)
 })
 
-test("transfer and word-retest still require their source roster", () => {
+test("transfer accepts its already removed source while word-retest still requires its roster", () => {
   const { getRosterCompletionBlockers: blockers } = load("workspace", ["getRosterCompletionBlockers", "hasRosterLink"], {
     EMPTY_OPS_TASK_OPTION_INDEXES: {}, hasLinkedRecord: (value) => Boolean(text(value)),
     findStudentOptionByReference: () => student, findClassOptionByReference: () => classItem,
   })
-  assert.deepEqual(Array.from(blockers({ ...input, type: "transfer", transfer: { fromClassId: classItem.id } }, [student], [classItem])), ["전 수업 명단"])
+  assert.deepEqual(Array.from(blockers({ ...input, type: "transfer", transfer: { fromClassId: classItem.id } }, [student], [classItem])), [])
   assert.deepEqual(Array.from(blockers({ ...input, type: "word_retest" }, [student], [classItem])), ["수업 명단"])
 })
 
@@ -155,6 +155,7 @@ test("completed fee handler saves through the narrow endpoint and never repeats 
 
 test("settlement and re-entry conflicts explain the next action without exposing SQL codes", () => {
   const { getOpsTaskActionErrorMessage: message } = load("workspace", ["getUnknownErrorMessage", "getOpsTaskActionErrorMessage"])
+  assert.equal(message({ message: "withdrawal_last_lesson_date_in_future" }, "fallback"), "마지막 수업일까지 수업을 마친 뒤 퇴원 완료를 처리해 주세요. 퇴원일을 확인해 주세요.")
   assert.equal(message({ message: "withdrawal_settlement_check_conflict" }, "fallback"), "다른 관리자가 비용 확인을 변경했습니다. 새로고침 후 다시 확인해 주세요.")
   assert.equal(message({ message: "ops_withdrawal_registration_changed" }, "fallback"), "신청 이후 학생의 수업 등록이 바뀌었습니다. 명단을 확인하고 퇴원 신청을 다시 검토해 주세요.")
   assert.equal(message({ message: "unrelated-error" }, "fallback"), "unrelated-error")

@@ -25,6 +25,31 @@ begin
  insert into withdrawal_cases values(p_label,v_task,v_student,v_class,gen_random_uuid(),p_date,null);
 end;$$;
 
+-- Preserve old reservations as explicit synthetic history. The new completion
+-- endpoint must never be used to create a legacy pending row or receipt.
+create function pg_temp.withdrawal_legacy_reservation(p_label text,p_claim_id uuid default null)
+returns void language plpgsql as $$
+declare c withdrawal_cases%rowtype; v_response jsonb;
+begin
+ select * into strict c from withdrawal_cases where label=p_label;
+ perform set_config('app.ops_transition_completion_authorized','true',true);
+ update public.ops_withdrawal_details set timetable_roster_updated=true where task_id=c.task_id;
+ update public.ops_tasks set status='done',completed_at=now() where id=c.task_id;
+ perform set_config('app.ops_transition_completion_authorized','false',true);
+ -- Only this retired-insert fence is relaxed to seed historical synthetic rows.
+ alter table dashboard_private.withdrawal_roster_release_queue_v1 disable trigger reject_new_withdrawal_roster_release_v1;
+ insert into dashboard_private.withdrawal_roster_release_queue_v1(task_id,claim_source_task_id,student_id,class_id,expected_claim_id,expected_history_count,last_lesson_date,actor_id)
+ select c.task_id,case when p_claim_id is not null then c.task_id end,c.student_id,c.class_id,p_claim_id,count(*),c.last_date,'a0600000-0000-4000-8000-000000000001'
+ from public.student_class_enrollment_history h where h.student_id=c.student_id and h.class_id=c.class_id;
+ alter table dashboard_private.withdrawal_roster_release_queue_v1 enable trigger reject_new_withdrawal_roster_release_v1;
+ v_response:=jsonb_build_object('taskId',c.task_id,'studentId',c.student_id,'sourceClassId',c.class_id,
+   'taskStatus','done','timetableRosterUpdated',true,'rosterReleaseScheduled',true,'lastLessonDate',c.last_date,
+   'task',(select to_jsonb(t) from public.ops_tasks t where id=c.task_id));
+ perform dashboard_private.finish_ops_task_request_v2(c.request_id,'complete_ops_withdrawal_roster_transition_v2',
+   md5(jsonb_build_object('actor',auth.uid(),'task_id',c.task_id)::text),v_response);
+ update withdrawal_cases set response=v_response where label=p_label;
+end;$$;
+
 select ok(not has_table_privilege('authenticated','dashboard_private.withdrawal_roster_release_queue_v1','SELECT'),'queue is private');
 select ok(not has_function_privilege('authenticated','dashboard_private.process_due_withdrawal_roster_releases_v1(integer)','EXECUTE'),'worker is not browser callable');
 select ok(not has_function_privilege('service_role','dashboard_private.apply_scheduled_withdrawal_roster_release_v1(uuid)','EXECUTE'),'service API cannot call worker helper');
@@ -39,12 +64,16 @@ select pg_temp.withdrawal_case('late',(clock_timestamp() at time zone 'Asia/Seou
 select pg_temp.withdrawal_case('missing',null);
 select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'23514','withdrawal_last_lesson_date_required','missing last lesson has domain SQLSTATE') from withdrawal_cases where label='missing';
 select public.manage_withdrawal_roster_release_scheduler_v1('remove');
-select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'55000','withdrawal_release_scheduler_not_ready','completion requires verified scheduler readiness') from withdrawal_cases where label='early';
-select is((select count(*) from dashboard_private.withdrawal_roster_release_queue_v1),0::bigint,'blocked scheduling writes no queue');
+select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'23514','withdrawal_last_lesson_date_in_future','future completion fails safely without scheduler') from withdrawal_cases where label='early';
+select pg_temp.withdrawal_case('immediate_today',(clock_timestamp() at time zone 'Asia/Seoul')::date);
+update withdrawal_cases set response=public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id) where label in('immediate_today','late');
+select ok(not(s.class_ids?c.class_id::text) and not(cl.student_ids?c.student_id::text) and s.status='퇴원',c.label||' completion immediately removes both arrays without scheduler') from withdrawal_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where label in('immediate_today','late');
+select is((select count(*) from dashboard_private.withdrawal_roster_release_queue_v1),0::bigint,'future rejection and same-day/past completion create no queue');
+select pg_temp.withdrawal_legacy_reservation('early');
+select pg_temp.withdrawal_legacy_reservation('today');
 select public.manage_withdrawal_roster_release_scheduler_v1('install');
 select ok(dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'explicit local scheduler install satisfies metadata readiness');
-update withdrawal_cases set response=public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id) where label in('early','today','late');
-select is(response->>'rosterReleaseScheduled','true',label||' completion reserves removal') from withdrawal_cases where label in('early','today');
+select is(response->>'rosterReleaseScheduled','true',label||' legacy receipt retains scheduled response') from withdrawal_cases where label in('early','today');
 select is(response->>'lastLessonDate',last_date::text,label||' receipt keeps fixed last lesson') from withdrawal_cases where label in('early','today');
 select is(s.status,'재원',c.label||' retains student status through KST D') from withdrawal_cases c join public.students s on s.id=c.student_id where label in('early','today');
 select ok(s.class_ids?c.class_id::text and cl.student_ids?c.student_id::text,c.label||' keeps reciprocal enrolled arrays') from withdrawal_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where label in('early','today');
@@ -63,7 +92,7 @@ select throws_ok(format('delete from dashboard_private.withdrawal_roster_release
 insert into public.ops_tasks(id,type,status,title,student_id,class_id,requested_by,subject)
 select 'a0600000-0000-4000-8000-000000000020','withdrawal','requested','중복 합성 요청',student_id,class_id,'a0600000-0000-4000-8000-000000000001','영어' from withdrawal_cases where label='early';
 insert into public.ops_withdrawal_details(task_id,withdrawal_date,withdrawal_session,makeedu_withdrawal_done,fee_processed,textbook_fee_processed)
-values('a0600000-0000-4000-8000-000000000020',(clock_timestamp() at time zone 'Asia/Seoul')::date+3,'3회차',true,true,true);
+values('a0600000-0000-4000-8000-000000000020',(clock_timestamp() at time zone 'Asia/Seoul')::date,'3회차',true,true,true);
 select throws_ok($$select public.complete_ops_withdrawal_roster_transition_v3('a0600000-0000-4000-8000-000000000020',gen_random_uuid())$$,'23514','withdrawal_release_already_scheduled','same pair/generation duplicate has domain SQLSTATE');
 select throws_ok(format('update public.ops_tasks set status=''requested'' where id=%L',task_id),'P0001','완료된 운영 업무는 관리 데이터가 반영되어 상태만 되돌릴 수 없습니다.','completed withdrawal keeps existing reopen guard') from withdrawal_cases where label='today';
 
@@ -73,8 +102,11 @@ select pg_temp.withdrawal_case('due',(clock_timestamp() at time zone 'Asia/Seoul
 select set_config('app.ops_transition_completion_authorized','true',true);
 update public.ops_tasks set status='done',completed_at=now() where id=(select task_id from withdrawal_cases where label='due');
 select set_config('app.ops_transition_completion_authorized','false',true);
+-- Only this retired-insert fence is relaxed to seed historical synthetic rows.
+alter table dashboard_private.withdrawal_roster_release_queue_v1 disable trigger reject_new_withdrawal_roster_release_v1;
 insert into dashboard_private.withdrawal_roster_release_queue_v1(task_id,student_id,class_id,expected_history_count,last_lesson_date,actor_id)
 select task_id,student_id,class_id,(select count(*) from public.student_class_enrollment_history h where h.student_id=c.student_id and h.class_id=c.class_id),last_date,'a0600000-0000-4000-8000-000000000001' from withdrawal_cases c where label='due';
+alter table dashboard_private.withdrawal_roster_release_queue_v1 enable trigger reject_new_withdrawal_roster_release_v1;
 create temp table withdrawal_notification_counts as select (select count(*) from dashboard_private.notification_events) events,(select count(*) from dashboard_private.notification_event_fanout_jobs) jobs,(select count(*) from dashboard_private.notification_deliveries) deliveries,(select count(*) from public.ops_task_events where event_type like 'withdrawal.%' or event_type like 'registration.%') sources;
 select set_config('request.jwt.claims','{}',true),set_config('request.jwt.claim.sub','',true),set_config('request.jwt.claim.role','',true);
 select is(dashboard_private.apply_scheduled_withdrawal_roster_release_v1(task_id),'applied','D+1 worker releases without user JWT') from withdrawal_cases where label='due';
@@ -114,12 +146,14 @@ select dashboard_private.apply_student_class_roster_mode(student_id,class_id,'re
 select dashboard_private.apply_student_class_roster_mode(student_id,class_id,'enrolled','removed',null,'synthetic_manual_restore','a0600000-0000-4000-8000-000000000001') from withdrawal_cases where label='early';
 select is(dashboard_private.withdrawal_roster_cutoff_v1(student_id,class_id),null::date,'manual remove/restore invalidates old cutoff generation') from withdrawal_cases where label='early';
 select is((select count(*) from public.student_class_enrollment_history h where h.student_id=c.student_id and h.class_id=c.class_id),2::bigint,'manual remove and restore produce real generation history') from withdrawal_cases c where label='early';
-select lives_ok($$select public.complete_ops_withdrawal_roster_transition_v3('a0600000-0000-4000-8000-000000000020',gen_random_uuid())$$,'new generation may reserve while old pending becomes superseded');
+update public.student_class_enrollment_history h set changed_at=((clock_timestamp() at time zone 'Asia/Seoul')::date-2)::timestamp at time zone 'Asia/Seoul'
+from withdrawal_cases c where c.label='early' and h.student_id=c.student_id and h.class_id=c.class_id;
+select lives_ok($$select public.complete_ops_withdrawal_roster_transition_v3('a0600000-0000-4000-8000-000000000020',gen_random_uuid())$$,'new generation completes immediately while old pending becomes superseded');
 select is(q.status,'superseded','old generation becomes superseded') from withdrawal_cases c join dashboard_private.withdrawal_roster_release_queue_v1 q on q.task_id=c.task_id where label='early';
 select is(q.last_lesson_date,c.last_date,'superseded snapshot cutoff is still immutable') from withdrawal_cases c join dashboard_private.withdrawal_roster_release_queue_v1 q on q.task_id=c.task_id where label='early';
-select is(dashboard_private.withdrawal_roster_cutoff_v1(student_id,class_id),(clock_timestamp() at time zone 'Asia/Seoul')::date+3,'new generation owns its own cutoff') from withdrawal_cases where label='early';
+select is(dashboard_private.withdrawal_roster_cutoff_v1(student_id,class_id),null::date,'new immediate generation creates no cutoff') from withdrawal_cases where label='early';
 
-select pg_temp.withdrawal_case('canceled',(clock_timestamp() at time zone 'Asia/Seoul')::date+1);
+select pg_temp.withdrawal_case('canceled',(clock_timestamp() at time zone 'Asia/Seoul')::date-1);
 update public.ops_tasks set status='canceled' where id=(select task_id from withdrawal_cases where label='canceled');
 select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'23514','ops_withdrawal_completion_state_conflict','existing canceled-state guard remains exact') from withdrawal_cases where label='canceled';
 update public.ops_tasks set status='requested' where id=(select task_id from withdrawal_cases where label='canceled');
@@ -144,8 +178,8 @@ begin
 end;$$;
 select pg_temp.withdrawal_case('claimed',(clock_timestamp() at time zone 'Asia/Seoul')::date);
 select pg_temp.withdrawal_claim('claimed');
-update withdrawal_cases set response=public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id) where label='claimed';
-select ok(e.roster_active and e.status='enrolled','completion preserves active canonical claim') from withdrawal_claims c join public.ops_registration_enrollments e on e.id=c.claim_id where c.label='claimed';
+select pg_temp.withdrawal_legacy_reservation(c.label,c.claim_id) from withdrawal_claims c where label='claimed';
+select ok(e.roster_active and e.status='enrolled','legacy reservation preserves active canonical claim') from withdrawal_claims c join public.ops_registration_enrollments e on e.id=c.claim_id where c.label='claimed';
 select is(q.expected_claim_id,c.claim_id,'reservation captures exact claim owner') from withdrawal_claims c join withdrawal_cases t using(label) join dashboard_private.withdrawal_roster_release_queue_v1 q on q.task_id=t.task_id where c.label='claimed';
 select is(q.claim_source_task_id,t.task_id,'claimed queue fences deletion of source task') from withdrawal_claims c join withdrawal_cases t using(label) join dashboard_private.withdrawal_roster_release_queue_v1 q on q.task_id=t.task_id where c.label='claimed';
 select is(dashboard_private.withdrawal_roster_cutoff_v1(t.student_id,t.class_id),t.last_date,'exact claimed generation exposes cutoff') from withdrawal_cases t where label='claimed';
@@ -156,8 +190,11 @@ select pg_temp.withdrawal_claim('due_claimed');
 select set_config('app.ops_transition_completion_authorized','true',true);
 update public.ops_tasks set status='done',completed_at=now() where id=(select task_id from withdrawal_cases where label='due_claimed');
 select set_config('app.ops_transition_completion_authorized','false',true);
+-- Only this retired-insert fence is relaxed to seed historical synthetic rows.
+alter table dashboard_private.withdrawal_roster_release_queue_v1 disable trigger reject_new_withdrawal_roster_release_v1;
 insert into dashboard_private.withdrawal_roster_release_queue_v1(task_id,claim_source_task_id,student_id,class_id,expected_claim_id,expected_history_count,last_lesson_date,actor_id)
 select t.task_id,t.task_id,t.student_id,t.class_id,c.claim_id,(select count(*) from public.student_class_enrollment_history h where h.student_id=t.student_id and h.class_id=t.class_id),t.last_date,'a0600000-0000-4000-8000-000000000001' from withdrawal_cases t join withdrawal_claims c using(label) where label='due_claimed';
+alter table dashboard_private.withdrawal_roster_release_queue_v1 enable trigger reject_new_withdrawal_roster_release_v1;
 truncate withdrawal_notification_counts;
 insert into withdrawal_notification_counts select (select count(*) from dashboard_private.notification_events),(select count(*) from dashboard_private.notification_event_fanout_jobs),(select count(*) from dashboard_private.notification_deliveries),(select count(*) from public.ops_task_events where event_type like 'withdrawal.%' or event_type like 'registration.%');
 select set_config('request.jwt.claims','{}',true),set_config('request.jwt.claim.sub','',true),set_config('request.jwt.claim.role','',true);
@@ -187,8 +224,11 @@ begin
  perform set_config('app.ops_transition_completion_authorized','true',true);
  update public.ops_tasks set status='done',completed_at=now() where id=c.task_id;
  perform set_config('app.ops_transition_completion_authorized','false',true);
+ -- Only this retired-insert fence is relaxed to seed historical synthetic rows.
+ alter table dashboard_private.withdrawal_roster_release_queue_v1 disable trigger reject_new_withdrawal_roster_release_v1;
  insert into dashboard_private.withdrawal_roster_release_queue_v1(task_id,claim_source_task_id,student_id,class_id,expected_claim_id,expected_history_count,last_lesson_date,actor_id)
  select c.task_id,case when v_claim is not null then c.task_id end,c.student_id,c.class_id,v_claim,count(*),c.last_date,'a0600000-0000-4000-8000-000000000001' from public.student_class_enrollment_history h where h.student_id=c.student_id and h.class_id=c.class_id;
+ alter table dashboard_private.withdrawal_roster_release_queue_v1 enable trigger reject_new_withdrawal_roster_release_v1;
 end;$$;
 select pg_temp.withdrawal_case('multi',(clock_timestamp() at time zone 'Asia/Seoul')::date-1);
 create temp table withdrawal_other_classes(enrolled uuid,waitlisted uuid);

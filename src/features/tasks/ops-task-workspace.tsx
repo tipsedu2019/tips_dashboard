@@ -1485,7 +1485,9 @@ function getUnknownErrorMessage(error: unknown) {
 
 function getOpsTaskActionErrorMessage(error: unknown, fallback: string) {
   const rawMessage = getUnknownErrorMessage(error)
-  const message = rawMessage.includes("withdrawal_settlement_check_conflict")
+  const message = rawMessage.includes("withdrawal_last_lesson_date_in_future")
+    ? "마지막 수업일까지 수업을 마친 뒤 퇴원 완료를 처리해 주세요. 퇴원일을 확인해 주세요."
+    : rawMessage.includes("withdrawal_settlement_check_conflict")
     ? "다른 관리자가 비용 확인을 변경했습니다. 새로고침 후 다시 확인해 주세요."
     : rawMessage.includes("ops_withdrawal_registration_changed")
       ? "신청 이후 학생의 수업 등록이 바뀌었습니다. 명단을 확인하고 퇴원 신청을 다시 검토해 주세요."
