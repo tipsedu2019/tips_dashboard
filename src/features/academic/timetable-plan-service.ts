@@ -50,9 +50,10 @@ const occupancyBlocker = (value: unknown) => record(value) && string(value.class
   && string(value.label) && (value.scope === 'all' || value.scope === 'resource')
   && nullableString(value.resourceId) && ['unresolved_time', 'unresolved_resource', 'incomplete_read'].includes(String(value.reason))
   && (value.weekday == null || (integer(value.weekday) && Number(value.weekday) >= 0 && Number(value.weekday) <= 6))
-  && ((value.startMinute == null && value.endMinute == null)
-    || (integer(value.startMinute) && integer(value.endMinute) && Number(value.startMinute) >= 0
-      && Number(value.startMinute) < Number(value.endMinute) && Number(value.endMinute) <= 1440))
+  && (value.startMinute == null || (integer(value.startMinute) && value.startMinute >= 0 && value.startMinute < 1440))
+  && (value.endMinute == null || (integer(value.endMinute) && value.endMinute >= 0 && value.endMinute <= 1440))
+  // A missing bound reserves the whole known day in the server and client conflict checks.
+  && (value.startMinute == null || value.endMinute == null || Number(value.startMinute) < Number(value.endMinute))
   && (value.teacherId === undefined || nullableString(value.teacherId))
   && (value.classroomId === undefined || nullableString(value.classroomId));
 const datedSession = (value: unknown) => record(value) && string(value.id) && string(value.classId)

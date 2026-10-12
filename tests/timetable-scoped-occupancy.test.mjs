@@ -36,7 +36,14 @@ test('unknown bounds stay conservative; known resources constrain uncertainty wi
 });
 test('invalid bounds or unsupported protocol fail at the real response consumer',()=>{
  assert.equal(requireTimetableOperatingReference(ref),ref);
- for(const invalid of [{...ref,occupancyValidationVersion:3},{...ref,unresolvedOccupancies:[{...blocker,weekday:9}]},{...ref,unresolvedOccupancies:[{...blocker,endMinute:1000}]},{...ref,unresolvedOccupancies:[{...blocker,startMinute:null}]}]) assert.throws(()=>requireTimetableOperatingReference(invalid),/invalid/);
+ for(const invalid of [{...ref,occupancyValidationVersion:3},{...ref,unresolvedOccupancies:[{...blocker,weekday:9}]},{...ref,unresolvedOccupancies:[{...blocker,endMinute:1000}]},{...ref,unresolvedOccupancies:[{...blocker,startMinute:-1}]}]) assert.throws(()=>requireTimetableOperatingReference(invalid),/invalid/);
+});
+test('independently missing bounds pass the producer contract while reserving the entire known day',()=>{
+ for(const partial of [{...blocker,startMinute:null},{...blocker,endMinute:null}]) {
+  const loaded=requireTimetableOperatingReference({...ref,unresolvedOccupancies:[partial]});
+  for(const candidate of [slot,{...slot,startMinute:600,endMinute:650},{...slot,startMinute:1350,endMinute:1400}]) assert.equal(findOperatingConflicts([candidate],loaded)[0].kind,'unresolved');
+  assert.deepEqual(findOperatingConflicts([{...slot,weekday:1}],loaded),[]);
+ }
 });
 test('metadata edits retain existing occupancy; a new affected placement explains the specific class',()=>{
  const snapshot={...ref,plan:{targetStartDate:null,targetEndDate:null},items:[{id:'item',name:'draft'}],slots:[slot]};
