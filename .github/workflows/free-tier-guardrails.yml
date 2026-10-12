@@ -32,7 +32,7 @@ jobs:
             tests/textbook-reference-read-service.test.mjs \
             tests/textbook-numbered-read-service.test.mjs
       - name: Verify class detail and schedule request ownership
-        run: node --test --experimental-strip-types tests/management-detail-race.test.mjs tests/management-continuous-class-schedule.test.mjs tests/management-progressive-loading.test.mjs
+        run: node --test --experimental-strip-types tests/management-detail-race.test.mjs tests/management-continuous-class-schedule.test.mjs tests/management-progressive-loading.test.mjs tests/management-class-close-atomic.test.mjs tests/management-class-close-recovery.test.mjs
       - name: Verify student enrollment status and management pagination
         run: |
           node --test --experimental-strip-types \
