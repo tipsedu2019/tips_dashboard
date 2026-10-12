@@ -10178,6 +10178,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setMessage("")
     setNotice("")
 
+    void preloadRegistrationApplication()
     try {
       const [detail, attempt] = await Promise.all([
         loadRegistrationCaseForWorkspace(target.taskId),

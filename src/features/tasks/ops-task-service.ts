@@ -1820,7 +1820,7 @@ async function loadOpsTaskPageStats(
         : AbortSignal.timeout(8_000))
       .retry(false)
     return mapOpsTaskPageStatsResult(statsResult)
-  })
+  }, signal)
 }
 
 export function startOpsTaskPageStatsSupplementLoad(options: {

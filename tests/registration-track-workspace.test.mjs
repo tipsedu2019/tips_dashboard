@@ -5193,3 +5193,181 @@ test("mounted enrollment editor saves multiple textbooks and retains them after 
     assert.equal(select(readOnly).props.disabled, true)
   } finally { hookHarness.cleanup() }
 })
+
+test("inactive enrollment defers its observation read until the subject is selected", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const calls = []
+  const Editor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness,
+    loadObservation: async (input) => { calls.push(input); return null },
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+  })
+  const props = mountedRegistrationEditorProps({ active: false })
+  try {
+    hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    assert.equal(calls.length, 0, "a hidden mounted subject must not start the auxiliary manager read")
+    hookHarness.render(Editor, { ...props, track: { ...props.track, observationFeedbackRevision: 9 } })
+    hookHarness.flushEffects()
+    assert.equal(calls.length, 0, "hidden feedback refreshes remain deferred")
+    const activeProps = { ...props, active: true }
+    hookHarness.render(Editor, activeProps)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    assert.deepEqual(calls, [{ trackId: props.track.id }])
+    hookHarness.render(Editor, activeProps)
+    hookHarness.flushEffects()
+    assert.equal(calls.length, 1, "ordinary renders must not add reads")
+    hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    hookHarness.render(Editor, activeProps)
+    hookHarness.flushEffects()
+    assert.equal(calls.length, 1, "returning to a completed unchanged read must retain the existing result")
+    hookHarness.render(Editor, { ...props, track: { ...props.track, observationFeedbackRevision: 10 } })
+    hookHarness.flushEffects()
+    assert.equal(calls.length, 1)
+    hookHarness.render(Editor, { ...activeProps, track: { ...props.track, observationFeedbackRevision: 10 } })
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    assert.equal(calls.length, 2, "a changed feedback revision must refresh on activation")
+    hookHarness.render(Editor, { ...props, permissions: { canManage: false } })
+    hookHarness.flushEffects()
+    assert.equal(calls.length, 2, "permission revocation never reads")
+    hookHarness.render(Editor, activeProps)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    assert.equal(calls.length, 3, "permission restoration must obtain fresh authority")
+  } finally { hookHarness.cleanup() }
+})
+
+test("subject deactivation rejects the pending observation default and preserves the user's draft on return", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const pending = []
+  const Editor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness,
+    loadObservation: () => { const request = createControlledPromise(); pending.push(request); return request.promise },
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+  })
+  const props = mountedRegistrationEditorProps({ active: true })
+  const calendarIn = (view) => findMountedRegistrationElement(view,
+    (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions), "first lesson calendar")
+  try {
+    let view = hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    findMountedRegistrationElement(view, (element) => element.props.label === "영어 수업 1 선택", "class selection").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(Editor, { ...props, active: false })
+    hookHarness.flushEffects()
+    pending[0].resolve(mountedRegistrationObservation)
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(Editor, { ...props, active: false })
+    assert.equal(calendarIn(view).props.sourceObservationId, "", "the hidden subject's abandoned result must not change its draft")
+    assert.doesNotMatch(collectMountedRegistrationText(view).join(" "), /최근 적합 청강/)
+    hookHarness.flushEffects()
+    const regular = calendarIn(view).props.sessions.find((item) => item.source === "regular")
+    assert.ok(regular)
+    calendarIn(view).props.onSelect(regular)
+    view = hookHarness.render(Editor, { ...props, active: false })
+    hookHarness.flushEffects()
+    view = hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    assert.equal(pending.length, 2, "returning to a subject refreshes its observation authority")
+    pending[1].resolve(mountedRegistrationObservation)
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(Editor, props)
+    assert.equal(calendarIn(view).props.valueDate, regular.sessionDate)
+    assert.equal(calendarIn(view).props.sourceObservationId, "", "fresh observation must not overwrite an owned regular draft")
+    hookHarness.flushEffects()
+    hookHarness.render(Editor, { ...props, active: false })
+    hookHarness.flushEffects()
+    view = hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    assert.equal(pending.length, 2, "the completed non-null result is reused after another subject visit")
+    assert.equal(calendarIn(view).props.valueDate, regular.sessionDate)
+    assert.ok(calendarIn(view).props.sessions.some((option) => option.source === "observation"), "the cached observation option survives")
+  } finally { hookHarness.cleanup() }
+})
+
+test("registration application keeps both enrollment forms mounted but activates only the selected subject", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({ hookHarness, loadManagerDetail: async () => null, loadFeedback: async () => null })
+  const tracks = ["영어", "수학"].map((subject, index) => ({
+    id: `fixture-active-track-${index}`, taskId: "fixture-active-task", subject,
+    status: "enrollment_decided", workflowStatus: "enrollment_decided", workflowRevision: 1,
+    directorProfileId: null, observationAttemptCount: 0, observationSummaryVisible: false,
+    migrationReviewRequired: false, legacy: false, waitingKind: null,
+  }))
+  const task = { id: "fixture-active-task", title: "합성 등록", studentName: "합성 학생", type: "registration", registration: null }
+  const props = {
+    task, detail: { task, commonRevision: 1, tracks, appointments: [], levelTests: [], consultations: [], enrollments: [], admissionBatches: [] },
+    focusTrackId: tracks[0].id, viewerId: "fixture-viewer", viewerRole: "staff", subjectCapabilities: [],
+    onFocusTrack: () => {}, onReload: async () => {}, onWarning: () => {}, customerMessageClient: {},
+    observationRuntime: { available: false, runtimeVersion: 0 }, closeAction: null,
+  }
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  globalThis.window = { matchMedia: () => ({ matches: true }), requestAnimationFrame: () => 1, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById: () => null }
+  try {
+    const view = hookHarness.render(mounted.RegistrationApplication, props)
+    const shell = findMountedRegistrationElement(view, (node) => node.type === mounted.RegistrationApplicationShell, "application shell")
+    const forms = findMountedRegistrationElements(shell.props.registration.props.fields, (node) => node.props.detail && node.props.track && "textbookOptions" in node.props)
+    assert.equal(forms.length, 2, "both subject drafts keep their existing component lifetime")
+    assert.deepEqual(forms.map((node) => [node.props.track.id, node.props.active]), [[tracks[0].id, true], [tracks[1].id, false]])
+    assert.deepEqual(forms[0].props.permissions, forms[1].props.permissions, "activity must not replace the existing equal authorization")
+    hookHarness.flushEffects()
+    const source = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
+    const wrapper = sourceBetween(source, "export function RegistrationEnrollmentTrackEditor", "export type RegistrationConsultationOutcomeEditorProps")
+    assert.match(wrapper, /<RegistrationEnrollmentEditor[\s\S]*?active=\{active\}/, "the intermediate wrapper forwards selection to the real form")
+  } finally {
+    hookHarness.cleanup()
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+  }
+})
+
+
+test("failed observation reads retry on selection and permission revocation rejects a pending result", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const pending = []
+  const Editor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness,
+    loadObservation: () => { const request = createControlledPromise(); pending.push(request); return request.promise },
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+  })
+  const props = mountedRegistrationEditorProps({ active: true })
+  try {
+    let view = hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    findMountedRegistrationElement(view, (element) => element.props.label === "영어 수업 1 선택", "class selection").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    pending[0].reject(new Error("synthetic unavailable"))
+    await flushMountedRegistrationWork()
+    hookHarness.render(Editor, { ...props, active: false })
+    hookHarness.flushEffects()
+    hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    assert.equal(pending.length, 2, "a failed read must not become a reusable empty success")
+    const denied = { ...props, permissions: { canManage: false } }
+    hookHarness.render(Editor, denied)
+    hookHarness.flushEffects()
+    pending[1].resolve(mountedRegistrationObservation)
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(Editor, denied)
+    const calendar = findMountedRegistrationElement(view, (element) => element.props.subject === "영어" && element.props.rowIndex === 1 && Array.isArray(element.props.sessions), "first lesson calendar")
+    assert.equal(calendar.props.sourceObservationId, "", "the revoked read cannot apply a default")
+    hookHarness.flushEffects()
+    hookHarness.render(Editor, props)
+    hookHarness.flushEffects()
+    assert.equal(pending.length, 3, "restoring permission starts a fresh read")
+    pending[2].resolve(mountedRegistrationObservation)
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(Editor, props)
+    assert.match(collectMountedRegistrationText(view).join(" "), /최근 적합 청강/)
+    hookHarness.flushEffects()
+  } finally { hookHarness.cleanup() }
+})
