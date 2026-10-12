@@ -7,6 +7,7 @@ import ts from "typescript";
 
 import { getRegistrationWorkflowStatusFromLegacyTrack } from "../src/features/tasks/registration-workflow-status.js";
 import { createOpsTaskPageStatsCache } from "../src/features/tasks/ops-task-page-stats-cache.ts";
+import { startOpsTaskPageSupplementLoad } from "../src/features/tasks/ops-task-page-supplement.ts";
 
 const serviceSource = await readFile(
   new URL("../src/features/tasks/ops-task-service.ts", import.meta.url),
@@ -155,20 +156,23 @@ function loadOpsTaskPageWithMocks(mocks) {
   ).loadOpsTaskPage;
 }
 
-function loadOpsTaskPageStatsSupplementWithMocks(mocks) {
+function loadOpsTaskPageStatsSupplementWithMocks(mocks, registration = false) {
   const source = sourceBetween(
     "function mapOpsTaskPageStatsResult",
-    "export function startOpsRegistrationTaskPageSupplementLoad",
+    "export async function loadOpsTaskPage",
   );
+  const exportName = registration ? "startOpsRegistrationTaskPageSupplementLoad" : "startOpsTaskPageStatsSupplementLoad";
   return transpileAndLoad(
     source,
-    ["startOpsTaskPageStatsSupplementLoad"],
+    [exportName],
     {
       opsTaskPageStatsCache: { load: (_key, loader) => loader() },
+      startOpsTaskPageSupplementLoad,
+      probeRegistrationSubjectTrackRuntime: async () => ({ enabled: true }),
       text: (value) => String(value || "").trim(),
       ...mocks,
     },
-  ).startOpsTaskPageStatsSupplementLoad;
+  )[exportName];
 }
 
 function taskPageRpcResult(data, error = null) {
@@ -393,6 +397,93 @@ test("task stats supplement combines caller cancellation with the exact bounded 
     kind: "combined",
     signals: [callerSignal, { kind: "timeout", milliseconds: 8_000 }],
   });
+});
+
+function controlledStatsSupplement(registration = false) {
+  const requests = [];
+  const start = loadOpsTaskPageStatsSupplementWithMocks({
+    opsTaskPageStatsCache: createOpsTaskPageStatsCache({ ttlMs: 60_000 }),
+    AbortSignal,
+    supabase: {
+      rpc(name) {
+        assert.equal(name, "get_ops_task_list_stats_v1");
+        const response = Promise.withResolvers();
+        const request = {
+          ...response,
+          signal: null,
+          abortSignal(signal) { request.signal = signal; return request; },
+          retry(enabled) { assert.equal(enabled, false); return request; },
+          then(resolve, reject) { return response.promise.then(resolve, reject); },
+        };
+        requests.push(request);
+        return request;
+      },
+    },
+  }, registration);
+  return {
+    requests,
+    start: (signal) => {
+      const result = start({ filters: { taskType: registration ? "registration" : "general" }, viewerId: "viewer-a", signal });
+      return registration ? result.stats : result;
+    },
+  };
+}
+
+for (const registration of [false, true]) {
+test(`${registration ? "registration" : "general"} stats supplement replacement gets its own RPC while a canceled owner's response is pending`, async () => {
+  const { start, requests } = controlledStatsSupplement(registration);
+  const ownerA = new AbortController();
+  const ownerB = new AbortController();
+  const first = start(ownerA.signal);
+  await Promise.resolve();
+  ownerA.abort();
+  const second = start(ownerB.signal);
+  await Promise.resolve();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].signal.aborted, true);
+  assert.equal(requests[1].signal.aborted, false);
+  requests[0].resolve({ data: null, error: new Error("canceled") });
+  assert.equal(await first, undefined);
+  requests[1].resolve({ data: [{ total: 2 }], error: null });
+  assert.equal((await second).total, 2);
+  assert.equal((await start(new AbortController().signal)).total, 2);
+  assert.equal(requests.length, 2, "completed results remain shared across owners");
+});
+}
+
+test("stats supplement does not reuse a canceled owner's late successful result", async () => {
+  const { start, requests } = controlledStatsSupplement();
+  const owner = new AbortController();
+  const first = start(owner.signal);
+  await Promise.resolve();
+  owner.abort();
+  requests[0].resolve({ data: [{ total: 900 }], error: null });
+  await first;
+  const second = start(new AbortController().signal);
+  await Promise.resolve();
+  assert.equal(requests.length, 2);
+  requests[1].resolve({ data: [{ total: 2 }], error: null });
+  assert.equal((await second).total, 2);
+});
+
+test("stats supplement preserves same-owner deduplication and separates live owners", async () => {
+  const { start, requests } = controlledStatsSupplement();
+  const ownerA = new AbortController();
+  const ownerB = new AbortController();
+  const first = start(ownerA.signal);
+  const shared = start(ownerA.signal);
+  await Promise.resolve();
+  assert.equal(requests.length, 1);
+  const second = start(ownerB.signal);
+  const sharedSecond = start(ownerB.signal);
+  await Promise.resolve();
+  assert.equal(requests.length, 2);
+  requests[1].resolve({ data: [{ total: 2 }], error: null });
+  assert.deepEqual((await Promise.all([second, sharedSecond])).map((stats) => stats.total), [2, 2]);
+  requests[0].resolve({ data: [{ total: 900 }], error: null });
+  assert.deepEqual((await Promise.all([first, shared])).map((stats) => stats.total), [900, 900]);
+  assert.equal((await start(new AbortController().signal)).total, 2);
+  assert.equal(requests.length, 2);
 });
 
 // Withdrawal status/other-live-roster preservation is now exercised against the
