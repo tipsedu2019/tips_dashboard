@@ -1,6 +1,6 @@
 -- Local synthetic pgTAP only. Run after the ordered migration chain with
--- pgTAP and transaction-safe pg_cron metadata available. Scheduler install/remove
--- follows withdrawal_last_lesson_release_test.sql and rolls back with this test;
+-- pgTAP and transaction-safe pg_cron metadata available. Scheduler changes
+-- are independent from completion and roll back with this test;
 -- automatic cron ticks are verified separately in an isolated no-network fixture.
 -- All identities and amounts below are fictional. Business RPCs/helpers and
 -- active source/projection guards remain installed; no business function is stubbed.
@@ -36,18 +36,18 @@ begin
  insert into completion_claims values(p_label,p,t,b,e);
 end;$$;
 
-select is(public.withdrawal_last_lesson_release_runtime_version(),'withdrawal_completion_without_settlement_v2','runtime capability identifies new contract');
-select pg_temp.completion_case('absent00',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'removed','재원',false,false);
-select pg_temp.completion_case('absent01',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'removed','재원',false,true);
+select is(public.withdrawal_last_lesson_release_runtime_version(),'withdrawal_immediate_completion_v3','runtime capability identifies new contract');
+select pg_temp.completion_case('absent00',(clock_timestamp()at time zone'Asia/Seoul')::date,'removed','재원',false,false);
+select pg_temp.completion_case('absent01',(clock_timestamp()at time zone'Asia/Seoul')::date,'removed','재원',false,true);
 select pg_temp.completion_case('absent10',(clock_timestamp()at time zone'Asia/Seoul')::date-20,'removed','재원',true,false);
 select pg_temp.completion_case('absent11',(clock_timestamp()at time zone'Asia/Seoul')::date-20,'removed','재원',true,true);
-select pg_temp.completion_case('withdrawn',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'removed','퇴원',false,false,true);
-select pg_temp.completion_case('absent_false_flag',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'removed','재원',false,false,false);
-select pg_temp.completion_case('makeedu_false',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'removed','재원',false,false,true,false);
+select pg_temp.completion_case('withdrawn',(clock_timestamp()at time zone'Asia/Seoul')::date,'removed','퇴원',false,false,true);
+select pg_temp.completion_case('absent_false_flag',(clock_timestamp()at time zone'Asia/Seoul')::date,'removed','재원',false,false,false);
+select pg_temp.completion_case('makeedu_false',(clock_timestamp()at time zone'Asia/Seoul')::date,'removed','재원',false,false,true,false);
 select pg_temp.completion_case('missing_date',null);
-select pg_temp.completion_case('asymmetric',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'asymmetric');
-select pg_temp.completion_case('waitlist',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'waitlist');
-select pg_temp.completion_case('claim_absent',(clock_timestamp()at time zone'Asia/Seoul')::date+20);
+select pg_temp.completion_case('asymmetric',(clock_timestamp()at time zone'Asia/Seoul')::date,'asymmetric');
+select pg_temp.completion_case('waitlist',(clock_timestamp()at time zone'Asia/Seoul')::date,'waitlist');
+select pg_temp.completion_case('claim_absent',(clock_timestamp()at time zone'Asia/Seoul')::date);
 select pg_temp.completion_claim('claim_absent');
 
 -- Actual financial tables hold both textbook and tuition unpaid evidence.
@@ -64,7 +64,7 @@ select is(t.status,'done',c.label||' completes with absent roster')from completi
 select is(c.response->>'rosterAlreadyRemoved','true',c.label||' receipt reports already removed roster')from completion_cases c where c.response is not null;
 select ok(d.fee_processed=c.original_fee and d.textbook_fee_processed=c.original_book,c.label||' preserves exact original settlement flags')from completion_cases c join public.ops_withdrawal_details d on d.task_id=c.task_id where c.response is not null;
 select is((select count(*)from public.student_class_enrollment_history h where h.student_id=c.student_id and h.class_id=c.class_id),0::bigint,c.label||' does not fabricate roster history')from completion_cases c where c.response is not null;
-select is((select count(*)from dashboard_private.withdrawal_roster_release_queue_v1),0::bigint,'absent past/future dates never enqueue or restore roster');
+select is((select count(*)from dashboard_private.withdrawal_roster_release_queue_v1),0::bigint,'absent same-day/past dates never enqueue or restore roster');
 select is(s.status,'퇴원','already withdrawn empty student stays withdrawn')from completion_cases c join public.students s on s.id=c.student_id where label='withdrawn';
 select ok(d.timetable_roster_updated,'false roster checklist becomes true after absent completion')from completion_cases c join public.ops_withdrawal_details d on d.task_id=c.task_id where label='absent_false_flag';
 select is(pg_temp.financial_state(),state,'completion preserves actual tuition/book balances and batch finance byte-for-byte')from protected_financial_state;
@@ -81,19 +81,21 @@ select pg_temp.completion_claim('present_future');
 select pg_temp.completion_case('present_past',(clock_timestamp()at time zone'Asia/Seoul')::date-20,'enrolled','재원',false,false,false);
 select pg_temp.completion_claim('present_past');
 select public.manage_withdrawal_roster_release_scheduler_v1('install');
-update completion_cases set response=public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id)where label in('present_future','present_past');
+select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'23514','withdrawal_last_lesson_date_in_future','future existing claim is rejected even with a scheduler')from completion_cases where label='present_future';
+update completion_cases set response=public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id)where label='present_past';
 select ok(s.class_ids?c.class_id::text and cl.student_ids?c.student_id::text and e.roster_active and s.status='재원','future existing roster remains live with unpaid flags')from completion_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id join completion_claims own using(label)join public.ops_registration_enrollments e on e.id=own.claim_id where label='present_future';
-select is(response->>'rosterReleaseScheduled','true','future existing roster schedules immutable release')from completion_cases where label='present_future';
+select is(t.status,'requested','rejected future task remains requested')from completion_cases c join public.ops_tasks t on t.id=c.task_id where label='present_future';
+select is((select count(*)from dashboard_private.withdrawal_roster_release_queue_v1),0::bigint,'future rejection never creates a reservation');
 select ok(not(s.class_ids?c.class_id::text)and not(cl.student_ids?c.student_id::text)and not e.roster_active,'past existing roster and exact claim release normally despite unpaid fees')from completion_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id join completion_claims own using(label)join public.ops_registration_enrollments e on e.id=own.claim_id where label='present_past';
 select ok(not d.fee_processed and not d.textbook_fee_processed,c.label||' existing roster completion never marks fees settled')from completion_cases c join public.ops_withdrawal_details d on d.task_id=c.task_id where label in('present_future','present_past');
 select is(pg_temp.financial_state()-'batches',state-'batches','existing roster completion preserves real balances and sale status')from protected_financial_state;
 
 -- Initial admission history is not re-entry; a removed/enrolled cycle after
 -- an old request is a newer relationship and cannot be removed by that task.
-select pg_temp.completion_case('initial_history',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'enrolled','재원',false,false,false);
+select pg_temp.completion_case('initial_history',(clock_timestamp()at time zone'Asia/Seoul')::date,'enrolled','재원',false,false,false);
 insert into public.student_class_enrollment_history(student_id,class_id,action,changed_by,memo)select student_id,class_id,'enrolled','a0700000-0000-4000-8000-000000000001','합성 최초 등록'from completion_cases where label='initial_history';
 select lives_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'initial enrollment alone is not mistaken for re-entry')from completion_cases where label='initial_history';
-select pg_temp.completion_case('reentry',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'enrolled','재원',false,false,false);
+select pg_temp.completion_case('reentry',(clock_timestamp()at time zone'Asia/Seoul')::date,'enrolled','재원',false,false,false);
 update public.ops_tasks set created_at=now()-interval'1 day'where id=(select task_id from completion_cases where label='reentry');
 select dashboard_private.apply_student_class_roster_mode(student_id,class_id,'removed','enrolled',null,'synthetic_remove','a0700000-0000-4000-8000-000000000001')from completion_cases where label='reentry';
 select dashboard_private.apply_student_class_roster_mode(student_id,class_id,'enrolled','removed',null,'synthetic_reentry','a0700000-0000-4000-8000-000000000001')from completion_cases where label='reentry';
@@ -102,15 +104,15 @@ select throws_ok(format('select public.complete_ops_withdrawal_roster_transition
 select ok(s.class_ids?c.class_id::text and cl.student_ids?c.student_id::text,'re-entry guard preserves reciprocal roster')from completion_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where label='reentry';
 
 -- All present-roster fee combinations, including a previously checked roster.
-select pg_temp.completion_case('present01',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'enrolled','재원',false,true,true);
-select pg_temp.completion_case('present10',(clock_timestamp()at time zone'Asia/Seoul')::date+20,'enrolled','재원',true,false,true);
+select pg_temp.completion_case('present01',(clock_timestamp()at time zone'Asia/Seoul')::date,'enrolled','재원',false,true,true);
+select pg_temp.completion_case('present10',(clock_timestamp()at time zone'Asia/Seoul')::date,'enrolled','재원',true,false,true);
 select pg_temp.completion_case('present11',(clock_timestamp()at time zone'Asia/Seoul')::date-20,'enrolled','재원',true,true,true);
 update completion_cases set response=public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id)where label in('present01','present10','present11');
 select is(t.status,'done',c.label||' completes with existing roster and original fee combination')from completion_cases c join public.ops_tasks t on t.id=c.task_id where label in('present01','present10','present11');
 select ok(d.fee_processed=c.original_fee and d.textbook_fee_processed=c.original_book and d.timetable_roster_updated,c.label||' preserves fee combination and accepts timetable already true')from completion_cases c join public.ops_withdrawal_details d on d.task_id=c.task_id where label in('present01','present10','present11');
-select ok(s.class_ids?c.class_id::text and cl.student_ids?c.student_id::text,c.label||' future roster remains through cutoff')from completion_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where label in('present01','present10');
+select ok(not(s.class_ids?c.class_id::text)and not(cl.student_ids?c.student_id::text),c.label||' same-day roster is removed immediately')from completion_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where label in('present01','present10');
 select ok(not(s.class_ids?c.class_id::text)and not(cl.student_ids?c.student_id::text),'present11 past roster removed with true timetable')from completion_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where label='present11';
-select is(public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id),response,'scheduled receipt replays exactly after timetable true')from completion_cases where label='present01';
+select is(public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id),response,'immediate receipt replays exactly after timetable true')from completion_cases where label='present01';
 select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,gen_random_uuid())',task_id),'23514','ops_withdrawal_completion_state_conflict','new request cannot complete done task twice')from completion_cases where label='present01';
 select pg_temp.completion_case('canceled',(clock_timestamp()at time zone'Asia/Seoul')::date-20);
 update public.ops_tasks set status='canceled'where id=(select task_id from completion_cases where label='canceled');
@@ -123,7 +125,7 @@ update public.classes set name='합성 동일 수업명'where id in(select class
 select lives_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'exact UUID target completes with colliding display names')from completion_cases where label='exact_target';
 select ok(s.status='재원'and s.class_ids?c.class_id::text and cl.student_ids?c.student_id::text and t.status='requested','same-name non-target student/class/task remain untouched')from completion_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id join public.ops_tasks t on t.id=c.task_id where label='exact_other';
 -- Already absent source preserves another active class instead of forcing withdrawal.
-select pg_temp.completion_case('absent_other',(clock_timestamp()at time zone'Asia/Seoul')::date+20);
+select pg_temp.completion_case('absent_other',(clock_timestamp()at time zone'Asia/Seoul')::date);
 create temp table other_class as select gen_random_uuid()id;
 insert into public.classes(id,name,status,subject,student_ids,waitlist_ids)select o.id,'합성 타수업','진행중','영어',jsonb_build_array(c.student_id),'[]'::jsonb from other_class o cross join completion_cases c where c.label='absent_other';
 update public.students set class_ids=jsonb_build_array(o.id)from other_class o where public.students.id=(select student_id from completion_cases where label='absent_other');

@@ -52,13 +52,17 @@ create temp table snapshot_history_before as
   where task_id in(select task_id from snapshot_cases);
 create temp table snapshot_notifications_before as
   select id,to_jsonb(e) as original from dashboard_private.notification_events e;
-select public.manage_withdrawal_roster_release_scheduler_v1('install');
+-- Completion uses the applied detail without a scheduler or new reservation.
+select public.manage_withdrawal_roster_release_scheduler_v1('remove');
 
 -- Completion regression: call the actual public endpoint with an app role.
 grant select,update on snapshot_cases to authenticated;
 set local role authenticated;
 update snapshot_cases set response=public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id)
-  where label<>'no_applied_round';
+  where label not in('no_applied_round','future');
+select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),
+  '23514','withdrawal_last_lesson_date_in_future','future applied detail cannot complete despite incomplete original history')
+  from snapshot_cases where label='future';
 reset role;
 select is(t.status,'done',c.label||' completes through real v3')
   from snapshot_cases c join public.ops_tasks t on t.id=c.task_id where c.response is not null;
@@ -72,7 +76,7 @@ select is(e.payload->>'requested_withdrawal_snapshot_status',
 select ok(not(e.payload?'requested_withdrawal_date') and not(e.payload?'requested_withdrawal_round'),
   c.label||' does not fabricate original request values')
   from snapshot_cases c join public.ops_task_events e on e.task_id=c.task_id
-  where e.event_type='withdrawal.completed' and c.label in('missing','empty','future','missing_removed','empty_removed');
+  where e.event_type='withdrawal.completed' and c.label in('missing','empty','missing_removed','empty_removed');
 select is(e.payload->>'requested_withdrawal_date','2026-06-01',c.label||' retains original date')
   from snapshot_cases c join public.ops_task_events e on e.task_id=c.task_id
   where e.event_type='withdrawal.completed' and c.label in('partial','complete');
@@ -99,11 +103,11 @@ select ok(e.payload->>'applied_withdrawal_date'=c.last_date::text
 select ok(not(s.class_ids?c.class_id::text) and not(cl.student_ids?c.student_id::text),c.label||' past roster is removed')
   from snapshot_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id
   where c.label in('missing','empty','partial','complete');
-select ok(s.class_ids?c.class_id::text and cl.student_ids?c.student_id::text,'incomplete history preserves future roster')
-  from snapshot_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where c.label='future';
-select ok(dashboard_private.withdrawal_roster_includes_date_v1(student_id,class_id,last_date)
-  and not dashboard_private.withdrawal_roster_includes_date_v1(student_id,class_id,last_date+1),
-  'historical snapshot does not change D inclusive / D+1 excluded boundary') from snapshot_cases where label='future';
+select ok(t.status='requested' and s.class_ids?c.class_id::text and cl.student_ids?c.student_id::text,'future rejection preserves requested task and reciprocal roster')
+  from snapshot_cases c join public.ops_tasks t on t.id=c.task_id join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where c.label='future';
+select is((select count(*) from dashboard_private.withdrawal_roster_release_queue_v1),0::bigint,'completion and future rejection create no queue');
+select is((select count(*) from public.ops_task_events e where e.task_id=c.task_id and e.event_type='withdrawal.completed'),
+  0::bigint,'rejected future emits no completion source') from snapshot_cases c where c.label='future';
 select is(public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id),response,label||' exact retry replays receipt')
   from snapshot_cases where response is not null;
 select is((select count(*) from public.ops_task_events e where e.task_id=c.task_id and e.event_type='withdrawal.completed'),

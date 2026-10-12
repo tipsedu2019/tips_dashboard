@@ -8,8 +8,8 @@ import ts from "typescript"
 const source = await readFile(new URL("../src/features/tasks/ops-task-service.ts", import.meta.url), "utf8")
 const parsed = ts.createSourceFile("ops-task-service.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 const functions = new Map(parsed.statements.filter(ts.isFunctionDeclaration).map((item) => [item.name?.text, item.getText(parsed)]))
-const runtimeVersion = "withdrawal_completion_without_settlement_v2"
-const unavailableMessage = "퇴원 기준일을 포함하는 명단 처리 기능이 준비되지 않았습니다. 관리자에게 문의하세요."
+const runtimeVersion = "withdrawal_immediate_completion_v3"
+const unavailableMessage = "퇴원 완료 즉시 명단 처리 기능이 준비되지 않았습니다. 관리자에게 문의하세요."
 
 function load(names, mocks) {
   const snippets = names.map((name) => {
@@ -75,7 +75,7 @@ function loadCompletion(mocks) {
   ], mocks).completeReadyOpsRosterTransition
 }
 
-test("withdrawal completion uses only the date-inclusive V3 RPC in ready and legacy runtimes", async () => {
+test("withdrawal completion uses only the immediate-completion V3 RPC in ready and legacy runtimes", async () => {
   for (const mode of ["ready", "legacy"]) {
     const { calls, mocks } = harness({ mode })
     const complete = loadCompletion(mocks)
@@ -88,12 +88,13 @@ test("withdrawal completion uses only the date-inclusive V3 RPC in ready and leg
   }
 })
 
-test("missing or incompatible date-boundary capability rejects before completion or any legacy write", async () => {
+test("missing or incompatible immediate-completion capability rejects before completion or any legacy write", async () => {
   for (const options of [
     { capabilityError: { code: "PGRST202", message: "function missing" } },
     { capabilityError: { code: "42883", message: "function does not exist" } },
     { version: "withdrawal_last_lesson_release_v0" },
     { version: "withdrawal_last_lesson_release_v1" },
+    { version: "withdrawal_completion_without_settlement_v2" },
     { version: "" },
   ]) {
     const { calls, mocks } = harness(options)
@@ -175,7 +176,7 @@ test("the manual withdrawal sync refuses completed input before management write
     setOpsStudentStatus: async () => calls.push(["write-status"]),
     markWithdrawalRosterUpdated: async () => calls.push(["write-detail"]),
   }).syncWithdrawalManagementLinks
-  await assert.rejects(sync("task-1", { type: "withdrawal", status: "done" }), /퇴원 완료는 기준일을 포함하는 명단 처리 경로에서 진행하세요/)
+  await assert.rejects(sync("task-1", { type: "withdrawal", status: "done" }), /퇴원 완료는 즉시 명단 처리 경로에서 진행하세요/)
   assert.ok(!calls.some(([kind]) => ["write-links", "remove-roster", "write-status", "write-detail"].includes(kind)))
 })
 
@@ -225,7 +226,7 @@ test("withdrawal cancellation and canceled-task reopening keep their existing st
   }
 })
 
-test("withdrawal creation and completed detail updates preflight the date-boundary capability before mutations", async () => {
+test("withdrawal creation and completed detail updates preflight the immediate-completion capability before mutations", async () => {
   for (const method of ["createOpsTransitionTask", "createOpsTask", "updateOpsTask"]) {
     const { calls, mocks } = harness()
     const input = { type: "withdrawal", status: "done", withdrawal: { withdrawalDate: "2099-10-06" } }

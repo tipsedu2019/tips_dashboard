@@ -3254,8 +3254,8 @@ async function assertWithdrawalLastLessonRuntimeReady() {
     .abortSignal(AbortSignal.timeout(8_000))
     .retry(false)
   if (error && !isMissingOpsRosterRpc(error)) throw error
-  if (error || data !== "withdrawal_completion_without_settlement_v2") {
-    throw new Error("퇴원 기준일을 포함하는 명단 처리 기능이 준비되지 않았습니다. 관리자에게 문의하세요.")
+  if (error || data !== "withdrawal_immediate_completion_v3") {
+    throw new Error("퇴원 완료 즉시 명단 처리 기능이 준비되지 않았습니다. 관리자에게 문의하세요.")
   }
   await getOpsRosterRuntimeState()
 }
@@ -4196,7 +4196,7 @@ async function markTransferRosterUpdated(taskId: string) {
 
 async function syncWithdrawalManagementLinks(taskId: string, input: OpsTaskInput) {
   if (input.status === "done") {
-    throw new Error("퇴원 완료는 기준일을 포함하는 명단 처리 경로에서 진행하세요.")
+    throw new Error("퇴원 완료는 즉시 명단 처리 경로에서 진행하세요.")
   }
   const student = await resolveOpsStudent(input)
   const classRow = await resolveOpsClass(input.classId, input.className, input.withdrawal?.teacherName)
