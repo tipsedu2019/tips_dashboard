@@ -77,7 +77,12 @@ begin
     return 'pending';
   end if;
   if pg_catalog.to_regclass('cron.job') is null
-    or pg_catalog.to_regprocedure('cron.unschedule(text)') is null then
+    or not exists (
+      select 1 from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='cron' and p.proname='unschedule' and p.prokind='f'
+        and p.pronargs=1 and p.proargtypes[0]='pg_catalog.text'::regtype
+    ) then
     return 'unavailable';
   end if;
   if not pg_catalog.pg_try_advisory_xact_lock(pg_catalog.hashtextextended('tips-withdrawal-roster-release-v1',0)) then

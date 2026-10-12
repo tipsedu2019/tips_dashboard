@@ -112,7 +112,7 @@ export const CURRENT_WITHDRAWAL_MIGRATIONS=Object.freeze([
  Object.freeze({"fileName":"20261006091000_withdrawal_future_roster_boundary.sql","status":"final","sha256":"59b76d0271adacbddb49896adc272a889314766caa58f61534f7dc45ab71c009"}),
  Object.freeze({"fileName":"20261007141548_withdrawal_completion_without_settlement.sql","status":"final","sha256":"221a7f214457ea6f02e86b5e2775b749cbfe2dce64708fce3c3e262b202e74fe"}),
  Object.freeze({"fileName":"20261008113322_withdrawal_completion_optional_request_snapshot.sql","status":"final","sha256":"649a119837bfb55428e835fca4b32de9f066408dd50c37e238782c16877d5b45"}),
- Object.freeze({"fileName":"20261012102015_withdrawal_immediate_completion.sql","status":"final","sha256":"2fa579746490620d62c323555318bf5d2dee8e54c45ea2c989946ac9a4b3554f"}),
+ Object.freeze({"fileName":"20261012102015_withdrawal_immediate_completion.sql","status":"final","sha256":"4283c5a46522d473a710913ffe564bb2796ebc80a200210055165cc88abc8eac"}),
 ]);
 export function extractAiCapture(stdout,identity){
  const producer=AI_PRODUCERS[identity];assert.ok(producer,'unknown capture producer');
