@@ -1,3 +1,7 @@
+-- Provider user IDs in this fixture are newly authored, locally chosen synthetic numeric identifiers.
+-- They were not copied from provider-account data and retain the numeric grammar required by these tests.
+-- This fixture-only choice does not establish global provider nonassignment.
+
 begin;
 select no_plan();
 set local statement_timeout='120s';
@@ -222,7 +226,7 @@ select
 from chat_lifecycle_clock clock;
 
 insert into dashboard_private.google_chat_profile_identities(profile_id,account_email_snapshot,chat_user_id,source,verification_status,verified_at,last_sync_status,last_sync_at,identity_revision)
-values('94980000-0000-4000-8000-000000000001','chat-contract-teacher@example.invalid','994800001','manual','verified',now(),'ok',now(),1);
+values('94980000-0000-4000-8000-000000000001','chat-contract-teacher@example.invalid','990000006','manual','verified',now(),'ok',now(),1);
 insert into public.google_chat_webhook_settings(channel,webhook_url,connection_state,revision)
 values('english','https://chat.googleapis.com/v1/spaces/fixture/messages?key=fixture&token=fixture','legacy_active',1)
 on conflict(channel) do update set webhook_url=excluded.webhook_url,connection_state=excluded.connection_state,revision=excluded.revision;

@@ -33,7 +33,8 @@ const REQUEST_ID = /^[a-z0-9][a-z0-9-]{7,127}$/u;
 const SQL_TEST = /^supabase\/tests\/[a-z0-9_]+\.sql$/u;
 const PROBE = /^(?:tests\/[a-z0-9_./-]+\.mjs|scripts\/probe-dashboard-audit-chain-concurrency\.mjs)$/u;
 const MIGRATION = /^(\d{14})_([a-z0-9_]+)\.sql$/u;
-const SUPABASE = "/Users/hyunjun/.npm/_npx/aa8e5c70f9d8d161/node_modules/@supabase/cli-darwin-arm64/bin/supabase";
+// Explicit TASK_SUPABASE_CLI takes precedence; otherwise use standard PATH lookup.
+const SUPABASE = "supabase";
 const ISOLATED_SCHEMA_REPAIR_PATH = "scripts/fixtures/dashboard-free-tier-isolated-schema-repair.sql";
 const ISOLATED_SCHEMA_REPAIR_SHA256 = "00c1a584269816060933bb6d728494aef085592d6c6b08dbc8a715cf6ee2794b";
 const ISOLATED_MIGRATION_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql";
