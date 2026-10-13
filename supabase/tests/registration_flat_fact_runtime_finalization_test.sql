@@ -196,7 +196,7 @@ select pg_temp.set_flat_fact_actor(
 
 insert into flat_fact_case(response)
 select public.create_registration_case(
-  '사실 독립성 학생', '중1', '사실독립중', '01099501200', null,
+  '사실 독립성 학생', '중1', '사실독립중', 'fixture-contact-z-01070260021', null,
   '본관', pg_catalog.now(), array['영어'],
   'migration review에서도 예약 사실 저장', 'normal',
   'flat-fact-finalization-case'

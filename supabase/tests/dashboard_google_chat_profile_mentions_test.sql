@@ -740,7 +740,7 @@ insert into public.ops_registration_details(
 )
 values (
   '99450000-0000-4000-8000-000000000301', '중3', '테스트중',
-  '01000000000', null, 'Chat mention fixture'
+  'fixture-contact-a-01070010001', null, 'Chat mention fixture'
 );
 
 insert into public.ops_registration_subject_tracks(

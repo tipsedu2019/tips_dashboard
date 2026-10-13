@@ -168,7 +168,7 @@ values
   (
     'single_completed',
     public.create_registration_case(
-      '레벨결과 완료 학생', '중1', '레벨결과중', '01077007251', null,
+      '레벨결과 완료 학생', '중1', '레벨결과중', 'fixture-contact-aa-01070270022', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
       'parent reconciliation fixture', 'normal',
       'level-result-parent-single-completed'
@@ -177,7 +177,7 @@ values
   (
     'single_absent',
     public.create_registration_case(
-      '레벨결과 결석 학생', '중1', '레벨결과중', '01077007252', null,
+      '레벨결과 결석 학생', '중1', '레벨결과중', 'fixture-contact-ab-01070280023', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
       'parent reconciliation fixture', 'normal',
       'level-result-parent-single-absent'
@@ -186,7 +186,7 @@ values
   (
     'single_canceled',
     public.create_registration_case(
-      '레벨결과 취소 학생', '중1', '레벨결과중', '01077007253', null,
+      '레벨결과 취소 학생', '중1', '레벨결과중', 'fixture-contact-ac-01070290024', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
       'parent reconciliation fixture', 'normal',
       'level-result-parent-single-canceled'
@@ -195,7 +195,7 @@ values
   (
     'shared_terminal',
     public.create_registration_case(
-      '레벨결과 공유 학생', '중1', '레벨결과중', '01077007254', null,
+      '레벨결과 공유 학생', '중1', '레벨결과중', 'fixture-contact-ad-01070300025', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어', '수학'],
       'parent reconciliation fixture', 'normal',
       'level-result-parent-shared-terminal'

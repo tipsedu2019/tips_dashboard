@@ -63,7 +63,7 @@ select ('96000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'np-fixture regi
  '94000000-0000-4000-8000-000000000002','영어, 수학','번호 학생','', '2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'
 from generate_series(1,2) n;
 insert into public.ops_registration_details(task_id,parent_phone,school_name)
-select id,'010-1234-5678','번호학교' from public.ops_tasks where id between '96000000-0000-4000-8000-000000000001' and '96000000-0000-4000-8000-000000000002';
+select id,'fixture-contact-m-010-7013-0009','번호학교' from public.ops_tasks where id between '96000000-0000-4000-8000-000000000001' and '96000000-0000-4000-8000-000000000002';
 insert into public.ops_registration_subject_tracks(id,task_id,subject,pipeline_status,workflow_status,workflow_revision)
 select ('96100000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
  ('96000000-0000-4000-8000-'||lpad(((n+1)/2)::text,12,'0'))::uuid,
@@ -211,7 +211,7 @@ select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters(
  '{"inquiry":1,"level_test":1,"consultation_requested":1,"consultation_completed":1,"waiting":3,"observation":3,"enrollment":1,"payment":1,"completed":3}'::jsonb,'stats retain sibling view counts');
 select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"stats-only"}'))->>'total','1','stats exclude archived subject membership');
 select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"stats visit place"}'))->>'total','1','stats retain normalized visit place search');
-select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"01012345678"}'))->>'total','2','stats retain normalized phone search and parent deduplication');
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"fixture-contact-m-01070130009"}'))->>'total','2','stats retain normalized phone search and parent deduplication');
 select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"np-views","statuses":["done"]}'))->>'total','0','stats filter task status');
 select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"np-views","view":"consultation_requested","consultationOwnerId":"94000000-0000-4000-8000-000000000003"}'))->>'total','0','stats filter consultation owner');
 select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"np-views","view":"consultation_requested"}'))->'metrics',
@@ -237,7 +237,7 @@ select is(
   where track->>'id'=fixture.track_id::text),
  fixture.rows,'final numbered projection preserves all stored enrollment metadata '||fixture.track_id)
 from enrollment_fixture fixture;
-select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"01012345678"}'),1,10)->>'totalCount','2','normalized phone search');
+select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"fixture-contact-m-01070130009"}'),1,10)->>'totalCount','2','normalized phone search');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"stats visit place"}'),1,10)->>'totalCount','1','narrow key selection retains normalized visit-place search');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"stats visit place"}'),1,10)->'rows'->0->'registrationTracks'->0->>'visitPlace','stats-visit-place','selected row still receives the full visit DTO');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"stats-only 2"}'),1,10)->>'totalCount','1','archived-only parent remains visible in inquiry');
