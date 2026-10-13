@@ -7,7 +7,7 @@ test('capture protocol preserves JSON bytes and rejects missing, duplicate, unkn
  for(const output of ['', 'AI_HTTP_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_UNKNOWN_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_HTTP_CAPTURE:{\n'])assert.throws(()=>extractAiCapture(output,'http'));
 });
 
-import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,CURRENT_PR126_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,TIMETABLE_VALIDATION_MIGRATION,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,CURRENT_PR126_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,TIMETABLE_VALIDATION_MIGRATION,TIMETABLE_BATCH_SAVE_MIGRATION,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
@@ -31,8 +31,8 @@ function parityArguments({tests,probes}){
   ...tests.flatMap(path=>['--test',path]),...probes.flatMap(path=>['--probe',path])];
 }
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
- assert.equal(AI_SQL_TESTS.length,97);
- assert.equal(AI_PROBES.length,21);
+ assert.equal(AI_SQL_TESTS.length,98);
+ assert.equal(AI_PROBES.length,23);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
  for(const name of isolatedWorkflows){
@@ -70,6 +70,13 @@ test('full parity guard rejects missing, duplicate and reordered workflow select
   const swapFirst=list=>[list[1],list[0],...list.slice(2)];
   for(const [label,changed] of [
    ['missing legacy occupancy',{...inventory,tests:inventory.tests.filter(path=>path!==legacyOccupancyTest)}],
+   ['missing batch SQL',{...inventory,tests:inventory.tests.filter(path=>path!=='supabase/tests/timetable_plan_batch_save_test.sql')}],
+   ['missing batch DTO',{...inventory,probes:inventory.probes.filter(path=>path!=='tests/probe-timetable-batch-save-dto.mjs')}],
+   ['missing batch concurrency',{...inventory,probes:inventory.probes.filter(path=>path!=='tests/probe-timetable-batch-save-concurrency.mjs')}],
+   ['duplicate batch SQL',{...inventory,tests:[...inventory.tests,'supabase/tests/timetable_plan_batch_save_test.sql']}],
+   ['duplicate batch probe',{...inventory,probes:[...inventory.probes,'tests/probe-timetable-batch-save-concurrency.mjs']}],
+   ['reordered batch SQL',{...inventory,tests:[...inventory.tests.filter(path=>path!=='supabase/tests/timetable_plan_batch_save_test.sql'),'supabase/tests/timetable_plan_batch_save_test.sql']}],
+   ['reordered batch DTO',{...inventory,probes:[...inventory.probes.filter(path=>path!=='tests/probe-timetable-batch-save-dto.mjs'),'tests/probe-timetable-batch-save-dto.mjs']}],
    ['duplicate SQL',{...inventory,tests:[...inventory.tests,legacyOccupancyTest]}],
    ['reordered SQL',{...inventory,tests:swapFirst(inventory.tests)}],
    ['missing probe',{...inventory,probes:inventory.probes.slice(1)}],
@@ -81,6 +88,27 @@ test('full parity guard rejects missing, duplicate and reordered workflow select
    assert.equal(launched,0,name+' '+label+' must stop before process launch');
   }
  }
+});
+test('atomic timetable migration is pinned without accepting prior-source or new batch drift',async()=>{
+ const {AI_SOURCE_CLOSURE,TIMETABLE_BATCH_SAVE_MIGRATION}=await import('../../scripts/lib/ai-producer-receipt.mjs');
+ const current=await snapshotAiSource();
+ const path='supabase/migrations/'+TIMETABLE_BATCH_SAVE_MIGRATION.fileName;
+ assert.equal(current.closure.find(row=>row.path===path)?.sha256,TIMETABLE_BATCH_SAVE_MIGRATION.sha256);
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-batch-drift-'));
+ try{
+  for(const file of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const original=JSON.parse(await readFile(manifestPath));
+  for(const change of [entry=>({...entry,sha256:'0'.repeat(64)}),entry=>({...entry,status:'candidate'})]){
+   await writeFile(manifestPath,JSON.stringify({...original,orderedNewMigrations:original.orderedNewMigrations.map(entry=>entry.fileName===TIMETABLE_BATCH_SAVE_MIGRATION.fileName?change(entry):entry)}));
+   await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  }
+  await writeFile(manifestPath,JSON.stringify(original));
+  await writeFile(join(root,path),(await readFile(join(root,path),'utf8'))+'\n-- unreviewed drift\n');
+  await assert.rejects(snapshotAiSource(root),/timetable batch migration source drift/);
+ }finally{await rm(root,{recursive:true,force:true});}
 });
 test('independent attestation rejects stale run/source, migration, closure, inventory and raw payload drift',async()=>{
  const source=await snapshotAiSource(),raw=Buffer.from(' {"test":"negative protocol only"} '),now=Date.now();
@@ -172,8 +200,8 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,167);
-  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && !CURRENT_PR126_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
+  assert.equal(original.orderedNewMigrations.length,168);
+  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && !CURRENT_PR126_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
   assert.equal(reviewedLegacy.at(-1).fileName,mainFileName);
