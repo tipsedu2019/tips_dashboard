@@ -16,7 +16,8 @@ import { suggestPlacements } from './timetable-conflicts';
 import { PLAN_DAYS, PLAN_DAY_ORDER, formatPendingSlot, formatPlanTime, parsePlanTime, planErrorLabel, itemDraft, buildPlacementFormEdit, placementFormDefaults, placementScope, type PlacementEditorDraft, type PlacementFormValues } from './timetable-plan-interaction';
 export type { PlacementEditorDraft } from './timetable-plan-interaction';
 type Values = PlacementFormValues;
-export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onDirty, canEdit, failureKind, onRetry, onDiscard, onAcceptServer, serverSummary, loadScienceSubjectAreas }: {
+export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onDirty, canEdit, failureKind, onRetry, onDiscard, onAcceptServer, serverSummary, loadScienceSubjectAreas, localDraft = false }: {
+    localDraft?: boolean;
     loadScienceSubjectAreas?: TimetablePlanService['listScienceSubjectAreas'];
     draft: PlacementEditorDraft;
     snapshot: PlanSnapshot;
@@ -96,7 +97,7 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
     const description = scope === 'slot' ? '선택한 배치만 변경합니다. 다른 요일의 배치는 유지됩니다.'
         : scope === 'add' ? '기존 배치를 유지하고 선택한 요일에 추가합니다.'
         : whole ? '전체 변경을 선택한 항목만 모든 배치에 적용합니다. 나머지 배치 정보는 유지됩니다.'
-        : '요일을 선택하지 않으면 미배치 수업으로 저장합니다.';
+        : localDraft ? '요일을 선택하지 않으면 미배치 수업으로 적용합니다.' : '요일을 선택하지 않으면 미배치 수업으로 저장합니다.';
     return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}>
         <DialogContent restoreFocusToOpener className="sm:max-w-xl max-h-[90dvh] overflow-y-auto">
             <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
@@ -167,7 +168,7 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
                         {slot ? <Button type="button" variant="outline" disabled={!canEdit || busy} onClick={() => void unplace()}>이 배치 해제</Button> : null}
                         <Button type="button" variant="outline" disabled={busy} onClick={() => onClose()}>닫기</Button>
                         <Button disabled={!canEdit || busy || failureKind === 'uncertain' || failureKind === 'stale'}>
-                            {busy ? '저장 중…' : failureKind === 'rejected' ? '수정 저장' : '저장'}
+                            {busy ? localDraft ? '적용 중…' : '저장 중…' : localDraft ? '적용' : failureKind === 'rejected' ? '수정 저장' : '저장'}
                         </Button>
                     </DialogFooter>
                 </form>

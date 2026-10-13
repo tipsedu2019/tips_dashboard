@@ -239,14 +239,21 @@ export function AcademicTimetableWorkspace() {
       return () => { current = false; };
     }
   }, [plan.error, plan.service, planId]);
-  const navigation = useDraftNavigation({ dirty: plan.dirty || pickerDirty || editorDirty || transferDirty });
+  const navigation = useDraftNavigation({ dirty: plan.dirty || pickerDirty || editorDirty || transferDirty,
+    description: '저장하지 않은 변경사항이 있습니다. 적용한 시간표 초안은 이 탭에 남고, 열린 편집창의 미적용 입력은 닫힙니다. 계속 진행할까요?',
+    confirmLabel: '계속 진행' });
   const changePlan = (id: string | null) => navigation.requestLocalAction(() => {
     setPlanId(id);
   });
+  const changeView = (next: TimetableView) => navigation.requestLocalAction(() => setView(next));
+  const requestEditorAction = (action: () => void) => {
+    if (plan.saveState === 'saving') return;
+    navigation.requestLocalAction(action, { skipConfirmation: !pickerDirty && !editorDirty && !transferDirty });
+  };
   return <div className="space-y-4">
-    {presetsEnabled ? <TimetablePlanPicker disabled={!!planId && plan.referenceStatus !== 'verified'} onCommitted={id => { setPlanId(id); }} onFormDirty={setPickerDirty} reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/> : null}
+    {presetsEnabled ? <TimetablePlanPicker disabled={!!planId && (plan.referenceStatus !== 'verified' || plan.saveState === 'saving' || plan.pendingOperations.some(operation => operation.failure === 'uncertain'))} onCommitted={id => { setPlanId(id); }} onFormDirty={setPickerDirty} reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/> : null}
     <div hidden={Boolean(visiblePlanId)}><OperationalTimetableWorkspace refreshRef={operationalRefresh} view={view} setView={setView}/></div>
-    {visiblePlanId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={setView} onEditorDirty={setEditorDirty} onTransferDirty={setTransferDirty} requestAction={navigation.requestLocalAction}/> : null}
+    {visiblePlanId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={changeView} onEditorDirty={setEditorDirty} onTransferDirty={setTransferDirty} requestAction={requestEditorAction}/> : null}
     {navigation.confirmation}
   </div>;
 }
