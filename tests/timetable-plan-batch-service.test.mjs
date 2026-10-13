@@ -114,3 +114,15 @@ test('batch preserves scoped partial occupancy and immutable applied snapshots',
   result.snapshot.unresolvedOccupancies = [{ classId: 'partial', label: '다른 요일 수업', scope: 'all', resourceId: null, reason: 'unresolved_time', weekday: 3, startMinute: null, endMinute: 780, teacherId: null, classroomId: null }];
   assert.equal(requireTimetableBatchResult(result, command).snapshot.appliedSnapshots[0].slots.length, 1);
 });
+
+for (const [name, change] of [
+  ['slot UUID case', c => { c.edits[0].slots[0].id = 'ABCDEF00-0000-4000-8000-000000000001'; }],
+  ['item UUID case', c => { c.edits[0].item.id = 'ABCDEF00-0000-4000-8000-000000000002'; }],
+  ['resource UUID spelling', c => { c.edits[0].slots[0].teacherId = '{abcdef00-0000-4000-8000-000000000003}'; }],
+]) test(`batch rejects noncanonical ${name} before an irreversible RPC`, async () => {
+  const { command, result } = fixture(), calls = []; change(command);
+  const original = structuredClone(command);
+  const service = createTimetablePlanService({ actorScope: 'admin', client: withRpcQueryControls({ rpc(name, args) { calls.push({ name, args }); return Promise.resolve({ data: result, error: null }); } }) });
+  await assert.rejects(service.saveBatch(command), error => error.code === '22023' && error.message === 'timetable_invalid');
+  assert.equal(calls.length, 0); assert.deepEqual(command, original);
+});

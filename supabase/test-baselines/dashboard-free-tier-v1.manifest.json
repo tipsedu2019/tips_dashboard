@@ -839,6 +839,11 @@
       "fileName": "20261012155755_timetable_validation_date_reuse.sql",
       "status": "final",
       "sha256": "83ec63aad313c61b6c2205ce4748a0707b1f478a424e5e6c67d92fb4b27c9e82"
+    },
+    {
+      "fileName": "20261013051620_timetable_plan_atomic_batch_save.sql",
+      "status": "final",
+      "sha256": "d84407072b358e36d071d38d7c0818568716a8566683d1059121637e85e2b4a7"
     }
   ]
 }

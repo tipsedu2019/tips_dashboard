@@ -23,6 +23,24 @@ const sameJson = (left: unknown, right: unknown): boolean => {
   const keys = Object.keys(left);
   return keys.length === Object.keys(right).length && keys.every(key => Object.prototype.hasOwnProperty.call(right, key) && sameJson(left[key], right[key]));
 };
+// UUID table columns serialize canonically. Reject alternate spellings before
+// submitting so a successful commit cannot become an unmatchable receipt/queue.
+function requireCanonicalBatchIdentities(command: BatchPlanItemsCommand): void {
+  const canonical = (value: unknown) => {
+    if (value === null) return;
+    if (typeof value !== 'string') throw { code: '22023', message: 'timetable_invalid' };
+    const compact = value.replace(/^\{(.*)\}$/, '$1').replace(/-/g, '');
+    if (!/^[a-f0-9]{32}$/i.test(compact)) return; // Existing server validation owns invalid identifiers.
+    const uuid = compact.toLowerCase().replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5');
+    if (value !== uuid) throw { code: '22023', message: 'timetable_invalid' };
+  };
+  canonical(command.planId);
+  for (const edit of command.edits) {
+    if (edit.operation === 'delete') { canonical(edit.itemId); continue; }
+    for (const value of [edit.item.id, edit.item.planId, edit.item.defaultTeacherId, edit.item.defaultClassroomId]) canonical(value);
+    for (const slot of edit.slots) for (const value of [slot.id, slot.itemId, slot.planId, slot.teacherId, slot.classroomId, slot.sourceSlotId]) canonical(value);
+  }
+}
 const pendingSlot = (value: unknown) => record(value) && string(value.id) && string(value.sourceText)
   && ['missing_resource', 'conflict', 'invalid_time'].includes(String(value.reason))
   && nullableInteger(value.weekday) && nullableInteger(value.startMinute) && nullableInteger(value.endMinute)
@@ -314,8 +332,10 @@ export function createTimetablePlanService({ client, actorScope }: { client: Tim
     readRevision: async (planId: string, options?: RequestOptions) => requireRevision(await invoke('get_timetable_plan_revision_v1', { p_plan_id: planId }, options)),
     saveItem: async (command: SavePlanItemCommand | DeletePlanItemCommand, options?: RequestOptions) =>
       requireMutation(await invoke('mutate_timetable_plan_item_v1', { p_command: command }, options)),
-    saveBatch: async (command: BatchPlanItemsCommand, options?: RequestOptions) =>
-      requireTimetableBatchResult(await invoke('mutate_timetable_plan_item_v1', { p_command: command }, options), command),
+    saveBatch: async (command: BatchPlanItemsCommand, options?: RequestOptions) => {
+      requireCanonicalBatchIdentities(command);
+      return requireTimetableBatchResult(await invoke('mutate_timetable_plan_item_v1', { p_command: command }, options), command);
+    },
     mutatePlan: async (command: PlanCommand, options?: RequestOptions) => {
       const result = await invoke('mutate_timetable_plan_v1', { p_command: command }, options);
       if (!record(result) || !planMetadata(result.plan)) throw invalid();

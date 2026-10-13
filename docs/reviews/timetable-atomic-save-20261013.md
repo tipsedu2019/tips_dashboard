@@ -14,6 +14,8 @@
 
 응답은 `BatchSaveResult` 하나로 고정한다. 모든 save/delete 대상의 acknowledgement와 해당 commit의 전체 snapshot을 포함한다. 소비자는 대상 누락·중복·operation/revision/plan/key/version 불일치, 부분 snapshot, 다른 최종 슬롯을 거부한다. PostgreSQL jsonb 키 순서와 JSON의 `-0`→`0` 변환은 정상적으로 처리한다.
 
+프런트 batch 요청의 UUID 식별자는 기존 UI가 만드는 소문자 정규 형식으로 제한하고 다른 표기는 RPC 전에 거부한다. 서버가 UUID를 정규화해 성공한 뒤 queue/receipt가 원래 문자열과 달라지는 일을 막기 위한 입력 계약이다. 원래 body/key를 재작성하지 않으며 표시 문자열·fingerprint·requestKey를 정규화하지 않는다. 서버의 기존 UUID 허용 범위와 단건 복구 경로는 바꾸지 않는다.
+
 ## 검증 경계
 
 로컬 서비스·controller 회귀, 실제 production 컴포넌트의 loopback UI 합성 검사, SQL grammar/static 검사, 독립 전체 원본 리뷰를 각각 구분한다. 합성 receipt나 SQL parser가 실제 PostgreSQL의 원자성·동시성 검증을 대신하지 않는다.
