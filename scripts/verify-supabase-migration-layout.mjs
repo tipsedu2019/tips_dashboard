@@ -54,6 +54,7 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_plan_no_send_test.sql",
   "supabase/tests/timetable_plan_permissions_test.sql",
   "supabase/tests/timetable_plan_storage_test.sql",
+  "supabase/tests/timetable_plan_batch_save_test.sql",
   "supabase/tests/timetable_plan_transfers_test.sql",
   "supabase/tests/timetable_schedule_mutation_safety_test.sql",
   "supabase/tests/timetable_scoped_occupancy_test.sql",
@@ -131,6 +132,8 @@ const ISOLATED_PROBES = Object.freeze([
   "tests/probe-agent-calendar-dto.mjs",
   "tests/probe-curriculum-scheduling-dto.mjs",
   "tests/probe-operations-annual-board-http.mjs",
+  "tests/probe-timetable-batch-save-dto.mjs",
+  "tests/probe-timetable-batch-save-concurrency.mjs",
   "tests/probe-makeup-approval-collision-dto.mjs",
   "tests/probe-textbook-stock-count-concurrency.mjs",
   "tests/probe-signup-identity-concurrency.mjs",
@@ -178,9 +181,9 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c2ebb1d241788e01c876bffca55d13858b96ce3351147a0cf155107a9c88984d"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "85fbb50cf2f499970335efa2976548fab9af4fbd4aa51d95946317242deaa777"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "5121ff0e1bf1382d2b71412d99e1e372aa1908fd01a93b76f7e99d0e7994a480"
+  "0369c5213d0a7ee1d1e8a8a248d3022d9c07b3f244ad6ee6ba78e4880b42f79d"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.

@@ -82,6 +82,8 @@ const PROBE_DEPENDENCIES = Object.freeze({
   "tests/probe-agent-class-edit-dto.mjs": ["src/features/agent-api/server/class-edit-compiler.mjs", "src/lib/class-schedule-planner.js"],
   "tests/probe-curriculum-scheduling-dto.mjs": ["src/features/academic/academic-read-service.js", "src/lib/numbered-pagination.ts"],
   "tests/probe-dashboard-workload-dto.mjs": ["src/features/dashboard/workload-contract.ts"],
+  "tests/probe-timetable-batch-save-dto.mjs": ["supabase/tests/timetable_plan_batch_save_test.sql", "src/features/academic/timetable-plan-contract.ts", "src/features/academic/timetable-plan-service.ts"],
+  "tests/probe-timetable-batch-save-concurrency.mjs": ["tests/helpers/ai-personal-probe-runtime.mjs", "scripts/lib/ai-agent-probe-runtime.mjs"],
   "tests/probe-makeup-approval-collision-dto.mjs": [
     "src/features/makeup-requests/makeup-request-model.js", "src/features/academic/records.js",
     "src/lib/class-status.js", "src/lib/class-schedule-planner.js", "src/lib/academic-director-assignment.js",

@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = new Set()
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c2ebb1d241788e01c876bffca55d13858b96ce3351147a0cf155107a9c88984d"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "85fbb50cf2f499970335efa2976548fab9af4fbd4aa51d95946317242deaa777"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -77,6 +77,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_plan_no_send_test.sql",
   "supabase/tests/timetable_plan_permissions_test.sql",
   "supabase/tests/timetable_plan_storage_test.sql",
+  "supabase/tests/timetable_plan_batch_save_test.sql",
   "supabase/tests/timetable_plan_transfers_test.sql",
   "supabase/tests/timetable_schedule_mutation_safety_test.sql",
   "supabase/tests/timetable_scoped_occupancy_test.sql",
@@ -154,6 +155,8 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-calendar-dto.mjs",
   "tests/probe-curriculum-scheduling-dto.mjs",
   "tests/probe-operations-annual-board-http.mjs",
+  "tests/probe-timetable-batch-save-dto.mjs",
+  "tests/probe-timetable-batch-save-concurrency.mjs",
   "tests/probe-makeup-approval-collision-dto.mjs",
   "tests/probe-textbook-stock-count-concurrency.mjs",
   "tests/probe-signup-identity-concurrency.mjs",
@@ -1420,7 +1423,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "4410140a7b20cec70ef65fd9394021087deb0330a542f42fcc6efda72e9e1aef"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "5121ff0e1bf1382d2b71412d99e1e372aa1908fd01a93b76f7e99d0e7994a480"],
+    ["supabase-sql-review.yml", "0369c5213d0a7ee1d1e8a8a248d3022d9c07b3f244ad6ee6ba78e4880b42f79d"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {

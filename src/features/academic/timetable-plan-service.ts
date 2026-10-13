@@ -1,6 +1,6 @@
 import type {
   DeletePlanItemCommand, PlanCommand, PlanItem, PlanMutationResult, PlanRevision, PlanSnapshot,
-  SavePlanItemCommand, TimetableOperatingReference, TimetablePlanRpcContract, TransferCommitCommand, TransferPreview,
+  SavePlanItemCommand, BatchPlanItemsCommand, BatchSaveResult, TimetableOperatingReference, TimetablePlanRpcContract, TransferCommitCommand, TransferPreview,
   TransferRequest, TransferResult, PlanList, ShareCandidate, ScienceSubjectArea, TimetableImportSource, TimetableImportSources, TimetableImportPreview, TimetableImportCommand,
 } from './timetable-plan-contract.ts';
 
@@ -15,6 +15,14 @@ const integer = (value: unknown): value is number => Number.isSafeInteger(value)
 const nullableString = (value: unknown) => value === null || string(value);
 const nullableNumber = (value: unknown) => value === null || (typeof value === 'number' && Number.isFinite(value));
 const nullableInteger = (value: unknown) => value === null || integer(value);
+const sameJson = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right)
+    && left.length === right.length && left.every((entry, index) => sameJson(entry, right[index]));
+  if (!record(left) || !record(right)) return false;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every(key => Object.prototype.hasOwnProperty.call(right, key) && sameJson(left[key], right[key]));
+};
 const pendingSlot = (value: unknown) => record(value) && string(value.id) && string(value.sourceText)
   && ['missing_resource', 'conflict', 'invalid_time'].includes(String(value.reason))
   && nullableInteger(value.weekday) && nullableInteger(value.startMinute) && nullableInteger(value.endMinute)
@@ -109,6 +117,56 @@ function requireMutation(value: unknown): PlanMutationResult {
     || !Array.isArray(value.removedItemIds) || !value.removedItemIds.every(string)
     || !(value.item === null || (planItem(value.item) && value.item.planId === value.planId))) throw invalid();
   return value as PlanMutationResult;
+}
+/** Partial or mismatched receipts cannot authorize abandoning an immutable batch. */
+export function requireTimetableBatchResult(value: unknown, command: BatchPlanItemsCommand): BatchSaveResult {
+  if (!record(value) || value.planId !== command.planId || value.requestKey !== command.requestKey
+    || !command.requestKey.trim() || command.requestKey.length > 200
+    || value.committedMetaRevision !== command.expectedMetaRevision
+    || value.committedChangeSequence !== command.expectedChangeSequence + 1
+    || !integer(value.committedMetaRevision) || !integer(value.committedChangeSequence)
+    || value.committedMetaRevision < 0 || command.expectedChangeSequence < 0
+    || !Array.isArray(value.acknowledgements) || value.acknowledgements.length !== command.edits.length
+    || !command.edits.length || command.edits.length > 500) throw invalid();
+  const snapshot = requireSnapshot(value.snapshot);
+  if (snapshot.plan.id !== command.planId || snapshot.plan.state !== 'draft'
+    || snapshot.plan.metaRevision !== value.committedMetaRevision
+    || snapshot.plan.changeSequence !== value.committedChangeSequence
+    || snapshot.shadowFingerprint !== command.expectedShadowFingerprint) throw invalid();
+  const items = new Map(snapshot.items.map(item => [item.id, item]));
+  const allSlots = [...snapshot.slots, ...snapshot.appliedSnapshots.flatMap(entry => entry.slots)];
+  if (items.size !== snapshot.items.length || new Set(allSlots.map(slot => slot.id)).size !== allSlots.length
+    || snapshot.slots.some(slot => items.get(slot.itemId)?.state !== 'draft')
+    || new Set(snapshot.appliedSnapshots.map(entry => entry.itemId)).size !== snapshot.appliedSnapshots.length
+    || snapshot.appliedSnapshots.some(entry => items.get(entry.itemId)?.state !== 'applied'
+      || entry.slots.some(slot => slot.itemId !== entry.itemId || slot.planId !== command.planId))
+    || snapshot.items.some(item => item.state === 'applied' && !snapshot.appliedSnapshots.some(entry => entry.itemId === item.id))
+    || snapshot.capacity.itemCount !== items.size || snapshot.capacity.slotCount !== allSlots.length
+    || items.size > 500 || allSlots.length > 2000 || snapshot.capacity.exceeded) throw invalid();
+  const acknowledgements = new Map<string, Record<string, unknown>>();
+  for (const ack of value.acknowledgements) {
+    if (!record(ack) || !string(ack.itemId) || acknowledgements.has(ack.itemId)) throw invalid();
+    acknowledgements.set(ack.itemId, ack);
+  }
+  const targets = new Set<string>();
+  const occupancyKeys = ['id', 'itemId', 'planId', 'weekday', 'startMinute', 'endMinute', 'teacherId', 'classroomId', 'sourceSlotId'] as const;
+  for (const edit of command.edits) {
+    const id = edit.operation === 'save' ? edit.item.id : edit.itemId;
+    const ack = acknowledgements.get(id);
+    if (targets.has(id) || !ack || ack.operation !== edit.operation) throw invalid();
+    targets.add(id);
+    if (edit.operation === 'delete') {
+      if (ack.itemRevision !== null || items.has(id) || allSlots.some(slot => slot.itemId === id)) throw invalid();
+      continue;
+    }
+    const item = items.get(id), slots = snapshot.slots.filter(slot => slot.itemId === id);
+    const nextRevision = edit.expectedItemRevision === null ? 1 : edit.expectedItemRevision + 1;
+    if (!integer(nextRevision) || nextRevision < 1 || !item || item.state !== 'draft' || ack.itemRevision !== nextRevision || item.revision !== nextRevision
+      || slots.length !== edit.slots.length || new Set(edit.slots.map(slot => slot.id)).size !== edit.slots.length
+      || Object.entries(edit.item).some(([key, expected]) => !sameJson(item[key as keyof PlanItem], expected))
+      || edit.slots.some(expected => !slots.some(slot => occupancyKeys.every(key => slot[key] === expected[key])))) throw invalid();
+  }
+  return value as BatchSaveResult;
 }
 function requirePreview(value: unknown, request: TransferRequest): TransferPreview {
   const issue = (entry: unknown) => record(entry) && string(entry.sourceId) && request.itemIds.includes(entry.sourceId)
@@ -256,6 +314,8 @@ export function createTimetablePlanService({ client, actorScope }: { client: Tim
     readRevision: async (planId: string, options?: RequestOptions) => requireRevision(await invoke('get_timetable_plan_revision_v1', { p_plan_id: planId }, options)),
     saveItem: async (command: SavePlanItemCommand | DeletePlanItemCommand, options?: RequestOptions) =>
       requireMutation(await invoke('mutate_timetable_plan_item_v1', { p_command: command }, options)),
+    saveBatch: async (command: BatchPlanItemsCommand, options?: RequestOptions) =>
+      requireTimetableBatchResult(await invoke('mutate_timetable_plan_item_v1', { p_command: command }, options), command),
     mutatePlan: async (command: PlanCommand, options?: RequestOptions) => {
       const result = await invoke('mutate_timetable_plan_v1', { p_command: command }, options);
       if (!record(result) || !planMetadata(result.plan)) throw invalid();

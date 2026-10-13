@@ -102,7 +102,7 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onEditorDirt
     const cleanupPointer = useRef<(() => void) | null>(null);
     const suppressClick = useRef(false);
     const cleanupReleaseSuppression = useRef<(() => void) | null>(null);
-    const canEdit = !transferPending && state.saveState !== 'saving' && !!snapshot?.permissions.canEdit && snapshot.plan.state === 'draft' && state.referenceStatus === 'verified';
+    const canEdit = !transferPending && state.saveState !== 'saving' && !state.pendingOperations.some(operation => operation.failure === 'uncertain') && !!snapshot?.permissions.canEdit && snapshot.plan.state === 'draft' && state.referenceStatus === 'verified';
     const visibleStartMinute = 540, visibleEndMinute = 1440;
     const panels = useMemo(() => snapshot ? buildPlanPanels(snapshot, view, subject, targets[view] || []) : [], [snapshot, view, subject, targets]);
     const layout = getTimetablePanelLayout({ view, gridCount });
