@@ -41,6 +41,21 @@ $workset$;
 revoke all on function dashboard_private.timetable_effective_workset_date_v1(jsonb,date,dashboard_private.timetable_validation_row_v1[])
  from public,anon,authenticated,service_role;
 
+-- Project raw values from the already-built workset in source order. Retain
+-- the original jsonb_array_elements iterator descriptor (JSONB, immutable,
+-- strict, parallel safe, cost 1, rows 100, no planner support function). A SQL
+-- function configuration prevents inlining, just as the original builtin is
+-- an opaque FunctionScan; array-length estimates must not change enumeration.
+-- This is an invocation-local projection, not a cache or a second JSON decode.
+create function dashboard_private.timetable_validation_workset_values_v1(
+ rows dashboard_private.timetable_validation_row_v1[]
+) returns table(value jsonb) language sql immutable strict parallel safe
+cost 1 rows 100 set search_path='' as $enumerate$
+ select r.v from unnest(rows) r
+$enumerate$;
+revoke all on function dashboard_private.timetable_validation_workset_values_v1(dashboard_private.timetable_validation_row_v1[])
+ from public,anon,authenticated,service_role;
+
 create or replace function dashboard_private.validate_timetable_operating_reference_v1()
 returns jsonb language plpgsql security definer set search_path='' as $f$
 declare oldref jsonb; newref jsonb; x jsonb; y jsonb; d date; oldday dashboard_private.timetable_validation_effective_row_v1[];
@@ -120,22 +135,26 @@ begin
  into new_workset,new_dates from prepared;
  old_date_reference:=jsonb_build_object('asOfDate',oldref->'asOfDate','shadowSlots',oldref->'shadowSlots');
  new_date_reference:=jsonb_build_object('asOfDate',newref->'asOfDate','shadowSlots',newref->'shadowSlots');
+ -- Date enumeration retains the original value-only multiset and raw-date
+ -- expression. Source rows come from the immutable workset, not a second JSON
+ -- expansion. Occupancy preparation remains separate from enumeration; no new
+ -- sort or preferred date order is introduced.
  for d in
- with old_sessions as materialized (select v as value,dt from unnest(old_workset)),
-      new_sessions as materialized (select v as value,dt from unnest(new_workset)),
+ with old_sessions as materialized (select value from dashboard_private.timetable_validation_workset_values_v1(old_workset)),
+      new_sessions as materialized (select value from dashboard_private.timetable_validation_workset_values_v1(new_workset)),
       changed as (
-        (select value,dt from old_sessions except all select value,dt from new_sessions)
+        (select value from old_sessions except all select value from new_sessions)
         union all
-        (select value,dt from new_sessions except all select value,dt from old_sessions)
+        (select value from new_sessions except all select value from old_sessions)
       )
- select distinct dt from (
-   select value,dt from changed
+ select distinct (value->>'date')::date from (
+   select value from changed
    where oldref->'shadowSlots'=newref->'shadowSlots' and oldref->'asOfDate'=newref->'asOfDate'
    union all
-   select value,dt from old_sessions
+   select value from old_sessions
    where oldref->'shadowSlots' is distinct from newref->'shadowSlots' or oldref->'asOfDate' is distinct from newref->'asOfDate'
    union all
-   select value,dt from new_sessions
+   select value from new_sessions
    where oldref->'shadowSlots' is distinct from newref->'shadowSlots' or oldref->'asOfDate' is distinct from newref->'asOfDate'
  ) affected loop
  -- The index contains positions, never a second copy of the raw rows.
