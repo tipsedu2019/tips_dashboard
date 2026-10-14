@@ -1,3 +1,5 @@
+import { REGISTRATION_SYNTHETIC_PHONES } from "../src/features/tasks/registration-track-fixtures.ts"
+import { isValidRegistrationMobilePhone, normalizeRegistrationPhone } from "../src/features/tasks/registration-workflow.js"
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
@@ -33,6 +35,7 @@ import {
 import {
   isRegistrationCustomerMessageSingleSourceKind,
 } from "../src/features/tasks/registration-customer-message-contract.ts"
+import { createRegistrationDetailObservation } from "../src/features/tasks/registration-detail-observation.ts"
 
 const academicSubjectRegistry = {
   ACADEMIC_SUBJECT_VALUES,
@@ -171,6 +174,7 @@ async function loadServiceBoundary({
     clearTimeout,
     require(specifier) {
       if (specifier === "@/lib/supabase") return { supabase }
+      if (specifier === "./registration-detail-observation.ts") return { createRegistrationDetailObservation }
       if (specifier === "@/lib/public-classes-cache-invalidation.js") {
         return { invalidatePublicClassesCacheAfterMutation: async () => undefined }
       }
@@ -251,8 +255,8 @@ function initialWorkflowInput(overrides = {}) {
     studentName: "신규학생",
     schoolGrade: "고1",
     schoolName: "중앙고",
-    parentPhone: "01012345678",
-    studentPhone: "01087654321",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
+    studentPhone: REGISTRATION_SYNTHETIC_PHONES.searchStudent,
     campus: "본관",
     inquiryAt: "2026-07-13T08:30:00+09:00",
     subjects: ["수학", "영어"],
@@ -290,6 +294,34 @@ function ensureFixtureObservationReady(client, getState, requestKey) {
   if (getState().observation.runtimeVersion === 1) return Promise.resolve(null)
   return activateFixtureObservation(client, requestKey)
 }
+
+test("synthetic contacts preserve mobile validation, distinct lookup identities, and formatting aliases", async () => {
+  const phones = Object.values(REGISTRATION_SYNTHETIC_PHONES)
+  const normalized = phones.map((phone) => phone.replace(/\D/g, ""))
+  assert.equal(new Set(phones).size, 7, "raw fixture spellings remain distinct")
+  assert.equal(new Set(normalized).size, 5, "formatted contacts retain their numeric identity")
+  for (const phone of normalized) {
+    assert.equal(isValidRegistrationMobilePhone(phone), true, "fixture contact must pass the existing format contract")
+    assert.equal(phone.length, 11)
+  }
+  assert.equal(REGISTRATION_SYNTHETIC_PHONES.parentFormatted.replace(/\D/g, ""), REGISTRATION_SYNTHETIC_PHONES.parent)
+  assert.equal(REGISTRATION_SYNTHETIC_PHONES.searchStudentFormatted.replace(/\D/g, ""), REGISTRATION_SYNTHETIC_PHONES.searchStudent)
+  assert.notEqual(REGISTRATION_SYNTHETIC_PHONES.parent, REGISTRATION_SYNTHETIC_PHONES.student)
+  for (const formatted of [REGISTRATION_SYNTHETIC_PHONES.parentFormatted, REGISTRATION_SYNTHETIC_PHONES.searchStudentFormatted, REGISTRATION_SYNTHETIC_PHONES.searchOtherParentFormatted]) {
+    const spaced = formatted.replaceAll("-", " ")
+    assert.equal(isValidRegistrationMobilePhone(formatted), true)
+    assert.equal(isValidRegistrationMobilePhone(spaced), true)
+    assert.equal(normalizeRegistrationPhone(spaced), normalizeRegistrationPhone(formatted))
+    assert.equal(normalizeRegistrationPhone(formatted.replace(/\D/g, "")), formatted)
+  }
+  assert.equal(normalizeRegistrationPhone(""), "")
+  assert.equal(isValidRegistrationMobilePhone(""), false)
+  const fixture = await loadFixtureModule()
+  const state = fixture.createRegistrationSubjectTrackFixtureState()
+  const detail = Object.values(state.caseDetails)[0]
+  assert.equal(detail.task.registration.parentPhone, REGISTRATION_SYNTHETIC_PHONES.parent)
+  assert.equal(detail.task.registration.studentPhone, REGISTRATION_SYNTHETIC_PHONES.student)
+})
 
 test("fixture gate is exact and production always ignores the query", async () => {
   const {
@@ -1412,7 +1444,7 @@ test("fixture calendar adapter derives one live row per canonical appointment", 
     {
       appointment_id: "fixture-appointment-dual-test",
       task_id: "fixture-task-dual-test",
-      student_name: "김다미",
+      student_name: "합성인물02",
       kind: "level_test",
       scheduled_at: "2026-07-15T10:00:00+09:00",
       place: "본관 201호",
@@ -2413,13 +2445,13 @@ test("fixture option fault is scoped to one option load and never records an ext
   await adapter.executeAction("updateRegistrationCaseCommon", {
     taskId: "fixture-task-enrollment-decided",
     expectedCommonRevision: 1,
-    studentName: "정하린",
+    studentName: "합성인물17",
     campus: "본관",
     priority: "normal",
     schoolGrade: "고1",
     schoolName: "중앙고",
-    parentPhone: "01012345678",
-    studentPhone: "01098765432",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
+    studentPhone: REGISTRATION_SYNTHETIC_PHONES.student,
     inquiryAt: "2026-07-12T09:00:00+09:00",
     requestNote: "다른 동작은 fault를 소비하지 않음",
     requestKey: "fixture-option-fault-unrelated-action",
@@ -2454,8 +2486,8 @@ test("fixture state digest detects a same-count canonical mutation before naviga
     priority: "normal",
     schoolGrade: "고1",
     schoolName: "중앙고",
-    parentPhone: "01012345678",
-    studentPhone: "01098765432",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
+    studentPhone: REGISTRATION_SYNTHETIC_PHONES.student,
     inquiryAt: "2026-07-12T09:00:00+09:00",
     requestNote: "local attempted value",
     requestKey: "fixture-state-digest-conflict",
@@ -2481,8 +2513,8 @@ test("fixture common conflict updates canonical state once and remains scoped to
     priority: "normal",
     schoolGrade: "고1",
     schoolName: "중앙고",
-    parentPhone: "01012345678",
-    studentPhone: "01098765432",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
+    studentPhone: REGISTRATION_SYNTHETIC_PHONES.student,
     inquiryAt: "2026-07-12T09:00:00+09:00",
     requestNote,
     requestKey,
@@ -2544,8 +2576,8 @@ test("fixture common conflict preserves an explicit empty canonical request note
     priority: "normal",
     schoolGrade: "고1",
     schoolName: "중앙고",
-    parentPhone: "01012345678",
-    studentPhone: "01098765432",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
+    studentPhone: REGISTRATION_SYNTHETIC_PHONES.student,
     inquiryAt: "2026-07-12T09:00:00+09:00",
     requestNote: "내 요청 사항",
     requestKey: "fixture-empty-canonical-conflict",
@@ -3297,6 +3329,86 @@ test("fixture reducer supports multi-row enrollment and fresh admission revision
   assert.equal(outcome.result.batch.revisionNumber, 1)
   assert.equal(outcome.result.batch.status, "draft")
   assert.equal(outcome.state.externalCallLedger.length, 0)
+})
+
+test("guarded enrollment fixture advances a complete plan once and refuses stale or canceled opened rows", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const state = createRegistrationSubjectTrackFixtureState()
+  const detail = state.caseDetails["fixture-task-enrollment-decided"]
+  const track = detail.tracks[0]
+  track.workflowStatus = "consultation_completed"
+  track.enrollmentDetailRows = []
+  detail.enrollments = []
+  const command = { type: "saveRegistrationEnrollmentDetails", requestKey: "guarded-complete",
+    payload: { trackId: track.id, expectedRows: [], expectedWorkflowRevision: track.workflowRevision,
+      rows: [{ classId: "fixture-class-eng-a", textbookIds: [], classStartDate: "2026-07-20",
+        classStartSessionKey: "fixture-session", classStartSession: "1회차", sortOrder: 0 }] } }
+  const saved = reduceRegistrationSubjectTrackFixture(state, command)
+  assert.equal(saved.result.workflowStatus, "enrollment_requested")
+  assert.equal(saved.result.workflowRevision, 2)
+  assert.equal(saved.result.statusChanged, true)
+  const replay = reduceRegistrationSubjectTrackFixture(saved.state, command)
+  assert.deepEqual(plain(replay.result), plain(saved.result))
+  assert.equal(Object.keys(replay.state.receipts).length, 1)
+  assert.throws(() => reduceRegistrationSubjectTrackFixture(saved.state, { ...command, requestKey: "different-key" }),
+    /registration_enrollment_details_refresh_required/)
+  const canceled = structuredClone(saved.state)
+  canceled.caseDetails[detail.task.id].enrollments[0].status = "canceled"
+  assert.throws(() => reduceRegistrationSubjectTrackFixture(canceled, { ...command, requestKey: "canceled-stale",
+    payload: { ...command.payload, expectedRows: saved.result.rows, expectedWorkflowRevision: 2 } }),
+    /registration_enrollment_details_refresh_required/)
+  assert.deepEqual(plain(saved.state.externalCallLedger), [], "fixture behavior makes no provider calls")
+})
+
+test("guarded enrollment fixture preserves missing schedule source metadata and immutable enrollment history", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const seed = () => {
+    const state = createRegistrationSubjectTrackFixtureState()
+    const detail = state.caseDetails["fixture-task-enrollment-decided"]
+    detail.enrollments = []
+    detail.tracks[0].workflowStatus = "consultation_completed"
+    detail.tracks[0].enrollmentDetailRows = []
+    return { state, detail, track: detail.tracks[0] }
+  }
+  const row = { classId: "fixture-class-eng-a", sortOrder: 0 }
+  const initial = seed()
+  const partial = reduceRegistrationSubjectTrackFixture(initial.state, { type: "saveRegistrationEnrollmentDetails",
+    requestKey: "guard-partial", payload: { trackId: initial.track.id, rows: [row], expectedRows: [], expectedWorkflowRevision: 1 } })
+  assert.equal(partial.result.workflowStatus, "consultation_completed")
+  assert.equal(partial.result.statusChanged, false)
+  assert.equal(partial.result.rows[0].classStartDate, null)
+  assert.equal(partial.result.rows[0].classStartSessionKey, null)
+  assert.equal(partial.result.rows[0].classStartSession, null)
+  assert.throws(() => reduceRegistrationSubjectTrackFixture(initial.state, { type: "saveRegistrationEnrollmentDetails",
+    requestKey: "guard-partial-invalid", payload: { trackId: initial.track.id, expectedRows: [], expectedWorkflowRevision: 1,
+      rows: [{ ...row, classStartDate: "2026-07-20" }] } }),
+    error => error.code === "22023" && error.message === "registration_enrollment_schedule_incomplete")
+  const linked = seed()
+  const observationId = "76000000-0000-4000-8000-000000000055"
+  const sourced = reduceRegistrationSubjectTrackFixture(linked.state, { type: "saveRegistrationEnrollmentDetails",
+    requestKey: "guard-observation-source", payload: { trackId: linked.track.id, expectedRows: [], expectedWorkflowRevision: 1,
+      rows: [{ ...row, classStartDate: "2026-07-20", classStartSessionKey: "fixture-session", classStartSession: "1회차",
+        classStartSourceObservationId: observationId }] } })
+  assert.equal(sourced.result.rows[0].classStartSourceObservationId, observationId)
+  const history = seed()
+  history.detail.enrollments = [{ ...plain(partial.result.rows[0]), trackId: history.track.id,
+    id: "76000000-0000-4000-8000-000000000077", studentId: "synthetic-owner" },
+  { ...plain(partial.result.rows[0]), trackId: history.track.id,
+    id: "76000000-0000-4000-8000-000000000078", rosterReleasedAt: "2026-10-13T09:00:00Z",
+    rosterReleaseReason: "synthetic release", rosterReleaseKind: "withdrawal" }]
+  const before = JSON.stringify(history.detail.enrollments)
+  const kept = reduceRegistrationSubjectTrackFixture(history.state, { type: "saveRegistrationEnrollmentDetails",
+    requestKey: "guard-history", payload: { trackId: history.track.id, expectedRows: [], expectedWorkflowRevision: 1, rows: [] } })
+  assert.equal(JSON.stringify(kept.state.caseDetails[history.detail.task.id].enrollments), before,
+    "student ownership and released history cannot be replaced by an editable draft save")
+  const canceled = seed()
+  const canceledId = "76000000-0000-4000-8000-000000000099"
+  canceled.detail.enrollments = [{ ...plain(partial.result.rows[0]), id: canceledId, trackId: canceled.track.id, status: "canceled" }]
+  const canceledBefore = JSON.stringify(canceled.state)
+  assert.throws(() => reduceRegistrationSubjectTrackFixture(canceled.state, { type: "saveRegistrationEnrollmentDetails",
+    requestKey: "guard-canceled-id", payload: { trackId: canceled.track.id, expectedRows: [], expectedWorkflowRevision: 1,
+      rows: [{ ...row, id: canceledId }] } }), error => error.code === "23514" && error.message === "registration_enrollment_draft_not_editable")
+  assert.equal(JSON.stringify(canceled.state), canceledBefore, "a rejected draft cannot create a duplicate historical identity")
 })
 
 test("class detail adapter returns only exact requested IDs and unsupported actions fail closed", async () => {

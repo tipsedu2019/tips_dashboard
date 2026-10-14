@@ -1,314 +1,152 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
-import vm from "node:vm"
 
-import ts from "typescript"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 
-import {
-  getRegistrationObservationFeedbackErrorState,
-} from "../src/features/tasks/registration-observation-model.ts"
+import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs"
 
-const root = new URL("../", import.meta.url)
-const panelUrl = new URL(
-  "src/features/tasks/registration-observation-feedback-panel.tsx",
-  root,
-)
-
-const IDS = {
-  observation: "10000000-0000-4000-8000-000000000003",
-  task: "10000000-0000-4000-8000-000000000002",
-  track: "10000000-0000-4000-8000-000000000001",
-  appointment: "10000000-0000-4000-8000-000000000004",
-  class: "10000000-0000-4000-8000-000000000005",
-  lesson: "10000000-0000-4000-8000-000000000006",
-}
+const panelPath = "src/features/tasks/registration-observation-feedback-panel.tsx"
+const panelUrl = new URL(`../${panelPath}`, import.meta.url)
 
 const detail = Object.freeze({
-  observationId: IDS.observation,
-  taskId: IDS.task,
-  trackId: IDS.track,
-  appointmentId: IDS.appointment,
-  studentName: "김다미",
+  observationId: "10000000-0000-4000-8000-000000000003",
+  taskId: "10000000-0000-4000-8000-000000000002",
+  trackId: "10000000-0000-4000-8000-000000000001",
+  appointmentId: "10000000-0000-4000-8000-000000000004",
+  studentName: "합성 학생",
   studentGrade: "고1",
   subject: "영어",
-  classId: IDS.class,
-  className: "고1 영어 A",
+  classId: "10000000-0000-4000-8000-000000000005",
+  className: "합성 영어반",
   sessionAuthority: "normalized",
   sessionDate: "2026-08-12",
   sessionKey: "2026-08-12:lesson-1",
-  classLessonSessionId: IDS.lesson,
+  classLessonSessionId: "10000000-0000-4000-8000-000000000006",
   legacySessionKey: null,
-  sourceRevision: { authority: "normalized", sessionId: IDS.lesson, revision: 3 },
+  sourceRevision: { authority: "normalized", sessionId: "10000000-0000-4000-8000-000000000006", revision: 3 },
   startsAt: "2026-08-12T09:00:00.000Z",
   endsAt: "2026-08-12T10:00:00.000Z",
-  classroomName: "본관 301호",
-  teacherName: "강부희",
+  classroomName: "합성 강의실",
+  teacherName: "합성 교사",
   status: "completed",
   attendance: "attended",
   suitabilityResult: "fit",
-  feedbackReason: "수업 참여와 이해도가 좋습니다.",
+  feedbackReason: "합성 참여 기록\n합성 이해도 기록",
   proxySubmitted: true,
-  feedbackSubmittedByName: "운영 담당자",
+  feedbackSubmittedByName: "합성 운영자",
   feedbackSubmittedAt: "2026-08-12T10:05:00.000Z",
   revision: 2,
   feedbackRevision: 1,
   appointmentNotificationRevision: 1,
   trackWorkflowRevision: 9,
-  decisionKind: null,
+  decisionKind: "enrollment",
 })
 
-async function loadPanelModel() {
-  const source = await readFile(panelUrl, "utf8")
-  const startMarker = "// registration-observation-feedback-panel-model:start"
-  const endMarker = "// registration-observation-feedback-panel-model:end"
-  const start = source.indexOf(startMarker)
-  const end = source.indexOf(endMarker, start + startMarker.length)
-  assert.notEqual(start, -1)
-  assert.ok(end > start)
-  const compiled = ts.transpileModule(
-    `${source.slice(start + startMarker.length, end)}\nmodule.exports = {
-      applyRegistrationObservationFeedbackPanelOutcome,
-      buildRegistrationObservationDecisionPlan,
-      createRegistrationObservationFeedbackPanelState,
-      executeRegistrationObservationDecision,
-      executeRegistrationObservationFeedbackReload,
-      formatRegistrationObservationFeedbackKst,
-      getRegistrationObservationProxyLabel,
-      getRegistrationObservationAttendanceAvailability,
-      getRegistrationObservationFeedbackRefreshPlan,
-      getRegistrationObservationFeedbackMountPlan,
-      canKeepRegistrationObservationFeedbackHistoryMounted,
-      shouldMountRegistrationObservationFeedbackOnly,
-      loadRegistrationObservationFeedbackForOwnedPanel,
-      updateRegistrationObservationDecisionDraft,
-    };`,
-    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
-  ).outputText
-  const sandboxModule = { exports: {} }
-  vm.runInNewContext(compiled, {
-    module: sandboxModule,
-    exports: sandboxModule.exports,
-    Date,
-  })
-  return sandboxModule.exports
+function loadPanel() {
+  return loadNotificationComponent(panelPath)
 }
 
-test("attendance confirmation uses the exact class start boundary", async () => {
-  const { getRegistrationObservationAttendanceAvailability } = await loadPanelModel()
-  const scheduled = { ...detail, status: "scheduled" }
+test("actual history panel preserves legacy attendance, decisions, reason, and provenance without writes", (t) => {
+  const transport = t.mock.method(globalThis, "fetch", () => { throw new Error("unexpected observation transport") })
+  const { RegistrationObservationFeedbackPanel } = loadPanel()
+  const markup = renderToStaticMarkup(createElement(RegistrationObservationFeedbackPanel, { detail }))
 
-  assert.equal(
-    getRegistrationObservationAttendanceAvailability(
-      scheduled,
-      Date.parse(scheduled.startsAt) - 1,
-    ),
-    false,
-  )
-  assert.equal(
-    getRegistrationObservationAttendanceAvailability(
-      scheduled,
-      Date.parse(scheduled.startsAt),
-    ),
-    true,
-  )
-  assert.equal(
-    getRegistrationObservationAttendanceAvailability(
-      { ...scheduled, status: "attended_feedback_pending" },
-      Date.parse(scheduled.startsAt),
-    ),
-    false,
-  )
+  assert.match(markup, /기존 청강 이력/)
+  assert.match(markup, /합성 영어반/)
+  assert.match(markup, /합성 교사/)
+  assert.match(markup, /출석 이력<\/dt><dd>참석<\/dd>/)
+  assert.match(markup, /원장 결정<\/dt><dd>등록<\/dd>/)
+  assert.match(markup, /기존 피드백 기록/)
+  assert.match(markup, /적합 여부<\/dt><dd>적합<\/dd>/)
+  assert.ok(markup.includes(detail.feedbackReason), "the historical reason retains its line breaks")
+  assert.match(markup, /대리 입력 · 합성 운영자 · 2026\. 8\. 12\. 19:05/)
+  assert.doesNotMatch(markup, /<(?:button|select|input|textarea|form)\b|role="combobox"/)
+  assert.doesNotMatch(markup, /Google Chat|결정 저장|피드백 저장|피드백 정정|수업 시작 후 참석/)
+  assert.equal(transport.mock.callCount(), 0)
 })
 
-test("management decisions continue from a Chat-confirmed attendance without an app feedback submit", async () => {
-  const {
-    buildRegistrationObservationDecisionPlan,
-    createRegistrationObservationFeedbackPanelState,
-    updateRegistrationObservationDecisionDraft,
-  } = await loadPanelModel()
-  const pending = {
-    ...detail,
-    status: "attended_feedback_pending",
-    feedbackRevision: 0,
-    suitabilityResult: null,
-    feedbackReason: null,
-    feedbackSubmittedAt: null,
-    feedbackSubmittedByName: null,
-    proxySubmitted: false,
+test("every historical observation status renders facts without reviving confirmation or decision controls", (t) => {
+  const transport = t.mock.method(globalThis, "fetch", () => { throw new Error("unexpected observation transport") })
+  const { RegistrationObservationFeedbackPanel } = loadPanel()
+  for (const status of ["scheduled", "attended_feedback_pending", "completed", "no_show", "canceled"]) {
+    const historical = {
+      ...detail,
+      status,
+      attendance: status === "scheduled" || status === "canceled" ? null : status === "no_show" ? "no_show" : "attended",
+      decisionKind: null,
+      suitabilityResult: null,
+      feedbackReason: null,
+      feedbackSubmittedAt: null,
+      feedbackSubmittedByName: null,
+      proxySubmitted: false,
+    }
+    const markup = renderToStaticMarkup(createElement(RegistrationObservationFeedbackPanel, { detail: historical }))
+    assert.match(markup, /기존 청강 이력/, status)
+    assert.match(markup, /원장 결정<\/dt><dd>미결정<\/dd>/, status)
+    assert.match(markup, new RegExp(`출석 이력<\\/dt><dd>${historical.attendance === "attended" ? "참석" : historical.attendance === "no_show" ? "불참" : "미확인"}<\\/dd>`), status)
+    assert.doesNotMatch(markup, /<(?:button|select|input|textarea|form)\b|role="combobox"/, status)
+    assert.doesNotMatch(markup, /기존 피드백 기록|Google Chat|결정 저장|피드백 저장|피드백 정정/, status)
   }
-  let state = createRegistrationObservationFeedbackPanelState(pending)
-  assert.equal(state.decisionKind, "", "a director decision must never be preselected")
-  assert.equal(buildRegistrationObservationDecisionPlan(state, "decision-1").ok, false)
+  assert.equal(transport.mock.callCount(), 0)
+})
 
-  state = updateRegistrationObservationDecisionDraft(state, "waiting_current_class")
-  assert.deepEqual(JSON.parse(JSON.stringify(
-    buildRegistrationObservationDecisionPlan(state, "decision-1"),
-  )), {
-    ok: true,
-    input: {
-      observationId: IDS.observation,
-      decisionKind: "waiting_current_class",
-      waitingClassId: IDS.class,
-      expectedObservationRevision: 2,
-      expectedFeedbackRevision: 0,
-      expectedTrackWorkflowRevision: 9,
-      requestKey: "decision-1",
-    },
-  })
-
-  for (const allowedStatus of ["attended_feedback_pending", "completed", "no_show"]) {
-    const allowed = updateRegistrationObservationDecisionDraft(
-      createRegistrationObservationFeedbackPanelState({ ...pending, status: allowedStatus }),
-      "not_registered",
-    )
-    assert.equal(buildRegistrationObservationDecisionPlan(allowed, allowedStatus).ok, true)
+test("historical decision variants remain readable", () => {
+  const { RegistrationObservationFeedbackPanel } = loadPanel()
+  const decisions = {
+    enrollment: "등록",
+    waiting_current_class: "현재반 대기",
+    waiting_new_class: "신규반 대기",
+    waiting_next_opening: "다음 개강 대기",
+    not_registered: "미등록",
+    re_observation: "재청강",
   }
-  for (const blockedStatus of ["scheduled", "canceled"]) {
-    const blocked = updateRegistrationObservationDecisionDraft(
-      createRegistrationObservationFeedbackPanelState({ ...pending, status: blockedStatus }),
-      "not_registered",
-    )
-    assert.equal(buildRegistrationObservationDecisionPlan(blocked, blockedStatus).ok, false)
+  for (const [decisionKind, label] of Object.entries(decisions)) {
+    const markup = renderToStaticMarkup(createElement(RegistrationObservationFeedbackPanel, {
+      detail: { ...detail, decisionKind },
+    }))
+    assert.match(markup, new RegExp(`원장 결정<\\/dt><dd>${label}<\\/dd>`), decisionKind)
   }
 })
 
-test("decision duplicate clicks call one dedicated RPC and never a feedback mutation", async () => {
+test("history mount ownership remains bounded to authorized case detail", () => {
   const {
-    createRegistrationObservationFeedbackPanelState,
-    executeRegistrationObservationDecision,
-    updateRegistrationObservationDecisionDraft,
-  } = await loadPanelModel()
-  const pendingDecision = new Promise(() => {})
-  let decisionCalls = 0
-  let savedCalls = 0
-  const state = updateRegistrationObservationDecisionDraft(
-    createRegistrationObservationFeedbackPanelState(detail),
-    "not_registered",
-  )
-  const guard = { current: false }
-  const actions = {
-    decideRegistrationObservation: async () => {
-      decisionCalls += 1
-      return pendingDecision
-    },
-  }
-
-  const first = executeRegistrationObservationDecision({
-    state,
-    actions,
-    requestKey: "decision-duplicate-1",
-    guard,
-    onSaved: () => { savedCalls += 1 },
-  })
-  const second = await executeRegistrationObservationDecision({
-    state,
-    actions,
-    requestKey: "decision-duplicate-2",
-    guard,
-    onSaved: () => { savedCalls += 1 },
-  })
-
-  assert.deepEqual({ ...second }, { kind: "ignored" })
-  assert.equal(decisionCalls, 1)
-  assert.equal(savedCalls, 0)
-  assert.equal(guard.current, true)
-  void first
-})
-
-test("manager history stays mounted but no role receives feedback edit capabilities", async () => {
-  const {
-    canKeepRegistrationObservationFeedbackHistoryMounted,
     getRegistrationObservationFeedbackMountPlan,
     shouldMountRegistrationObservationFeedbackOnly,
-  } = await loadPanelModel()
-  assert.equal(canKeepRegistrationObservationFeedbackHistoryMounted({
-    canManageCase: true,
-    observationAttemptCount: 1,
-  }), true)
-  assert.equal(canKeepRegistrationObservationFeedbackHistoryMounted({
-    canManageCase: false,
-    observationAttemptCount: 1,
-  }), false)
-  assert.equal(shouldMountRegistrationObservationFeedbackOnly({
-    historyOnly: true,
-    workflowActionable: false,
-  }), true)
-  assert.deepEqual({ ...getRegistrationObservationFeedbackMountPlan({
-    managerDetail: {
-      currentObservation: { observationId: IDS.observation },
-      latestDecisionObservation: null,
-    },
-    canManageObservation: true,
-    canManageCase: false,
-  }) }, {
-    observationId: IDS.observation,
-    historyOnly: false,
+  } = loadPanel()
+  assert.equal(shouldMountRegistrationObservationFeedbackOnly({ historyOnly: true, workflowActionable: false }), true)
+  assert.equal(shouldMountRegistrationObservationFeedbackOnly({ historyOnly: true, workflowActionable: true }), false)
+  const managerDetail = {
+    currentObservation: { observationId: detail.observationId },
+    latestDecisionObservation: { observationId: "historical-observation" },
+  }
+  assert.deepEqual(getRegistrationObservationFeedbackMountPlan({ managerDetail, canManageObservation: true, canManageCase: false }), {
+    observationId: detail.observationId, historyOnly: false,
   })
-  assert.deepEqual({ ...getRegistrationObservationFeedbackMountPlan({
-    managerDetail: {
-      currentObservation: null,
-      latestDecisionObservation: { observationId: IDS.observation },
-    },
-    canManageObservation: true,
-    canManageCase: true,
-  }) }, {
-    observationId: IDS.observation,
-    historyOnly: true,
-  })
-})
-
-test("legacy feedback provenance remains readable with deterministic KST", async () => {
-  const {
-    formatRegistrationObservationFeedbackKst,
-    getRegistrationObservationProxyLabel,
-  } = await loadPanelModel()
-  assert.equal(
-    formatRegistrationObservationFeedbackKst("2026-08-12T10:05:00.000Z"),
-    "2026. 8. 12. 19:05",
-  )
-  assert.equal(
-    getRegistrationObservationProxyLabel(detail),
-    "대리 입력 · 운영 담당자 · 2026. 8. 12. 19:05",
-  )
-  assert.equal(getRegistrationObservationProxyLabel({
-    proxySubmitted: false,
-    feedbackSubmittedByName: "운영 담당자",
-    feedbackSubmittedAt: "2026-08-12T10:05:00.000Z",
+  assert.deepEqual(getRegistrationObservationFeedbackMountPlan({
+    managerDetail: { ...managerDetail, currentObservation: null }, canManageObservation: true, canManageCase: true,
+  }), { observationId: "historical-observation", historyOnly: true })
+  assert.equal(getRegistrationObservationFeedbackMountPlan({ managerDetail, canManageObservation: false, canManageCase: true }), null)
+  assert.equal(getRegistrationObservationFeedbackMountPlan({
+    managerDetail: { ...managerDetail, currentObservation: null }, canManageObservation: true, canManageCase: false,
   }), null)
+  assert.equal(getRegistrationObservationFeedbackMountPlan({ managerDetail: null, canManageObservation: true, canManageCase: true }), null)
 })
 
-test("stale reload remains bounded and retryable", async () => {
-  const { executeRegistrationObservationFeedbackReload } = await loadPanelModel()
-  const guard = { current: false }
-  let reloadCalls = 0
-  const outcome = await executeRegistrationObservationFeedbackReload({
-    guard,
-    onReload: async () => {
-      reloadCalls += 1
-      throw { message: "TypeError: Failed to fetch", details: "private endpoint" }
-    },
-    normalizeError: getRegistrationObservationFeedbackErrorState,
-  })
-  assert.deepEqual({ ...outcome }, {
-    kind: "failed",
-    errorMessage: "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요.",
-    reloadRequired: true,
-  })
-  assert.equal(reloadCalls, 1)
-  assert.equal(guard.current, false)
+test("legacy feedback provenance uses deterministic KST and omits incomplete proxy attribution", () => {
+  const { formatRegistrationObservationFeedbackKst, getRegistrationObservationProxyLabel } = loadPanel()
+  assert.equal(formatRegistrationObservationFeedbackKst("2026-08-12T10:05:00.000Z"), "2026. 8. 12. 19:05")
+  assert.equal(formatRegistrationObservationFeedbackKst("invalid"), "")
+  assert.equal(getRegistrationObservationProxyLabel(detail), "대리 입력 · 합성 운영자 · 2026. 8. 12. 19:05")
+  for (const overrides of [
+    { proxySubmitted: false }, { feedbackSubmittedByName: " " }, { feedbackSubmittedAt: null }, { feedbackSubmittedAt: "invalid" },
+  ]) assert.equal(getRegistrationObservationProxyLabel({ ...detail, ...overrides }), null)
 })
 
-test("panel source exposes history, attendance, and decisions without feedback form mutations", async () => {
+test("history implementation contains no retired attendance or decision write machinery", async () => {
   const source = await readFile(panelUrl, "utf8")
-
-  assert.match(source, /기존 피드백 기록/)
-  assert.match(source, /state\.detail\.feedbackReason/)
-  assert.match(source, /recordRegistrationObservationAttendance/)
-  assert.match(source, /decideRegistrationObservation/)
-  assert.match(source, /Google Chat/)
-  assert.doesNotMatch(source, /SubmitRegistrationObservationFeedbackInput/)
-  assert.doesNotMatch(source, /CorrectRegistrationObservationFeedbackInput/)
-  assert.doesNotMatch(source, /피드백 저장|피드백 정정/)
-  assert.doesNotMatch(source, /<Textarea/)
+  assert.doesNotMatch(source, /recordRegistrationObservationAttendance|decideRegistrationObservation|submitRegistrationObservationFeedback|correctRegistrationObservationFeedback/)
+  assert.doesNotMatch(source, /canRecordAttendance|canDecide|canEditFeedback|executeRegistrationObservationDecision|getRegistrationObservationAttendanceAvailability/)
+  assert.doesNotMatch(source, /useReducer|useOwnedDirtyState|Google Chat|<Textarea|<RegistrationSelect/)
 })

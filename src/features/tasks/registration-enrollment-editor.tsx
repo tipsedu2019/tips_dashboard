@@ -39,6 +39,7 @@ import {
   getRegistrationEnrollmentCancellationState,
   getRegistrationEnrollmentStartOptions,
   getRegistrationEnrollmentStartSaveErrorMessage,
+  mergeSavedRegistrationEnrollmentRows,
   restoreRegistrationEnrollmentDraft,
   serializeRegistrationEnrollmentRows,
   type RegistrationEnrollmentDraft,
@@ -61,6 +62,7 @@ import {
   type OpsRegistrationTrackSummary,
   type RegistrationAdmissionChecklistItem,
   type RegistrationAdmissionChecklistState,
+  type RegistrationEnrollmentRowInput,
   type RegistrationWaitingKind,
 } from "./registration-track-service"
 import type { RegistrationObservationFeedbackDetail } from "./registration-observation-model.ts"
@@ -78,6 +80,10 @@ type PersistedRegistrationEnrollmentDraft = {
   baseline: string
   canonicalKey: string
   textbookDefaultOwners: [string, string][]
+  saveSnapshot: {
+    rows: RegistrationEnrollmentRowInput[]
+    workflowRevision: number
+  }
 }
 
 const persistedRegistrationEnrollmentDrafts = new Map<string, PersistedRegistrationEnrollmentDraft>()
@@ -293,6 +299,10 @@ function isMutableDraft(enrollment: OpsRegistrationEnrollment) {
     && !enrollment.admissionBatchId
     && !enrollment.studentId
     && !enrollment.rosterActive
+    && !enrollment.rosterReleasedAt
+    && !enrollment.rosterReleaseReason
+    && !enrollment.rosterReleaseSourceTaskId
+    && !enrollment.rosterReleaseKind
 }
 
 function enrollmentHistoryLabel(enrollment: OpsRegistrationEnrollment) {
@@ -339,10 +349,18 @@ export function RegistrationEnrollmentEditor({
     () => enrollments.filter((enrollment) => enrollment.trackId === track.id),
     [enrollments, track.id],
   )
+  const canonicalSaveSnapshot = useMemo(() => ({
+    rows: trackEnrollments.some((row) => row.admissionBatchId || row.rosterActive)
+      ? [...(track.enrollmentDetailRows || [])]
+      : serializeRegistrationEnrollmentRows(trackEnrollments.filter(isMutableDraft).map(toDraft)),
+    workflowRevision: track.workflowRevision,
+  }), [track.enrollmentDetailRows, track.workflowRevision, trackEnrollments])
   const canonicalEnrollmentKey = useMemo(() => JSON.stringify({
     trackStatus: track.status,
+    workflowRevision: track.workflowRevision,
+    enrollmentDetailRows: track.enrollmentDetailRows || [],
     enrollments: [...trackEnrollments].sort((left, right) => left.id.localeCompare(right.id)),
-  }), [track.status, trackEnrollments])
+  }), [track.enrollmentDetailRows, track.status, track.workflowRevision, trackEnrollments])
   const canonicalDraftRows = useMemo(() => {
     const mutableRows = trackEnrollments.filter(isMutableDraft)
     return mutableRows.length > 0
@@ -353,7 +371,7 @@ export function RegistrationEnrollmentEditor({
         ? [createRegistrationEnrollmentDraft({ clientKey: `enrollment-row:${taskId}:${track.id}` })]
         : [createRegistrationEnrollmentDraft({ clientKey: `enrollment-row:${taskId}:${track.id}` })]
   }, [taskId, track.enrollmentDetailRows, track.id, track.status, trackEnrollments])
-  const enrollmentDraftScopeKey = `${taskId}:${track.id}`
+  const enrollmentDraftScopeKey = `${taskId}:${track.id}:${viewerId}`
   const cachedEnrollmentDraft = persistedRegistrationEnrollmentDrafts.get(enrollmentDraftScopeKey)
   const [draftRows, setDraftRows] = useState<RegistrationEnrollmentDraft[]>(() => {
     if (cachedEnrollmentDraft) return cachedEnrollmentDraft.rows.map((row) => ({ ...row }))
@@ -372,6 +390,20 @@ export function RegistrationEnrollmentEditor({
   const [loadingClassIds, setLoadingClassIds] = useState<Set<string>>(() => new Set())
   const [classDetailRetryToken, setClassDetailRetryToken] = useState(0)
   const [saving, setSaving] = useState(false)
+  const mutationInFlightRef = useRef(false)
+  const mutationAccessRef = useRef({ scopeKey: enrollmentDraftScopeKey, allowed: false, active })
+  mutationAccessRef.current = {
+    scopeKey: enrollmentDraftScopeKey,
+    allowed: Boolean(viewerId) && permissions.canManage && !permissions.readOnly,
+    active,
+  }
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+  const rowsCommittedRefreshPendingRef = useRef(false)
+  const cancellationCommittedRefreshPendingRef = useRef(false)
   const [rowsRefreshPending, setRowsRefreshPending] = useState(false)
   const [cancellationRefreshPending, setCancellationRefreshPending] = useState(false)
   const [cancelEnrollmentId, setCancelEnrollmentId] = useState("")
@@ -391,6 +423,7 @@ export function RegistrationEnrollmentEditor({
   const observationLoadOwnerRef = useRef(createRegistrationEnrollmentStartLoadOwner())
   const loadedObservationScopeRef = useRef<{ trackId: string; feedbackRevision: number | null } | null>(null)
   const initialDraftRowsRef = useRef(cachedEnrollmentDraft?.baseline || JSON.stringify(draftRows))
+  const saveSnapshotRef = useRef(cachedEnrollmentDraft?.saveSnapshot || canonicalSaveSnapshot)
   const canonicalKeyRef = useRef(cachedEnrollmentDraft?.canonicalKey || canonicalEnrollmentKey)
   const submissionKeys = useSubmissionKeys()
   const subjectClasses = useMemo(
@@ -405,8 +438,9 @@ export function RegistrationEnrollmentEditor({
   const selectedClassIdsKey = selectedClassIds.join("|")
   const openBatch = admissionBatches.find((batch) => !["completed", "canceled"].includes(batch.status)) || null
   const trackHasOpenBatch = Boolean(openBatch && trackEnrollments.some((enrollment) => enrollment.admissionBatchId === openBatch.id))
-  const canEditRows = permissions.canManage
+  const canEditRows = permissions.canManage && !permissions.readOnly
     && !rowsRefreshPending
+    && !cancellationRefreshPending
   const selectedCancelEnrollment = trackEnrollments.find((item) => item.id === cancelEnrollmentId) || null
   const selectedEnrollmentCancellation = getRegistrationEnrollmentCancellationState({
     enrollment: selectedCancelEnrollment,
@@ -433,6 +467,7 @@ export function RegistrationEnrollmentEditor({
   }, [canonicalDraftRows, canonicalEnrollmentKey, draftRows])
   useEffect(() => {
     if (!rowsDirty) {
+      saveSnapshotRef.current = canonicalSaveSnapshot
       persistedRegistrationEnrollmentDrafts.delete(enrollmentDraftScopeKey)
       return
     }
@@ -441,8 +476,9 @@ export function RegistrationEnrollmentEditor({
       baseline: initialDraftRowsRef.current,
       canonicalKey: canonicalKeyRef.current,
       textbookDefaultOwners: [...textbookDefaultOwnersRef.current],
+      saveSnapshot: saveSnapshotRef.current,
     })
-  }, [draftRows, enrollmentDraftScopeKey, rowsDirty])
+  }, [canonicalSaveSnapshot, draftRows, enrollmentDraftScopeKey, rowsDirty])
 
   useEffect(() => {
     textbookDefaultOwnersRef.current = new Map(cachedEnrollmentDraft?.textbookDefaultOwners || [])
@@ -670,8 +706,14 @@ export function RegistrationEnrollmentEditor({
   }
 
   function setOwnerRefreshPending(owner: RegistrationEnrollmentDirtyScope, pending: boolean) {
-    if (owner.kind === "rows") setRowsRefreshPending(pending)
-    else setCancellationRefreshPending(pending)
+    if (owner.kind === "rows") {
+      rowsCommittedRefreshPendingRef.current = pending
+      setRowsRefreshPending(pending)
+    }
+    else {
+      cancellationCommittedRefreshPendingRef.current = pending
+      setCancellationRefreshPending(pending)
+    }
   }
 
   async function reloadCommitted(owner: RegistrationEnrollmentDirtyScope) {
@@ -679,9 +721,11 @@ export function RegistrationEnrollmentEditor({
     setOwnerRefreshPending(owner, true)
     try {
       await withRegistrationRefreshTimeout(onReload())
+      if (!isCurrentEditableScope()) return false
       setOwnerRefreshPending(owner, false)
       return true
     } catch {
+      if (!isCurrentEditableScope()) return false
       setOwnerRefreshPending(owner, true)
       onWarning("저장은 완료됐지만 최신 내용을 불러오지 못했습니다")
       return false
@@ -689,11 +733,14 @@ export function RegistrationEnrollmentEditor({
   }
 
   async function retryEnrollmentReload(owner: RegistrationEnrollmentDirtyScope) {
+    if (!isCurrentEditableScope()) return
     try {
       await withRegistrationRefreshTimeout(onReload())
+      if (!isCurrentEditableScope()) return
       setOwnerRefreshPending(owner, false)
       if (owner.kind === "cancellation") setCancelEnrollmentId("")
     } catch {
+      if (!isCurrentEditableScope()) return
       setOwnerRefreshPending(owner, true)
       onWarning("최신 수업 정보를 다시 불러오지 못했습니다.")
     }
@@ -704,8 +751,15 @@ export function RegistrationEnrollmentEditor({
     && !classDetailById[row.classId]
   ))
 
+  function isCurrentEditableScope() {
+    return mountedRef.current && mutationAccessRef.current.allowed
+      && mutationAccessRef.current.scopeKey === enrollmentDraftScopeKey
+  }
+
   async function saveRows() {
-    if (!canEditRows || saving || textbookDefaultsPending) return
+    if (!isCurrentEditableScope() || !mutationAccessRef.current.active || !canEditRows || saving || textbookDefaultsPending
+      || mutationInFlightRef.current || rowsCommittedRefreshPendingRef.current
+      || cancellationCommittedRefreshPendingRef.current) return
     if (blockers.length > 0) {
       const message = blockers[0]?.message || "수업 정보를 확인하세요."
       setRowsValidationError(message)
@@ -717,32 +771,48 @@ export function RegistrationEnrollmentEditor({
       return
     }
     const rows = serializeRegistrationEnrollmentRows(draftRows)
-    const payloadFingerprint = JSON.stringify(rows)
+    const snapshot = saveSnapshotRef.current
+    const payloadFingerprint = JSON.stringify({ rows, snapshot })
     const logicalId = `${track.id}:${payloadFingerprint}`
     const requestKey = submissionKeys.getOrCreate("enrollment-rows", logicalId)
+    mutationInFlightRef.current = true
     setSaving(true)
     onWarning("")
     try {
-      const saved = await saveRegistrationEnrollmentDetails({ trackId: track.id, rows, requestKey })
+      const saved = await saveRegistrationEnrollmentDetails({
+        trackId: track.id,
+        rows,
+        expectedRows: snapshot.rows,
+        expectedWorkflowRevision: snapshot.workflowRevision,
+        requestKey,
+      })
+      if (!isCurrentEditableScope()) return
+      saveSnapshotRef.current = { rows: saved.rows, workflowRevision: saved.workflowRevision }
+      const committedRows = mergeSavedRegistrationEnrollmentRows(draftRows, saved.rows)
+      setDraftRows(committedRows)
       textbookDefaultOwnersRef.current.clear()
       setExternalReconciliationRequired(saved.externalReconciliationRequired)
-      initialDraftRowsRef.current = JSON.stringify(draftRows)
+      initialDraftRowsRef.current = JSON.stringify(committedRows)
       persistedRegistrationEnrollmentDrafts.delete(enrollmentDraftScopeKey)
       submissionKeys.clear("enrollment-rows", logicalId)
       await reloadCommitted({ kind: "rows" })
     } catch (error) {
+      if (!isCurrentEditableScope()) return
       onWarning(getRegistrationEnrollmentStartSaveErrorMessage(
         error,
         "수업 정보를 저장하지 못했습니다.",
       ))
     } finally {
+      mutationInFlightRef.current = false
       setSaving(false)
     }
   }
 
   async function cancelPersistedEnrollment() {
     const enrollment = selectedCancelEnrollment
-    if (!enrollment || saving || cancellationRefreshPending || trackHasOpenBatch) return
+    if (!isCurrentEditableScope() || !mutationAccessRef.current.active || mutationInFlightRef.current
+      || rowsCommittedRefreshPendingRef.current || cancellationCommittedRefreshPendingRef.current
+      || !enrollment || saving || cancellationRefreshPending || trackHasOpenBatch) return
     if (!cancelReason.trim()) {
       setCancellationValidationError("수강 취소 사유를 입력하세요.")
       window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(`[aria-label="${track.subject} 수강 취소 사유"]`)?.focus())
@@ -766,6 +836,7 @@ export function RegistrationEnrollmentEditor({
     }
     const logicalId = `${enrollment.id}:${destination}:${cancelWaitingKind}:${cancelClassId}:${cancelReason.trim()}`
     const requestKey = submissionKeys.getOrCreate("cancel-enrollment", logicalId)
+    mutationInFlightRef.current = true
     setSaving(true)
     try {
       const receipt = await cancelRegistrationEnrollment({
@@ -776,19 +847,24 @@ export function RegistrationEnrollmentEditor({
         reason: cancelReason.trim(),
         requestKey,
       })
+      if (!isCurrentEditableScope()) return
       submissionKeys.clear("cancel-enrollment", logicalId)
       setCancelDestination("")
       setCancelWaitingKind("")
       setCancelClassId("")
       setCancelReason("")
       setCancellationValidationError("")
-      if (await reloadCommitted(cancellationScope)) setCancelEnrollmentId("")
+      const reloaded = await reloadCommitted(cancellationScope)
+      if (!isCurrentEditableScope()) return
+      if (reloaded) setCancelEnrollmentId("")
       if (receipt.publicClassesCacheRefresh?.status === "pending") {
         onWarning("수강 취소는 완료되었습니다. 공개 수업 캐시 갱신 대기 중")
       }
     } catch (error) {
+      if (!isCurrentEditableScope()) return
       onWarning(errorMessage(error, "수강을 취소하지 못했습니다."))
     } finally {
+      mutationInFlightRef.current = false
       setSaving(false)
     }
   }
@@ -1025,7 +1101,7 @@ export function RegistrationEnrollmentEditor({
               setCancelReason("")
               setCancellationValidationError("")
             }} disabled={saving}>닫기</Button>
-            <Button type="button" aria-label={`${track.subject} 수강 취소 확인`} variant="destructive" onClick={() => void cancelPersistedEnrollment()} disabled={saving || cancellationRefreshPending}>수강 취소 확인</Button>
+            <Button type="button" aria-label={`${track.subject} 수강 취소 확인`} variant="destructive" onClick={() => void cancelPersistedEnrollment()} disabled={!canEditRows || saving || cancellationRefreshPending}>수강 취소 확인</Button>
           </div>
           {cancellationValidationError ? <p role="alert" className="text-xs text-destructive">{cancellationValidationError}</p> : null}
           </>}

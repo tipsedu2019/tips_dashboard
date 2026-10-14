@@ -13,11 +13,15 @@ import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {parseIsolatedDbArguments,runIsolatedSupabaseDbTests} from '../../scripts/run-isolated-supabase-db-tests.mjs';
 import {decodeAiImportLiteral} from '../../scripts/lib/ai-producer-receipt.mjs';
 import vm from 'node:vm';
 import {syncBuiltinESMExports} from 'node:module';
+import * as receiptProtocol from '../../scripts/lib/ai-producer-receipt.mjs';
 const hash=v=>createHash('sha256').update(v).digest('hex');
+const registrationPin={fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'candidate',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'};
+const repositoryRoot=fileURLToPath(new URL('../../',import.meta.url));
 const isolatedWorkflows=['supabase-db-push.yml','supabase-sql-review.yml'];
 const legacyOccupancyTest='supabase/tests/makeup_legacy_approval_occupancy_test.sql';
 const timetableCloseTests=Object.freeze([
@@ -131,6 +135,148 @@ function parityArguments({tests,probes}){
   '--transactional-preflight','--verify-local-ledger','--ai-producer-parity',
   ...tests.flatMap(path=>['--test',path]),...probes.flatMap(path=>['--probe',path])];
 }
+// This reviewed-final source fixture is solely for negative orchestration.
+// It inherits the existing read-only HEAD from its repository ancestor; it has
+// no .git, dependencies, environment copy, or external execution capability.
+async function isolatedFinalSourceFixture(t){
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-negative-source-'));
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ const manifestPath='supabase/test-baselines/dashboard-free-tier-v1.manifest.json';
+ const realManifestBytes=await readFile(join(repositoryRoot,manifestPath));
+ const manifest=JSON.parse(realManifestBytes);
+ assert.deepEqual(manifest.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName),registrationPin);
+ const runnerPath='scripts/run-isolated-supabase-db-tests.mjs';
+ const helperPath='scripts/lib/ai-producer-receipt.mjs';
+ const protectedPaths=[manifestPath,runnerPath,helperPath,'supabase/migrations/'+registrationPin.fileName];
+ const protectedHashes=new Map(await Promise.all(protectedPaths.map(async file=>[file,hash(await readFile(join(repositoryRoot,file)))])));
+ const assertRealSourcesUnchanged=async()=>{
+  for(const [file,expected] of protectedHashes)assert.equal(hash(await readFile(join(repositoryRoot,file))),expected,file+' remains byte-identical');
+ };
+ const runnerSource=await readFile(join(repositoryRoot,runnerPath),'utf8');
+ const dependencyBlock=runnerSource.match(/const PROBE_DEPENDENCIES = Object\.freeze\(\{([\s\S]*?)\n\}\);/u)?.[1];
+ assert.ok(dependencyBlock,'the curated dependency allowlist must remain explicit');
+ const dependencies=[...dependencyBlock.matchAll(/"([^"]+)"/gu)].map(match=>match[1]);
+ const prerequisiteBlock=runnerSource.match(/const NOTIFICATION_CONTENT_PREREQUISITE_MIGRATIONS = Object\.freeze\(\[([\s\S]*?)\n\]\);/u)?.[1];
+ assert.ok(prerequisiteBlock);
+ const prerequisites=[...prerequisiteBlock.matchAll(/"(\d{14}_[a-z0-9_]+\.sql)"/gu)].map(match=>'supabase/migrations/'+match[1]);
+ const activePath='supabase/test-baselines/dashboard-free-tier-v1.active.json';
+ const active=JSON.parse(await readFile(join(repositoryRoot,activePath)));
+ assert.match(active.captureId,/^[a-f0-9]{16}$/u);
+ const capture='supabase/test-baselines/dashboard-free-tier-v1-captures/'+active.captureId+'/';
+ const files=new Set([
+  ...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(pin=>'supabase/migrations/'+pin.fileName),
+  ...manifest.orderedNewMigrations.map(pin=>'supabase/migrations/'+pin.fileName),
+  ...AI_SQL_TESTS,...AI_PROBES,...dependencies,...prerequisites,
+  activePath,...Object.values(active.artifactPaths),...['baseline.sql','catalog.json','manifest.json','parity.sql'].map(file=>capture+file),
+  'supabase/tests/dashboard_free_tier_baseline_smoke_test.sql',
+  'supabase/tests/active_registration_workflow_postdeploy_readonly.sql',
+  'scripts/fixtures/dashboard-free-tier-isolated-schema-repair.sql',
+  'scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql',
+  'scripts/fixtures/dashboard-free-tier-notification-settings-prerequisites.sql',
+ ]);
+ for(const file of files){
+  assert.ok(/^(?:scripts|src|tests|supabase|integrations|package\.json|package-lock\.json)(?:\/|$)/u.test(file));
+  assert.ok(!file.split('/').some(part=>part==='..'||part==='.git'||part==='node_modules'||part.startsWith('.env')));
+  await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(join(repositoryRoot,file)));
+ }
+ const helper=await readFile(join(root,helperPath),'utf8');
+ const candidateDeclaration="export const REGISTRATION_ENROLLMENT_MIGRATION=Object.freeze({fileName:'"+registrationPin.fileName+"',status:'candidate',sha256:'"+registrationPin.sha256+"'});";
+ assert.equal(helper.split(candidateDeclaration).length,2,'replace exactly the isolated registration pin');
+ await writeFile(join(root,helperPath),helper.replace(candidateDeclaration,candidateDeclaration.replace("status:'candidate'","status:'final'")));
+ manifest.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName).status='final';
+ await writeFile(join(root,manifestPath),JSON.stringify(manifest));
+ const isolatedProtocol=await import(pathToFileURL(join(root,helperPath)).href);
+ assert.deepEqual(isolatedProtocol.REGISTRATION_ENROLLMENT_MIGRATION,{...registrationPin,status:'final'});
+ const source=await isolatedProtocol.snapshotAiSource(root);
+ assert.equal(source.sourceHead,(await snapshotAiSource()).sourceHead);
+ assert.equal(source.closure.find(row=>row.path===helperPath).sha256,hash(await readFile(join(root,helperPath))));
+ assert.equal(hash(await readFile(join(root,runnerPath))),hash(runnerSource),'runner itself is byte-identical');
+ const {lstat}=await import('node:fs/promises');
+ await assert.rejects(lstat(join(root,'.git')),{code:'ENOENT'});
+ assert.deepEqual(await readFile(join(repositoryRoot,manifestPath)),realManifestBytes);
+ await assertRealSourcesUnchanged();
+ const isolatedRunner=await import(pathToFileURL(join(root,runnerPath)).href);
+ return {root,run:isolatedRunner.runIsolatedSupabaseDbTests,realManifestBytes,assertRealSourcesUnchanged};
+}
+test('registration candidate is explicitly pinned in the closure without changing the accepted AI protocol',async()=>{
+ assert.deepEqual(receiptProtocol.REGISTRATION_ENROLLMENT_MIGRATION,registrationPin);
+ const current=await snapshotAiSource();
+ const path='supabase/migrations/'+registrationPin.fileName;
+ assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(file=>file===path).length,1);
+ assert.equal(current.closure.find(row=>row.path===path)?.sha256,registrationPin.sha256);
+ assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS);
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,173);
+ assert.deepEqual(manifest.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName),registrationPin);
+});
+test('registration candidate rejects missing, duplicate, reordered, hash, status and coordinated source drift',async()=>{
+ assert.deepEqual(receiptProtocol.REGISTRATION_ENROLLMENT_MIGRATION,registrationPin);
+ const warmSource=await snapshotAiSource();
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-registration-drift-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const original=JSON.parse(await readFile(manifestPath));
+  assert.deepEqual(await snapshotAiSource(root),warmSource,'a warmed literal cache still validates the exact copied source');
+  const allowedPath='src/features/ai-agent/server/ai-agent-auth.ts';
+  const allowedFile=join(root,allowedPath),allowedBytes=await readFile(allowedFile);
+  const correctedBytes=Buffer.concat([allowedBytes,Buffer.from('\n// isolated allowed-source correction\n')]);
+  await writeFile(allowedFile,correctedBytes);
+  const corrected=await snapshotAiSource(root);
+  assert.equal(corrected.closure.find(row=>row.path===allowedPath).sha256,hash(correctedBytes));
+  assert.notEqual(corrected.closure.find(row=>row.path===allowedPath).sha256,warmSource.closure.find(row=>row.path===allowedPath).sha256);
+  assert.equal(corrected.sourceHead,warmSource.sourceHead);
+  for(const statement of ['import "./warm-cache-outside.ts";',String.raw`import "\u002e\u002fwarm-cache-outside.ts";`]){
+   await writeFile(allowedFile,Buffer.concat([correctedBytes,Buffer.from('\n'+statement+'\n')]));
+   await assert.rejects(snapshotAiSource(root),/import outside audited AI closure/,'warmed cache must reject each current unknown import');
+  }
+  await rm(allowedFile);await assert.rejects(snapshotAiSource(root),/ENOENT/,'warmed cache must not replace a missing source file');
+  await writeFile(allowedFile,allowedBytes);
+  const index=original.orderedNewMigrations.findIndex(row=>row.fileName===registrationPin.fileName);
+  assert.equal(index,169);
+  for(const [label,mutate] of [
+   ['missing',rows=>rows.splice(index,1)],
+   ['duplicate appended',rows=>rows.push({...rows[index]})],
+   ['same-length duplicate',rows=>rows[index]={...rows[index-1]}],
+   ['reordered',rows=>[rows[index-1],rows[index]]=[rows[index],rows[index-1]]],
+   ['hash drift',rows=>rows[index].sha256='0'.repeat(64)],
+   ['unauthorized final promotion',rows=>rows[index].status='final'],
+   ['unknown status',rows=>rows[index].status='draft'],
+   ['filename drift',rows=>rows[index].fileName='20990101000000_unreviewed_registration.sql'],
+  ]){
+   const changed=structuredClone(original);mutate(changed.orderedNewMigrations);
+   await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/(?:AI canonical manifest inventory|current migration manifest drift)/,label);
+  }
+  await writeFile(manifestPath,JSON.stringify(original));
+  const sqlPath=join(root,'supabase/migrations/'+registrationPin.fileName),sql=await readFile(sqlPath);
+  const drift=Buffer.concat([sql,Buffer.from('\n-- unreviewed registration drift\n')]);
+  await writeFile(sqlPath,drift);
+  await assert.rejects(snapshotAiSource(root),/registration enrollment migration source drift/);
+  const coordinated=structuredClone(original);coordinated.orderedNewMigrations[index].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(manifestPath,JSON.stringify(original));
+  await rm(sqlPath);await assert.rejects(snapshotAiSource(root),/ENOENT/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('real registration candidate still refuses strict final plans and execution before any process launch',async()=>{
+ const manifestPath='supabase/test-baselines/dashboard-free-tier-v1.manifest.json';
+ const before=await readFile(manifestPath);
+ let launched=0;
+ const forbidden=async()=>{launched++;throw Error('external process forbidden for real candidate refusal');};
+ for(const argv of [
+  ['--review-head','--require-final'],
+  parityArguments({tests:AI_SQL_TESTS,probes:AI_PROBES}),
+ ])await assert.rejects(runIsolatedSupabaseDbTests({argv,executeProcess:forbidden,executeNetwork:forbidden,executeGit:forbidden}),
+  /^Error: isolated_supabase_db_final_manifest_required$/);
+ assert.equal(launched,0);
+ assert.deepEqual(await readFile(manifestPath),before);
+});
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
  assert.equal(AI_SQL_TESTS.length,101);
  assert.equal(AI_PROBES.length,21);
@@ -182,7 +328,7 @@ test('close candidate pins reject each missing, reordered, draft or changed migr
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.deepEqual(original.orderedNewMigrations.slice(-5),TIMETABLE_CLOSE_MIGRATIONS);
+  assert.deepEqual(original.orderedNewMigrations.filter(row=>TIMETABLE_CLOSE_MIGRATIONS.some(pin=>pin.fileName===row.fileName)),TIMETABLE_CLOSE_MIGRATIONS);
   for(const pin of TIMETABLE_CLOSE_MIGRATIONS){
    for(const mutate of [
     (rows,i)=>rows.splice(i,1),
@@ -211,7 +357,8 @@ test('close candidate pins reject each missing, reordered, draft or changed migr
   }
  }finally{await rm(root,{recursive:true,force:true});}
 });
-test('full parity guard rejects missing, duplicate and reordered workflow selectors before process launch',async()=>{
+test('full parity guard rejects missing, duplicate and reordered workflow selectors before process launch',async(t)=>{
+ const fixture=await isolatedFinalSourceFixture(t);
  let launched=0;
  const executeProcess=async()=>{launched++;throw new Error('process launch forbidden in inventory regression');};
  for(const name of isolatedWorkflows){
@@ -226,11 +373,13 @@ test('full parity guard rejects missing, duplicate and reordered workflow select
    ['duplicate probe',{...inventory,probes:[...inventory.probes,inventory.probes[0]]}],
    ['reordered probes',{...inventory,probes:swapFirst(inventory.probes)}],
   ]){
-   await assert.rejects(runIsolatedSupabaseDbTests({argv:parityArguments(changed),executeProcess}),
+   await assert.rejects(fixture.run({root:fixture.root,argv:parityArguments(changed),executeProcess,executeNetwork:executeProcess,executeGit:executeProcess}),
     /isolated_ai_parity_full_run_required/,name+' '+label);
    assert.equal(launched,0,name+' '+label+' must stop before process launch');
   }
  }
+ assert.deepEqual(await readFile(join(repositoryRoot,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')),fixture.realManifestBytes);
+ await fixture.assertRealSourcesUnchanged();
 });
 test('independent attestation rejects stale run/source, migration, closure, inventory and raw payload drift',async()=>{
  const source=await snapshotAiSource(),raw=Buffer.from(' {"test":"negative protocol only"} '),now=Date.now();
@@ -322,8 +471,8 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,172);
-  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
+  assert.equal(original.orderedNewMigrations.length,173);
+  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==registrationPin.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
   assert.equal(reviewedLegacy.at(-1).fileName,mainFileName);
@@ -511,6 +660,7 @@ test('capture phase checks source before the first producer and cannot refresh f
 // Negative runner orchestration only: every external process is replaced by a
 // deterministic stub. These synthetic captures can never count as DB/HTTP QA.
 test('final personal probe failure prevents a receipt and consumer launch after both producers',async(t)=>{
+ const fixture=await isolatedFinalSourceFixture(t);
  const {readdir,lstat}=await import('node:fs/promises');
  const tempDirectory=await mkdtemp(join(tmpdir(),'ai-final-probe-failure-'));t.after(()=>rm(tempDirectory,{recursive:true,force:true}));
  const applied=new Set(),probes=[];let consumers=0,checkedReceiptAbsence=false;
@@ -548,9 +698,11 @@ test('final personal probe failure prevents a receipt and consumer launch after 
   return output('');
  };
  const postdeploy=await readFile(new URL('../../supabase/tests/active_registration_workflow_postdeploy_readonly.sql',import.meta.url),'utf8');
- const run=runIsolatedSupabaseDbTests({argv:parityArguments({tests:AI_SQL_TESTS,probes:AI_PROBES}),tempDirectory,
+ const run=fixture.run({root:fixture.root,argv:parityArguments({tests:AI_SQL_TESTS,probes:AI_PROBES}),tempDirectory,
   allocatePort:(()=>{let port=56700;return()=>++port;})(),executeNetwork,
   executeProcess:invocation=>invocation.command==='docker'&&invocation.args.at(-1)===postdeploy?output('t'):executeProcess(invocation),log:()=>{}});
  await assert.rejects(run,/isolated_supabase_db_probe_failed/);
  assert.deepEqual(probes,AI_PROBES);assert.equal(consumers,0);assert.equal(checkedReceiptAbsence,true);
+ assert.deepEqual(await readFile(join(repositoryRoot,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')),fixture.realManifestBytes);
+ await fixture.assertRealSourcesUnchanged();
 });

@@ -36,7 +36,7 @@ test("ops tasks no longer recognize or link the retired feedback marker", async 
   assert.doesNotMatch(source, /피드백 작성/)
 })
 
-test("registration workspace keeps read attendance history and director decisions without feedback writes", async () => {
+test("registration workspace retains historical facts without teacher, attendance, or director write UI", async () => {
   const [trackEditor, feedbackPanel] = await Promise.all([
     readFile(trackEditorUrl, "utf8"),
     readFile(feedbackPanelUrl, "utf8"),
@@ -44,12 +44,16 @@ test("registration workspace keeps read attendance history and director decision
 
   assert.doesNotMatch(trackEditor, /submitRegistrationObservationFeedback/)
   assert.doesNotMatch(trackEditor, /correctRegistrationObservationFeedback/)
-  assert.match(trackEditor, /canRecordAttendance=\{!activeDeepLinkedAttemptTerminal[\s\S]*?canManageCase/)
-  assert.match(trackEditor, /canDecide=\{!activeDeepLinkedAttemptCanceled[\s\S]*?canManageCase/)
+  assert.doesNotMatch(trackEditor, /canRecordAttendance=|canDecide=|recordRegistrationObservationAttendance|decideRegistrationObservation/)
+  assert.match(trackEditor, /<RegistrationObservationFeedbackPanel/)
+  assert.match(trackEditor, /loadRegistrationObservationFeedback/)
   assert.doesNotMatch(feedbackPanel, /submitRegistrationObservationFeedback/)
   assert.doesNotMatch(feedbackPanel, /correctRegistrationObservationFeedback/)
   assert.doesNotMatch(feedbackPanel, /canEditFeedback/)
-  assert.match(feedbackPanel, /recordRegistrationObservationAttendance/)
-  assert.match(feedbackPanel, /decideRegistrationObservation/)
-  assert.match(feedbackPanel, /state\.detail\.feedbackReason/)
+  assert.doesNotMatch(feedbackPanel, /recordRegistrationObservationAttendance|decideRegistrationObservation|canRecordAttendance|canDecide/)
+  assert.doesNotMatch(feedbackPanel, /Google Chat|<Button|<RegistrationSelect|<Textarea/)
+  assert.match(feedbackPanel, /기존 청강 이력/)
+  assert.match(feedbackPanel, /detail\.feedbackReason/)
+  assert.match(feedbackPanel, /detail\.attendance/)
+  assert.match(feedbackPanel, /detail\.decisionKind/)
 })

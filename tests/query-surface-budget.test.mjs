@@ -132,6 +132,34 @@ async function verifyFixture({ surface = "tasks", file = "src/features/tasks/lis
   }
 }
 
+test("deleted worktree sources are removed while surviving changed queries remain guarded", async () => {
+  const retiredFile = "src/features/tasks/retired-observation.tsx"
+  const activeFile = "src/features/tasks/active-observation.tsx"
+  const safeSource = `export async function load(client) {
+  return client.from("ops_tasks").select("id").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}\n`
+  const root = await createFixtureRepository({ [retiredFile]: safeSource, [activeFile]: safeSource })
+  try {
+    const baseSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
+    await rm(join(root, retiredFile))
+    assert.deepEqual(await verifyQuerySurfaceBudget({
+      root, surface: "tasks", baseSha, includeWorktree: true, debtManifest: [],
+    }), { ok: true, violations: [] })
+    await writeFile(join(root, activeFile), safeSource.replace('select("id")', 'select("*")'))
+    assert.deepEqual(await verifyQuerySurfaceBudget({
+      root, surface: "tasks", baseSha, includeWorktree: true, debtManifest: [],
+    }), { ok: false, violations: [{
+      file: activeFile, symbol: "load", surface: "tasks", reason: "list_select_star",
+    }] })
+    await mkdir(join(root, retiredFile))
+    await assert.rejects(verifyQuerySurfaceBudget({
+      root, surface: "tasks", baseSha, includeWorktree: true, debtManifest: [],
+    }), { code: "EISDIR" })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("query budget verifier identifies a new list select-star by exact file, symbol, and reason", async () => {
   const result = await verifyFixture({
     source: `export async function listTasks(client) {

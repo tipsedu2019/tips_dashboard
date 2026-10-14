@@ -30,15 +30,12 @@ async function loadEditorModel() {
     `${source.slice(start + startMarker.length, end)}\nmodule.exports = {
       buildRegistrationObservationBookingInput,
       buildRegistrationObservationCancelInput,
-      buildRegistrationObservationWithdrawalInput,
       canLoadRegistrationObservationWorkspace,
       canUseRegistrationObservationDetail,
-      canWithdrawRegistrationObservation,
       completeRegistrationObservationRequestKey,
       executeRegistrationObservationBooking,
       executeRegistrationObservationCommit,
       getRegistrationObservationRequestKey,
-      getRegistrationObservationWithdrawalCorrection,
       getRegistrationObservationEditorAttemptPlan:
         typeof getRegistrationObservationEditorAttemptPlan === "function"
           ? getRegistrationObservationEditorAttemptPlan
@@ -51,12 +48,7 @@ async function loadEditorModel() {
         typeof getRegistrationObservationDisplayStatusLabel === "function"
           ? getRegistrationObservationDisplayStatusLabel
           : undefined,
-      reconcileRegistrationObservationWithdrawalValue,
       shouldLockRegistrationObservationMutation,
-      executeRegistrationObservationWithdrawal:
-        typeof executeRegistrationObservationWithdrawal === "function"
-          ? executeRegistrationObservationWithdrawal
-          : undefined,
       getRegistrationObservationDialogClosePlan:
         typeof getRegistrationObservationDialogClosePlan === "function"
           ? getRegistrationObservationDialogClosePlan
@@ -64,10 +56,6 @@ async function loadEditorModel() {
       getRegistrationObservationUiErrorMessage:
         typeof getRegistrationObservationUiErrorMessage === "function"
           ? getRegistrationObservationUiErrorMessage
-          : undefined,
-      getRegistrationObservationWithdrawalSubmitState:
-        typeof getRegistrationObservationWithdrawalSubmitState === "function"
-          ? getRegistrationObservationWithdrawalSubmitState
           : undefined,
       restoreRegistrationObservationDialogTriggerFocus:
         typeof restoreRegistrationObservationDialogTriggerFocus === "function"
@@ -147,22 +135,6 @@ async function loadMountedObservationEditor() {
   })
   classSelectFactory(runtimeRequire, classSelectModule, classSelectModule.exports)
   localModules.set("./registration-class-select", classSelectModule.exports)
-  const chatFileName = new URL("src/features/tasks/registration-observation-chat-actions.tsx", root)
-  const chatOutput = ts.transpileModule(await readFile(chatFileName, "utf8"), {
-    compilerOptions: {
-      esModuleInterop: true,
-      jsx: ts.JsxEmit.ReactJSX,
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-    },
-    fileName: chatFileName.pathname,
-  }).outputText
-  const chatModule = { exports: {} }
-  const chatFactory = vm.runInThisContext(`(function(require, module, exports) {${chatOutput}\n})`, {
-    filename: chatFileName.pathname,
-  })
-  chatFactory(runtimeRequire, chatModule, chatModule.exports)
-  localModules.set("./registration-observation-chat-actions", chatModule.exports)
   const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
     filename: fileName.pathname,
   })
@@ -186,7 +158,7 @@ function observationAttempt(observationId, overrides = {}) {
     endsAt: "2026-08-12T17:30:00+09:00",
     teacherCatalogId: "10000000-0000-4000-8000-000000000006",
     teacherProfileId: "10000000-0000-4000-8000-000000000007",
-    teacherName: "김선생",
+    teacherName: "합성인물04",
     classroomCatalogId: "10000000-0000-4000-8000-000000000008",
     classroomName: "본관 301호",
     campus: "본관",
@@ -408,8 +380,7 @@ test("mounted saved observation exposes one booking AlimTalk action with the can
 
   assert.match(markup, />청강 예약 안내 알림톡</)
   assert.doesNotMatch(markup, /disabled=""[^>]*>청강 예약 안내 알림톡</)
-  assert.match(markup, />청강 담당 전달</)
-  assert.match(markup, />청강 피드백 요청</)
+  assert.doesNotMatch(markup, />청강 담당 전달<|>청강 피드백 요청</)
   assert.deepEqual(targets, [], "rendering alone must not dispatch the customer-message action")
   assert.equal(transport.mock.callCount(), 0, 'rendering the actual chat actions must not request or send notifications')
 })
@@ -455,15 +426,11 @@ test("observation booking plans use dedicated RPCs and exact revision ownership"
   const {
     buildRegistrationObservationBookingInput,
     buildRegistrationObservationCancelInput,
-    buildRegistrationObservationWithdrawalInput,
     canUseRegistrationObservationDetail,
-    canWithdrawRegistrationObservation,
     completeRegistrationObservationRequestKey,
     executeRegistrationObservationBooking,
     executeRegistrationObservationCommit,
     getRegistrationObservationRequestKey,
-    getRegistrationObservationWithdrawalCorrection,
-    reconcileRegistrationObservationWithdrawalValue,
     shouldLockRegistrationObservationMutation,
   } = await loadEditorModel()
 
@@ -545,51 +512,6 @@ test("observation booking plans use dedicated RPCs and exact revision ownership"
     requestKey: "cancel-1",
   })
 
-  assert.deepEqual({ ...buildRegistrationObservationWithdrawalInput({
-    trackId: "track-1",
-    workflowRevision: 8,
-    exitKind: "return_to_previous",
-    targetWorkflowStatus: "consultation_completed",
-    reason: "일정 조정",
-    requestKey: "withdraw-1",
-    correction: null,
-  }) }, {
-    trackId: "track-1",
-    expectedWorkflowRevision: 8,
-    exitKind: "return_to_previous",
-    targetWorkflowStatus: "consultation_completed",
-    decisionObservationId: null,
-    expectedDecisionObservationRevision: null,
-    expectedDecisionFeedbackRevision: null,
-    reason: "일정 조정",
-    requestKey: "withdraw-1",
-  })
-
-  assert.deepEqual({ ...buildRegistrationObservationWithdrawalInput({
-    trackId: "track-1",
-    workflowRevision: 9,
-    exitKind: "director_decision",
-    targetWorkflowStatus: "waiting_new_class",
-    reason: "재청강",
-    requestKey: "correct-1",
-    correction: {
-      decisionKind: "re_observation",
-      observationId: "observation-2",
-      observationRevision: 6,
-      feedbackRevision: 2,
-    },
-  }) }, {
-    trackId: "track-1",
-    expectedWorkflowRevision: 9,
-    exitKind: "director_decision",
-    targetWorkflowStatus: "waiting_new_class",
-    decisionObservationId: "observation-2",
-    expectedDecisionObservationRevision: 6,
-    expectedDecisionFeedbackRevision: 2,
-    reason: "재청강",
-    requestKey: "correct-1",
-  })
-
   const rpcNames = []
   await executeRegistrationObservationBooking({
     saveRegistrationObservationBooking: async () => {
@@ -647,49 +569,6 @@ test("observation booking plans use dedicated RPCs and exact revision ownership"
   assert.deepEqual({ ...committed.result }, { operation: "book" })
   assert.match(committed.refreshError.message, /refresh_failed/)
 
-  const reObservation = {
-    observationId: "10000000-0000-4000-8000-000000000001",
-    decisionKind: "re_observation",
-    observationRevision: 6,
-    feedbackRevision: 2,
-  }
-  assert.deepEqual({ ...getRegistrationObservationWithdrawalCorrection({
-    latestDecisionObservation: reObservation,
-    attempts: Array.from({ length: 21 }, (_, index) => ({
-      observationId: `canceled-${index + 1}`,
-      decisionKind: null,
-      revision: 1,
-      feedbackRevision: 0,
-    })),
-  }) }, {
-    decisionKind: "re_observation",
-    observationId: "10000000-0000-4000-8000-000000000001",
-    observationRevision: 6,
-    feedbackRevision: 2,
-  })
-  assert.equal(getRegistrationObservationWithdrawalCorrection({
-    latestDecisionObservation: {
-      ...reObservation,
-      decisionKind: "enrollment",
-    },
-    attempts: [{
-      observationId: "old-re-observation-inside-attempts",
-      decisionKind: "re_observation",
-      revision: 99,
-      feedbackRevision: 99,
-    }],
-  }), null)
-
-  assert.equal(reconcileRegistrationObservationWithdrawalValue({
-    currentValue: "director:enrollment_requested",
-    touched: false,
-    returnWorkflowStatus: "consultation_completed",
-  }), "return:consultation_completed")
-  assert.equal(reconcileRegistrationObservationWithdrawalValue({
-    currentValue: "director:waiting_new_class",
-    touched: true,
-    returnWorkflowStatus: "consultation_completed",
-  }), "director:waiting_new_class")
   assert.equal(canUseRegistrationObservationDetail({
     activeTrackId: "track-2",
     detailTrackId: "track-1",
@@ -698,14 +577,7 @@ test("observation booking plans use dedicated RPCs and exact revision ownership"
     activeTrackId: "track-2",
     detailTrackId: "track-2",
   }), true)
-  assert.equal(canWithdrawRegistrationObservation({
-    workflowStatus: "observation_requested",
-    currentObservation: null,
-  }), true)
-  assert.equal(canWithdrawRegistrationObservation({
-    workflowStatus: "observation_requested",
-    currentObservation: { appointmentStatus: "scheduled", status: "scheduled" },
-  }), false, "scheduled attempts must be canceled before withdrawal")
+
 })
 
 test("runtime or concealed summary gates observation detail, session, and editor work to zero", async () => {
@@ -722,107 +594,6 @@ test("runtime or concealed summary gates observation detail, session, and editor
     runtimeAvailable: true,
     observationSummaryVisible: true,
   }), true)
-})
-
-test("latest re-observation correction rejects a blank reason before any withdrawal RPC", async () => {
-  const {
-    executeRegistrationObservationWithdrawal,
-    getRegistrationObservationWithdrawalSubmitState,
-  } = await loadEditorModel()
-  assert.equal(
-    typeof getRegistrationObservationWithdrawalSubmitState,
-    "function",
-    "the editor model must own correction-reason validation",
-  )
-  assert.equal(
-    typeof executeRegistrationObservationWithdrawal,
-    "function",
-    "the editor model must block invalid withdrawal operations before the service boundary",
-  )
-
-  const submitState = getRegistrationObservationWithdrawalSubmitState({
-    correction: {
-      decisionKind: "re_observation",
-      observationId: "observation-2",
-      observationRevision: 6,
-      feedbackRevision: 2,
-    },
-    reason: "   \t ",
-    saving: false,
-    mutationCommitted: false,
-  })
-  assert.deepEqual({ ...submitState }, {
-    normalizedReason: "",
-    fieldError: "재청강 결정 정정 사유를 입력하세요.",
-    submitDisabled: true,
-  })
-
-  let rpcCalls = 0
-  const result = await executeRegistrationObservationWithdrawal(
-    submitState,
-    async () => {
-      rpcCalls += 1
-      return { changed: true }
-    },
-  )
-  assert.equal(result, null)
-  assert.equal(rpcCalls, 0)
-})
-
-test("ordinary withdrawal permits a blank reason", async () => {
-  const {
-    executeRegistrationObservationWithdrawal,
-    getRegistrationObservationWithdrawalSubmitState,
-  } = await loadEditorModel()
-  assert.equal(typeof getRegistrationObservationWithdrawalSubmitState, "function")
-  assert.equal(typeof executeRegistrationObservationWithdrawal, "function")
-
-  const ordinary = getRegistrationObservationWithdrawalSubmitState({
-    correction: null,
-    reason: "   ",
-    saving: false,
-    mutationCommitted: false,
-  })
-  assert.deepEqual({ ...ordinary }, {
-    normalizedReason: "",
-    fieldError: "",
-    submitDisabled: false,
-  })
-
-  let rpcCalls = 0
-  const ordinaryResult = await executeRegistrationObservationWithdrawal(
-    ordinary,
-    async (normalizedReason) => {
-      rpcCalls += 1
-      assert.equal(normalizedReason, "")
-      return { changed: true }
-    },
-  )
-  assert.deepEqual({ ...ordinaryResult }, { changed: true })
-  assert.equal(rpcCalls, 1)
-
-})
-
-test("re-observation correction sends only a trimmed reason", async () => {
-  const { getRegistrationObservationWithdrawalSubmitState } = await loadEditorModel()
-  assert.equal(typeof getRegistrationObservationWithdrawalSubmitState, "function")
-
-  const correction = getRegistrationObservationWithdrawalSubmitState({
-    correction: {
-      decisionKind: "re_observation",
-      observationId: "observation-2",
-      observationRevision: 6,
-      feedbackRevision: 2,
-    },
-    reason: "  일정 변경으로 다시 청강  ",
-    saving: false,
-    mutationCommitted: false,
-  })
-  assert.deepEqual({ ...correction }, {
-    normalizedReason: "일정 변경으로 다시 청강",
-    fieldError: "",
-    submitDisabled: false,
-  })
 })
 
 test("saving blocks every dialog close path", async () => {
@@ -1142,7 +913,7 @@ test("track detail loading imports and uses the centralized observation UI norma
   )
 })
 
-test("booking editor delegates feedback decisions to one dedicated slot and excludes provider actions", async () => {
+test("booking editor preserves one read-only historic slot and excludes confirmation provider actions", async () => {
   const [source, caseListSource] = await Promise.all([
     readSource("src/features/tasks/registration-observation-editor.tsx"),
     readSource("src/features/tasks/registration-case-list.tsx"),
@@ -1217,7 +988,7 @@ test("track editor loads one bounded feedback DTO only for an owned visible pane
   assert.match(loadEffect, /activeObservationFeedbackKeyRef/)
   assert.match(loadEffect, /activeObservationViewerIdRef/)
   assert.match(loadEffect, /activeObservationRuntimeVersionRef/)
-  assert.match(source, /force: true/)
+  assert.equal((source.match(/loadRegistrationObservationFeedback\(/g) || []).length, 1)
   assert.match(source, /<RegistrationObservationFeedbackPanel/)
   assert.match(source, /feedbackPanel=\{/)
   assert.match(source, /observationSummaryVisible: true/)
@@ -1225,7 +996,7 @@ test("track editor loads one bounded feedback DTO only for an owned visible pane
   assert.match(
     source,
     /activeFeedbackHistoryOnly\s*\? activeObservationFeedbackPanel\s*:\s*\(/,
-    "terminal decisions must mount the correction panel without reopening the booking editor",
+    "terminal decisions must mount the history panel without reopening the booking editor",
   )
   assert.doesNotMatch(loadEffect, /parentPhone|studentPhone|schoolName|inquiry|registrationTracks/)
 })

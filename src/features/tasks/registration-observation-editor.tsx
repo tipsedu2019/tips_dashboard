@@ -17,7 +17,6 @@ import { Label } from "@/components/ui/label"
 import { RegistrationSelect } from "./registration-select"
 import { RegistrationClassSelect } from "./registration-class-select"
 import type { OpsClassOption } from "./ops-task-service"
-import { RegistrationObservationChatActions } from "./registration-observation-chat-actions"
 import type {
   RegistrationObservationAttempt,
   RegistrationObservationManagerDetail,
@@ -31,7 +30,6 @@ import type {
   CancelRegistrationObservationInput,
   LoadRegistrationObservationSessionsInput,
   SaveRegistrationObservationBookingInput,
-  WithdrawRegistrationObservationInput,
 } from "./registration-observation-service"
 
 // registration-observation-editor-model:start
@@ -103,17 +101,6 @@ export function getRegistrationObservationEditorAttemptPlan(input: {
   return selectedAttempt ? { attempts, selectedAttempt } : null
 }
 
-export function canWithdrawRegistrationObservation(input: {
-  workflowStatus: RegistrationObservationManagerDetail["track"]["workflowStatus"]
-  currentObservation: Pick<
-    RegistrationObservationManagerDetail["attempts"][number],
-    "appointmentStatus" | "status"
-  > | null
-}) {
-  return input.workflowStatus === "observation_requested"
-    && input.currentObservation === null
-}
-
 export function getRegistrationObservationAttemptStatusLabel(
   attempt: Pick<RegistrationObservationAttempt, "appointmentStatus" | "status">,
 ) {
@@ -183,9 +170,6 @@ export function getRegistrationObservationUiErrorMessage(
     || diagnostic.includes("registration_observation_revision_combination_invalid")
   ) {
     return "청강 예약에 필요한 정보를 확인할 수 없습니다. 반과 회차를 다시 선택해 주세요."
-  }
-  if (diagnostic.includes("registration_observation_correction_reason_required")) {
-    return "재청강 결정 정정 사유를 입력하세요."
   }
   if (code === "P0002" || diagnostic.includes("registration_observation_not_found")) {
     return "청강 정보를 찾을 수 없습니다. 화면을 새로고침해 주세요."
@@ -332,115 +316,6 @@ export function buildRegistrationObservationCancelInput(input: {
   }
 }
 
-type RegistrationObservationWithdrawalCorrection = Readonly<{
-  decisionKind: string | null
-  observationId: string
-  observationRevision: number
-  feedbackRevision: number
-}>
-
-type RegistrationObservationWithdrawalDraftInput = Readonly<{
-  trackId: string
-  workflowRevision: number
-  reason: string
-  requestKey: string
-  correction: RegistrationObservationWithdrawalCorrection | null
-} & (
-  | {
-      exitKind: "return_to_previous"
-      targetWorkflowStatus:
-        | "consultation_completed"
-        | "waiting_current_class"
-        | "waiting_new_class"
-        | "waiting_next_opening"
-    }
-  | {
-      exitKind: "director_decision"
-      targetWorkflowStatus:
-        | "enrollment_requested"
-        | "waiting_current_class"
-        | "waiting_new_class"
-        | "waiting_next_opening"
-        | "not_registered"
-    }
-)>
-
-export function buildRegistrationObservationWithdrawalInput(
-  input: RegistrationObservationWithdrawalDraftInput,
-): WithdrawRegistrationObservationInput {
-  if (input.exitKind === "return_to_previous") {
-    return {
-      trackId: input.trackId,
-      expectedWorkflowRevision: input.workflowRevision,
-      exitKind: input.exitKind,
-      targetWorkflowStatus: input.targetWorkflowStatus,
-      decisionObservationId: null,
-      expectedDecisionObservationRevision: null,
-      expectedDecisionFeedbackRevision: null,
-      reason: input.reason,
-      requestKey: input.requestKey,
-    }
-  }
-  const correction = input.correction?.decisionKind === "re_observation"
-    ? input.correction
-    : null
-  return {
-    trackId: input.trackId,
-    expectedWorkflowRevision: input.workflowRevision,
-    exitKind: input.exitKind,
-    targetWorkflowStatus: input.targetWorkflowStatus,
-    decisionObservationId: correction?.observationId || null,
-    expectedDecisionObservationRevision: correction?.observationRevision ?? null,
-    expectedDecisionFeedbackRevision: correction?.feedbackRevision ?? null,
-    reason: input.reason,
-    requestKey: input.requestKey,
-  }
-}
-
-export function getRegistrationObservationWithdrawalCorrection(
-  detail: Pick<RegistrationObservationManagerDetail, "latestDecisionObservation">,
-) {
-  const latestDecision = detail.latestDecisionObservation
-  if (latestDecision?.decisionKind !== "re_observation") return null
-  return {
-    decisionKind: latestDecision.decisionKind,
-    observationId: latestDecision.observationId,
-    observationRevision: latestDecision.observationRevision,
-    feedbackRevision: latestDecision.feedbackRevision,
-  }
-}
-
-export type RegistrationObservationWithdrawalSubmitState = Readonly<{
-  normalizedReason: string
-  fieldError: string
-  submitDisabled: boolean
-}>
-
-export function getRegistrationObservationWithdrawalSubmitState(input: {
-  correction: RegistrationObservationWithdrawalCorrection | null
-  reason: string
-  saving: boolean
-  mutationCommitted: boolean
-}): RegistrationObservationWithdrawalSubmitState {
-  const normalizedReason = input.reason.trim()
-  const fieldError = input.correction?.decisionKind === "re_observation" && !normalizedReason
-    ? "재청강 결정 정정 사유를 입력하세요."
-    : ""
-  return {
-    normalizedReason,
-    fieldError,
-    submitDisabled: input.saving || input.mutationCommitted || Boolean(fieldError),
-  }
-}
-
-export async function executeRegistrationObservationWithdrawal<T>(
-  submitState: RegistrationObservationWithdrawalSubmitState,
-  operation: (normalizedReason: string) => Promise<T>,
-): Promise<T | null> {
-  if (submitState.submitDisabled) return null
-  return operation(submitState.normalizedReason)
-}
-
 export function getRegistrationObservationRequestKey(
   cache: Map<string, string>,
   scope: string,
@@ -484,17 +359,6 @@ export async function executeRegistrationObservationCommit<T>(
   } catch (refreshError) {
     return { result, refreshError }
   }
-}
-
-export function reconcileRegistrationObservationWithdrawalValue(input: {
-  currentValue: string
-  touched: boolean
-  returnWorkflowStatus: RegistrationObservationManagerDetail["track"]["observationReturnWorkflowStatus"]
-}) {
-  if (input.touched) return input.currentValue
-  return input.returnWorkflowStatus
-    ? `return:${input.returnWorkflowStatus}`
-    : "director:enrollment_requested"
 }
 
 export function isRegistrationObservationBookingDirty(input: {
@@ -601,11 +465,14 @@ export function RegistrationObservationEditor({
   const [sessionId, setSessionId] = useState(current ? sessionValue(current) : "")
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [sessionError, setSessionError] = useState("")
+  const [sessionLoadVersion, setSessionLoadVersion] = useState(0)
+  const [validationAttempted, setValidationAttempted] = useState(false)
   const [mutationError, setMutationError] = useState("")
   const [refreshError, setRefreshError] = useState("")
   const [saving, setSaving] = useState(false)
   const [committedCanonicalKey, setCommittedCanonicalKey] = useState("")
   const committedCanonicalKeyRef = useRef("")
+  const mutationInFlightRef = useRef(false)
   const requestKeysRef = useRef(new Map<string, string>())
   const saveDialogTriggerRef = useRef<HTMLButtonElement>(null)
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
@@ -714,7 +581,7 @@ export function RegistrationObservationEditor({
     }).then((nextSessions) => {
       if (!active) return
       setSessions(nextSessions)
-      setSessionId((value) => nextSessions.some((session) => sessionValue(session) === value) ? value : "")
+      setMutationError("")
     }).catch((error) => {
       if (!active) return
       setSessions([])
@@ -725,7 +592,7 @@ export function RegistrationObservationEditor({
     return () => {
       active = false
     }
-  }, [actions, canBook, classId, trackId])
+  }, [actions, canBook, classId, sessionLoadVersion, trackId])
 
   const prerequisiteError = useMemo(() => {
     if (current && (observationRevision === null || appointmentNotificationRevision === null)) {
@@ -734,18 +601,21 @@ export function RegistrationObservationEditor({
     if (!classId) return "청강할 반을 선택하세요."
     if (sessionsLoading) return "청강 회차를 불러오는 중입니다."
     if (sessionError) return sessionError
-    if (!selectedSession) return "청강 회차를 선택하세요."
+    if (!selectedSession) return sessionId
+      ? "선택한 청강 회차를 확인할 수 없습니다. 회차를 다시 선택하세요."
+      : "청강 회차를 선택하세요."
     if (!selectedSession.teacherProfileId || !selectedSession.teacherName) return "담당 선생님 정보를 확인할 수 없습니다."
     if (!selectedSession.classroomCatalogId || !selectedSession.classroomName) return "강의실 정보를 확인할 수 없습니다."
     if (!selectedSession.campus) return "캠퍼스 정보를 확인할 수 없습니다."
     return ""
-  }, [appointmentNotificationRevision, classId, current, observationRevision, selectedSession, sessionError, sessionsLoading])
+  }, [appointmentNotificationRevision, classId, current, observationRevision, selectedSession, sessionError, sessionId, sessionsLoading])
 
   async function commit(
     operation: () => Promise<RegistrationObservationMutationResult>,
     request: Readonly<{ scope: string; fingerprint: string; requestKey: string }>,
   ) {
-    if (saving || committedCanonicalKeyRef.current === canonicalMutationKey) return
+    if (mutationInFlightRef.current || committedCanonicalKeyRef.current === canonicalMutationKey) return
+    mutationInFlightRef.current = true
     setSaving(true)
     setMutationError("")
     setRefreshError("")
@@ -774,12 +644,32 @@ export function RegistrationObservationEditor({
       setMutationError(getRegistrationObservationUiErrorMessage(error, "청강 정보를 저장하지 못했습니다."))
       return null
     } finally {
+      mutationInFlightRef.current = false
       setSaving(false)
     }
   }
 
+  function validateBooking() {
+    if (!prerequisiteError) return true
+    setValidationAttempted(true)
+    setMutationError(prerequisiteError)
+    const invalidControl = !classId
+      ? '[aria-label="청강 반"]'
+      : `#registration-observation-session-${trackId}`
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(invalidControl)?.focus()
+    })
+    return false
+  }
+
+  function openSaveConfirmation() {
+    if (!validateBooking()) return
+    setMutationError("")
+    setSaveConfirmOpen(true)
+  }
+
   async function saveBooking() {
-    if (!bookingDirty || !selectedSession || prerequisiteError) return
+    if (!bookingDirty || !validateBooking() || !selectedSession) return
     const fingerprint = JSON.stringify({
       trackId,
       workflowRevision,
@@ -873,12 +763,16 @@ export function RegistrationObservationEditor({
               value={classId}
               classes={classOptions}
               disabled={saving || mutationCommitted}
+              invalid={validationAttempted && !classId}
+              describedBy={!classId ? `registration-observation-class-error-${trackId}` : undefined}
               onValueChange={(value) => {
                 setClassId(value)
                 setSessionId("")
+                setSessions([])
+                setMutationError("")
               }}
             />
-            {!classId ? <p className="text-xs text-destructive">청강할 반을 선택하세요.</p> : null}
+            {!classId ? <p id={`registration-observation-class-error-${trackId}`} className="text-xs text-destructive">청강할 반을 선택하세요.</p> : null}
           </div>
 
           {classId ? (
@@ -887,13 +781,23 @@ export function RegistrationObservationEditor({
               <RegistrationSelect
                 id={`registration-observation-session-${trackId}`}
                 aria-label="청강 회차"
+                aria-required="true"
+                aria-invalid={Boolean(prerequisiteError && !sessionsLoading) || undefined}
+                aria-describedby={prerequisiteError ? `registration-observation-session-error-${trackId}` : undefined}
                 value={sessionId}
+                selectedLabel={selectedSession ? sessionLabel(selectedSession) : sessionId ? "선택한 회차 확인 필요" : undefined}
                 placeholder={sessionsLoading ? "불러오는 중" : "회차 선택"}
                 options={sessionOptions}
                 disabled={saving || mutationCommitted || sessionsLoading}
-                onValueChange={setSessionId}
+                onValueChange={(value) => {
+                  setSessionId(value)
+                  setMutationError("")
+                }}
               />
-              {prerequisiteError ? <p className="text-xs text-destructive">{prerequisiteError}</p> : null}
+              {prerequisiteError ? <p id={`registration-observation-session-error-${trackId}`} className="text-xs text-destructive">{prerequisiteError}</p> : null}
+              {sessionError ? (
+                <Button type="button" size="form" variant="outline" disabled={saving || sessionsLoading} onClick={() => setSessionLoadVersion((value) => value + 1)}>회차 다시 불러오기</Button>
+              ) : null}
             </div>
           ) : null}
 
@@ -908,7 +812,7 @@ export function RegistrationObservationEditor({
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button size="form" ref={saveDialogTriggerRef} type="button" onClick={() => setSaveConfirmOpen(true)} disabled={saving || mutationCommitted || !bookingDirty || Boolean(prerequisiteError)}>{bookingDirty ? "청강 예약 저장" : "저장됨"}</Button>
+            <Button size="form" ref={saveDialogTriggerRef} type="button" onClick={openSaveConfirmation} disabled={saving || mutationCommitted || !bookingDirty || sessionsLoading}>{bookingDirty ? "청강 예약 저장" : "저장됨"}</Button>
             {onOpenCustomerMessage ? (
               <Button
                 type="button"
@@ -929,17 +833,13 @@ export function RegistrationObservationEditor({
       ) : null}
 
       {readOnly ? <p className="text-sm text-muted-foreground">현재 상태는 이 화면에서 변경할 수 없습니다.</p> : null}
-      {!deepLinkedAttempt && current && ["scheduled", "attended_feedback_pending"].includes(current.status) ? (
-        <RegistrationObservationChatActions observationId={current.observationId} disabled={saving || bookingDirty || mutationCommitted}
-          feedbackAvailable={Date.parse(current.endsAt) <= Date.now()} />
-      ) : null}
       {feedbackPanel}
       {receipt === "예약 저장됨" ? (
         <div role="status" className="grid gap-1 text-sm">
           <p className="font-medium text-primary">예약 저장됨</p>
         </div>
       ) : receipt ? <p role="status" className="text-sm font-medium text-primary">{receipt}</p> : null}
-      {mutationError ? <p role="alert" className="text-sm text-destructive">{mutationError}</p> : null}
+      {mutationError && !saveConfirmOpen ? <p role="alert" className="text-sm text-destructive">{mutationError}</p> : null}
       {refreshError ? <p role="alert" className="text-sm text-destructive">{refreshError}</p> : null}
 
       <Dialog open={saveConfirmOpen} onOpenChange={handleSaveConfirmOpenChange}>
@@ -954,6 +854,7 @@ export function RegistrationObservationEditor({
             <DialogTitle>청강 예약을 저장할까요?</DialogTitle>
             <DialogDescription>선택한 반과 회차로 청강 예약을 저장합니다.</DialogDescription>
           </DialogHeader>
+          {mutationError ? <p role="alert" className="text-sm text-destructive">{mutationError}</p> : null}
           <DialogFooter>
             <DialogClose asChild><Button type="button" variant="outline" disabled={saving || mutationCommitted}>돌아가기</Button></DialogClose>
             <Button type="button" onClick={() => void saveBooking()} disabled={saving || mutationCommitted || !bookingDirty}>{saving ? "저장 중" : "청강 예약 저장"}</Button>

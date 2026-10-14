@@ -20,6 +20,7 @@ import {
 } from "./registration-appointment-calendar-model"
 import {
   executeRegistrationSubjectTrackFixtureAction,
+  hasRegistrationSubjectTrackFixtureContext,
   loadRegistrationSubjectTrackFixtureAppointmentCalendarRows,
   loadRegistrationSubjectTrackFixtureCase,
   loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion,
@@ -137,6 +138,7 @@ export type OpsRegistrationWorkflowStatus =
   | "level_test_requested"
   | "consultation_requested"
   | "consultation_completed"
+  | "observation_requested"
   | "waiting_current_class"
   | "waiting_new_class"
   | "waiting_next_opening"
@@ -151,6 +153,7 @@ const OPS_REGISTRATION_WORKFLOW_STATUSES: readonly OpsRegistrationWorkflowStatus
   "level_test_requested",
   "consultation_requested",
   "consultation_completed",
+  "observation_requested",
   "waiting_current_class",
   "waiting_new_class",
   "waiting_next_opening",
@@ -164,7 +167,6 @@ const OPS_REGISTRATION_WORKFLOW_STATUSES: readonly OpsRegistrationWorkflowStatus
 const REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES:
   readonly RegistrationObservationTrackWorkflowStatus[] = [
     ...OPS_REGISTRATION_WORKFLOW_STATUSES,
-    "observation_requested",
     "observation_feedback_pending",
     "observation_completed",
   ]
@@ -795,6 +797,19 @@ export type RouteRegistrationEnrollmentDecisionInput = {
 }
 export type SaveRegistrationEnrollmentRowsInput = {
   trackId: string; rows: RegistrationEnrollmentRowInput[]; requestKey: string
+}
+export type SaveRegistrationEnrollmentDetailsInput = SaveRegistrationEnrollmentRowsInput & {
+  expectedRows: RegistrationEnrollmentRowInput[]
+  expectedWorkflowRevision: number
+}
+export type RegistrationEnrollmentDetailsSaveResponse = {
+  trackId: string
+  rows: RegistrationEnrollmentRowInput[]
+  externalReconciliationRequired: boolean
+  workflowStatus: RegistrationObservationTrackWorkflowStatus
+  workflowRevision: number
+  workflowStatusEnteredAt: string
+  statusChanged: boolean
 }
 export type ClaimRegistrationAdmissionMessageInput = { taskId: string; messageRequestKey: string }
 export type ReconcileRegistrationAdmissionMessageInput = {
@@ -1893,6 +1908,55 @@ function registrationEnrollmentRowPayload(row: RegistrationEnrollmentRowInput) {
   }
 }
 
+function guardedRegistrationEnrollmentRowsAreValid(
+  returnedRows: unknown,
+  requestedRows: readonly RegistrationEnrollmentRowInput[],
+  externalized: boolean,
+): returnedRows is Row[] {
+  if (!Array.isArray(returnedRows) || returnedRows.length !== requestedRows.length) return false
+  const nullableUuid = (item: unknown) => item === null
+    || (typeof item === "string" && UUID_PATTERN.test(item))
+  const nullableString = (item: unknown) => item === null
+    || (typeof item === "string" && item.trim().length > 0)
+  const requested = new Map(requestedRows.map(row => [normalizeUuid(row.classId), row]))
+  if (requested.has(null) || requested.size !== requestedRows.length) return false
+  const returnedClasses = new Set<string>()
+  for (const row of returnedRows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)
+      || typeof row.classId !== "string" || !UUID_PATTERN.test(row.classId)
+      || !nullableUuid(row.id) || (!externalized && row.id === null)
+      || !nullableUuid(row.textbookId) || !nullableUuid(row.classStartLessonSessionId)
+      || !nullableUuid(row.classStartSourceObservationId)
+      || !nullableString(row.classStartSessionKey) || !nullableString(row.classStartSession)
+      || !Number.isInteger(row.sortOrder) || row.sortOrder < 0
+      || !Array.isArray(row.textbookIds)
+      || row.textbookIds.some((id: unknown) => typeof id !== "string" || !UUID_PATTERN.test(id))) return false
+    const classId = row.classId.toLowerCase()
+    const request = requested.get(classId)
+    if (!request || returnedClasses.has(classId)) return false
+    returnedClasses.add(classId)
+    const books = row.textbookIds.map((id: string) => id.toLowerCase())
+    const requestedBooks = [...new Set((request.textbookIds
+      || [request.textbookId].filter(Boolean)).map(normalizeUuid))]
+    if (books.length !== new Set(books).size
+      || normalizeUuid(row.textbookId) !== (books[0] || null)
+      || JSON.stringify(books) !== JSON.stringify(requestedBooks)
+      || (normalizeUuid(request.id) && normalizeUuid(request.id) !== normalizeUuid(row.id))
+      || row.sortOrder !== request.sortOrder
+      || nullableText(request.classStartDate) !== row.classStartDate
+      || nullableText(request.classStartSessionKey) !== row.classStartSessionKey
+      || normalizeUuid(request.classStartSourceObservationId) !== normalizeUuid(row.classStartSourceObservationId)) return false
+    if (row.classStartDate === null) {
+      if (row.classStartSessionKey !== null || row.classStartSession !== null
+        || row.classStartLessonSessionId !== null || row.classStartSourceObservationId !== null) return false
+    } else if (typeof row.classStartDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(row.classStartDate)
+      || !Number.isFinite(Date.parse(`${row.classStartDate}T00:00:00Z`))
+      || row.classStartSessionKey === null
+      || (row.classStartSession === null && !(externalized && row.classStartSourceObservationId !== null))) return false
+  }
+  return true
+}
+
 function requireRequestKey(input: unknown) {
   const requestKey = text(input)
   if (!requestKey) throw new Error("A non-empty request key is required.")
@@ -1955,6 +2019,7 @@ function missingSchemaError(error: unknown) {
 function missingColumnError(error: unknown) {
   if (!error || typeof error !== "object") return false
   const code = "code" in error ? text(error.code).toUpperCase() : ""
+  if (["42501", "PGRST300", "PGRST301", "PGRST302", "PGRST303"].includes(code)) return false
   if (code === "42703" || code === "PGRST204") return true
   const message = "message" in error ? text(error.message).toLowerCase() : ""
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"))
@@ -2966,7 +3031,13 @@ export function createRegistrationTrackService(
 
     const request = measure("registration:option-summary", false, async (metrics) => {
       const [profiles, classes, textbooks, teachers, schools] = await Promise.all([
-        readWithFallback("profiles", ["id,name,email,role,login_id", "id,name"], metrics),
+        readWithFallback("profiles", [
+          "id,name,email,role,login_id",
+          "id,name,email,role",
+          "id,name,role,login_id",
+          "id,name,role",
+          "id,name",
+        ], metrics),
         readWithFallback("classes", [
           "id,name,subject,grade,teacher,room,textbook_ids,status",
           "id,name,subject,grade,teacher,room,textbook_ids",
@@ -2978,6 +3049,7 @@ export function createRegistrationTrackService(
         ], metrics),
         readWithFallback("teacher_catalogs", [
           "id,name,subjects,is_visible,sort_order,profile_id,account_email",
+          "id,name,subjects,is_visible,sort_order,profile_id",
           "id,name,subjects,is_visible,sort_order",
         ], metrics),
         readWithFallback("academic_schools", ["id,name,category,sort_order"], metrics),
@@ -3803,21 +3875,54 @@ export function createRegistrationTrackService(
     }
   }
 
-  async function saveRegistrationEnrollmentDetails(input: {
-    trackId: string
-    rows: RegistrationEnrollmentRowInput[]
-    requestKey: string
-  }): Promise<{ trackId: string; rows: RegistrationEnrollmentRowInput[]; externalReconciliationRequired: boolean }> {
+  async function saveRegistrationEnrollmentDetails(
+    input: SaveRegistrationEnrollmentDetailsInput,
+  ): Promise<RegistrationEnrollmentDetailsSaveResponse> {
+    if (!Array.isArray(input.expectedRows)
+      || !Number.isInteger(input.expectedWorkflowRevision)
+      || input.expectedWorkflowRevision < 1) {
+      throw new Error("registration_enrollment_details_snapshot_required")
+    }
     const payloadRows = input.rows.map(registrationEnrollmentRowPayload)
-    const result = await callRpc<Row>("save_registration_enrollment_details_v1", {
+    const result = await callRpc<Row>("save_registration_enrollment_details_guarded_v2", {
       p_track_id: input.trackId,
       p_rows: payloadRows,
+      p_expected_rows: input.expectedRows.map(registrationEnrollmentRowPayload),
+      p_expected_workflow_revision: input.expectedWorkflowRevision,
       p_request_key: requireRequestKey(input.requestKey),
     })
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      throw new Error("registration_enrollment_details_response_invalid")
+    }
+    const returnedWorkflowStatus = value(result, "workflow_status", "workflowStatus")
+    const returnedWorkflowRevision = value(result, "workflow_revision", "workflowRevision")
+    const returnedTrackId = value(result, "track_id", "trackId")
+    const returnedRows = value(result, "rows")
+    const returnedStatusChanged = value(result, "status_changed", "statusChanged")
+    const returnedExternalized = value(result, "external_reconciliation_required", "externalReconciliationRequired")
+    const returnedStatusEnteredAt = value(result, "workflow_status_entered_at", "workflowStatusEnteredAt")
+    if (returnedTrackId !== input.trackId
+      || typeof returnedWorkflowStatus !== "string"
+      || !isRegistrationObservationTrackWorkflowStatus(returnedWorkflowStatus)
+      || typeof returnedWorkflowRevision !== "number"
+      || !Number.isInteger(returnedWorkflowRevision)
+      || typeof returnedStatusChanged !== "boolean"
+      || typeof returnedExternalized !== "boolean"
+      || returnedWorkflowRevision !== input.expectedWorkflowRevision + (returnedStatusChanged ? 1 : 0)
+      || (returnedStatusChanged && (returnedWorkflowStatus !== "enrollment_requested" || returnedExternalized))
+      || typeof returnedStatusEnteredAt !== "string"
+      || !Number.isFinite(Date.parse(returnedStatusEnteredAt))
+      || !guardedRegistrationEnrollmentRowsAreValid(returnedRows, input.rows, returnedExternalized)) {
+      throw new Error("registration_enrollment_details_response_invalid")
+    }
     return {
-      trackId: text(value(result, "track_id", "trackId")),
-      rows: rows(value(result, "rows")).map(mapRegistrationEnrollmentRowInput),
-      externalReconciliationRequired: Boolean(value(result, "external_reconciliation_required", "externalReconciliationRequired")),
+      trackId: returnedTrackId,
+      rows: returnedRows.map(mapRegistrationEnrollmentRowInput),
+      externalReconciliationRequired: returnedExternalized,
+      workflowStatus: returnedWorkflowStatus,
+      workflowRevision: returnedWorkflowRevision,
+      workflowStatusEnteredAt: returnedStatusEnteredAt,
+      statusChanged: returnedStatusChanged,
     }
   }
 
@@ -4331,6 +4436,11 @@ export function loadAssignedScienceConsultationClassOptions(
 export function createRegistrationCase(
   input: Parameters<typeof defaultRegistrationTrackService.createRegistrationCase>[0],
 ): Promise<RegistrationCaseCreateResponse> {
+  if (hasRegistrationSubjectTrackFixtureContext()) {
+    const error = new Error("샘플 화면에서는 새 등록 정보를 저장할 수 없습니다.") as Error & { code: string }
+    error.code = "registration_subject_track_fixture_explicit_client_required"
+    return Promise.reject(error)
+  }
   return defaultRegistrationTrackService.createRegistrationCase(input)
 }
 

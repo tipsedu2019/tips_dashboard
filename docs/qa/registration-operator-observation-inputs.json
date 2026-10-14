@@ -1,0 +1,233 @@
+{
+  "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
+  "sourceSha256": "2d6981864e4ddfbb84e391d954e3cae3fd3e0a0a7882e8993408bf3a0ce619ae",
+  "sourcePathCount": 45,
+  "source": [
+    {
+      "path": "scripts/lib/ai-producer-receipt.mjs",
+      "exists": true,
+      "sha256": "92fca4e6e6870bc0088e98a160e10145e2f1264a3d3441dbfd5142633aa7fa5f"
+    },
+    {
+      "path": "scripts/verify-ops-task-browser-workflow.mjs",
+      "exists": true,
+      "sha256": "93cb87ebcc204ac4c4282604b218fa7747464ecb4de33e91d060a8a730ed315d"
+    },
+    {
+      "path": "scripts/verify-registration-customer-message-browser.mjs",
+      "exists": true,
+      "sha256": "b18c059300478d3888fecd3cac56a420d825c66215832e656642cc4f14402f50"
+    },
+    {
+      "path": "src/features/tasks/registration-application-model.ts",
+      "exists": true,
+      "sha256": "47ca276f44c0b93ca03191f188675fc4410f7c7aca73cd0a2c31427403638b7f"
+    },
+    {
+      "path": "src/features/tasks/registration-application-track-actions.tsx",
+      "exists": true,
+      "sha256": "8f157c18935e4cd5ac555462b05d0c7e1c06c940010e31c898dcac79018dcc31"
+    },
+    {
+      "path": "src/features/tasks/registration-case-list.tsx",
+      "exists": true,
+      "sha256": "7129cd9abd2b022e72e9804fe55fba625ccc847e5ec20c651c1b8f58ccbf24c2"
+    },
+    {
+      "path": "src/features/tasks/registration-class-select.tsx",
+      "exists": true,
+      "sha256": "5ec4d73d8527fff8f5a65184a90c6c3dddc2921d5cafe5624a89b0140a078060"
+    },
+    {
+      "path": "src/features/tasks/registration-enrollment-editor.tsx",
+      "exists": true,
+      "sha256": "983a5979907ed25e3a46e51380cb9beb0b4054d37f18d1c57e0d6d9d69a5658e"
+    },
+    {
+      "path": "src/features/tasks/registration-observation-chat-actions.tsx",
+      "exists": false,
+      "sha256": null
+    },
+    {
+      "path": "src/features/tasks/registration-observation-editor.tsx",
+      "exists": true,
+      "sha256": "7cca9059e7c16b36d9f0cd976bc1e9fb77dd7afe9c36806973b300c454545401"
+    },
+    {
+      "path": "src/features/tasks/registration-observation-feedback-panel.tsx",
+      "exists": true,
+      "sha256": "30501dee1eafda2cd9e1e8bd07808eda7a6d592e380e503d0df1cee1eea477ad"
+    },
+    {
+      "path": "src/features/tasks/registration-track-editor.tsx",
+      "exists": true,
+      "sha256": "9e5323fe6e579ec4c68e4315f48e7aba1fbf48564fffeb07c603564ad2c8f39f"
+    },
+    {
+      "path": "src/features/tasks/registration-track-fixture-runtime.ts",
+      "exists": true,
+      "sha256": "d741b9a79110eb06b8a31e294eddb26e05e7d14049180a43fd7e9e66024be585"
+    },
+    {
+      "path": "src/features/tasks/registration-track-fixtures.ts",
+      "exists": true,
+      "sha256": "4ea1d9ed3cf29d629f53f1a76c990c0347cabf39dc1f2d7ee3978506b37ebb1a"
+    },
+    {
+      "path": "src/features/tasks/registration-track-model.js",
+      "exists": true,
+      "sha256": "c9fb97ce93e4197a0066ca48226fc438eaff38882b59ca864d6da1a742300a33"
+    },
+    {
+      "path": "src/features/tasks/registration-track-service.ts",
+      "exists": true,
+      "sha256": "d11a92093a2d498407f576b7fcecf97882ea714c5000871bdd545c002c96b9d6"
+    },
+    {
+      "path": "src/features/tasks/registration-workflow-status.d.ts",
+      "exists": true,
+      "sha256": "07f3bd5744b9c296710f2c0236dc3ed0e5629b7d022894073b9fffd92aeee42e"
+    },
+    {
+      "path": "src/features/tasks/registration-workflow-status.js",
+      "exists": true,
+      "sha256": "272c405f7df5a861f2bce5957bc01c9313308d0307c20cb0db566cefe8447181"
+    },
+    {
+      "path": "src/lib/query-surface-budget.js",
+      "exists": true,
+      "sha256": "1947252a46d9bc9c8e532cfc6cc4eddad6dbb9383a59f50e7042a9a7e2306ce7"
+    },
+    {
+      "path": "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql",
+      "exists": true,
+      "sha256": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3"
+    },
+    {
+      "path": "supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
+      "exists": true,
+      "sha256": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
+    },
+    {
+      "path": "supabase/tests/registration_enrollment_guarded_save_race.spec",
+      "exists": true,
+      "sha256": "c59b3977bf67a175b87a96b3afc7b421396d3d0c2b402825978757395c60164c"
+    },
+    {
+      "path": "supabase/tests/registration_enrollment_guarded_save_test.sql",
+      "exists": true,
+      "sha256": "3b4e02f358d4dc37dd49f4c47ded0cb36cd8df6ef1370fa39104b85d040e55b8"
+    },
+    {
+      "path": "tests/academic-operations-numbered-pagination.test.mjs",
+      "exists": true,
+      "sha256": "f58330959f051166585da117ff33f33df450d50cdb5dfb5ccd59bb8100bc5577"
+    },
+    {
+      "path": "tests/helpers/ai-producer-receipt.test.mjs",
+      "exists": true,
+      "sha256": "a0fe07798e873e205a14d494c8b45263fe97543e277483857d41d03ed6a2e700"
+    },
+    {
+      "path": "tests/isolated-supabase-db-tests.test.mjs",
+      "exists": true,
+      "sha256": "db07fcfab552f408df689577c5563c1af42514561cf43d99ba1194cf2c3307c6"
+    },
+    {
+      "path": "tests/ops-task-numbered-pagination.test.mjs",
+      "exists": true,
+      "sha256": "c6d64c656185363012c86cbdb2bafe33f4f482c89fe06dcf9297a38617842c92"
+    },
+    {
+      "path": "tests/ops-task-workspace.test.mjs",
+      "exists": true,
+      "sha256": "b9559ec6548d77982587fe85dc6b70ea1e91a5a42f956ddfb04a548afa1aca66"
+    },
+    {
+      "path": "tests/probe-registration-enrollment-guarded-save-concurrency.mjs",
+      "exists": true,
+      "sha256": "43650f87f2fa2b354d079de0be4e5598c5e959a9df35ca6c776a27aee4cc8ad4"
+    },
+    {
+      "path": "tests/query-surface-budget.test.mjs",
+      "exists": true,
+      "sha256": "6c96e1ca2799ce3ba1af806d2e99630c83e9f5b249909c02efd798468cdacfb7"
+    },
+    {
+      "path": "tests/registration-application-model.test.mjs",
+      "exists": true,
+      "sha256": "11cf4df50d1fd18241dd5a0f5737355dfa224e327c20970f6e637a79f1286161"
+    },
+    {
+      "path": "tests/registration-browser-verifier-contract.test.mjs",
+      "exists": true,
+      "sha256": "baba8a15c067ad266d0a925a8f5969053bbc61beafb68dc473ee0c9f8586ebee"
+    },
+    {
+      "path": "tests/registration-case-fixture-save-boundary.test.mjs",
+      "exists": true,
+      "sha256": "c20b2b56b8b54314387af1124608c3bde712aac339d160ae4064c73bc5f88ee0"
+    },
+    {
+      "path": "tests/registration-enrollment-guarded-save.test.mjs",
+      "exists": true,
+      "sha256": "fcfa57415590034f351fa32f0831a9cc2c9752be2843bebca7bc09724ee2995e"
+    },
+    {
+      "path": "tests/registration-enrollment-race-probe.test.mjs",
+      "exists": true,
+      "sha256": "3d730e25824f812326b2b29c81e1472d0c88723c35ee14e6b49b560a3f27a76c"
+    },
+    {
+      "path": "tests/registration-management-notification-actions.test.mjs",
+      "exists": true,
+      "sha256": "26dc094bd13a959aca58bee85d1f4f468c01e19f884e918cbe8b0cf8e548fdda"
+    },
+    {
+      "path": "tests/registration-observation-draft-navigation.test.mjs",
+      "exists": true,
+      "sha256": "df489ae7d9890fe39fac29dad4571e089d061dc0af120c0f36810badceb1463f"
+    },
+    {
+      "path": "tests/registration-observation-feedback-ui.test.mjs",
+      "exists": true,
+      "sha256": "c4abb6469602ee5b3c96fd667b196f1d94e8ce3ddb58d02e0879140019f8fc21"
+    },
+    {
+      "path": "tests/registration-observation-teacher-route.test.mjs",
+      "exists": true,
+      "sha256": "72e024458435a6b3204f2f53af7f34957bf32967dced629827dd4d288c3803d0"
+    },
+    {
+      "path": "tests/registration-observation-workspace.test.mjs",
+      "exists": true,
+      "sha256": "5178cdb48ef16a341fcb6bdc13e919532c7403378b9c330f2ad15fd9ca4ca3b1"
+    },
+    {
+      "path": "tests/registration-operator-catalog-fallback.test.mjs",
+      "exists": true,
+      "sha256": "609ffcc2b3af3a2994cff0e15e2a4ad200bbddf21b0917bcf889add8345ee166"
+    },
+    {
+      "path": "tests/registration-track-fixtures.test.mjs",
+      "exists": true,
+      "sha256": "86aa129aff45fc009a94cd193144cead8165a8de69fdc7d54432989725344ac2"
+    },
+    {
+      "path": "tests/registration-track-service.test.mjs",
+      "exists": true,
+      "sha256": "32c0dcf241782c99ca0710c69bc140d740283eec1e2d30756a368eefbe4e95d6"
+    },
+    {
+      "path": "tests/registration-track-workspace.test.mjs",
+      "exists": true,
+      "sha256": "9889ce85ad053ee9483e1d2ec687a41edf46727a8cc4343c3054a622af8a114e"
+    },
+    {
+      "path": "tests/registration-workflow-status.test.mjs",
+      "exists": true,
+      "sha256": "6ca7e94badf204fa24b46e0d76fedcb0199ffd72b5ad176745bde6fb49c2cd9b"
+    }
+  ],
+  "qualification": "One integrated candidate; original 42 paths plus three browser fixture-identity consumers. Documentation is outside the source digest. SQL remains candidate; DB verification not yet executed."
+}

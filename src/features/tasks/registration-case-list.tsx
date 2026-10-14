@@ -179,7 +179,8 @@ function RegistrationTrackStatusControl({
   disabled: boolean
   onStatusChange: RegistrationCaseListProps["onStatusChange"]
 }) {
-  if (isRegistrationObservationWorkflowStatus(track.workflowStatus)) {
+  if (isRegistrationObservationWorkflowStatus(track.workflowStatus)
+    && track.workflowStatus !== "observation_requested") {
     return <RegistrationTrackStatusBadge status={track.workflowStatus} />
   }
   const options = getRegistrationInlineWorkflowStatusOptions({
@@ -206,7 +207,9 @@ function RegistrationTrackStatusControl({
         size="sm"
         onValueChange={(value) => {
           const nextStatus = options.find((option) => option.value === value)?.value
-          if (nextStatus) onStatusChange(track, nextStatus)
+          if (nextStatus
+            && nextStatus !== "observation_feedback_pending"
+            && nextStatus !== "observation_completed") onStatusChange(track, nextStatus)
         }}
         className="h-8 w-full min-w-0 border-transparent bg-transparent px-2 text-xs font-medium text-primary shadow-none hover:border-border hover:bg-muted/40 focus-visible:ring-2 disabled:cursor-wait disabled:opacity-60"
       />

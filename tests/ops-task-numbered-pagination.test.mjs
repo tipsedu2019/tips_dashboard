@@ -990,7 +990,7 @@ for (const navigationMode of ['native', 'legacy']) test(`registration ${navigati
   assert.equal(page.requests.length, 0);
 });
 
-for (const mode of ['booking', 'decision']) test(`real registration ${mode} child protects parent close, subject replacement and remaining sibling drafts`, async t => {
+for (const mode of ['booking']) test(`real registration ${mode} child protects parent close, subject replacement and remaining sibling drafts`, async t => {
   const env = process.env.NODE_ENV; process.env.NODE_ENV = 'test'; t.after(() => { process.env.NODE_ENV = env; });
   const page = await workspace(t, { workspace: 'registration', observationDraftMode: mode, search: `?fixture=registration-subject-tracks&fixtureRole=staff&observationDraftQa=${mode}` });
   await settleDraftUi(() => document.querySelector('[data-testid="registration-case-desktop-list"] [data-registration-case-row]').click());
@@ -1022,6 +1022,75 @@ for (const mode of ['booking', 'decision']) test(`real registration ${mode} chil
   assert.equal(routes.length, 0); assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
   await settleDraftUi(() => draftAction('계속 편집'));
   assert.equal(page.requests.length, 0);
+});
+
+test('real registration legacy observation history is read-only and survives parent drafts', async t => {
+  const env = process.env.NODE_ENV; process.env.NODE_ENV = 'test'; t.after(() => { process.env.NODE_ENV = env; });
+  const page = await workspace(t, { workspace: 'registration', observationDraftMode: 'decision', search: '?fixture=registration-subject-tracks&fixtureRole=staff&observationDraftQa=decision' });
+  await settleDraftUi(() => document.querySelector('[data-testid="registration-case-desktop-list"] [data-registration-case-row]').click());
+  const app = () => currentComponentProps('RegistrationApplication');
+  const trackId = '20000000-0000-4000-8000-000000000001';
+  await settleDraftUi(() => app().onFocusTrack(trackId));
+  const manager = () => currentComponentProps('RegistrationObservationEditor', props => props.trackId === trackId).detail;
+  const managerBefore = structuredClone(manager());
+  assert.equal(managerBefore.currentObservation.status, 'completed');
+  assert.equal(managerBefore.attempts.length, 1);
+  const observationId = managerBefore.currentObservation.observationId;
+  const feedback = () => currentComponentProps('RegistrationObservationFeedbackPanel', props => props.detail.observationId === observationId).detail;
+  const feedbackBefore = structuredClone(feedback());
+  const caseBefore = structuredClone(app().detail);
+  assert.equal(feedbackBefore.attendance, 'attended');
+  assert.equal(feedbackBefore.suitabilityResult, 'fit');
+  assert.equal(feedbackBefore.decisionKind, null);
+  assert.ok(feedbackBefore.feedbackReason);
+  assert.ok(feedbackBefore.className);
+  assert.ok(feedbackBefore.teacherName);
+
+  const assertReadOnlyHistory = () => {
+    const history = document.querySelector(`section[aria-labelledby="observation-review-${observationId}"]`);
+    assert.ok(history, 'existing observation history remains visible');
+    assert.equal(history.querySelector('h3').textContent, '기존 청강 이력');
+    assert.ok(history.textContent.includes('청강 기록 완료'));
+    assert.ok(history.textContent.includes(feedbackBefore.className));
+    assert.ok(history.textContent.includes(feedbackBefore.teacherName));
+    const value = label => {
+      const term = [...history.querySelectorAll('dt')].find(node => node.textContent === label);
+      assert.ok(term, `history field ${label}`);
+      return term.nextElementSibling.textContent;
+    };
+    assert.equal(value('출석 이력'), '참석');
+    assert.equal(value('원장 결정'), '미결정');
+    assert.ok(history.querySelector('section[aria-label="기존 피드백 기록"]'));
+    assert.equal(value('적합 여부'), '적합');
+    assert.equal(value('기존 사유'), feedbackBefore.feedbackReason);
+    assert.equal(history.querySelector('button, input, select, textarea, form, [role="combobox"]'), null, 'historical feedback has no editing controls');
+    assert.equal(document.querySelector('[id^="observation-decision-"]'), null, 'retired decision control stays absent');
+    assert.equal(document.querySelector('[aria-label="청강 반"], [aria-label="청강 회차"]'), null, 'completed history has no booking editor');
+    assert.equal([...document.querySelectorAll('button')].some(button => ['청강 확인', '참석 확인'].includes(button.textContent.trim())), false, 'retired confirmation actions stay absent');
+    assert.deepStrictEqual(structuredClone(manager()), managerBefore, 'manager history and revisions are preserved');
+    assert.deepStrictEqual(structuredClone(feedback()), feedbackBefore, 'legacy feedback is preserved');
+    assert.deepStrictEqual(structuredClone(app().detail), caseBefore, 'canonical case data is preserved');
+  };
+  assertReadOnlyHistory();
+  assert.equal(unloadIsBlocked(), false, 'viewing historical feedback does not create a draft');
+  const { requestAppNavigation } = page.load('src/lib/guarded-navigation.ts'); const routes = [];
+  await settleDraftUi(() => requestAppNavigation(() => routes.push('history-only')));
+  assert.deepEqual(routes, ['history-only']);
+  assert.equal(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'), null);
+
+  const memo = () => document.querySelector('section[aria-label="등록 문의 정보"] textarea');
+  assert.ok(memo()); assert.equal(memo().disabled, false);
+  const draft = '합성 부모 메모 보존';
+  await settleDraftUi(() => memo()[Object.keys(memo()).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: draft } }));
+  assert.equal(unloadIsBlocked(), true, 'current inquiry drafts retain their navigation guard');
+  await settleDraftUi(() => requestAppNavigation(() => routes.push('outside')));
+  assert.deepEqual(routes, ['history-only']);
+  assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
+  await settleDraftUi(() => draftAction('계속 편집'));
+  assert.equal(memo().value, draft, 'cancelling navigation preserves the current inquiry draft');
+  assert.equal(unloadIsBlocked(), true);
+  assertReadOnlyHistory();
+  assert.equal(page.requests.length, 0, 'history viewing and local drafts do not issue RPCs');
 });
 
 test('a new inline score draft uses the latest accepted server row after an earlier draft was reverted', async t => {

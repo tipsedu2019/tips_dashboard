@@ -168,8 +168,8 @@ test("read-only coverage reopens calendar and list cases without persistent acti
   assert.match(list, /getByRole\("listitem"/)
   assert.match(list, /getByRole\("row"\)/)
   assert.match(list, /registrationCaseRow\.click\(\)/)
-  assert.match(verifier, /openFixtureCaseFromList\(\{ studentName: "김예린"[\s\S]*?viewLabel: "상담"/)
-  assert.match(verifier, /openFixtureCaseFromList\(\{ studentName: "서지안"[\s\S]*?viewLabel: "완료"/)
+  assert.match(verifier, /openFixtureCaseFromList\(\{ studentName: "합성인물05"[\s\S]*?viewLabel: "상담"/)
+  assert.match(verifier, /openFixtureCaseFromList\(\{ studentName: "합성인물11"[\s\S]*?viewLabel: "완료"/)
 
   assert.doesNotMatch(verifier, /saveCreateButton|createdResult|예약 저장[^\n]*click\(|입학 처리 시작[^\n]*click\(/)
 })

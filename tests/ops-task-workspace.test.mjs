@@ -1080,10 +1080,10 @@ test("registration keeps the observation tab in its fixed position before runtim
     "RegistrationTrackStatusControl",
     "REGISTRATION_WORKFLOW_STATUS_LABELS",
     "getRegistrationInlineWorkflowStatusOptions",
-    "if (isRegistrationObservationWorkflowStatus(track.workflowStatus))",
     "const nextStatus = options.find((option) => option.value === value)?.value",
-    "if (nextStatus) onStatusChange(track, nextStatus)",
   ]);
+  assert.match(caseListSource, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)[\s\S]*?track\.workflowStatus !== "observation_requested"[\s\S]*?return <RegistrationTrackStatusBadge/);
+  assert.match(caseListSource, /if \(nextStatus[\s\S]*?nextStatus !== "observation_feedback_pending"[\s\S]*?nextStatus !== "observation_completed"[\s\S]*?onStatusChange\(track, nextStatus\)/);
   assert.ok(!caseListSource.includes("value as OpsRegistrationWorkflowStatus"));
 });
 
@@ -3292,6 +3292,12 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "<TransferTuitionAdjustmentPanel",
     "adjustment={transferTuitionAdjustment}",
   ]);
+  const counselorGroupSource = source.match(/const TRANSFER_COUNSELOR_GROUPS = \[([\s\S]*?)\] as const/);
+  assert.ok(counselorGroupSource, "transfer workflow keeps its counselor group configuration");
+  const counselorGroups = [...counselorGroupSource[1].matchAll(/\{ label: "([^"]+)", value: "([^"]+)" \}/g)];
+  assert.deepEqual(counselorGroups.map((group) => group[1]), ["영어", "수학 고등부", "수학 초중등부"]);
+  assert.ok(counselorGroups.every((group) => group[2].split(",").every((name) => name.trim().length > 0)),
+    "every counselor group retains non-empty assigned counselor names");
   assertIncludesAll(source, [
     "function getTransferTuitionAdjustment",
     "getSchedulePlanSessions(classItem)",
@@ -3329,9 +3335,10 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "수업계획표 상의 진도",
     "관리팀으로부터 수령한 교재 중 위 학생에게 아직 배부되지 않은 교재가 있다면 입력하고, 전반신청서를 제출하는 즉시 해당 교재를 관리팀에게 반납해 주세요.",
     "청구 예정 교재 중(전반 후 수업의 현재 진행 교재) 위 학생에게 배부하지 않을 교재가 있다면 입력해 주세요.",
-    "강부희, 김민경, 정보영",
-    "양소윤",
-    "강정은",
+    "const TRANSFER_COUNSELOR_GROUPS = [",
+    'label: "영어"',
+    'label: "수학 고등부"',
+    'label: "수학 초중등부"',
     "전 진행률",
     "후 잔여진행률",
     "환불/이월",
@@ -3341,7 +3348,7 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "border-amber-300 bg-amber-50",
   ]);
   assert.doesNotMatch(source, /전 항목은 전 선생님이 직접 입력하거나 후 선생님에게 대신 입력요청/);
-  assert.doesNotMatch(source, /영어 원장\(강부희, 김민경, 정보영\)/);
+  assert.doesNotMatch(source, /영어 원장\([^)]*\)/);
   assert.doesNotMatch(source, /고등부: 소윤T/);
   assert.doesNotMatch(source, /초중등부: 정은T/);
   assert.match(
