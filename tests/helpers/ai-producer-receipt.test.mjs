@@ -164,7 +164,7 @@ test('timetable validation is exactly pinned without changing earlier migration 
 });
 test('close candidate pins reject each missing, reordered, draft or changed migration and preserve regression source closure',async()=>{
  const current=await snapshotAiSource();
- assert.equal(TIMETABLE_CLOSE_MIGRATIONS.length,3);
+ assert.equal(TIMETABLE_CLOSE_MIGRATIONS.length,4);
  assert.deepEqual(AI_SQL_TESTS.slice(AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+1,
   AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+4),timetableCloseTests);
  for(const path of timetableCloseTests){
@@ -181,7 +181,7 @@ test('close candidate pins reject each missing, reordered, draft or changed migr
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.deepEqual(original.orderedNewMigrations.slice(-3),TIMETABLE_CLOSE_MIGRATIONS);
+  assert.deepEqual(original.orderedNewMigrations.slice(-4),TIMETABLE_CLOSE_MIGRATIONS);
   for(const pin of TIMETABLE_CLOSE_MIGRATIONS){
    for(const mutate of [
     (rows,i)=>rows.splice(i,1),
@@ -321,7 +321,7 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,170);
+  assert.equal(original.orderedNewMigrations.length,171);
   const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
