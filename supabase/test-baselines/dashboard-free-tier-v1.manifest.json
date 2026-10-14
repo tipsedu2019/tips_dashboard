@@ -839,6 +839,21 @@
       "fileName": "20261012155755_timetable_validation_date_reuse.sql",
       "status": "final",
       "sha256": "83ec63aad313c61b6c2205ce4748a0707b1f478a424e5e6c67d92fb4b27c9e82"
+    },
+    {
+      "fileName": "20261013043948_class_close_gateway_noop_validation_reuse.sql",
+      "status": "final",
+      "sha256": "8c6c0897694d935bbcb276d19ffdf8376146d42fe7da767d9508c6d626ef8886"
+    },
+    {
+      "fileName": "20261013070534_timetable_reader_explicit_native_resolution.sql",
+      "status": "final",
+      "sha256": "cf8bec62963545e209ea4d18c5b7276ff75a62e93fac1e5bddbb55ab7c5922c0"
+    },
+    {
+      "fileName": "20261013193200_timetable_shared_validation_workset.sql",
+      "status": "final",
+      "sha256": "f5df6c1d0494ff8f0d5ad75251e1b3592ee5a14b7a532eb43534413976886559"
     }
   ]
 }

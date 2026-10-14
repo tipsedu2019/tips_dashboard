@@ -3,18 +3,29 @@ select no_plan();
 
 -- Synthetic references isolate the final validator's computational cost and
 -- semantics. These transaction-local probe replacements roll back afterwards.
+select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),'sha256'),'hex'),
+ 'f947041f7ac55db09b251ebfe81862124c52ea2693fc9fdb242bbb0751bcde14',
+ 'date coverage assertions execute the exact final shared-workset validator');
+select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.timetable_effective_workset_date_v1(jsonb,date,dashboard_private.timetable_validation_row_v1[])'::regprocedure),'sha256'),'hex'),
+ '3d456b6b5af3469e8ed5e00dd0641e0a4afca12b5eb61e37d4833611195b6956',
+ 'date coverage probe delegates to the exact final workset evaluator');
 create temp table validation_probe(next_reference jsonb,calls bigint default 0,dated_rows bigint default 0);
 insert into validation_probe(next_reference) values('{}');
 create or replace function dashboard_private.read_timetable_operating_reference_v1()
 returns jsonb language sql stable security definer set search_path='' as $$
 select next_reference from pg_temp.validation_probe
 $$;
-alter function dashboard_private.timetable_effective_date_v1(jsonb,date) rename to timetable_effective_date_probe_original_v1;
-create function dashboard_private.timetable_effective_date_v1(r jsonb,d date)
-returns setof jsonb language plpgsql volatile set search_path='' as $$begin
- update pg_temp.validation_probe set calls=calls+1,dated_rows=dated_rows+jsonb_array_length(r->'datedSessions');
- return query select * from dashboard_private.timetable_effective_date_probe_original_v1(r,d);
+-- The final validator passes a typed date bucket, not r.datedSessions. Count
+-- the actual helper invocations and input rows while executing its real body.
+alter function dashboard_private.timetable_effective_workset_date_v1(jsonb,date,dashboard_private.timetable_validation_row_v1[])
+ rename to timetable_effective_workset_date_probe_original_v1;
+create function dashboard_private.timetable_effective_workset_date_v1(r jsonb,d date,rows dashboard_private.timetable_validation_row_v1[])
+returns setof dashboard_private.timetable_validation_effective_row_v1 language plpgsql volatile set search_path='' as $$begin
+ update pg_temp.validation_probe set calls=calls+1,dated_rows=dated_rows+coalesce(cardinality(rows),0);
+ return query select * from dashboard_private.timetable_effective_workset_date_probe_original_v1(r,d,rows);
 end$$;
+revoke all on function dashboard_private.timetable_effective_workset_date_v1(jsonb,date,dashboard_private.timetable_validation_row_v1[])
+ from public,anon,authenticated,service_role;
 create function pg_temp.reference(weekly jsonb,dated jsonb,blockers jsonb default '[]') returns jsonb language sql as $$
  select jsonb_build_object('asOfDate','2026-10-12','shadowSlots',weekly,'datedSessions',dated,
  'unresolvedOccupancies','[]'::jsonb,'datedUnresolvedOccupancies',blockers)

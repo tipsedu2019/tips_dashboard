@@ -7,16 +7,116 @@ test('capture protocol preserves JSON bytes and rejects missing, duplicate, unkn
  for(const output of ['', 'AI_HTTP_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_UNKNOWN_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_HTTP_CAPTURE:{\n'])assert.throws(()=>extractAiCapture(output,'http'));
 });
 
-import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,CURRENT_PR126_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,TIMETABLE_VALIDATION_MIGRATION,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,CURRENT_PR126_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,TIMETABLE_VALIDATION_MIGRATION,TIMETABLE_CLOSE_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {parseIsolatedDbArguments,runIsolatedSupabaseDbTests} from '../../scripts/run-isolated-supabase-db-tests.mjs';
+import {decodeAiImportLiteral} from '../../scripts/lib/ai-producer-receipt.mjs';
+import vm from 'node:vm';
+import {syncBuiltinESMExports} from 'node:module';
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const isolatedWorkflows=['supabase-db-push.yml','supabase-sql-review.yml'];
 const legacyOccupancyTest='supabase/tests/makeup_legacy_approval_occupancy_test.sql';
+const timetableCloseTests=Object.freeze([
+ 'supabase/tests/timetable_reader_explicit_native_resolution_test.sql',
+ 'supabase/tests/timetable_shared_validation_workset_test.sql',
+ 'supabase/tests/timetable_close_gateway_validation_reuse_test.sql',
+]);
+test('import literal decoding preserves plain and escaped string values and rejects expressions',()=>{
+ for(const [literal,value] of [
+  ['""',''],["'node:fs'",'node:fs'],['"./한글/😀.mjs"','./한글/😀.mjs'],["'a\"b'",'a"b'],['"a\'b"',"a'b"],
+  [String.raw`'\u002e\u002fmodule.mjs'`,'./module.mjs'],[String.raw`"\x2e\x2fmodule.mjs"`,'./module.mjs'],
+  [String.raw`'\u{2e}\u{2f}module.mjs'`,'./module.mjs'],[String.raw`'\056\057module.mjs'`,'./module.mjs'],
+  [String.raw`'\.\/module.mjs'`,'./module.mjs'],[String.raw`'\uD83D\uDE00'`,'😀'],
+  [String.raw`'a\nb\rc\td\ve\ff\bg\0'`,'a\nb\rc\td\ve\ff\bg\0'],
+  [String.raw`'quote\'slash\\'`,"quote'slash\\"],
+  ["'./line\\\nbreak.mjs'",'./linebreak.mjs'],["'./line\\\r\nbreak.mjs'",'./linebreak.mjs'],
+ ])assert.equal(decodeAiImportLiteral(literal),value);
+ for(const invalid of ['"a"+"b"','"ok";throw 1','`template`','"unterminated','"line\nbreak"','"done"\n',null]){
+  assert.throws(()=>decodeAiImportLiteral(invalid),/invalid import literal/);
+ }
+ for(const invalid of [String.raw`'\xGG'`,String.raw`'\uZZZZ'`,String.raw`'\u{110000}'`]){
+  assert.throws(()=>decodeAiImportLiteral(invalid),{name:'SyntaxError'});
+ }
+});
+test('literal value memo preserves the VM budget, propagates errors and remains bounded',async()=>{
+ // A separate module instance keeps deliberate cache saturation local to this
+ // capacity test, without warming or filling the real snapshot module's memo.
+ const {decodeAiImportLiteral}=await import('../../scripts/lib/ai-producer-receipt.mjs?literal-capacity-regression');
+ const original=vm.runInNewContext,calls=[];
+ vm.runInNewContext=(literal,context,options)=>{
+  calls.push(literal);assert.equal(Object.getPrototypeOf(context),null);assert.deepEqual(options,{timeout:50});
+  if(literal.includes('timeout-probe'))throw Object.assign(new Error('synthetic VM timeout'),{code:'ERR_SCRIPT_EXECUTION_TIMEOUT'});
+  return original(literal,context,options);
+ };
+ syncBuiltinESMExports();
+ try{
+  assert.equal(decodeAiImportLiteral('"plain-probe"'),'plain-probe');assert.equal(calls.length,0);
+  const escaped=String.raw`'memo-probe-\u002e'`;
+  assert.equal(decodeAiImportLiteral(escaped),'memo-probe-.');assert.equal(decodeAiImportLiteral(escaped),'memo-probe-.');assert.equal(calls.length,1);
+  for(let i=0;i<2;i++)assert.throws(()=>decodeAiImportLiteral(String.raw`'timeout-probe-\u002e'`),{code:'ERR_SCRIPT_EXECUTION_TIMEOUT'});
+  assert.equal(calls.filter(s=>s.includes('timeout-probe')).length,2);
+  const invalid=String.raw`'invalid-probe-\xGG'`;
+  for(let i=0;i<2;i++)assert.throws(()=>decodeAiImportLiteral(invalid),{name:'SyntaxError'});
+  assert.equal(calls.filter(s=>s===invalid).length,2);
+  const large="'"+'x'.repeat(4097)+String.raw`\u002e'`;
+  for(let i=0;i<2;i++)assert.equal(decodeAiImportLiteral(large),'x'.repeat(4097)+'.');
+  assert.equal(calls.filter(s=>s===large).length,2);
+  // More distinct small values than the capacity: new values must still be
+  // evaluated and accepted, without growing the retained cache indefinitely.
+  for(let i=0;i<65;i++)decodeAiImportLiteral("'capacity-"+i+String.raw`-\u002e'`);
+  const overflow=String.raw`'capacity-overflow-\u002e'`,before=calls.length;
+  for(let i=0;i<2;i++)assert.equal(decodeAiImportLiteral(overflow),'capacity-overflow-.');
+  assert.equal(calls.length-before,2);
+ }finally{vm.runInNewContext=original;syncBuiltinESMExports();}
+});
+test('warmed literal values never cache source hashes, relative import authorization or manifest validity',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-memo-boundary-'));
+ const originalVm=vm.runInNewContext,calls=[];
+ try{
+  const {AI_SOURCE_CLOSURE,snapshotAiSource}=await import('../../scripts/lib/ai-producer-receipt.mjs?literal-boundary-regression');
+  for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
+  }
+  for(const args of [['init','-q'],['-c','core.hooksPath=/dev/null','-c','user.name=Fixture','-c','user.email=fixture@test.invalid','commit','-q','--allow-empty','-m','synthetic source snapshot']]){
+   const result=spawnSync('git',args,{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}});
+   assert.equal(result.status,0,result.stderr);
+  }
+  vm.runInNewContext=(literal,context,options)=>{
+   assert.ok(literal.includes('\\'),'plain literal must not require VM execution');
+   assert.deepEqual(options,{timeout:50});calls.push(literal);return originalVm(literal,context,options);
+  };
+  syncBuiltinESMExports();
+  const first=await snapshotAiSource(root),initialCalls=calls.length;
+  assert.ok(initialCalls>0,'the real escaped source literal reaches the VM');
+  assert.deepEqual(await snapshotAiSource(root),first);assert.equal(calls.length,initialCalls);
+  const allowedPath='src/features/operations/academic-event-utils.js',forbiddenPath='src/lib/auth-utils.ts';
+  const allowedOriginal=await readFile(join(root,allowedPath)),forbiddenOriginal=await readFile(join(root,forbiddenPath));
+  const literal=String.raw`'..\u002f..\u002flib/class-schedule-planner.js'`;
+  const statement='\nimport '+literal+';\n';
+  await writeFile(join(root,allowedPath),Buffer.concat([allowedOriginal,Buffer.from(statement)]));
+  const allowed=await snapshotAiSource(root),warmCalls=calls.length;
+  assert.equal(warmCalls,initialCalls+1);
+  assert.notEqual(allowed.closure.find(r=>r.path===allowedPath).sha256,first.closure.find(r=>r.path===allowedPath).sha256);
+  await writeFile(join(root,forbiddenPath),Buffer.concat([forbiddenOriginal,Buffer.from(statement)]));
+  await assert.rejects(snapshotAiSource(root),/import outside audited AI closure/);
+  assert.equal(calls.length,warmCalls,'same decoded literal still needs authorization at a different source location');
+  await writeFile(join(root,forbiddenPath),forbiddenOriginal);
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json'),manifestOriginal=await readFile(manifestPath);
+  const changed=JSON.parse(manifestOriginal);changed.orderedNewMigrations.at(-1).sha256='0'.repeat(64);
+  await writeFile(manifestPath,JSON.stringify(changed));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(manifestPath,manifestOriginal);
+  await writeFile(join(root,allowedPath),Buffer.concat([allowedOriginal,Buffer.from(statement+'// source changed after memo hit\n')]));
+  const edited=await snapshotAiSource(root);
+  assert.notEqual(edited.closure.find(r=>r.path===allowedPath).sha256,allowed.closure.find(r=>r.path===allowedPath).sha256);
+  assert.equal(calls.length,warmCalls,'changed files are rehashed even when literal decoding is reused');
+  await rm(join(root,allowedPath));await assert.rejects(snapshotAiSource(root),/ENOENT/);
+ }finally{vm.runInNewContext=originalVm;syncBuiltinESMExports();await rm(root,{recursive:true,force:true});}
+});
 async function workflowInventory(name){
  const source=await readFile(new URL('../../.github/workflows/'+name,import.meta.url),'utf8');
  return {
@@ -31,7 +131,7 @@ function parityArguments({tests,probes}){
   ...tests.flatMap(path=>['--test',path]),...probes.flatMap(path=>['--probe',path])];
 }
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
- assert.equal(AI_SQL_TESTS.length,97);
+ assert.equal(AI_SQL_TESTS.length,100);
  assert.equal(AI_PROBES.length,21);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
@@ -62,6 +162,54 @@ test('timetable validation is exactly pinned without changing earlier migration 
   await assert.rejects(snapshotAiSource(root),/timetable validation migration source drift/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('close candidate pins reject each missing, reordered, draft or changed migration and preserve regression source closure',async()=>{
+ const current=await snapshotAiSource();
+ assert.equal(TIMETABLE_CLOSE_MIGRATIONS.length,3);
+ assert.deepEqual(AI_SQL_TESTS.slice(AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+1,
+  AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+4),timetableCloseTests);
+ for(const path of timetableCloseTests){
+  assert.equal(current.closure.find(row=>row.path===path)?.sha256,hash(await readFile(path)));
+ }
+ for(const pin of TIMETABLE_CLOSE_MIGRATIONS){
+  assert.equal(current.closure.find(row=>row.path==='supabase/migrations/'+pin.fileName)?.sha256,pin.sha256);
+ }
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-close-drift-'));
+ try{
+  const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
+  for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const original=JSON.parse(await readFile(manifestPath));
+  assert.deepEqual(original.orderedNewMigrations.slice(-3),TIMETABLE_CLOSE_MIGRATIONS);
+  for(const pin of TIMETABLE_CLOSE_MIGRATIONS){
+   for(const mutate of [
+    (rows,i)=>rows.splice(i,1),
+    (rows,i)=>rows[i].status='draft',
+    (rows,i)=>rows[i].sha256='0'.repeat(64),
+    (rows,i)=>[rows[i-1],rows[i]]=[rows[i],rows[i-1]],
+    (rows,i)=>rows.push({...rows[i]}),
+   ]){
+    const changed=structuredClone(original),rows=changed.orderedNewMigrations;
+    mutate(rows,rows.findIndex(row=>row.fileName===pin.fileName));
+    await writeFile(manifestPath,JSON.stringify(changed));
+    await assert.rejects(snapshotAiSource(root),/(?:AI canonical manifest inventory|current migration manifest drift)/);
+   }
+   await writeFile(manifestPath,JSON.stringify(original));
+   const path=join(root,'supabase/migrations',pin.fileName),bytes=await readFile(path);
+   const altered=Buffer.concat([bytes,Buffer.from('\n-- unreviewed drift\n')]);
+   await writeFile(path,altered);
+   await assert.rejects(snapshotAiSource(root),/timetable close migration source drift/);
+   const changed=structuredClone(original);
+   changed.orderedNewMigrations.find(row=>row.fileName===pin.fileName).sha256=hash(altered);
+   await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+   await writeFile(manifestPath,JSON.stringify(original));
+   await rm(path);await assert.rejects(snapshotAiSource(root),/ENOENT/);
+   await writeFile(path,bytes);
+  }
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 test('full parity guard rejects missing, duplicate and reordered workflow selectors before process launch',async()=>{
  let launched=0;
  const executeProcess=async()=>{launched++;throw new Error('process launch forbidden in inventory regression');};
@@ -70,6 +218,7 @@ test('full parity guard rejects missing, duplicate and reordered workflow select
   const swapFirst=list=>[list[1],list[0],...list.slice(2)];
   for(const [label,changed] of [
    ['missing legacy occupancy',{...inventory,tests:inventory.tests.filter(path=>path!==legacyOccupancyTest)}],
+   ...timetableCloseTests.map(test=>['missing '+test,{...inventory,tests:inventory.tests.filter(path=>path!==test)}]),
    ['duplicate SQL',{...inventory,tests:[...inventory.tests,legacyOccupancyTest]}],
    ['reordered SQL',{...inventory,tests:swapFirst(inventory.tests)}],
    ['missing probe',{...inventory,probes:inventory.probes.slice(1)}],
@@ -172,8 +321,8 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,167);
-  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && !CURRENT_PR126_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
+  assert.equal(original.orderedNewMigrations.length,170);
+  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
   assert.equal(reviewedLegacy.at(-1).fileName,mainFileName);
