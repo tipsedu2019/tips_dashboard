@@ -182,9 +182,9 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c845a97e176bb0ae00bec07575d8c43e17dcb258523c2f02e25765866a539d63"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "56b70c15cf69973cf3a1d99ea8844667e228481a4c926a9ee01fd35f2fee989f"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "613d6dba401f01d9b4e423ea26121d86fb0415369aeec163de9b9468c67f9cc2"
+  "1eda7a15250e1e28ae0646e3b1aebe97d1b12d923c9924e814d928994e5c5da4"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
