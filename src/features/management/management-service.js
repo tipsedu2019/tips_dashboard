@@ -1786,7 +1786,9 @@ export function createManagementService(options = {}) {
             onConfirmed: async () => {
               if (operationalRequestKeys.get(body) === requestKey) operationalRequestKeys.delete(body);
               try {
-                const cache = await refreshPublicClassesCache("class");
+                const cache = await withReadDeadline(() => refreshPublicClassesCache("class"), {
+                  deadline: AbortSignal.timeout(3_000),
+                });
                 return { status: cache?.status === "pending" ? "pending" : "complete" };
               } catch {
                 return { status: "pending" };

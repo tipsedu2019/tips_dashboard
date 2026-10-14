@@ -290,7 +290,7 @@ test("installed transport uses separate bounded 8-second write and confirmation 
     writeController.abort(new DOMException("response lost", "TimeoutError"));
     assert.equal((await saving).closeConfirmation, "current-state");
     assert.deepEqual(requests, ["/rest/v1/rpc/update_class_operational_v1", "/rest/v1/rpc/get_management_detail_v1"]);
-    assert.deepEqual(deadlines, [8000, 8000]);
+    assert.deepEqual(deadlines, [8000, 8000, 3000]);
   } finally { AbortSignal.timeout = originalTimeout; }
 });
 
@@ -345,4 +345,22 @@ test("only confirmed state invalidates the public cache, and cache failure prese
     assert.equal(invalidations, 1);
     assert.equal(f.calls.length, 1);
   }
+});
+
+test("confirmed state does not wait indefinitely for cache session or transport recovery", async () => {
+  const timeout = AbortSignal.timeout;
+  const cacheDeadline = new AbortController();
+  const started = Promise.withResolvers();
+  AbortSignal.timeout = ms => ms === 3000 ? cacheDeadline.signal : timeout(ms);
+  try {
+    const f = fixture(() => ({ error: lostResponse }), () => { started.resolve(); return new Promise(() => {}); }, () => ({ data: closedDetail() }));
+    const saving = f.service.updateClass(fullRecord, confirmOptions());
+    await started.promise;
+    cacheDeadline.abort(new DOMException("cache deadline", "TimeoutError"));
+    const result = await saving;
+    assert.equal(result.closeConfirmation, "current-state");
+    assert.equal(result.publicClassesCacheRefresh.status, "pending");
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.reads.length, 1);
+  } finally { AbortSignal.timeout = timeout; }
 });
