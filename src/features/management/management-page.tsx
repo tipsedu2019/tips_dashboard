@@ -1,5 +1,6 @@
 "use client";
 
+import { isClassCloseConfirmationError, type ClassCloseConfirmationError } from "./class-close-confirmation";
 import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
 import { Fragment, type FormEvent, type ReactNode, type TouchEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2, X } from "lucide-react";
@@ -98,7 +99,7 @@ type ManagementServiceClient = {
   updateStudent: (record: Record<string, unknown>) => Promise<unknown>;
   deleteStudent: (id: string) => Promise<unknown>;
   createClass: (record: Record<string, unknown>, options: { candidateMembershipContext?: ClassFormReferences; groupIds?: string[] }) => Promise<unknown>;
-  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized"; resolveScheduleOwnership?: boolean }) => Promise<unknown>;
+  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized"; resolveScheduleOwnership?: boolean; confirmCloseResult?: { isCurrent: () => boolean; onChecking?: () => void } }) => Promise<unknown>;
   deleteClass: (id: string) => Promise<unknown>;
   createTextbook: (record: Record<string, unknown>) => Promise<unknown>;
   updateTextbook: (record: Record<string, unknown>) => Promise<unknown>;
@@ -1391,6 +1392,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [pendingClassScheduleInitialization, setPendingClassScheduleInitialization] = useState<PendingClassScheduleInitialization | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState("");
+  const [checkingClassClose, setCheckingClassClose] = useState(false);
+  const [pendingClassClose, setPendingClassClose] = useState<{
+    error: ClassCloseConfirmationError; form: FormState; payload: Record<string, unknown>; detailRequestId: number;
+  } | null>(null);
+  const currentPendingClassClose = pendingClassClose?.detailRequestId === detailRequestRef.current ? pendingClassClose : null;
   const [saving, setSaving] = useState(false);
   // React batches state updates; this lock is shared before any mutation starts.
   const savingRef = useRef(false);
@@ -2610,6 +2616,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     const defaultsRequest = kind === "classes" && isNormalizedClassRow(activeRow)
       ? service.getClassScheduleDefaults(activeRow.id)
       : Promise.resolve(null);
+    setPendingClassClose(null);
+    setCheckingClassClose(false);
     setSelectedRow(activeRow);
     setForm(nextForm);
     setValidationAttempted(false);
@@ -3009,37 +3017,56 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
   const handleDetailSave = async () => {
     if (!selectedRow) return;
-    if (classFormReferencesBlocked) return;
+    const pending = kind === "classes" ? currentPendingClassClose : null;
+    if (!pending && classFormReferencesBlocked) return;
     if (!canMutateRows) {
       setOperationError("수정 권한이 없습니다.");
       return;
     }
-    if (scienceClassCandidateSelectionBlocked) {
+    if (!pending && scienceClassCandidateSelectionBlocked) {
       setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
       return;
     }
-    if (!validateRequiredFields("detail")) return;
-    const isCurrent = beginSaving({ form: formDraft, ...(!normalizedScheduleDefaults ? { schedule: scheduleDraft } : {}) });
+    if (!pending && !validateRequiredFields("detail")) return;
+    const isCurrent = beginSaving(pending ? undefined : { form: formDraft, ...(!normalizedScheduleDefaults ? { schedule: scheduleDraft } : {}) });
     if (!isCurrent) return;
     setOperationError(null);
     setSaveNotice("");
+    const submittedForm = pending?.form || form;
+    let payload: Record<string, unknown> = pending?.payload || {};
     try {
-      const payload = compact(form, kind, selectedRow);
+      if (!pending) payload = compact(form, kind, selectedRow);
       let savedResult: unknown = null;
-      if (kind === "students") {
+      if (pending) {
+        savedResult = await pending.error.confirm();
+      } else if (kind === "students") {
         savedResult = await service.updateStudent(payload);
       } else if (kind === "classes") {
         const updated = await service.updateClass(payload, {
           candidateMembershipContext: classFormReferences,
+          confirmCloseResult: {
+            isCurrent: () => pageActiveRef.current && isCurrent(),
+            onChecking: () => { if (isCurrent()) setCheckingClassClose(true); },
+          },
           ...(normalizedScheduleDefaults ? { scheduleOwnership: "normalized" as const } : {}),
         });
         savedResult = updated;
       } else {
         savedResult = await service.updateTextbook(payload);
       }
+      const result = savedResult as { closeConfirmation?: string; publicClassesCacheRefresh?: { status?: string } } | null;
+      const confirmedState = result?.closeConfirmation === "current-state";
+      const successNotice = confirmedState ? "종강 상태 확인됨" : "저장 완료";
       if (isCurrent()) {
-        setSavedForm(form);
-        reportPublicClassesCacheRefresh(savedResult);
+        setPendingClassClose(null);
+        setCheckingClassClose(false);
+        setSavedForm(submittedForm);
+        setSaveNotice(successNotice);
+        if (confirmedState && result?.publicClassesCacheRefresh?.status === "pending") {
+          setSaveNotice(`${successNotice} · 공개 수업 캐시 갱신 대기 중`);
+        } else {
+          reportPublicClassesCacheRefresh(savedResult);
+        }
       }
 
       const nextTitle =
@@ -3064,13 +3091,25 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             }
           : current,
       );
-      const refreshed = await reconcileManagementPage(selectedRow.id);
-      if (!isCurrent()) return;
-      if (refreshed) setSelectedRow(refreshed);
-      setSaveNotice("저장 완료");
+      try {
+        const refreshed = await reconcileManagementPage(selectedRow.id);
+        if (!isCurrent()) return;
+        if (refreshed) setSelectedRow(refreshed);
+      } catch (refreshError) {
+        if (kind !== "classes") throw refreshError;
+        // A failed display refresh cannot undo a receipt or a confirmed read.
+        if (isCurrent()) setSaveNotice(`${successNotice} · 화면 갱신 대기 중`);
+      }
     } catch (saveError) {
-      if (isCurrent()) setOperationError(getSaveErrorMessage(saveError));
+      if (isCurrent()) {
+        if (isClassCloseConfirmationError(saveError)) {
+          setPendingClassClose({ error: saveError, form: submittedForm, payload, detailRequestId: detailRequestRef.current });
+        } else {
+          setOperationError(getSaveErrorMessage(saveError));
+        }
+      }
     } finally {
+      if (isCurrent()) setCheckingClassClose(false);
       finishSaving();
     }
   };
@@ -3211,10 +3250,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     if (saving) {
       return (
         <div data-testid="management-save-status" className="text-xs font-medium text-muted-foreground">
-          저장 중
+          {checkingClassClose ? "저장 결과 확인 중" : "저장 중"}
         </div>
       );
     }
+    if (kind === "classes" && isDetail && currentPendingClassClose) return null;
     if (operationError) {
       if (kind === "classes" && isDetail) return null;
       const saveErrorStatusLabel = getSaveErrorStatusLabel(operationError);
@@ -3807,10 +3847,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 {operationError ? <Alert variant="destructive" role="alert" className="max-h-24 basis-full overflow-y-auto">
                   <AlertDescription>{operationError}</AlertDescription>
                 </Alert> : null}
-                <span role="status" className="sr-only">{saving ? "수업 정보 저장 중" : saveNotice}</span>
+                {currentPendingClassClose && !saving ? <Alert role="status" className="basis-full">
+                  <AlertDescription>{currentPendingClassClose.error.message}</AlertDescription>
+                </Alert> : null}
+                <span role="status" className="sr-only">{saving ? (checkingClassClose ? "저장 결과 확인 중" : "수업 정보 저장 중") : saveNotice}</span>
                 {renderSaveStatus()}
                 <Button type="button" size="form" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>닫기</Button>
-                <Button type="button" size="form" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || classFormReferencesBlocked || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "저장"}</Button>
+                <Button type="button" size="form" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || (!currentPendingClassClose && (classFormReferencesBlocked || scienceClassCandidateSelectionBlocked))}>{saving ? (checkingClassClose ? "확인 중" : "저장 중") : currentPendingClassClose ? "저장 결과 확인" : "저장"}</Button>
               </DialogFooter>
             </div>
           ) : isDetail && selectedRow ? (

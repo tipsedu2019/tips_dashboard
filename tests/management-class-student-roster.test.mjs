@@ -423,7 +423,8 @@ test("class management shares curriculum summary data without dashboard warning 
   assert.doesNotMatch(pageSource, /data-testid="class-summary-primary-warning"/);
   assert.doesNotMatch(pageSource, /상담 확인 필요/);
   assert.match(pageSource, /data-testid="management-save-status"/);
-  assert.match(pageSource, /setSaveNotice\("저장 완료"\)/);
+  assert.match(pageSource, /const successNotice = confirmedState \? "종강 상태 확인됨" : "저장 완료"/);
+  assert.match(pageSource, /setSaveNotice\(successNotice\)/);
 });
 
 test("class save failure makes preserved data explicit", async () => {
@@ -510,7 +511,8 @@ test("class detail shares one reachable save area across desktop and mobile", as
   assert.doesNotMatch(pageSource, /renderClassMobileActionBar|class-detail-mobile-save|pb-28 md:pb-0/);
   assert.match(actions, /\{renderSaveStatus\(\)\}/);
   assert.match(actions, /onClick=\{handleDetailSave\}/);
-  assert.match(actions, /disabled=\{saving \|\| !canMutateRows \|\| classFormReferencesBlocked \|\| scienceClassCandidateSelectionBlocked\}/);
+  assert.match(actions, /disabled=\{saving \|\| !canMutateRows \|\| \(!currentPendingClassClose && \(classFormReferencesBlocked \|\| scienceClassCandidateSelectionBlocked\)\)\}/);
+  assert.match(actions, /currentPendingClassClose \? "저장 결과 확인" : "저장"/);
   assert.match(actions, /onClick=\{\(\) => handleDialogOpenChange\(false\)\}/);
   assert.match(styleSource, /\.class-sheet-actions\s*\{[^}]*position: sticky;[^}]*bottom: 0;/);
   assert.doesNotMatch(actions, /md:hidden|hidden md:/);
