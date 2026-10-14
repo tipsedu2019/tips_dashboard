@@ -1783,8 +1783,14 @@ export function createManagementService(options = {}) {
             readDetail: () => createManagementReadService({ supabase: client }).loadDetail({ kind: "classes", id: payload.id }),
             isCurrent: options.confirmCloseResult.isCurrent,
             onChecking: options.confirmCloseResult.onChecking,
-            onConfirmed: () => {
+            onConfirmed: async () => {
               if (operationalRequestKeys.get(body) === requestKey) operationalRequestKeys.delete(body);
+              try {
+                const cache = await refreshPublicClassesCache("class");
+                return { status: cache?.status === "pending" ? "pending" : "complete" };
+              } catch {
+                return { status: "pending" };
+              }
             },
           });
           return confirm();

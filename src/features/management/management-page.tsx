@@ -3062,7 +3062,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setCheckingClassClose(false);
         setSavedForm(submittedForm);
         setSaveNotice(successNotice);
-        reportPublicClassesCacheRefresh(savedResult);
+        if (confirmedState && result?.publicClassesCacheRefresh?.status === "pending") {
+          setSaveNotice(`${successNotice} · 공개 수업 캐시 갱신 대기 중`);
+        } else {
+          reportPublicClassesCacheRefresh(savedResult);
+        }
       }
 
       const nextTitle =

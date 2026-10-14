@@ -157,10 +157,12 @@ import { matchesClosedClassDetail, isUncertainClassWrite } from "../src/features
 
 test("committed close with lost response confirms actual producer state without a second write or invented receipt", async () => {
   let checking = 0;
-  const f = fixture(() => ({ error: lostResponse }), async () => assert.fail("no receipt cache refresh"),
+  let cacheRefreshes = 0;
+  const f = fixture(() => ({ error: lostResponse }), async () => { cacheRefreshes++; },
     () => ({ data: closedDetail() }));
   const result = await f.service.updateClass(fullRecord, { confirmCloseResult: { isCurrent: () => true, onChecking: () => checking++ } });
-  assert.deepEqual(result, { id, status: "종강", closeConfirmation: "current-state" });
+  assert.deepEqual(result, { id, status: "종강", closeConfirmation: "current-state", publicClassesCacheRefresh: { status: "complete" } });
+  assert.equal(cacheRefreshes, 1);
   assert.equal(f.calls.length, 1);
   assert.equal(f.reads.length, 1);
   assert.equal(checking, 1);
@@ -282,7 +284,7 @@ test("installed transport uses separate bounded 8-second write and confirmation 
     });
     const service = createManagementService({ supabase: client,
       probeRegistrationRuntime: async () => ({ mode: "ready" }),
-      refreshPublicClassesCache: async () => assert.fail("no verified receipt") });
+      refreshPublicClassesCache: async () => ({ status: "refreshed" }) });
     const saving = service.updateClass(fullRecord, confirmOptions());
     await started.promise;
     writeController.abort(new DOMException("response lost", "TimeoutError"));
@@ -319,5 +321,28 @@ test("both automatic and manual confirmation retire only their successful intent
     await f.service.updateClass(fullRecord, confirmOptions());
     assert.equal(f.calls.length, 2);
     assert.notEqual(f.calls[0].args.p_request_key, f.calls[1].args.p_request_key);
+  }
+});
+
+test("only confirmed state invalidates the public cache, and cache failure preserves confirmation", async () => {
+  for (const mode of ["complete", "pending", "throws"]) {
+    let closed = false;
+    let invalidations = 0;
+    const f = fixture(() => ({ error: lostResponse }), async () => {
+      invalidations++;
+      if (mode === "throws") throw new Error("cache unavailable");
+      return { status: mode };
+    }, () => { const detail = closedDetail(); if (!closed) detail.record.status = "수강"; return { data: detail }; });
+    let pending;
+    await assert.rejects(f.service.updateClass(fullRecord, confirmOptions()), error => { pending = error; return true; });
+    assert.equal(invalidations, 0);
+    await assert.rejects(pending.confirm(), { code: "CLASS_CLOSE_RESULT_UNCERTAIN" });
+    assert.equal(invalidations, 0);
+    closed = true;
+    const result = await pending.confirm();
+    assert.equal(result.closeConfirmation, "current-state");
+    assert.equal(result.publicClassesCacheRefresh.status, mode === "complete" ? "complete" : "pending");
+    assert.equal(invalidations, 1);
+    assert.equal(f.calls.length, 1);
   }
 });

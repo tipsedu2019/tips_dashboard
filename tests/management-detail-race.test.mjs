@@ -1547,3 +1547,14 @@ test("invalid textbook usage releases the class save lock before any writer and 
   assert.equal(writes, 1);
   assert.match(ui.text(), /저장 완료/);
 });
+
+test("confirmed class state reports pending public cache without claiming a request receipt", async t => {
+  const ui = await setup(t, { configureFixture(fixture) {
+    fixture.service.updateClass = async input => ({ id: input.id, status: "종강", closeConfirmation: "current-state", publicClassesCacheRefresh: { status: "pending" } });
+  } });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.click("저장");
+  assert.match(ui.text(), /종강 상태 확인됨 · 공개 수업 캐시 갱신 대기 중/);
+  assert.doesNotMatch(ui.text(), /저장은 완료되었습니다|저장 실패/);
+});

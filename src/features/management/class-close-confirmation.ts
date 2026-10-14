@@ -41,7 +41,10 @@ export function isUncertainClassWrite(error: unknown): boolean {
     || /^(TypeError: )?(Failed to fetch|fetch failed|NetworkError when attempting to fetch resource|Load failed)/i.test(message || "");
 }
 
-export type ClassCloseConfirmation = { id: string; status: "종강"; closeConfirmation: "current-state" };
+export type ClassCloseConfirmation = {
+  id: string; status: "종강"; closeConfirmation: "current-state";
+  publicClassesCacheRefresh?: { status: "complete" | "pending" };
+};
 export type ClassCloseConfirmationError = Error & { code: "CLASS_CLOSE_RESULT_UNCERTAIN"; confirm: () => Promise<ClassCloseConfirmation> };
 
 export function isClassCloseConfirmationError(error: unknown): error is ClassCloseConfirmationError {
@@ -55,7 +58,7 @@ export function createClassCloseConfirmation(options: {
   readDetail: () => Promise<unknown>;
   isCurrent: () => boolean;
   onChecking?: () => void;
-  onConfirmed?: () => void;
+  onConfirmed?: () => Promise<{ status: "complete" | "pending" }>;
 }): () => Promise<ClassCloseConfirmation> {
   const patch = structuredClone(options.patch);
   const confirm = async (): Promise<ClassCloseConfirmation> => {
@@ -67,9 +70,10 @@ export function createClassCloseConfirmation(options: {
     let detail: unknown;
     try { detail = await options.readDetail(); } catch { throw uncertain; }
     if (!options.isCurrent() || !matchesClosedClassDetail(detail, options.classId, patch)) throw uncertain;
-    options.onConfirmed?.();
+    const publicClassesCacheRefresh = await options.onConfirmed?.();
     // This is current state evidence, not a receipt attributing a commit to this request.
-    return { id: options.classId, status: "종강", closeConfirmation: "current-state" };
+    return { id: options.classId, status: "종강", closeConfirmation: "current-state",
+      ...(publicClassesCacheRefresh ? { publicClassesCacheRefresh } : {}) };
   };
   return confirm;
 }
