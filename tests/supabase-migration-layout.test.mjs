@@ -140,6 +140,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_reader_explicit_native_resolution_test.sql",
   "supabase/tests/timetable_shared_validation_workset_test.sql",
   "supabase/tests/timetable_close_gateway_validation_reuse_test.sql",
+  "supabase/tests/legacy_context_binding_preparation_test.sql",
   "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql",
   "supabase/tests/ai_agent_chat_outbox_test.sql",
   "supabase/tests/ai_agent_chat_runtime_test.sql",

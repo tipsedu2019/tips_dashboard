@@ -38,9 +38,11 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261013070534_timetable_reader_explicit_native_resolution.sql',
  'supabase/migrations/20261013193200_timetable_shared_validation_workset.sql',
  'supabase/migrations/20261014180000_timetable_validation_unchanged_inputs.sql',
+ 'supabase/migrations/20261014193500_legacy_context_binding_preparation.sql',
  'supabase/tests/timetable_reader_explicit_native_resolution_test.sql',
  'supabase/tests/timetable_shared_validation_workset_test.sql',
  'supabase/tests/timetable_close_gateway_validation_reuse_test.sql',
+ 'supabase/tests/legacy_context_binding_preparation_test.sql',
  'supabase/migrations/20261008140556_ai_agent_thread_replies.sql',
  'supabase/tests/ai_agent_thread_replies_test.sql',
  'supabase/tests/ai_agent_nonexpiring_chat_test.sql',
@@ -116,6 +118,7 @@ export const TIMETABLE_CLOSE_MIGRATIONS=Object.freeze([
  Object.freeze({"fileName":"20261013070534_timetable_reader_explicit_native_resolution.sql","status":"final","sha256":"cf8bec62963545e209ea4d18c5b7276ff75a62e93fac1e5bddbb55ab7c5922c0"}),
  Object.freeze({"fileName":"20261013193200_timetable_shared_validation_workset.sql","status":"final","sha256":"f5df6c1d0494ff8f0d5ad75251e1b3592ee5a14b7a532eb43534413976886559"}),
  Object.freeze({"fileName":"20261014180000_timetable_validation_unchanged_inputs.sql","status":"final","sha256":"cc7ada2b9a4670b38d431cc69c16b4e63d0008b40914f4d17594cfb0c1aafc7f"}),
+ Object.freeze({"fileName":"20261014193500_legacy_context_binding_preparation.sql","status":"final","sha256":"70ef7db3791f04a8b9e42986d21e2afa6396f8967084b293c3f1f3c77889b5af"}),
 ]);
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
@@ -332,6 +335,7 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_reader_explicit_native_resolution_test.sql",
   "supabase/tests/timetable_shared_validation_workset_test.sql",
   "supabase/tests/timetable_close_gateway_validation_reuse_test.sql",
+  "supabase/tests/legacy_context_binding_preparation_test.sql",
   "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql",
   "supabase/tests/ai_agent_chat_outbox_test.sql",
   "supabase/tests/ai_agent_chat_runtime_test.sql",
