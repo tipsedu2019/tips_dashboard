@@ -138,15 +138,28 @@ export function extractAiCapture(stdout,identity){
  return raw;
 }
 export function suppressAiCaptures(value){return value.replace(/[^\r\n]*AI_[A-Z_]*CAPTURE:[^\r\n]*/gu,'[private AI capture omitted]');}
+const decodedImportLiterals=new Map();
+export function decodeAiImportLiteral(literal){
+ // Accept exactly one quoted literal, including its closing quote. This also
+ // keeps the exported helper from evaluating expressions supplied by a caller.
+ assert.ok(typeof literal==='string' && /^(['"])(?:\\(?:\r\n|[\s\S])|(?!\1)[^\\\r\n])*\1(?![\s\S])/u.test(literal),'invalid import literal');
+ if(!literal.includes('\\'))return literal.slice(1,-1);
+ if(decodedImportLiterals.has(literal))return decodedImportLiterals.get(literal);
+ // Keep V8's existing escape semantics, timeout, and exception propagation.
+ // Only successful literal values are reusable, never an import authorization.
+ const value=runInNewContext(literal,Object.create(null),{timeout:50});
+ if(decodedImportLiterals.size<64 && literal.length<=4096)decodedImportLiterals.set(literal,value);
+ return value;
+}
 export async function snapshotAiSource(root=ROOT){
  const closure=[];
  for(const path of AI_SOURCE_CLOSURE){
   const contents=await readFile(join(root,path));
   // Fail closed if a local import is added outside the audited allowlist.
   if(/\.[mt]?[js]+x?$/u.test(path))for(const match of contents.toString().matchAll(/(?:\bfrom|\bimport|\brequire)(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n\u2028\u2029]*(?:[\r\n\u2028\u2029]|$))*(?:\((?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n\u2028\u2029]*(?:[\r\n\u2028\u2029]|$))*)?((['"])(?:\\[\s\S]|(?!\2)[^\\\r\n])*\2)/gu)){
-   // Evaluate only the matched quoted literal, never application/source code.
-   // JS Unicode/hex escapes must be decoded before classifying local imports.
-   const spec=runInNewContext(match[1],Object.create(null),{timeout:50});
+   // Recheck each occurrence against this file's location even on a value hit.
+   // JS Unicode/hex escapes are decoded before classifying local imports.
+   const spec=decodeAiImportLiteral(match[1]);
    if(!spec.startsWith('.')&&!spec.startsWith('@/'))continue;
    const stem=spec.startsWith('@/')?'src/'+spec.slice(2):join(dirname(path),spec);
    assert.ok([stem,stem+'.ts',stem+'.tsx',stem+'.js',stem+'.mjs'].some(target=>AI_SOURCE_CLOSURE.includes(target)),'import outside audited AI closure');
