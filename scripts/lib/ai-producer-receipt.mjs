@@ -178,7 +178,7 @@ export async function snapshotAiSource(root=ROOT){
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,171,'AI canonical manifest inventory');
+ assert.equal(manifest.orderedNewMigrations.length,172,'AI canonical manifest inventory');
  const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');
