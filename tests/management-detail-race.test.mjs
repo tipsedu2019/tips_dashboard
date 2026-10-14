@@ -347,19 +347,20 @@ for (const failed of ["list", "detail"]) {
     assert.equal(ui.mutations.length, 1);
     await act(async () => second.resolve(failed === "list" ? classRow("a") : undefined));
     assert.equal(document.querySelector('[data-testid="class-detail-save"]').disabled, false);
-    assert.match(ui.text(), new RegExp(`${failed} 합성 조회 실패`));
+    assert.match(ui.text(), /저장 완료 · 화면 갱신 대기 중/);
+    assert.doesNotMatch(ui.text(), /합성 조회 실패|저장 실패/);
     await ui.click("저장");
     assert.equal(ui.mutations.length, 2, "both settled reads release the slot for the next explicit save");
     await act(async () => ui.mutations[1].reject(new Error("합성 후속 저장 실패")));
   });
 }
 
-test("class reconciliation preserves list-error priority when detail rejects first", async t => {
+test("class reconciliation keeps the committed result when both display reads fail", async t => {
   const ui = await beginClassReconciliation(t);
   await act(async () => ui.reconciliationDetails[0].reject(new Error("상세 오류 후순위")));
   await act(async () => ui.refreshes[0].reject(new Error("목록 오류 우선순위")));
-  assert.match(ui.text(), /목록 오류 우선순위/);
-  assert.doesNotMatch(ui.text(), /상세 오류 후순위/);
+  assert.match(ui.text(), /저장 완료 · 화면 갱신 대기 중/);
+  assert.doesNotMatch(ui.text(), /목록 오류 우선순위|상세 오류 후순위|저장 실패/);
 });
 
 for (const change of ["account", "role"]) {
@@ -1441,4 +1442,108 @@ test("an old actor's pending detail cannot start a schedule request after logout
   await ui.resolve(0, classRow("a"));
   assert.equal(ui.title(), undefined);
   assert.equal(ui.requests.filter(request => request.type === "defaults").length, 0);
+});
+
+test("uncertain class close offers read-only confirmation and preserves edits made after submission", async t => {
+  let writes = 0;
+  let reads = 0;
+  let committed = false;
+  const ui = await setup(t, { configureFixture(fixture) {
+    fixture.service.updateClass = async (_input, options) => {
+      writes++;
+      const confirm = async () => {
+        assert.equal(options.confirmCloseResult.isCurrent(), true);
+        options.confirmCloseResult.onChecking();
+        reads++;
+        if (!committed) throw Object.assign(new Error("종강 반영 여부를 확인하지 못했습니다. 입력은 유지됩니다."), { code: "CLASS_CLOSE_RESULT_UNCERTAIN", confirm });
+        return { id: "a", status: "종강", closeConfirmation: "current-state" };
+      };
+      return confirm();
+    };
+  } });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.editField("classes-detail-name", "제출한 초안");
+  await ui.click("저장");
+  assert.equal(writes, 1);
+  assert.equal(reads, 1);
+  assert.match(ui.text(), /종강 반영 여부를 확인하지 못했습니다/);
+  assert.doesNotMatch(ui.text(), /다시 저장|저장 실패/);
+  assert.equal(document.querySelector('[data-testid="class-detail-actions"] [role="alert"]'), null);
+  await ui.editField("classes-detail-name", "제출 이후 편집");
+  await ui.click("저장 결과 확인");
+  assert.equal(reads, 2);
+  committed = true;
+  await ui.click("저장 결과 확인");
+  assert.equal(writes, 1);
+  assert.equal(reads, 3);
+  assert.match(ui.text(), /종강 상태 확인됨/);
+  assert.equal(document.getElementById("classes-detail-name").value, "제출 이후 편집");
+  await ui.click("닫기");
+  assert.ok(document.querySelector('[data-testid="management-discard-confirm-dialog"]'), "later edits were not marked saved");
+});
+
+test("known class save and confirmed state remain successful when the subsequent display refresh fails", async t => {
+  for (const confirmed of [false, true]) {
+    const ui = await setup(t, { configureFixture(fixture) {
+      fixture.service.updateClass = async input => confirmed ? { id: input.id, status: "종강", closeConfirmation: "current-state" } : input;
+      fixture.records.refresh = async () => { throw new Error("display unavailable"); };
+    } });
+    await ui.click("A 영어반");
+    await ui.resolve(0, defaultsFor());
+    await ui.click("저장");
+    assert.match(ui.text(), confirmed ? /종강 상태 확인됨 · 화면 갱신 대기 중/ : /저장 완료 · 화면 갱신 대기 중/);
+    assert.doesNotMatch(ui.text(), /display unavailable|저장 실패/);
+    assert.equal(document.querySelector('[data-testid="class-detail-actions"] [role="alert"]'), null);
+    await ui.unmount();
+  }
+});
+
+test("pending class confirmation is owned by its detail lifetime and actor", async t => {
+  for (const change of ["row", "actor", "unmount"]) {
+    let complete;
+    let owner;
+    const ui = await setup(t, { configureFixture(fixture) {
+      fixture.service.updateClass = async (_input, options) => {
+        owner = options.confirmCloseResult.isCurrent;
+        options.confirmCloseResult.onChecking();
+        return new Promise(resolve => { complete = resolve; });
+      };
+    } });
+    await ui.click("A 영어반");
+    await ui.resolve(0, defaultsFor());
+    await ui.click("저장");
+    assert.match(ui.text(), /저장 결과 확인 중/);
+    assert.equal(owner(), true);
+    if (change === "row") {
+      await ui.click("수업 상세 닫기");
+      await ui.click("B 영어반");
+      await ui.resolve(1, defaultsFor());
+    } else if (change === "actor") await ui.actor("staff-b");
+    else await ui.unmount();
+    assert.equal(owner(), false);
+    await act(async () => complete({ id: "a", status: "종강", closeConfirmation: "current-state" }));
+    assert.doesNotMatch(ui.text(), /종강 상태 확인됨/);
+    await ui.unmount();
+  }
+});
+
+test("invalid textbook usage releases the class save lock before any writer and permits a corrected save", async t => {
+  let writes = 0;
+  const ui = await setup(t, { configureFixture(fixture) {
+    Object.assign(fixture.rows[0].raw, { textbook_ids: ["book-1"], textbook_usage: {
+      "book-1": { startDate: "2026-10-30", endDate: "2026-10-01", title: "합성 교재" },
+    } });
+    fixture.service.updateClass = async input => { writes++; return input; };
+  } });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.click("저장");
+  assert.equal(writes, 0);
+  assert.match(document.querySelector('[data-testid="class-detail-actions"]').textContent, /종료일은 시작일 이후/);
+  assert.equal(document.querySelector('[data-testid="class-detail-save"]').disabled, false);
+  await ui.editField("textbook-book-1-end", "2026-10-31");
+  await ui.click("저장");
+  assert.equal(writes, 1);
+  assert.match(ui.text(), /저장 완료/);
 });

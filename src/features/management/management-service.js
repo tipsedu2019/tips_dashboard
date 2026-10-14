@@ -1,5 +1,6 @@
 import { withReadDeadline } from "../../lib/read-deadline.ts";
 import { createTimetableOperationalMutation } from "../academic/timetable-operational-service.ts";
+import { createClassCloseConfirmation, isUncertainClassWrite } from "./class-close-confirmation.ts";
 import { buildClassTextbookUsage } from "./class-textbook-usage.ts";
 import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supabase.ts";
 import {
@@ -1770,7 +1771,25 @@ export function createManagementService(options = {}) {
         const action = createTimetableOperationalMutation({ requestKey,
           rpc: (_name, args) => client.rpc("update_class_operational_v1", args)
             .abortSignal(AbortSignal.timeout(8_000)).retry(false), refresh: () => refreshPublicClassesCache("class") });
-        const { data, refreshStatus } = await action.save({ classId: payload.id, patch });
+        let outcome;
+        try {
+          outcome = await action.save({ classId: payload.id, patch });
+        } catch (error) {
+          if (patch.status !== ARCHIVED_CLASS_STATUS || !options.confirmCloseResult || !isUncertainClassWrite(error)) throw error;
+          // Only a writer/receipt failure reaches this branch. Preflight failures
+          // remain failures; confirmation never resubmits a mutation.
+          const confirm = createClassCloseConfirmation({
+            classId: payload.id, patch,
+            readDetail: () => createManagementReadService({ supabase: client }).loadDetail({ kind: "classes", id: payload.id }),
+            isCurrent: options.confirmCloseResult.isCurrent,
+            onChecking: options.confirmCloseResult.onChecking,
+            onConfirmed: () => {
+              if (operationalRequestKeys.get(body) === requestKey) operationalRequestKeys.delete(body);
+            },
+          });
+          return confirm();
+        }
+        const { data, refreshStatus } = outcome;
         operationalRequestKeys.delete(body);
         const result = data?.closeResult || data?.classRow || data || null;
         return result && typeof result === "object" ? { ...result, publicClassesCacheRefresh: { status: refreshStatus === "pending" ? "pending" : "complete" } } : result;
