@@ -421,8 +421,10 @@ select is((select count(*) from dashboard_private.notification_deliveries),(sele
 select is((select count(*) from public.student_class_enrollment_history),(select enrollments from no_send),'reader changes no enrollment history');
 select is((select count(*) from public.dashboard_audit_logs),(select audits from no_send),'reader and probes leave no audit record');
 select is((select provolatile::text from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'s','reader remains STABLE');
+-- The final reader includes explicit native resolution from 20261013070534;
+-- the inheritance/freshness/security assertions above still exercise that body.
 select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'sha256'),'hex'),
- '97f999206747a3656d67606e7b05745e21abf8f0da852538402f1ba518ca7ecd',
+ '89fda6eee9435fe83bb550456912bb5bef4ae87ae7177c6237c7af8c5c192e17',
  'assertions execute the exact final inheritance reader body');
 select ok((select prosecdef from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'reader remains SECURITY DEFINER');
 select ok((select proconfig @> array['search_path=""'] from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),
