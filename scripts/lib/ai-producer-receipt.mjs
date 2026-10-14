@@ -37,6 +37,7 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261013043948_class_close_gateway_noop_validation_reuse.sql',
  'supabase/migrations/20261013070534_timetable_reader_explicit_native_resolution.sql',
  'supabase/migrations/20261013193200_timetable_shared_validation_workset.sql',
+ 'supabase/migrations/20261014180000_timetable_validation_unchanged_inputs.sql',
  'supabase/tests/timetable_reader_explicit_native_resolution_test.sql',
  'supabase/tests/timetable_shared_validation_workset_test.sql',
  'supabase/tests/timetable_close_gateway_validation_reuse_test.sql',
@@ -114,6 +115,7 @@ export const TIMETABLE_CLOSE_MIGRATIONS=Object.freeze([
  Object.freeze({"fileName":"20261013043948_class_close_gateway_noop_validation_reuse.sql","status":"final","sha256":"8c6c0897694d935bbcb276d19ffdf8376146d42fe7da767d9508c6d626ef8886"}),
  Object.freeze({"fileName":"20261013070534_timetable_reader_explicit_native_resolution.sql","status":"final","sha256":"cf8bec62963545e209ea4d18c5b7276ff75a62e93fac1e5bddbb55ab7c5922c0"}),
  Object.freeze({"fileName":"20261013193200_timetable_shared_validation_workset.sql","status":"final","sha256":"f5df6c1d0494ff8f0d5ad75251e1b3592ee5a14b7a532eb43534413976886559"}),
+ Object.freeze({"fileName":"20261014180000_timetable_validation_unchanged_inputs.sql","status":"final","sha256":"cc7ada2b9a4670b38d431cc69c16b4e63d0008b40914f4d17594cfb0c1aafc7f"}),
 ]);
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
@@ -173,7 +175,7 @@ export async function snapshotAiSource(root=ROOT){
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,170,'AI canonical manifest inventory');
+ assert.equal(manifest.orderedNewMigrations.length,171,'AI canonical manifest inventory');
  const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');

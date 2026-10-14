@@ -7,7 +7,7 @@ select no_plan();
 -- Narrow semantic regression, not a benchmark. Real fixtures and their gateway /
 -- fresh-deferred / role checks below use unmodified production functions.
 select is(md5((select prosrc from pg_proc where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure)),
- '95b08ac30fbc25c20a491e117a358d00','final validator body matches the reviewed shared-workset migration');
+ '9e4abd6e0a863ceb3f9990c1c0d1e442','final validator body matches the reviewed shared-workset migration');
 
 -- Exact operational fe872 validator, frozen before this native-day experiment. Both paths
 -- call the REAL complete reader and REAL effective-date helper. No production
@@ -234,9 +234,10 @@ select is((select reference from dashboard_private.timetable_operating_write_bas
 create temp table measured_before as select pg_temp.effective_calls() calls;
 create temp table measured_candidate as select dashboard_private.validate_timetable_operating_reference_v1() value;
 create temp table measured_after as select pg_temp.effective_calls() calls;
--- This experiment retains both helper calls for every selected date.
-select is((select calls from measured_after)-(select calls from measured_before),6::bigint,
- 'native-day validator retains both helper calls for all three historical dates');
+-- Exact unchanged past inputs need no effective comparison; the frozen oracle
+-- still evaluates them and must return the exact same complete reference.
+select is((select calls from measured_after)-(select calls from measured_before),0::bigint,
+ 'canonical unchanged historical dates avoid both redundant helper calls');
 create temp table measured_oracle as select pg_temp.historical_equal_original_validator() value;
 create temp table oracle_after as select pg_temp.effective_calls() calls;
 select is((select calls from oracle_after)-(select calls from measured_after),6::bigint,
@@ -274,7 +275,7 @@ begin
  candidate_calls:=pg_temp.effective_calls();o:=pg_temp.validation_outcome(true);after_calls:=pg_temp.effective_calls();
  return jsonb_build_object('candidate',c,'oracle',o,'candidateCalls',candidate_calls-before_calls,'oracleCalls',after_calls-candidate_calls);
 end$$;
-create function pg_temp.assert_validation_pair(p jsonb,label text,expected_code text,expected_calls bigint default null)
+create function pg_temp.assert_validation_pair(p jsonb,label text,expected_code text,expected_calls bigint default null,omitted_calls bigint default 0)
 returns setof text language plpgsql as $$begin
  return next is(p#>>'{candidate,sqlstate}',expected_code,label||': actual SQLSTATE');
  return next is(p->'candidate',p->'oracle',label||': complete result/error message/DETAIL equals frozen oracle');
@@ -282,7 +283,7 @@ returns setof text language plpgsql as $$begin
   return next is((p#>'{candidate,value}')::text,(p#>'{oracle,value}')::text,label||': JSON text/order/fingerprints equal oracle');
  end if;
  if expected_calls is not null then
-  return next is((p->>'candidateCalls')::bigint,(p->>'oracleCalls')::bigint,label||': same completed real effective helper calls as oracle');
+  return next is((p->>'candidateCalls')::bigint,(p->>'oracleCalls')::bigint-omitted_calls,label||': helper count excludes only proven-equal date inputs');
  end if;
 end$$;
 create function pg_temp.close_shape(cid uuid) returns void language plpgsql as $$
@@ -318,7 +319,11 @@ create function pg_temp.guard_counts() returns jsonb language sql volatile as $$
  'assert',coalesce((select calls from pg_stat_xact_user_functions where funcid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure),0))
 $$;
 
--- Today and tomorrow join the three historical dates; no selected date is skipped. Real normalized production output throughout.
+-- Today and tomorrow join three historical dates. Only changed Monday weekly
+-- inputs on or after the cutoff require comparison; nonfinite dates always do.
+-- Derive the exact omitted count independently from these five known dates.
+create temp table omitted_finite as select 2*count(*) n from generate_series(-3,1) delta
+ where delta<0 or extract(dow from pg_temp.hday(delta))<>1;
 select set_config('app.class_schedule_mutation','release2-rpc',true);
 insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,teacher_catalog_id,classroom_catalog_id,origin)
  select pg_temp.hid(604+n),pg_temp.hid(301),'boundary-'||n,pg_temp.hday(n),'active','09:00','10:00',pg_temp.hid(101),pg_temp.hid(201),'manual'
@@ -329,7 +334,7 @@ savepoint mixed_close;
 create temp table mixed_original as select dashboard_private.read_timetable_operating_reference_v1() value;
 select pg_temp.close_shape(pg_temp.hid(301));
 create temp table mixed_pair as select pg_temp.validation_pair() p;
-select line from mixed_pair cross join lateral pg_temp.assert_validation_pair(p,'historical/current/future mixed close','00000',4) as check_line(line);
+select line from mixed_pair cross join lateral pg_temp.assert_validation_pair(p,'historical/current/future mixed close','00000',4,(select n from omitted_finite)) as check_line(line);
 select is((select (p->>'oracleCalls')::bigint from mixed_pair),10::bigint,'frozen oracle expands both sides of all five mixed dates');
 select is((select reference from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current()),
  (select value from mixed_original),'mixed boundary comparison retains original transaction baseline');
@@ -346,14 +351,14 @@ set constraints all immediate;set constraints all deferred;
 savepoint infinite_close;
 select pg_temp.close_shape(pg_temp.hid(301));
 create temp table infinite_pair as select pg_temp.validation_pair() p;
-select line from infinite_pair cross join lateral pg_temp.assert_validation_pair(p,'real normalized nonfinite dates','00000',8) as check_line(line);
+select line from infinite_pair cross join lateral pg_temp.assert_validation_pair(p,'real normalized nonfinite dates','00000',8,(select n from omitted_finite)) as check_line(line);
 select is((select (p->>'oracleCalls')::bigint from infinite_pair),14::bigint,'oracle expands seven dates including both infinities');
 rollback to infinite_close;release infinite_close;
 savepoint german_dates;
 set local datestyle='German, DMY';
 select pg_temp.close_shape(pg_temp.hid(301));
 create temp table german_pair as select pg_temp.validation_pair() p;
-select line from german_pair cross join lateral pg_temp.assert_validation_pair(p,'German DMY normalized full reference','00000',8) as check_line(line);
+select line from german_pair cross join lateral pg_temp.assert_validation_pair(p,'German DMY normalized full reference','00000',8,(select n from omitted_finite)) as check_line(line);
 rollback to german_dates;release german_dates;
 set local datestyle='ISO, MDY';
 
@@ -680,7 +685,7 @@ begin
  end loop;
 end$copy$;
 select is((select source_md5 from native_copy_provenance where label='native_original'),'23930d704f99b99ea763a04e51f871ef','synthetic oracle copied exact fe body');
-select is((select source_md5 from native_copy_provenance where label='native_candidate'),'95b08ac30fbc25c20a491e117a358d00','synthetic candidate copied exact fixed prototype');
+select is((select source_md5 from native_copy_provenance where label='native_candidate'),'9e4abd6e0a863ceb3f9990c1c0d1e442','synthetic candidate copied exact fixed prototype');
 create function pg_temp.native_outcome(original boolean) returns jsonb language plpgsql security definer set search_path='' as $$
 declare r jsonb;c text;m text;det text;
 begin
@@ -708,7 +713,7 @@ create function pg_temp.native_row(rowid text,daytext text) returns jsonb langua
  select jsonb_build_object('id',rowid,'classId',pg_temp.hid(301),'date',daytext,'state','active','startMinute',540,'endMinute',600,
  'teacherId',pg_temp.hid(101),'classroomId',pg_temp.hid(201))
 $$;
-create temp table native_cases(label text primary key,before_ref jsonb,after_ref jsonb,expected_code text,expected_message text,expected_calls bigint,mode text default 'real');
+create temp table native_cases(label text primary key,before_ref jsonb,after_ref jsonb,expected_code text,expected_message text,expected_calls bigint,mode text default 'real',omitted_calls bigint default 0);
 insert into native_cases(label,before_ref,after_ref,expected_code,expected_calls) values
  ('complete metadata-only return',pg_temp.native_ref('[]','[]'),pg_temp.native_ref('[]','[]')||'{"extra":"preserve"}','00000',0),
  ('dated multiset permutation zero affected',pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('a','2026-10-11'),pg_temp.native_row('b','2026-10-12'))),
@@ -745,6 +750,60 @@ insert into native_cases(label,before_ref,after_ref,expected_code,expected_calls
 -- compares the emitted date itself, not only successful trace ordering.
 insert into native_cases(label,before_ref,after_ref,expected_code,expected_message,expected_calls,mode) values
  ('first selected date error ordinal',pg_temp.native_ref('[]','[]'),pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('a','2026-10-15'),pg_temp.native_row('b','2026-10-11'),pg_temp.native_row('c','2026-10-14'))),'22007','date-order-probe:%:1',1,'date-order-probe');
+
+-- Current-cutoff cases exercise the new guarded path against the frozen oracle.
+-- Only the two explicit zero-work cases omit helper traces; all other cases
+-- preserve both result/error and every observed helper/witness boundary.
+create temp table current_guard_data as select
+ (pg_temp.native_row('weekly',null)-'date')||'{"weekday":1,"sourceSlotId":"slot"}' w,
+ to_jsonb(pg_temp.hday(0)) cutoff,
+ pg_temp.hday(7+(1-extract(dow from pg_temp.hday(0))::int+7)%7)::text monday,
+ pg_temp.hday(7+(2-extract(dow from pg_temp.hday(0))::int+7)%7)::text tuesday,
+ pg_temp.hday(-1)::text past;
+insert into native_cases(label,before_ref,after_ref,expected_code,expected_calls,omitted_calls)
+ select 'canonical unchanged past omission',pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('past',past)),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('past',past)),cutoff),'00000',0,2 from current_guard_data
+ union all select 'canonical unchanged future weekday omission',pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('future',tuesday)),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('future',tuesday)),cutoff),'00000',0,2 from current_guard_data;
+insert into native_cases(label,before_ref,after_ref,expected_code,expected_calls)
+ select 'old weekday removal exposes inherited conflict',
+ pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('inherited',monday)||'{"inheritedWeeklySlotId":"weekly"}',pg_temp.native_row('peer',monday)||jsonb_build_object('classId',pg_temp.hid(304))),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('inherited',monday)||'{"inheritedWeeklySlotId":"weekly"}',pg_temp.native_row('peer',monday)||jsonb_build_object('classId',pg_temp.hid(304))),cutoff),'23P01',2 from current_guard_data
+ union all select 'numeric dated serialization requires fallback',
+ pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('past',past)||'{"sourceSlotId":1}'),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('past',past)||'{"sourceSlotId":1.0}'),cutoff),'00000',2 from current_guard_data
+ union all select 'canonical changed historical conflict',
+ pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('past',past)),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('past',past),pg_temp.native_row('peer',past)),cutoff),'23P01',2 from current_guard_data
+ union all select 'numeric weekly identity preserves inherited exposure',
+ pg_temp.native_ref(jsonb_build_array(w||'{"id":1}',w||'{"id":"other-weekly","weekday":2,"sourceSlotId":"other-slot","revision":1}'),jsonb_build_array(pg_temp.native_row('inherited',monday)||'{"inheritedWeeklySlotId":"1"}'),cutoff),
+ pg_temp.native_ref(jsonb_build_array(w||'{"id":1.0}',w||'{"id":"other-weekly","weekday":2,"sourceSlotId":"other-slot","revision":2}'),jsonb_build_array(pg_temp.native_row('inherited',monday)||'{"inheritedWeeklySlotId":"1"}'),cutoff),'23P01',2 from current_guard_data
+ union all select 'noncanonical matching cutoff preserves history',
+ pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('past',past)),to_jsonb(pg_temp.hday(-7))),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('past',past)),to_jsonb(pg_temp.hday(-7))),'00000',2 from current_guard_data
+ union all select 'old empty retains original new date evaluation',pg_temp.native_ref('[]','[]',cutoff),
+ pg_temp.native_ref(jsonb_build_array(w||'{"date":"invalid-new-date"}'),'[]',cutoff),'22007',0 from current_guard_data
+ union all select 'new empty must not expand scalar old weekly',pg_temp.native_ref('1','[]',cutoff),
+ pg_temp.native_ref('[]','[]',cutoff),'00000',0 from current_guard_data
+ union all select 'matching old key precedes invalid old date',pg_temp.native_ref(jsonb_build_array(w,w||'{"date":"invalid-later-date"}'),'[]',cutoff),
+ pg_temp.native_ref(jsonb_build_array(w),'[]',cutoff),'00000',0 from current_guard_data
+ union all select 'duplicate and scalar old keys keep existence semantics',pg_temp.native_ref(jsonb_build_array(null,'scalar',w,w),'[]',cutoff),
+ pg_temp.native_ref(jsonb_build_array(w),'[]',cutoff),'00000',0 from current_guard_data;
+insert into native_cases(label,before_ref,after_ref,expected_code,expected_calls)
+ select 'canonical NULL date keeps helper boundary',pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('null-date',null)),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('null-date',null)),cutoff),'00000',2 from current_guard_data
+ union all select 'canonical infinite date keeps helper boundary',pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('infinite','infinity')),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('infinite','infinity')),cutoff),'00000',2 from current_guard_data
+ union all select 'string weekday retains original path',pg_temp.native_ref(jsonb_build_array(w||'{"weekday":"1"}'),jsonb_build_array(pg_temp.native_row('future',monday)),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('future',monday)),cutoff),'00000',2 from current_guard_data;
+insert into native_cases(label,before_ref,after_ref,expected_code,expected_message,expected_calls)
+ select 'numeric decimal weekday retains cast error',pg_temp.native_ref(jsonb_build_array(w||'{"weekday":1.0}'),jsonb_build_array(pg_temp.native_row('future',monday)),cutoff),
+ pg_temp.native_ref(jsonb_build_array(w||'{"weekday":1.0,"revision":2}'),jsonb_build_array(pg_temp.native_row('future',monday)),cutoff),'22P02','%1.0%',1 from current_guard_data
+ union all select 'weekly conflict before later new date error',pg_temp.native_ref(jsonb_build_array(w),'[]',cutoff),
+ pg_temp.native_ref(jsonb_build_array(w||'{"id":"new-first","sourceSlotId":"new-first-slot"}',w||'{"id":"new-second","date":"invalid-later-date"}'),'[]',cutoff),'23P01','timetable_resource_conflict',0 from current_guard_data
+ union all select 'introduced unknown before malformed weekly',pg_temp.native_ref(jsonb_build_array(w),'[]',cutoff),
+ pg_temp.native_ref(jsonb_build_array(w||'{"date":"invalid-new-date"}'),'[]',cutoff)||'{"unresolvedOccupancies":[{"id":"new-unknown"}]}','23P01','timetable_resource_conflict',0 from current_guard_data;
+
 create temp table native_results(label text,original jsonb,candidate jsonb);
 do $run$
 declare c record;o jsonb;n jsonb;
@@ -759,8 +818,8 @@ end$run$;
 select is(r.candidate#>>'{outcome,sqlstate}',c.expected_code,'synthetic '||r.label||': actual SQLSTATE') from native_results r join native_cases c using(label) order by label;
 select is(r.candidate->'outcome',r.original->'outcome','synthetic '||r.label||': complete output/message/DETAIL parity') from native_results r order by label;
 select is((r.candidate->>'calls')::bigint,c.expected_calls,'synthetic '||r.label||': entered helper count including errors') from native_results r join native_cases c using(label) order by label;
-select is(r.candidate->'calls',r.original->'calls','synthetic '||r.label||': old/new helper boundary parity') from native_results r order by label;
-select is(r.candidate->'trace',r.original->'trace','synthetic '||r.label||': emitted date / helper / representative witness order parity') from native_results r order by label;
+select is((r.candidate->>'calls')::bigint,(r.original->>'calls')::bigint-c.omitted_calls,'synthetic '||r.label||': exact helper count against oracle and proven omissions') from native_results r join native_cases c using(label) order by label;
+select is(r.candidate->'trace',case when c.omitted_calls=0 then r.original->'trace' else '[]'::jsonb end,'synthetic '||r.label||': emitted date / helper / representative witness order parity') from native_results r join native_cases c using(label) order by label;
 select ok(r.candidate#>>'{outcome,message}' like c.expected_message,'synthetic '||r.label||': specific first error') from native_results r join native_cases c using(label) where c.expected_message is not null order by label;
 select is((candidate#>'{outcome,value}')::text,c.after_ref::text,'synthetic '||r.label||': exact complete fresh reference text') from native_results r join native_cases c using(label) where c.expected_code='00000' order by label;
 select is((select count(*) from native_results r cross join lateral jsonb_array_elements(r.candidate->'trace') t where r.label='SQL NULL and JSON null helper rows' and t->>'kind'='returned' and t->>'sqlNull'='true'),2::bigint,'synthetic NULL transport actually includes one SQL NULL from each helper');
