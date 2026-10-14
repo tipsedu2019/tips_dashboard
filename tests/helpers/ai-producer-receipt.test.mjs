@@ -24,6 +24,7 @@ const timetableCloseTests=Object.freeze([
  'supabase/tests/timetable_reader_explicit_native_resolution_test.sql',
  'supabase/tests/timetable_shared_validation_workset_test.sql',
  'supabase/tests/timetable_close_gateway_validation_reuse_test.sql',
+ 'supabase/tests/legacy_context_binding_preparation_test.sql',
 ]);
 test('import literal decoding preserves plain and escaped string values and rejects expressions',()=>{
  for(const [literal,value] of [
@@ -131,7 +132,7 @@ function parityArguments({tests,probes}){
   ...tests.flatMap(path=>['--test',path]),...probes.flatMap(path=>['--probe',path])];
 }
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
- assert.equal(AI_SQL_TESTS.length,100);
+ assert.equal(AI_SQL_TESTS.length,101);
  assert.equal(AI_PROBES.length,21);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
@@ -164,9 +165,9 @@ test('timetable validation is exactly pinned without changing earlier migration 
 });
 test('close candidate pins reject each missing, reordered, draft or changed migration and preserve regression source closure',async()=>{
  const current=await snapshotAiSource();
- assert.equal(TIMETABLE_CLOSE_MIGRATIONS.length,4);
+ assert.equal(TIMETABLE_CLOSE_MIGRATIONS.length,5);
  assert.deepEqual(AI_SQL_TESTS.slice(AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+1,
-  AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+4),timetableCloseTests);
+  AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+5),timetableCloseTests);
  for(const path of timetableCloseTests){
   assert.equal(current.closure.find(row=>row.path===path)?.sha256,hash(await readFile(path)));
  }
@@ -181,7 +182,7 @@ test('close candidate pins reject each missing, reordered, draft or changed migr
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.deepEqual(original.orderedNewMigrations.slice(-4),TIMETABLE_CLOSE_MIGRATIONS);
+  assert.deepEqual(original.orderedNewMigrations.slice(-5),TIMETABLE_CLOSE_MIGRATIONS);
   for(const pin of TIMETABLE_CLOSE_MIGRATIONS){
    for(const mutate of [
     (rows,i)=>rows.splice(i,1),
@@ -321,7 +322,7 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,171);
+  assert.equal(original.orderedNewMigrations.length,172);
   const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';

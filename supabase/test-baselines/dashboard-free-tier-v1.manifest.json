@@ -859,6 +859,11 @@
       "fileName": "20261014180000_timetable_validation_unchanged_inputs.sql",
       "status": "final",
       "sha256": "cc7ada2b9a4670b38d431cc69c16b4e63d0008b40914f4d17594cfb0c1aafc7f"
+    },
+    {
+      "fileName": "20261014193500_legacy_context_binding_preparation.sql",
+      "status": "final",
+      "sha256": "70ef7db3791f04a8b9e42986d21e2afa6396f8967084b293c3f1f3c77889b5af"
     }
   ]
 }

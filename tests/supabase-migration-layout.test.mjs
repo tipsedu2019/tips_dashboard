@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = new Set()
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c845a97e176bb0ae00bec07575d8c43e17dcb258523c2f02e25765866a539d63"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "56b70c15cf69973cf3a1d99ea8844667e228481a4c926a9ee01fd35f2fee989f"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -140,6 +140,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_reader_explicit_native_resolution_test.sql",
   "supabase/tests/timetable_shared_validation_workset_test.sql",
   "supabase/tests/timetable_close_gateway_validation_reuse_test.sql",
+  "supabase/tests/legacy_context_binding_preparation_test.sql",
   "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql",
   "supabase/tests/ai_agent_chat_outbox_test.sql",
   "supabase/tests/ai_agent_chat_runtime_test.sql",
@@ -1423,7 +1424,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "4410140a7b20cec70ef65fd9394021087deb0330a542f42fcc6efda72e9e1aef"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "613d6dba401f01d9b4e423ea26121d86fb0415369aeec163de9b9468c67f9cc2"],
+    ["supabase-sql-review.yml", "1eda7a15250e1e28ae0646e3b1aebe97d1b12d923c9924e814d928994e5c5da4"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
