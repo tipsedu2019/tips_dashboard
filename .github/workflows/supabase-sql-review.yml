@@ -264,6 +264,9 @@ jobs:
             --test supabase/tests/timetable_default_projection_performance_test.sql \
             --test supabase/tests/timetable_save_conflict_details_test.sql \
             --test supabase/tests/timetable_validation_date_reuse_test.sql \
+            --test supabase/tests/timetable_reader_explicit_native_resolution_test.sql \
+            --test supabase/tests/timetable_shared_validation_workset_test.sql \
+            --test supabase/tests/timetable_close_gateway_validation_reuse_test.sql \
             --test supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql \
             --test supabase/tests/ai_agent_chat_outbox_test.sql \
             --test supabase/tests/ai_agent_chat_runtime_test.sql \

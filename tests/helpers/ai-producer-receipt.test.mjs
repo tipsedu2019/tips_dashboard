@@ -7,7 +7,7 @@ test('capture protocol preserves JSON bytes and rejects missing, duplicate, unkn
  for(const output of ['', 'AI_HTTP_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_UNKNOWN_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_HTTP_CAPTURE:{\n'])assert.throws(()=>extractAiCapture(output,'http'));
 });
 
-import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,CURRENT_PR126_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,TIMETABLE_VALIDATION_MIGRATION,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,CURRENT_PR126_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,TIMETABLE_VALIDATION_MIGRATION,TIMETABLE_CLOSE_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
@@ -17,6 +17,11 @@ import {parseIsolatedDbArguments,runIsolatedSupabaseDbTests} from '../../scripts
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const isolatedWorkflows=['supabase-db-push.yml','supabase-sql-review.yml'];
 const legacyOccupancyTest='supabase/tests/makeup_legacy_approval_occupancy_test.sql';
+const timetableCloseTests=Object.freeze([
+ 'supabase/tests/timetable_reader_explicit_native_resolution_test.sql',
+ 'supabase/tests/timetable_shared_validation_workset_test.sql',
+ 'supabase/tests/timetable_close_gateway_validation_reuse_test.sql',
+]);
 async function workflowInventory(name){
  const source=await readFile(new URL('../../.github/workflows/'+name,import.meta.url),'utf8');
  return {
@@ -31,7 +36,7 @@ function parityArguments({tests,probes}){
   ...tests.flatMap(path=>['--test',path]),...probes.flatMap(path=>['--probe',path])];
 }
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
- assert.equal(AI_SQL_TESTS.length,97);
+ assert.equal(AI_SQL_TESTS.length,100);
  assert.equal(AI_PROBES.length,21);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
@@ -62,6 +67,54 @@ test('timetable validation is exactly pinned without changing earlier migration 
   await assert.rejects(snapshotAiSource(root),/timetable validation migration source drift/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('close candidate pins reject each missing, reordered, draft or changed migration and preserve regression source closure',async()=>{
+ const current=await snapshotAiSource();
+ assert.equal(TIMETABLE_CLOSE_MIGRATIONS.length,3);
+ assert.deepEqual(AI_SQL_TESTS.slice(AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+1,
+  AI_SQL_TESTS.indexOf('supabase/tests/timetable_validation_date_reuse_test.sql')+4),timetableCloseTests);
+ for(const path of timetableCloseTests){
+  assert.equal(current.closure.find(row=>row.path===path)?.sha256,hash(await readFile(path)));
+ }
+ for(const pin of TIMETABLE_CLOSE_MIGRATIONS){
+  assert.equal(current.closure.find(row=>row.path==='supabase/migrations/'+pin.fileName)?.sha256,pin.sha256);
+ }
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-close-drift-'));
+ try{
+  const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
+  for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const original=JSON.parse(await readFile(manifestPath));
+  assert.deepEqual(original.orderedNewMigrations.slice(-3),TIMETABLE_CLOSE_MIGRATIONS);
+  for(const pin of TIMETABLE_CLOSE_MIGRATIONS){
+   for(const mutate of [
+    (rows,i)=>rows.splice(i,1),
+    (rows,i)=>rows[i].status='draft',
+    (rows,i)=>rows[i].sha256='0'.repeat(64),
+    (rows,i)=>[rows[i-1],rows[i]]=[rows[i],rows[i-1]],
+    (rows,i)=>rows.push({...rows[i]}),
+   ]){
+    const changed=structuredClone(original),rows=changed.orderedNewMigrations;
+    mutate(rows,rows.findIndex(row=>row.fileName===pin.fileName));
+    await writeFile(manifestPath,JSON.stringify(changed));
+    await assert.rejects(snapshotAiSource(root),/(?:AI canonical manifest inventory|current migration manifest drift)/);
+   }
+   await writeFile(manifestPath,JSON.stringify(original));
+   const path=join(root,'supabase/migrations',pin.fileName),bytes=await readFile(path);
+   const altered=Buffer.concat([bytes,Buffer.from('\n-- unreviewed drift\n')]);
+   await writeFile(path,altered);
+   await assert.rejects(snapshotAiSource(root),/timetable close migration source drift/);
+   const changed=structuredClone(original);
+   changed.orderedNewMigrations.find(row=>row.fileName===pin.fileName).sha256=hash(altered);
+   await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+   await writeFile(manifestPath,JSON.stringify(original));
+   await rm(path);await assert.rejects(snapshotAiSource(root),/ENOENT/);
+   await writeFile(path,bytes);
+  }
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 test('full parity guard rejects missing, duplicate and reordered workflow selectors before process launch',async()=>{
  let launched=0;
  const executeProcess=async()=>{launched++;throw new Error('process launch forbidden in inventory regression');};
@@ -70,6 +123,7 @@ test('full parity guard rejects missing, duplicate and reordered workflow select
   const swapFirst=list=>[list[1],list[0],...list.slice(2)];
   for(const [label,changed] of [
    ['missing legacy occupancy',{...inventory,tests:inventory.tests.filter(path=>path!==legacyOccupancyTest)}],
+   ...timetableCloseTests.map(test=>['missing '+test,{...inventory,tests:inventory.tests.filter(path=>path!==test)}]),
    ['duplicate SQL',{...inventory,tests:[...inventory.tests,legacyOccupancyTest]}],
    ['reordered SQL',{...inventory,tests:swapFirst(inventory.tests)}],
    ['missing probe',{...inventory,probes:inventory.probes.slice(1)}],
@@ -172,8 +226,8 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,167);
-  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && !CURRENT_PR126_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
+  assert.equal(original.orderedNewMigrations.length,170);
+  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
   assert.equal(reviewedLegacy.at(-1).fileName,mainFileName);

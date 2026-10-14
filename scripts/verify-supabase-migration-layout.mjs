@@ -114,6 +114,9 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_default_projection_performance_test.sql",
   "supabase/tests/timetable_save_conflict_details_test.sql",
   "supabase/tests/timetable_validation_date_reuse_test.sql",
+  "supabase/tests/timetable_reader_explicit_native_resolution_test.sql",
+  "supabase/tests/timetable_shared_validation_workset_test.sql",
+  "supabase/tests/timetable_close_gateway_validation_reuse_test.sql",
   "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql",
   "supabase/tests/ai_agent_chat_outbox_test.sql",
   "supabase/tests/ai_agent_chat_runtime_test.sql",
@@ -178,9 +181,9 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c2ebb1d241788e01c876bffca55d13858b96ce3351147a0cf155107a9c88984d"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c845a97e176bb0ae00bec07575d8c43e17dcb258523c2f02e25765866a539d63"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "5121ff0e1bf1382d2b71412d99e1e372aa1908fd01a93b76f7e99d0e7994a480"
+  "613d6dba401f01d9b4e423ea26121d86fb0415369aeec163de9b9468c67f9cc2"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.

@@ -34,6 +34,12 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261008113322_withdrawal_completion_optional_request_snapshot.sql',
  'supabase/migrations/20261012102015_withdrawal_immediate_completion.sql',
  'supabase/migrations/20261012155755_timetable_validation_date_reuse.sql',
+ 'supabase/migrations/20261013043948_class_close_gateway_noop_validation_reuse.sql',
+ 'supabase/migrations/20261013070534_timetable_reader_explicit_native_resolution.sql',
+ 'supabase/migrations/20261013193200_timetable_shared_validation_workset.sql',
+ 'supabase/tests/timetable_reader_explicit_native_resolution_test.sql',
+ 'supabase/tests/timetable_shared_validation_workset_test.sql',
+ 'supabase/tests/timetable_close_gateway_validation_reuse_test.sql',
  'supabase/migrations/20261008140556_ai_agent_thread_replies.sql',
  'supabase/tests/ai_agent_thread_replies_test.sql',
  'supabase/tests/ai_agent_nonexpiring_chat_test.sql',
@@ -104,6 +110,11 @@ export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
 const REVIEWED_MANIFEST_PREFIX_SHA256='80a6a4d06fe190ef65e9c926392cf187995c07ce1a25c275ac07dc9d72df79c2';
 const MAIN_MIGRATION=Object.freeze({fileName:'20261007135140_textbook_latest_count_read_aggregation.sql',status:'final',sha256:'1491b4b824c343e23dc24b83e1be41214f5fda197813dca012c252a9b541cb23'});
 export const TIMETABLE_VALIDATION_MIGRATION=Object.freeze({fileName:'20261012155755_timetable_validation_date_reuse.sql',status:'final',sha256:'83ec63aad313c61b6c2205ce4748a0707b1f478a424e5e6c67d92fb4b27c9e82'});
+export const TIMETABLE_CLOSE_MIGRATIONS=Object.freeze([
+ Object.freeze({"fileName":"20261013043948_class_close_gateway_noop_validation_reuse.sql","status":"final","sha256":"8c6c0897694d935bbcb276d19ffdf8376146d42fe7da767d9508c6d626ef8886"}),
+ Object.freeze({"fileName":"20261013070534_timetable_reader_explicit_native_resolution.sql","status":"final","sha256":"cf8bec62963545e209ea4d18c5b7276ff75a62e93fac1e5bddbb55ab7c5922c0"}),
+ Object.freeze({"fileName":"20261013193200_timetable_shared_validation_workset.sql","status":"final","sha256":"f5df6c1d0494ff8f0d5ad75251e1b3592ee5a14b7a532eb43534413976886559"}),
+]);
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
  Object.freeze({fileName:'20261009082000_ops_legacy_dispatch_actor_null_guard.sql',status:'final',sha256:'191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3'}),
@@ -144,18 +155,19 @@ export async function snapshotAiSource(root=ROOT){
  }
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
  const withdrawalNames=CURRENT_WITHDRAWAL_MIGRATIONS.map(m=>m.fileName);
- const integratedNames=CURRENT_PR126_MIGRATIONS.map(m=>m.fileName);
+ const integratedNames=[...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].map(m=>m.fileName);
  const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && !integratedNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,167,'AI canonical manifest inventory');
- const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
+ assert.equal(manifest.orderedNewMigrations.length,170,'AI canonical manifest inventory');
+ const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');
  for(const m of CURRENT_WITHDRAWAL_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed withdrawal migration source drift');
  for(const m of CURRENT_PR126_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed PR126 migration source drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',TIMETABLE_VALIDATION_MIGRATION.fileName))),TIMETABLE_VALIDATION_MIGRATION.sha256,'timetable validation migration source drift');
+ for(const m of TIMETABLE_CLOSE_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'timetable close migration source drift');
  assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
  for(const m of CURRENT_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
  const sourceHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}}).trim();
@@ -302,6 +314,9 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_default_projection_performance_test.sql",
   "supabase/tests/timetable_save_conflict_details_test.sql",
   "supabase/tests/timetable_validation_date_reuse_test.sql",
+  "supabase/tests/timetable_reader_explicit_native_resolution_test.sql",
+  "supabase/tests/timetable_shared_validation_workset_test.sql",
+  "supabase/tests/timetable_close_gateway_validation_reuse_test.sql",
   "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql",
   "supabase/tests/ai_agent_chat_outbox_test.sql",
   "supabase/tests/ai_agent_chat_runtime_test.sql",
