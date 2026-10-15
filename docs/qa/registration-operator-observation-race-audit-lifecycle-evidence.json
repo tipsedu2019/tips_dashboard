@@ -1,0 +1,102 @@
+{
+  "previousCandidateCommit": "fa0327113eede9653936bb01a091f71b3964c193",
+  "sourceSha256": "ee1d1391fc523e9ecf0f3f25259f5a2e49901d37c80f5cf5d075e425ef7d0c58",
+  "sourcePathCount": 49,
+  "reportedMacResults": {
+    "provenance": "Parent delegation describing existing Mac task; not rerun in cloud",
+    "taskId": "01a13a32-3a3b-77ca-a490-88ee40d720ad",
+    "diagnosisReceiptSha256": "dcf330aeea6de2da799d0fbe6f14392af753b0c97a10f35ed7b6985ee2142101",
+    "node22RaceContracts": {
+      "passed": 12,
+      "failed": 0
+    },
+    "parsedSessions": 3,
+    "case1": {
+      "waitObserved": true,
+      "completionObserved": true,
+      "verificationRows": 1,
+      "teardown": "FAILED dashboard_audit_logs_class_id_fkey"
+    },
+    "case2": "SETUP_FAILED",
+    "cases3To7": "NOT_STARTED",
+    "completedLifecycles": 0,
+    "requiredLifecycles": 7,
+    "childExit": 1,
+    "stdoutBytes": 1851,
+    "stderrBytes": 1569,
+    "exactFailingDelete": null,
+    "exactSqlstate": null,
+    "freshPostdeploy": true,
+    "cleanup5": "EMPTY",
+    "source725": "UNCHANGED (parent reported)"
+  },
+  "sourceDiagnosis": {
+    "status": "Confirmed in ordered active source; exact original runtime statement/SQLSTATE unavailable",
+    "mechanism": "AFTER DELETE class audit derives class_id from OLD.id and inserts it after parent deletion. ON DELETE SET NULL handles pre-existing audit rows, not that new insert. Removing earlier audit rows does not solve this mechanism.",
+    "productFix": "None; fixture keeps audited parents until owned DB disposal.",
+    "schemaPins": {
+      "supabase/migrations/20260728230427_continuous_class_schedule_release2_contracts.sql": "c3fc23a6f54e7bed3f1fab56ec4c24e4da90ca9821359e7b3d35052ca6ba4253",
+      "supabase/migrations/20260814115116_dashboard_audit_diff_format.sql": "8fcd458950cee39866dc6be500628f79f4a9ad7a2ae45f54eefe683f79f0871d",
+      "supabase/migrations/20260521190000_ops_taskbox.sql": "de8034d4d5cbcf1a9d5c0670da7ab1d26120ae5fe72749594554c362988a3031",
+      "supabase/migrations/20260712172644_registration_subject_tracks_schema.sql": "5e4bd1a081f96ddaa2dac15ad56ac96e3f1861a8808fc2f64828e0b6d72c2194"
+    }
+  },
+  "changedSourcePins": {
+    "supabase/tests/registration_enrollment_guarded_save_race.spec": "88414c1549e0d0d15b4bc3ddf59cee9638f6935522aa3fe6c5db7d95dbc8237d",
+    "tests/probe-registration-enrollment-guarded-save-concurrency.mjs": "d339a5af9e5c7ca4576f9b0efc87625da498e005aa29373f3aec4413b90530b5",
+    "tests/registration-enrollment-race-probe.test.mjs": "6f09d6c58ccc73d1783b5b4868a7d9deacd7e1a2956124986532075e2eee677a"
+  },
+  "unchangedSourcePins": {
+    "supabase/tests/registration_enrollment_guarded_save_test.sql": "879621aa654cd9bff2193b68ca3b89fddbdb0c99d362b64c3ad090bdafaa4a1a",
+    "tests/registration-enrollment-guarded-save.test.mjs": "2777c5fa29f706f74e3b3b92fbccd3ff33c3d6a78a9935776755e0719c49ad53",
+    "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3",
+    "scripts/run-isolated-supabase-db-tests.mjs": "581731526c3ca61d284d597b83313e2b200f1a35c40e9f6439c1c12dabfa8439",
+    "supabase/tests/active_registration_workflow_postdeploy_readonly.sql": "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343",
+    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
+  },
+  "fixtureLifecycle": {
+    "commonResources": "Five synthetic account/profile/class/teacher/classroom rows created once and retained with audit history until owned DB disposal.",
+    "privateState": "Separate fixture schema, RLS enabled, no PUBLIC/anon/authenticated/service_role grants; SQL invoker snapshot helper also revoked from these roles.",
+    "snapshot": "Full resource and audit rows plus every direct FK child row referencing resource IDs; catalog-discovered single-id dependencies, quoted identifiers and bound UUID, unsupported shapes fail closed.",
+    "setup": "Reject initial ID collisions; flush resource seed constraints; snapshot before case data; later setups require matching snapshot and completed_cases1-6. Full case seed constraints still flush before commit.",
+    "teardown": "Delete scoped tasks through existing cascades; flush all constraints; verify business residue zero, exact resource/audit/FK snapshot and six no-send counts; require two results for next case; advance count, clear JWT and drop only per-case schema.",
+    "diagnostics": "Successful case cleanup emits numeric checkpoint; failures emit phase, original SQLSTATE and constraint name then rethrow. No row/SQL payload logging.",
+    "finalCleanup": "Require fresh owned DB, seven lifecycle checkpoints and final owned-resource cleanup5 empty. No manual anchor/audit deletion.",
+    "auditAndIntegrityBypass": false
+  },
+  "localVerification": {
+    "runtime": "v24.19.0",
+    "scope": "Race source/parser and active ordered-schema contract checks only; no database or isolationtester executed",
+    "passed": 14,
+    "failed": 0,
+    "skipped": 0,
+    "malformedGrammarVariantsRejected": 18,
+    "newAnchorRegressionFailsOnPredecessor": true,
+    "regressionBeforeLogSha256": "f2d95e59a508b1234537ef9d9782db660862a494306cf35e95910c407b75abe7",
+    "passingLogSha256": "5ee16188f600c8d881988aa6a0a42a1642975170c69974980daf0b7a78e9a57a"
+  },
+  "preservedControls": {
+    "comparedAgainstCommit": "fa0327113eede9653936bb01a091f71b3964c193",
+    "allSessionDeclarationsAndBodiesUnchanged": true,
+    "unchangedStepBodies": 26,
+    "unchangedPermutations": 7,
+    "unchangedFunctionSha256": {
+      "capture": "336cac2d5f832db87b5026052f5f268258efdd5c2e3325967f39f8cee0fff334",
+      "assert_case": "e5479e7eec58c08b1c9123f0d4c56ab0d2c7456710b25a6eaba75cac5ac419da"
+    },
+    "probeOnlyEmbeddedDataAndHashChanged": true,
+    "probeLogicSha256": "0222108666966a3585ea09221f556c67e7b144b5a73f27f45eeed61312c508f9",
+    "runtimeEvidence": false
+  },
+  "reusableEvidence": [
+    "source-matched guarded SQL127",
+    "SQL6",
+    "Linux10",
+    "parent-reported unchanged source725"
+  ],
+  "currentRaceRuntime": "PENDING Mac full7 lifecycles",
+  "finalRequiredReleaseChecks": "PENDING",
+  "candidateStatus": "candidate",
+  "operationalMutations": false,
+  "deployment": false
+}

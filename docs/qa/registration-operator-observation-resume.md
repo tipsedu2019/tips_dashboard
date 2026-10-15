@@ -4,7 +4,82 @@ This is the single integration of the preserved registration candidate with main
 `1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). It is ready
 for the existing Mac operator to retrieve and validate, not for deployment.
 
-## Current Mac handoff: session teardown grammar correction
+## Current Mac handoff: audit-preserving race lifecycle
+
+Use the next exact commit supplied on the same branch. The existing Mac task
+reported Node22 12/12 PASS and native PG17.6 parsing of all3 sessions for
+`fa0327113eede9653936bb01a091f71b3964c193`. Case1 observed its wait/completion and
+one-row verification, then teardown failed on
+`dashboard_audit_logs_class_id_fkey`. Case2 setup failed; cases3-7 did not start.
+The complete lifecycle result is0/7 PASS, not a successful race case. Exit1,
+stdout1851B and stderr1569B were retained; the exact failing DELETE and SQLSTATE
+were not recorded. Receipt SHA256:
+`dcf330aeea6de2da799d0fbe6f14392af753b0c97a10f35ed7b6985ee2142101`.
+New postdeploy was true, cleanup5 empty, and source725 unchanged, as reported by
+the parent. These are Mac results, not additional cloud executions.
+
+The source audit explains a deterministic failure path. Migration
+`20260728230427_continuous_class_schedule_release2_contracts.sql` adds the audit
+class FK with ON DELETE SET NULL. The final
+`20260814115116_dashboard_audit_diff_format.sql` still attaches an AFTER DELETE
+class trigger that derives audit_class_id from OLD.id and inserts a new audit
+row. Existing rows can be detached by the FK action, but the new audit row then
+references the removed class. Deleting old audit rows first cannot fix that
+path. This is a source-confirmed mechanism; the old runtime report does not
+identify its exact statement/SQLSTATE. Product audit functions/FKs are unchanged.
+
+The fixture now creates its five common synthetic resource rows once: auth
+account, profile, class, teacher catalog and classroom catalog. They and their
+audit history remain inside the owned disposable DB until that entire DB is
+removed. This lifecycle avoids audited parent deletion; it does not disable
+triggers, alter product constraints, delete audit history or change product RLS.
+A private fixture state table has RLS enabled and no client-role grants.
+
+Before creating case data, setup snapshots the complete five rows, their audit
+rows and every direct FK child row that references their IDs. It discovers these
+FKs from pg_constraint, uses quoted identifiers and a bound UUID, and rejects
+unsupported dependency shapes. Later setups require an identical snapshot and
+the expected previous lifecycle count; they never silently overwrite resources.
+Task data and result/baseline tables are recreated separately for every case.
+
+Teardown deletes only the eight scoped synthetic tasks, whose existing cascades
+remove tracks/details/enrollments/events and mutation receipts. It flushes all
+deferred constraints, asserts zero scoped business residue, compares the full
+resource/audit/FK snapshot, and rechecks the six no-send counts. It then requires
+two worker results for the next exact case number, advances the lifecycle count,
+clears JWT and drops the per-case fixture schema. Each successful checkpoint
+emits `registration_guard_race_case_cleaned:N`. Failure emits only cleanup phase,
+SQLSTATE and constraint name, then rethrows the original error. Retained anchors
+and all remaining synthetic audit history are removed by the owned DB's final
+disposal, whose cleanup evidence remains required.
+
+All3 session declarations/bodies, all26 steps, all7 permutations, `capture`,
+`assert_case`, wait/completion checks, output parser and timeouts are unchanged.
+Cloud Node24.19.0 passed14 race source/parser tests, including the official-grammar
+subset checks, snapshot/lifecycle boundaries and a check of the final ordered
+migration's audit/FK definitions. The new anchor regression rejects the old
+embedded spec. These are source checks; no cloud DB query or race was executed.
+
+Hand this single candidate and its manifest/spec pins to the existing Mac task
+`01a13a32-3a3b-77ca-a490-88ee40d720ad`. Use a fresh owned disposable DB and the
+existing verified runtime/wrapper/context checks. Run the changed race contract
+and actual race7; reuse source-matched SQL127, SQL6, Linux10 and unchanged
+source725 evidence. Do not reuse the old failed DB or remove retained anchor rows
+manually. The focused source command remains:
+
+```bash
+node --test --test-reporter=tap tests/registration-enrollment-race-probe.test.mjs
+```
+
+Require all7 waits/completions/verifications, cleanup notices1-7, successful
+teardowns, original zero exit and final owned-resource cleanup5 empty. If any
+phase fails, retain the non-sensitive phase/SQLSTATE/constraint diagnostic and
+original exits; do not substitute a partial-case success for lifecycle7/7.
+Actual race and final release gates remain pending. No deployment or operational
+mutation was performed. Exact source and schema pins are recorded in
+`registration-operator-observation-race-audit-lifecycle-evidence.json`.
+
+## Historical Mac handoff: session teardown grammar correction
 
 Use the next exact commit supplied on the same branch. The Mac operator reported
 that predecessor `4eb4b562870c950937a1d67f0293a96b6cebf27e` passed Node22 race

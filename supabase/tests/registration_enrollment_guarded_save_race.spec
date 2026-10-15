@@ -98,28 +98,113 @@ setup
   GRANT SELECT, INSERT ON registration_guard_race_fixture.results TO authenticated;
   GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA registration_guard_race_fixture TO authenticated;
 
-  INSERT INTO auth.users(id, aud, role, email, raw_app_meta_data, raw_user_meta_data)
-  VALUES(registration_guard_race_fixture.sid(1), 'authenticated', 'authenticated',
-    'registration-guard-race@example.invalid', jsonb_build_object(), jsonb_build_object('fixture', true));
-  INSERT INTO public.profiles(id, role, name, email)
-  VALUES(registration_guard_race_fixture.sid(1), 'admin', '등록 저장 동시성 합성 운영자',
-    'registration-guard-race@example.invalid')
-  ON CONFLICT(id) DO UPDATE SET role = excluded.role, name = excluded.name, email = excluded.email;
+  -- Keep audited resource parents until the owned disposable DB is destroyed.
+  -- Deleting a class would make its AFTER DELETE audit insert reference a
+  -- missing parent. Never disable audit/FKs or delete audit history to clean up.
+  CREATE SCHEMA IF NOT EXISTS registration_guard_race_anchor;
+  REVOKE ALL ON SCHEMA registration_guard_race_anchor FROM PUBLIC, anon, authenticated, service_role;
+  CREATE TABLE IF NOT EXISTS registration_guard_race_anchor.state(
+    singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
+    resource_snapshot jsonb NOT NULL,
+    completed_cases integer NOT NULL DEFAULT 0 CHECK(completed_cases BETWEEN 0 AND 7)
+  );
+  ALTER TABLE registration_guard_race_anchor.state ENABLE ROW LEVEL SECURITY;
+  REVOKE ALL ON registration_guard_race_anchor.state FROM PUBLIC, anon, authenticated, service_role;
+  CREATE FUNCTION registration_guard_race_fixture.resource_snapshot()
+  RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = '' AS $$
+  DECLARE
+    v_snapshot jsonb;
+    v_dependency record;
+    v_rows jsonb;
+    v_parent_id uuid;
+  BEGIN
+    v_snapshot := jsonb_build_object(
+      'account', (SELECT to_jsonb(r) FROM auth.users r WHERE id = registration_guard_race_fixture.sid(1)),
+      'profile', (SELECT to_jsonb(r) FROM public.profiles r WHERE id = registration_guard_race_fixture.sid(1)),
+      'class', (SELECT to_jsonb(r) FROM public.classes r WHERE id = registration_guard_race_fixture.sid(21)),
+      'teacher', (SELECT to_jsonb(r) FROM public.teacher_catalogs r WHERE id = registration_guard_race_fixture.sid(31)),
+      'classroom', (SELECT to_jsonb(r) FROM public.classroom_catalogs r WHERE id = registration_guard_race_fixture.sid(32)),
+      'audit', (SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.event_sequence, r.id), jsonb_build_array())
+        FROM public.dashboard_audit_logs r
+        WHERE (entity_table, entity_id) IN (
+          ('profiles', registration_guard_race_fixture.sid(1)::text),
+          ('classes', registration_guard_race_fixture.sid(21)::text),
+          ('teacher_catalogs', registration_guard_race_fixture.sid(31)::text),
+          ('classroom_catalogs', registration_guard_race_fixture.sid(32)::text))));
+    -- Check every direct FK dependency, including auth/receipt/restrict tables,
+    -- against the pre-case snapshot. No deletion order or table list bypasses it.
+    FOR v_dependency IN
+      SELECT c.conname, c.confrelid, c.conkey, c.confkey,
+        n.nspname, t.relname, a.attname, p.attname AS parent_column
+      FROM pg_catalog.pg_constraint c
+      JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+      JOIN pg_catalog.pg_attribute p ON p.attrelid = c.confrelid AND p.attnum = c.confkey[1]
+      WHERE c.contype = 'f' AND c.confrelid IN ('auth.users'::regclass, 'public.profiles'::regclass,
+        'public.classes'::regclass, 'public.teacher_catalogs'::regclass, 'public.classroom_catalogs'::regclass)
+      ORDER BY n.nspname, t.relname, c.conname
+    LOOP
+      IF cardinality(v_dependency.conkey) <> 1 OR cardinality(v_dependency.confkey) <> 1
+        OR v_dependency.parent_column <> 'id' THEN
+        RAISE EXCEPTION 'registration_guard_race_dependency_shape_changed' USING ERRCODE = '23514';
+      END IF;
+      v_parent_id := registration_guard_race_fixture.sid(CASE v_dependency.confrelid
+        WHEN 'auth.users'::regclass THEN 1 WHEN 'public.profiles'::regclass THEN 1
+        WHEN 'public.classes'::regclass THEN 21 WHEN 'public.teacher_catalogs'::regclass THEN 31 ELSE 32 END);
+      EXECUTE format('SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text), jsonb_build_array()) FROM %I.%I r WHERE %I = $1',
+        v_dependency.nspname, v_dependency.relname, v_dependency.attname) INTO v_rows USING v_parent_id;
+      v_snapshot := v_snapshot || jsonb_build_object(
+        format('%s.%s/%s', v_dependency.nspname, v_dependency.relname, v_dependency.conname), v_rows);
+    END LOOP;
+    RETURN v_snapshot;
+  END;
+  $$;
+  REVOKE ALL ON FUNCTION registration_guard_race_fixture.resource_snapshot() FROM PUBLIC, anon, authenticated, service_role;
+  DO $$
+  BEGIN
+    IF NOT EXISTS(SELECT 1 FROM registration_guard_race_anchor.state) THEN
+      IF EXISTS(SELECT 1 FROM auth.users WHERE id = registration_guard_race_fixture.sid(1))
+        OR EXISTS(SELECT 1 FROM public.profiles WHERE id = registration_guard_race_fixture.sid(1))
+        OR EXISTS(SELECT 1 FROM public.classes WHERE id = registration_guard_race_fixture.sid(21))
+        OR EXISTS(SELECT 1 FROM public.teacher_catalogs WHERE id = registration_guard_race_fixture.sid(31))
+        OR EXISTS(SELECT 1 FROM public.classroom_catalogs WHERE id = registration_guard_race_fixture.sid(32)) THEN
+        RAISE EXCEPTION 'registration_guard_race_resource_collision' USING ERRCODE = '23514';
+      END IF;
+      INSERT INTO auth.users(id, aud, role, email, raw_app_meta_data, raw_user_meta_data)
+      VALUES(registration_guard_race_fixture.sid(1), 'authenticated', 'authenticated',
+        'registration-guard-race@example.invalid', jsonb_build_object(), jsonb_build_object('fixture', true));
+      INSERT INTO public.profiles(id, role, name, email)
+      VALUES(registration_guard_race_fixture.sid(1), 'admin', '등록 저장 동시성 합성 운영자',
+        'registration-guard-race@example.invalid')
+      ON CONFLICT(id) DO UPDATE SET role = excluded.role, name = excluded.name, email = excluded.email;
+      PERFORM registration_guard_race_fixture.actor(true);
+      INSERT INTO public.teacher_catalogs(id, name, subjects, is_visible, sort_order)
+      VALUES(registration_guard_race_fixture.sid(31), '등록 저장 동시성 합성 교사', ARRAY['영어'], true, 9981);
+      INSERT INTO public.classroom_catalogs(id, name, subjects, is_visible, sort_order, campus)
+      VALUES(registration_guard_race_fixture.sid(32), '등록 저장 동시성 합성 강의실', ARRAY['영어'], true, 9982, '본관');
+      INSERT INTO public.classes(id, name, subject, status, teacher, room, schedule, schedule_storage_mode, schedule_plan)
+      VALUES(registration_guard_race_fixture.sid(21), '등록 저장 동시성 합성반', '영어', '수업 진행 중',
+        '등록 저장 동시성 합성 교사', '등록 저장 동시성 합성 강의실',
+        substr('일월화수목금토', extract(dow FROM current_date + 7)::integer + 1, 1) || ' 18:00-20:00', 'legacy',
+        jsonb_build_object('sessions', jsonb_build_array(jsonb_build_object(
+          'date', current_date + 7, 'sessionNumber', 1, 'scheduleState', 'active',
+          'sessionKey', to_char(current_date + 7, 'YYYY-MM-DD') || ':1',
+          'startTime', '18:00', 'endTime', '20:00',
+          'teacherCatalogId', registration_guard_race_fixture.sid(31),
+          'classroomCatalogId', registration_guard_race_fixture.sid(32)))));
+      SET CONSTRAINTS ALL IMMEDIATE;
+      INSERT INTO registration_guard_race_anchor.state(resource_snapshot)
+      VALUES(registration_guard_race_fixture.resource_snapshot());
+      SET CONSTRAINTS ALL DEFERRED;
+    ELSIF NOT EXISTS(SELECT 1 FROM registration_guard_race_anchor.state
+      WHERE completed_cases BETWEEN 1 AND 6
+        AND resource_snapshot = registration_guard_race_fixture.resource_snapshot()) THEN
+      RAISE EXCEPTION 'registration_guard_race_case_isolation_invalid' USING ERRCODE = '23514';
+    END IF;
+  END;
+  $$;
   SELECT registration_guard_race_fixture.actor(true);
-  INSERT INTO public.teacher_catalogs(id, name, subjects, is_visible, sort_order)
-  VALUES(registration_guard_race_fixture.sid(31), '등록 저장 동시성 합성 교사', ARRAY['영어'], true, 9981);
-  INSERT INTO public.classroom_catalogs(id, name, subjects, is_visible, sort_order, campus)
-  VALUES(registration_guard_race_fixture.sid(32), '등록 저장 동시성 합성 강의실', ARRAY['영어'], true, 9982, '본관');
-  INSERT INTO public.classes(id, name, subject, status, teacher, room, schedule, schedule_storage_mode, schedule_plan)
-  VALUES(registration_guard_race_fixture.sid(21), '등록 저장 동시성 합성반', '영어', '수업 진행 중',
-    '등록 저장 동시성 합성 교사', '등록 저장 동시성 합성 강의실',
-    substr('일월화수목금토', extract(dow FROM current_date + 7)::integer + 1, 1) || ' 18:00-20:00', 'legacy',
-    jsonb_build_object('sessions', jsonb_build_array(jsonb_build_object(
-      'date', current_date + 7, 'sessionNumber', 1, 'scheduleState', 'active',
-      'sessionKey', to_char(current_date + 7, 'YYYY-MM-DD') || ':1',
-      'startTime', '18:00', 'endTime', '20:00',
-      'teacherCatalogId', registration_guard_race_fixture.sid(31),
-      'classroomCatalogId', registration_guard_race_fixture.sid(32)))));
   INSERT INTO public.ops_tasks(id, title, type, status, requested_by, student_name, subject, campus, priority)
   SELECT registration_guard_race_fixture.sid(200 + n), '등록 저장 동시성 합성 ' || n,
     'registration', 'requested', registration_guard_race_fixture.sid(1),
@@ -246,17 +331,18 @@ teardown
   BEGIN;
   RESET ROLE;
   SELECT registration_guard_race_fixture.actor(true);
-  DELETE FROM public.ops_tasks
-  WHERE id IN (SELECT registration_guard_race_fixture.sid(200 + n) FROM generate_series(1, 8) n);
-  DELETE FROM public.classes WHERE id = registration_guard_race_fixture.sid(21);
-  DELETE FROM public.teacher_catalogs WHERE id = registration_guard_race_fixture.sid(31);
-  DELETE FROM public.classroom_catalogs WHERE id = registration_guard_race_fixture.sid(32);
-  SET CONSTRAINTS ALL IMMEDIATE;
-  -- Clear JWT before deleting the account referenced by it and audit triggers.
-  SELECT registration_guard_race_fixture.actor(false);
-  DELETE FROM public.profiles WHERE id = registration_guard_race_fixture.sid(1);
-  DELETE FROM auth.users WHERE id = registration_guard_race_fixture.sid(1);
-  DO $$ BEGIN
+  DO $$
+  DECLARE
+    v_completed integer;
+    v_phase text := 'delete_case_tasks';
+    v_state text;
+    v_constraint text;
+  BEGIN
+    DELETE FROM public.ops_tasks
+    WHERE id IN (SELECT registration_guard_race_fixture.sid(200 + n) FROM generate_series(1, 8) n);
+    v_phase := 'flush_case_constraints';
+    SET CONSTRAINTS ALL IMMEDIATE;
+    v_phase := 'verify_case_isolation';
     IF EXISTS(SELECT 1 FROM public.ops_tasks
         WHERE id IN (SELECT registration_guard_race_fixture.sid(200 + n) FROM generate_series(1, 8) n))
       OR EXISTS(SELECT 1 FROM public.ops_registration_enrollments WHERE class_id = registration_guard_race_fixture.sid(21))
@@ -265,14 +351,35 @@ teardown
       OR EXISTS(SELECT 1 FROM public.ops_registration_details
         WHERE task_id IN (SELECT registration_guard_race_fixture.sid(200 + n) FROM generate_series(1, 8) n))
       OR EXISTS(SELECT 1 FROM dashboard_private.ops_registration_mutations WHERE actor_id = registration_guard_race_fixture.sid(1))
-      OR EXISTS(SELECT 1 FROM public.classes WHERE id = registration_guard_race_fixture.sid(21))
-      OR EXISTS(SELECT 1 FROM public.teacher_catalogs WHERE id = registration_guard_race_fixture.sid(31))
-      OR EXISTS(SELECT 1 FROM public.classroom_catalogs WHERE id = registration_guard_race_fixture.sid(32))
-      OR EXISTS(SELECT 1 FROM public.profiles WHERE id = registration_guard_race_fixture.sid(1))
-      OR EXISTS(SELECT 1 FROM auth.users WHERE id = registration_guard_race_fixture.sid(1)) THEN
+      OR EXISTS(SELECT 1 FROM public.ops_task_events
+        WHERE task_id IN (SELECT registration_guard_race_fixture.sid(200 + n) FROM generate_series(1, 8) n))
+      OR registration_guard_race_fixture.resource_snapshot() IS DISTINCT FROM
+        (SELECT resource_snapshot FROM registration_guard_race_anchor.state)
+      OR jsonb_build_object(
+        'events', (SELECT count(*) FROM dashboard_private.notification_events),
+        'fanout', (SELECT count(*) FROM dashboard_private.notification_event_fanout_jobs),
+        'deliveries', (SELECT count(*) FROM dashboard_private.notification_deliveries),
+        'messages', (SELECT count(*) FROM public.ops_registration_customer_messages),
+        'reminders', (SELECT count(*) FROM dashboard_private.registration_customer_reminder_jobs),
+        'chat', (SELECT count(*) FROM dashboard_private.registration_observation_chat_jobs))
+        IS DISTINCT FROM (SELECT counts FROM registration_guard_race_fixture.baseline) THEN
       RAISE EXCEPTION 'registration_guard_race_fixture_cleanup_incomplete' USING ERRCODE = '23514';
     END IF;
+    v_phase := 'advance_lifecycle';
+    SELECT completed_cases INTO STRICT v_completed FROM registration_guard_race_anchor.state;
+    IF v_completed >= 7
+      OR (SELECT count(*) FROM registration_guard_race_fixture.results) <> 2
+      OR EXISTS(SELECT 1 FROM registration_guard_race_fixture.results WHERE case_number <> v_completed + 1) THEN
+      RAISE EXCEPTION 'registration_guard_race_lifecycle_order_invalid' USING ERRCODE = '23514';
+    END IF;
+    UPDATE registration_guard_race_anchor.state SET completed_cases = v_completed + 1;
+    RAISE NOTICE 'registration_guard_race_case_cleaned:%', v_completed + 1;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_constraint = CONSTRAINT_NAME;
+    RAISE NOTICE 'registration_guard_race_cleanup_failed:phase=% sqlstate=% constraint=%', v_phase, v_state, v_constraint;
+    RAISE;
   END; $$;
+  SELECT registration_guard_race_fixture.actor(false);
   DROP SCHEMA registration_guard_race_fixture CASCADE;
   COMMIT;
 }
