@@ -1,6 +1,6 @@
 {
   "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
-  "sourceSha256": "2606829a785888144cc7cf7fbf9334edf8ef4667926a378b90b470d2cb7ac28a",
+  "sourceSha256": "db76eeeed58341f40a81b4abb3417312a20b3b350f3f4d2f99175fb1febb8548",
   "sourcePathCount": 49,
   "source": [
     {
@@ -126,7 +126,7 @@
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_race.spec",
       "exists": true,
-      "sha256": "8f90fe059f22c2330965ce9ee373992314947abe56c8796627751c61c8eec993"
+      "sha256": "7a28c7a97b470605ea970c5c77e8f85ccdd12d5d836bcfa17d31324a6b85e7fd"
     },
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_test.sql",
@@ -161,7 +161,7 @@
     {
       "path": "tests/probe-registration-enrollment-guarded-save-concurrency.mjs",
       "exists": true,
-      "sha256": "27ddf23db351fb013a7cf0bfc0632ab97c6ba72718b7616e1bd6eb364e59f1ee"
+      "sha256": "dbed1cbc974d02ee4ab5fc2e69f2e7ce1cf3b8e5b2b46f1c273f23f2193be03b"
     },
     {
       "path": "tests/query-surface-budget.test.mjs",
@@ -191,7 +191,7 @@
     {
       "path": "tests/registration-enrollment-race-probe.test.mjs",
       "exists": true,
-      "sha256": "8490e0e95d57cdeec692c3c3f795bcb8f063aac46a801b74728ab8a7da70e66f"
+      "sha256": "e265326708bb6b0e2e6b48042a1211a5df98571b19cb05a3e5d69d36be01b32c"
     },
     {
       "path": "tests/registration-management-notification-actions.test.mjs",
@@ -249,5 +249,5 @@
       "sha256": "3aac93db1262c84d398e83478ba18af763b1f7ea709f30961e38b7a8ac86b035"
     }
   ],
-  "qualification": "One integrated candidate pinned to 49 source paths; documentation is outside the source digest. Migration remains candidate. Current SQL/race fixture changes await Mac PostgreSQL17 validation; earlier per-input evidence is historical."
+  "qualification": "One integrated candidate pinned to 49 source paths; documentation is outside the source digest. Migration remains candidate. Predecessor Mac guarded SQL127 and postdeploy passed; the current race-scanner correction awaits Mac PostgreSQL17 race7 validation."
 }

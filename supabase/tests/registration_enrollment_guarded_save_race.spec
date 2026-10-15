@@ -30,7 +30,7 @@ setup
       CASE WHEN p_active THEN registration_guard_race_fixture.sid(1)::text ELSE '' END, p_local);
     PERFORM set_config('request.jwt.claim.role', CASE WHEN p_active THEN 'authenticated' ELSE '' END, p_local);
     PERFORM set_config('request.jwt.claims', CASE WHEN p_active THEN jsonb_build_object(
-      'sub', registration_guard_race_fixture.sid(1), 'role', 'authenticated')::text ELSE '{}' END, p_local);
+      'sub', registration_guard_race_fixture.sid(1), 'role', 'authenticated')::text ELSE jsonb_build_object()::text END, p_local);
     IF p_active THEN
       IF (SELECT auth.uid()) IS DISTINCT FROM registration_guard_race_fixture.sid(1)
         OR (SELECT auth.role()) IS DISTINCT FROM 'authenticated'

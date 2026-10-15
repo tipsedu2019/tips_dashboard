@@ -4,7 +4,51 @@ This is the single integration of the preserved registration candidate with main
 `1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). It is ready
 for the existing Mac operator to retrieve and validate, not for deployment.
 
-## Current Mac handoff: both fixture authentication corrections
+## Current Mac handoff: race scanner correction only
+
+Use the new exact commit supplied in this handoff on the same branch. The Mac
+operator reported that predecessor `2e5e6c735aa5f72f2a2b1c784ae2f81a25711df4`
+passed Node22 15/15, guarded-save SQL127 and postdeploy. The remaining race run
+failed at specification parsing: child exit1, no signal, stdout0B/stderr50B,
+zero executed cases. Diagnosis receipt SHA256:
+`e35b516b062792708189604df03c555b322c0efb034616ce6ab806a75b7ff419`.
+These are reported Mac results, not additional cloud executions.
+
+The exact PostgreSQL17.6 scanner treats a closing brace as the end of an SQL
+block without interpreting SQL string quoting. The empty-object literal on
+spec line33 therefore ended setup prematurely. The fixture now constructs the
+same empty JSON object with `jsonb_build_object()::text`. This is the only spec
+change; its embedded copy and SHA256 are synchronized. See the
+[official PostgreSQL17.6 scanner](https://raw.githubusercontent.com/postgres/postgres/REL_17_6/src/test/isolation/specscanner.l).
+
+The new source regression fails on the predecessor and passes after correction.
+Cloud Node24.19.0 passed all10 race source/parser tests with zero failures/skips.
+All26 steps, all7 permutation lines and the complete probe executable logic are
+byte-identical to the predecessor. SQLSTATE expectations, role/RLS restrictions,
+lock waits, timeouts, no-send and cleanup assertions remain intact. The guarded
+SQL, product migration, isolated runner and postdeploy SQL are unchanged.
+
+Hand the new exact HEAD and manifest/spec pins to the existing Mac validation
+task `01a13a32-3a3b-77ca-a490-88ee40d720ad`. Rebind the existing verified wrapper
+and owned disposable PostgreSQL17 context, preserving nonce/CWD/UID/config and
+existing gate prerequisites. Repeat only the changed race contract and actual
+race7 execution; do not repeat the passed whole Node suite or guarded SQL127.
+The focused contract command is:
+
+```bash
+node --test --test-reporter=tap tests/registration-enrollment-race-probe.test.mjs
+```
+
+The actual probe must use the existing approved owned-DB execution path, not a
+standalone invocation that bypasses its context or postdeploy prerequisites.
+Retain the existing runtime and source-matched gate evidence. Record actual
+parsed sessions, all7 permutations, all7 observed waits/completions, all7 verify
+results and original exits. A parsing source check is not race runtime evidence.
+The current race and final required release checks remain pending; deployment
+is not authorized by this handoff. Exact hashes and result provenance are in
+`registration-operator-observation-race-scanner-evidence.json`.
+
+## Historical Mac handoff: both fixture authentication corrections
 
 The final candidate combines the SQL-fixture correction from
 `c1681c7951c3ea092751da640b0545da235a9ef4` with the race-fixture correction on the
@@ -211,8 +255,8 @@ injected-process checks do not prove PostgreSQL or production success.
 
 ## Historical validation instructions for bde58ada
 
-These commands preserve the earlier handoff. Use the current combined invocation
-above for both fixture corrections; broader runtime/release gates remain pending.
+These commands preserve the earlier handoff. Use the current race-only handoff
+at the top; broader runtime/release gates remain pending.
 
 From the exact checked-out commit, first verify the version and input hashes:
 

@@ -33,6 +33,16 @@ test("portable race probe embeds the exact standalone spec and seven paired wait
   assert.match(source, /permutation[^\n]*a_hold_director_track[^\n]*b_save_after_director[^\n]*a_assign_after_guard_task/);
 });
 
+test("race fixture avoids braces inside SQL blocks consumed by the PostgreSQL isolation scanner", () => {
+  const source = embeddedSpec();
+  // PG17.6 specscanner.l ends SQL at the first closing brace, including one in
+  // an SQL string literal. This is a source guard, not an executed parser test.
+  const declarations = [...source.matchAll(/^(?:setup|teardown|step "[^"]+")\s*\{/gm)];
+  const blocks = [...source.matchAll(/^(?:setup|teardown|step "[^"]+")\s*\{[^{}]*\}/gm)];
+  assert.equal(blocks.length, declarations.length, "every SQL block must avoid interior brace literals");
+  assert.match(source, /'role', 'authenticated'\)::text ELSE jsonb_build_object\(\)::text END, p_local\)/);
+});
+
 // Source boundary checks supplement the real PG17 run; they cannot certify SQL
 // execution, constraint success, or any concurrent outcome.
 function assertInOrder(source, fragments) {
