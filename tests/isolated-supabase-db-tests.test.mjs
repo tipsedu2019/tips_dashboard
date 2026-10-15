@@ -499,6 +499,78 @@ test("isolated DB runner exposes an explicit final-only lifecycle gate", async (
   }
 });
 
+test("postdeploy diagnostics retain every predicate and accept only source-keyed booleans", async () => {
+  const { buildIsolatedPostdeployDiagnostics, validateIsolatedPostdeployDiagnosticsOutput } = await import(runnerUrl.href);
+  const source = await readFile(new URL("../supabase/tests/active_registration_workflow_postdeploy_readonly.sql", import.meta.url), "utf8");
+  const diagnostic = buildIsolatedPostdeployDiagnostics(source);
+  assert.equal(diagnostic.checkKeys.length, 50);
+  assert.equal(diagnostic.functionKeys.length, 77);
+  assert.ok(Buffer.byteLength(diagnostic.sql) < 128 * 1024, "Docker exec must fit the Linux single-argument limit");
+  assert.ok(diagnostic.sql.startsWith("begin transaction read only;\nset local statement_timeout = '5s';\nset local lock_timeout = '1s';"));
+  assert.ok(diagnostic.sql.endsWith("rollback;\n"));
+  const predicates = source.split("\nselect (\n")[1].split("\n) as contract_ok;")[0].split("\n  and ");
+  for (const [index, predicate] of predicates.entries()) {
+    assert.ok(diagnostic.sql.includes(index === 1
+      ? predicate.slice("not exists (\n    select 1\n    from functions\n    where ".length, -"\n  )".length)
+      : predicate), `predicate ${index + 1} must remain byte-identical`);
+  }
+  for (const changed of [source.replace("\nselect (\n", "\nselect(\n"), source.replace("\n  and ", "\n and "), source.replace("begin transaction read only;", "begin;")]) {
+    assert.throws(() => buildIsolatedPostdeployDiagnostics(changed), /diagnostic_layout_invalid/);
+  }
+  const expected = {
+    checks: Object.fromEntries(diagnostic.checkKeys.map((key) => [key, true])),
+    functions: Object.fromEntries(diagnostic.functionKeys.map((key) => [key, key !== "workflow_private"])),
+  };
+  assert.deepEqual(validateIsolatedPostdeployDiagnosticsOutput(JSON.stringify(expected), diagnostic), expected);
+  for (const invalid of ["", "t", "f", JSON.stringify(expected) + "\n{}", "x".repeat(32769),
+    JSON.stringify({ ...expected, extra: "synthetic-private-output" }),
+    JSON.stringify({ ...expected, functions: { ...expected.functions, workflow_private: "synthetic-private-output" } }),
+    JSON.stringify({ ...expected, functions: { ...expected.functions, workflow_private: null } }),
+    JSON.stringify({ ...expected, checks: {} })]) {
+    assert.throws(() => validateIsolatedPostdeployDiagnosticsOutput(invalid, diagnostic), /diagnostic_output_invalid/);
+  }
+});
+
+test("postdeploy failure diagnostics cannot admit a failed gate or leak child output and always clean up", async (t) => {
+  const { runIsolatedSupabaseDbTests, buildIsolatedPostdeployDiagnostics } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const source = await readFile(join(root, "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"), "utf8");
+  const diagnostic = buildIsolatedPostdeployDiagnostics(source);
+  const booleans = { checks: Object.fromEntries(diagnostic.checkKeys.map((key) => [key, true])),
+    functions: Object.fromEntries(diagnostic.functionKeys.map((key) => [key, true])) };
+  for (const [stdout, diagnosticResult, kind, diagnosticEvent] of [
+    ["f\n", { code: 0, stdout: JSON.stringify(booleans) }, "false", "isolated_supabase_db_postdeploy_diagnostics"],
+    ["", { code: 0, stdout: "synthetic-private-output" }, "empty", "isolated_supabase_db_postdeploy_diagnostics_unavailable"],
+    ["t\nt\nsynthetic-private-output", { code: 1, stdout: "synthetic-private-output" }, "unexpected", "isolated_supabase_db_postdeploy_diagnostics_unavailable"],
+  ]) {
+    const calls = [], logs = [];
+    await assert.rejects(runIsolatedSupabaseDbTests({ root, executeNetwork: isolatedNetworkFixture,
+      argv: ["--execute", "--authorized", "--request-id", "postdeploy-diagnostic-failure", "--postdeploy-contract"],
+      allocatePort: (() => { let port = 55740; return () => ++port; })(), log: (line) => logs.push(line),
+      executeProcess: async (invocation) => {
+        calls.push(invocation);
+        if (invocation.command === "docker") {
+          assert.equal(invocation.args[0], "exec");
+          const original = invocation.args.at(-1) === source;
+          if (!original) assert.equal(invocation.args.at(-1), diagnostic.sql);
+          return { ...(original ? { code: 0, stdout } : diagnosticResult), stderr: "synthetic-private-stderr" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    }), /isolated_supabase_db_postdeploy_contract_invalid/);
+    const summaries = logs.map((line) => JSON.parse(line));
+    assert.equal(summaries.find((row) => row.event === "isolated_supabase_db_postdeploy_contract_failed").outputKind, kind);
+    assert.ok(summaries.some((row) => row.event === diagnosticEvent));
+    assert.doesNotMatch(logs.join("\n"), /synthetic-private/);
+    assert.equal(calls.filter((call) => call.command === "docker").length, 2);
+    assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
+    assert.equal(calls.filter((call) => call.args[0] === "status" || call.command === process.execPath).length, 0);
+    assert.equal(calls.filter((call) => call.command === "docker")[0].args[1],
+      calls.filter((call) => call.command === "docker")[1].args[1]);
+  }
+});
+
 test("isolated DB runner parses explicit review-head and lint gates", async () => {
   const { parseIsolatedDbArguments } = await import(runnerUrl.href);
   const baseSha = "a".repeat(40);

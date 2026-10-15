@@ -1,12 +1,17 @@
 {
   "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
-  "sourceSha256": "2d6981864e4ddfbb84e391d954e3cae3fd3e0a0a7882e8993408bf3a0ce619ae",
-  "sourcePathCount": 45,
+  "sourceSha256": "062b300d55899974b9fc17b9deb9554b33a0188d85eb62232f37eadd60d35cc8",
+  "sourcePathCount": 49,
   "source": [
     {
       "path": "scripts/lib/ai-producer-receipt.mjs",
       "exists": true,
       "sha256": "92fca4e6e6870bc0088e98a160e10145e2f1264a3d3441dbfd5142633aa7fa5f"
+    },
+    {
+      "path": "scripts/run-isolated-supabase-db-tests.mjs",
+      "exists": true,
+      "sha256": "581731526c3ca61d284d597b83313e2b200f1a35c40e9f6439c1c12dabfa8439"
     },
     {
       "path": "scripts/verify-ops-task-browser-workflow.mjs",
@@ -17,6 +22,11 @@
       "path": "scripts/verify-registration-customer-message-browser.mjs",
       "exists": true,
       "sha256": "b18c059300478d3888fecd3cac56a420d825c66215832e656642cc4f14402f50"
+    },
+    {
+      "path": "scripts/verify-supabase-migration-layout.mjs",
+      "exists": true,
+      "sha256": "49982e17af1d76a4de250debc0cbb67d393f06982c238dd67700e093c854ce14"
     },
     {
       "path": "src/features/tasks/registration-application-model.ts",
@@ -109,6 +119,11 @@
       "sha256": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
     },
     {
+      "path": "supabase/tests/active_registration_workflow_postdeploy_readonly.sql",
+      "exists": true,
+      "sha256": "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343"
+    },
+    {
       "path": "supabase/tests/registration_enrollment_guarded_save_race.spec",
       "exists": true,
       "sha256": "c59b3977bf67a175b87a96b3afc7b421396d3d0c2b402825978757395c60164c"
@@ -116,7 +131,7 @@
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_test.sql",
       "exists": true,
-      "sha256": "3b4e02f358d4dc37dd49f4c47ded0cb36cd8df6ef1370fa39104b85d040e55b8"
+      "sha256": "6693b36dfdbd4b6c676086e23c24a26bce22fd3dda84f34378bd197632d06915"
     },
     {
       "path": "tests/academic-operations-numbered-pagination.test.mjs",
@@ -131,7 +146,7 @@
     {
       "path": "tests/isolated-supabase-db-tests.test.mjs",
       "exists": true,
-      "sha256": "db07fcfab552f408df689577c5563c1af42514561cf43d99ba1194cf2c3307c6"
+      "sha256": "0f38e177ef94946331fcd9e56c99e12cd4948c0e564032e593e134c3f0593b91"
     },
     {
       "path": "tests/ops-task-numbered-pagination.test.mjs",
@@ -227,6 +242,11 @@
       "path": "tests/registration-workflow-status.test.mjs",
       "exists": true,
       "sha256": "6ca7e94badf204fa24b46e0d76fedcb0199ffd72b5ad176745bde6fb49c2cd9b"
+    },
+    {
+      "path": "tests/supabase-migration-layout.test.mjs",
+      "exists": true,
+      "sha256": "3aac93db1262c84d398e83478ba18af763b1f7ea709f30961e38b7a8ac86b035"
     }
   ],
   "qualification": "One integrated candidate; original 42 paths plus three browser fixture-identity consumers. Documentation is outside the source digest. SQL remains candidate; DB verification not yet executed."

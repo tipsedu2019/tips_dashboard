@@ -23,7 +23,7 @@ const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
 const POSTDEPLOY_READONLY_SQL =
   "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
+  "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343"
 const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
 // Independent fixed inventories preserve every SQL/probe from the reviewed PR
 // schema job; main must execute the same permission, mutation and DTO contracts.

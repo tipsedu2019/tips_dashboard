@@ -41,7 +41,7 @@ const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-pr
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
   "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
+  "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -2184,7 +2184,6 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["workflow null finalization compatibility", "definition not like '%''enrollmentFinalization'', null%'"],
     ["workflow finalizer isolation", "definition like '%dashboard_private.finalize_registration_track_enrollments_v1%'"],
     ["workflow notification isolation", "definition like '%dashboard_private.record_registration_management_notification_v1%'"],
-    ["workflow observation isolation", "definition like '%registration_observation_%'"],
     ["observation enter delegation", "dashboard_private.enter_registration_observation_v1_impl%"],
     ["observation enter no-op response", "definition not like '%null, null, false%'"],
     ["observation enter stale gate absence", "definition like '%registration_observation_stale_revision%'"],
@@ -2345,8 +2344,28 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["nullable legacy lesson authority", "and not attribute.attnotnull"],
   ]
 
-  // Mutate from the original source each time; retaining 218 full baseline
-  // copies until suite teardown exhausts disk on the isolated CI runner.
+  await assertPinnedPostdeployPredicates(source, requiredPredicates)
+})
+
+test("postdeploy observation booking contract keeps guard, ownership, history and side-effect fences", async () => {
+  const sqlPath = join(repoRoot, "supabase/tests/active_registration_workflow_postdeploy_readonly.sql")
+  const source = await readFile(sqlPath, "utf8")
+  assert.equal(await sha256(sqlPath), POSTDEPLOY_READONLY_SQL_SHA256)
+  await assertPinnedPostdeployPredicates(source, [
+    ["workflow observation booking guard", "definition not like '%registration_observation_booking_required'' using errcode = ''23514''%'"],
+    ["workflow observation owned appointment", "definition not like '%appointment.task_id = v_track.task_id%'"],
+    ["workflow observation scheduled appointment", "definition not like '%appointment.status = ''scheduled''%'"],
+    ["workflow observation owned booking", "definition not like '%observation.task_id = v_track.task_id and observation.track_id = v_track.id%'"],
+    ["workflow observation selected session", "definition not like '%observation.session_authority = ''normalized'' and observation.class_lesson_session_id is not null%'"],
+    ["workflow observation paired history", "definition not like '%observation_return_workflow_status = case%when v_workflow_status = ''observation_requested'' then coalesce(%else null end%'"],
+    ["workflow observation write isolation", "'(in' || 'sert[[:space:]]+into|up' || 'date|de' || 'lete[[:space:]]+from)[[:space:]]+public[.]ops_registration_(observations|appointments)'"],
+    ["workflow observation enter isolation", "definition like '%dashboard_private.enter_registration_observation_%'"],
+    ["workflow observation complete isolation", "definition like '%dashboard_private.complete_registration_observation_%'"],
+  ])
+})
+
+async function assertPinnedPostdeployPredicates(source, requiredPredicates) {
+  // Reuse one fixture for independent mutations instead of retaining full copies.
   const fixtureRoot = await createRepoFixture()
   const fixturePath = join(
     fixtureRoot,
@@ -2364,7 +2383,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   }
   await writeFile(fixturePath, source)
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
-})
+}
 
 test("isolated main·PR는 동일한 SQL 100개·probe 21개와 필수 PR 검사 이름을 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")

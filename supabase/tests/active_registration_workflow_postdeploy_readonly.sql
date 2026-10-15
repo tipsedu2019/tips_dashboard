@@ -511,7 +511,21 @@ select (
         or definition like '%dashboard_private.apply_student_class_roster_mode%'
         or definition like '%dashboard_private.record_registration_management_notification_v1%'
         or definition like '%ensure_registration_workflow_notification_v1%'
-        or definition like '%registration_observation_%'
+        or definition not like '%if v_workflow_status = ''observation_requested'' and not exists (%'
+        or definition not like '%registration_observation_booking_required'' using errcode = ''23514''%'
+        or definition not like '%appointment.task_id = v_track.task_id%'
+        or definition not like '%appointment.kind = ''observation_class''%'
+        or definition not like '%appointment.status = ''scheduled''%'
+        or definition not like '%observation.task_id = v_track.task_id and observation.track_id = v_track.id%'
+        or definition not like '%observation.status = ''scheduled''%'
+        or definition not like '%observation.decision_kind is null%'
+        or definition not like '%observation.session_date is not null%'
+        or definition not like '%observation.session_authority = ''normalized'' and observation.class_lesson_session_id is not null%'
+        or definition not like '%observation.session_authority = ''legacy'' and nullif(pg_catalog.btrim(observation.legacy_session_key), '''') is not null%'
+        or definition not like '%observation_return_workflow_status = case%when v_workflow_status = ''observation_requested'' then coalesce(%else null end%'
+        or definition ~* ('(in' || 'sert[[:space:]]+into|up' || 'date|de' || 'lete[[:space:]]+from)[[:space:]]+public[.]ops_registration_(observations|appointments)')
+        or definition like '%dashboard_private.enter_registration_observation_%'
+        or definition like '%dashboard_private.complete_registration_observation_%'
         or definition ~* ('up' || 'date[[:space:]]+public[.]ops_tasks')
         or definition ~* ('up' || 'date[[:space:]]+public[.]ops_registration_(details|enrollments)')
       ))

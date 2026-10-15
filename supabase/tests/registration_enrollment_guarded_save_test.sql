@@ -1,5 +1,5 @@
--- Draft only: this file has not been executed. Run only against an explicitly
--- authorized isolated synthetic database with the complete migration chain.
+-- Run only against an explicitly authorized isolated synthetic database with
+-- the complete migration chain. Record runtime results against the exact source.
 -- Every fixture and fault-injection object belongs to this rollback transaction.
 -- Sequential stale-snapshot cases do not claim cross-session concurrency proof.
 begin;
@@ -243,7 +243,8 @@ insert into public.ops_registration_subject_tracks(id, task_id, subject, pipelin
   workflow_status, workflow_revision, workflow_status_entered_at,
   observation_return_workflow_status, director_profile_id, director_assignment_source, director_assigned_at)
 select pg_temp.registration_guard_sid(300 + number), pg_temp.registration_guard_sid(200 + number),
-  '영어', 'inquiry', review_required, initial_status, 1, now() - interval '1 day',
+  '영어', case when review_required then 'migration_review' else 'inquiry' end,
+  review_required, initial_status, 1, now() - interval '1 day',
   case when initial_status like 'observation_%' then 'consultation_completed' else null end,
   pg_temp.registration_guard_sid(3), 'manual', now()
 from registration_guard_cases;
@@ -492,6 +493,11 @@ select ok((result.response ->> 'workflowRevision')::integer = case when fixture.
     || ' increments the revision only when advancing')
 from registration_guard_cases fixture join registration_guard_results result on result.result_key = 'matrix-' || fixture.number
 order by fixture.number;
+select ok((select pipeline_status = 'migration_review' and migration_review_required
+    and workflow_status = 'inquiry' and workflow_revision = 1
+    and jsonb_array_length(enrollment_detail_rows) = 1
+  from public.ops_registration_subject_tracks where id = pg_temp.registration_guard_sid(316)),
+  'a migration-review case saves its draft while retaining both review and workflow state');
 select is((select response -> 'rows' -> 0 ->> 'classStartLessonSessionId'
   from registration_guard_results where result_key = 'matrix-32'),
   pg_temp.registration_guard_sid(41)::text, 'a normalized selected lesson is saved with its durable lesson identity');
