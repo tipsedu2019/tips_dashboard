@@ -1,7 +1,7 @@
 {
   "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
-  "sourceSha256": "ee1d1391fc523e9ecf0f3f25259f5a2e49901d37c80f5cf5d075e425ef7d0c58",
-  "sourcePathCount": 49,
+  "sourceSha256": "71a998a9c280d1ce8938901ed067db1ce1888942deb53b7fbee9c064bb529192",
+  "sourcePathCount": 50,
   "source": [
     {
       "path": "scripts/lib/ai-producer-receipt.mjs",
@@ -126,7 +126,7 @@
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_race.spec",
       "exists": true,
-      "sha256": "88414c1549e0d0d15b4bc3ddf59cee9638f6935522aa3fe6c5db7d95dbc8237d"
+      "sha256": "6f068df7a79a9783396ab79b86ba5cac08c97dad13296a3730e8da7fbe09f788"
     },
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_test.sql",
@@ -137,6 +137,11 @@
       "path": "tests/academic-operations-numbered-pagination.test.mjs",
       "exists": true,
       "sha256": "f58330959f051166585da117ff33f33df450d50cdb5dfb5ccd59bb8100bc5577"
+    },
+    {
+      "path": "tests/fixtures/registration-race-pg17.6-568537c7.json",
+      "exists": true,
+      "sha256": "3629dbb9e6e74bae09592c5ddceea6bbcef0ae8fde59849ed085041ab9ac20e0"
     },
     {
       "path": "tests/helpers/ai-producer-receipt.test.mjs",
@@ -161,7 +166,7 @@
     {
       "path": "tests/probe-registration-enrollment-guarded-save-concurrency.mjs",
       "exists": true,
-      "sha256": "d339a5af9e5c7ca4576f9b0efc87625da498e005aa29373f3aec4413b90530b5"
+      "sha256": "15cedc76d48a5a2f16965cd0b4ca52d905013311f35c1391ad093681c0451f06"
     },
     {
       "path": "tests/query-surface-budget.test.mjs",
@@ -191,7 +196,7 @@
     {
       "path": "tests/registration-enrollment-race-probe.test.mjs",
       "exists": true,
-      "sha256": "6f09d6c58ccc73d1783b5b4868a7d9deacd7e1a2956124986532075e2eee677a"
+      "sha256": "94d4dfac8b483d7c57049f526560d6126069f504b38ede8965c539770fce61ca"
     },
     {
       "path": "tests/registration-management-notification-actions.test.mjs",
@@ -249,5 +254,5 @@
       "sha256": "3aac93db1262c84d398e83478ba18af763b1f7ea709f30961e38b7a8ac86b035"
     }
   ],
-  "qualification": "One integrated candidate pinned to 49 source paths; documentation is outside the source digest. Migration remains candidate. Current audit-preserving race lifecycle awaits Mac PostgreSQL17 verification; reuse only source-matched prior SQL/postdeploy/Linux evidence."
+  "qualification": "One integrated candidate pinned to 50 source paths; documentation is outside the source digest. Native historical output is a verified FAIL fixture, not a passing runtime. Parser and committed cleanup observability changes await Mac PostgreSQL17 verification; migration remains candidate."
 }

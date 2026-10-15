@@ -106,7 +106,8 @@ setup
   CREATE TABLE IF NOT EXISTS registration_guard_race_anchor.state(
     singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
     resource_snapshot jsonb NOT NULL,
-    completed_cases integer NOT NULL DEFAULT 0 CHECK(completed_cases BETWEEN 0 AND 7)
+    completed_cases integer NOT NULL DEFAULT 0 CHECK(completed_cases BETWEEN 0 AND 7),
+    last_cleanup_xid bigint
   );
   ALTER TABLE registration_guard_race_anchor.state ENABLE ROW LEVEL SECURITY;
   REVOKE ALL ON registration_guard_race_anchor.state FROM PUBLIC, anon, authenticated, service_role;
@@ -372,16 +373,22 @@ teardown
       OR EXISTS(SELECT 1 FROM registration_guard_race_fixture.results WHERE case_number <> v_completed + 1) THEN
       RAISE EXCEPTION 'registration_guard_race_lifecycle_order_invalid' USING ERRCODE = '23514';
     END IF;
-    UPDATE registration_guard_race_anchor.state SET completed_cases = v_completed + 1;
-    RAISE NOTICE 'registration_guard_race_case_cleaned:%', v_completed + 1;
+    UPDATE registration_guard_race_anchor.state
+    SET completed_cases = v_completed + 1, last_cleanup_xid = txid_current();
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_constraint = CONSTRAINT_NAME;
-    RAISE NOTICE 'registration_guard_race_cleanup_failed:phase=% sqlstate=% constraint=%', v_phase, v_state, v_constraint;
-    RAISE;
+    RAISE EXCEPTION USING ERRCODE = v_state, MESSAGE = format(
+      'registration_guard_race_cleanup_failed:phase=%s sqlstate=%s constraint=%s', v_phase, v_state, v_constraint);
   END; $$;
   SELECT registration_guard_race_fixture.actor(false);
   DROP SCHEMA registration_guard_race_fixture CASCADE;
   COMMIT;
+  -- The control connection suppresses NOTICEs but prints its final result set.
+  -- A new transaction must see the committed cleanup and removed case schema.
+  SELECT 'registration_guard_race_cleanup_committed:' || completed_cases::text AS race_cleanup_checkpoint
+  FROM registration_guard_race_anchor.state
+  WHERE singleton AND last_cleanup_xid IS NOT NULL AND txid_current() <> last_cleanup_xid
+    AND to_regnamespace('registration_guard_race_fixture') IS NULL;
 }
 
 session "a"

@@ -1,0 +1,121 @@
+{
+  "previousCandidateCommit": "568537c70ea044af1f7ceed163ed35d6de4f692a",
+  "sourceSha256": "71a998a9c280d1ce8938901ed067db1ce1888942deb53b7fbee9c064bb529192",
+  "sourcePathCount": 50,
+  "nativeCapture": {
+    "provenance": {
+      "kind": "native PostgreSQL 17.6 isolationtester output relayed by parent",
+      "runId": "615f9762df234344a9de2761588ebb9b",
+      "candidate": "568537c70ea044af1f7ceed163ed35d6de4f692a",
+      "specExit": 0,
+      "probeRunnerExit": 1,
+      "strictGate": "FAIL",
+      "relayDecoding": "JSON string decoding, then HTML entity decoding; supplied original byte counts and SHA256 matched"
+    },
+    "macTaskId": "01a13a32-3a3b-77ca-a490-88ee40d720ad",
+    "parentReceiptSha256": "3e06f9b37f24321142b43c6a2e882f8fdbf6118dd2041456bfa5b30c4bb3cabd",
+    "files": {
+      "spec_stdout": {
+        "bytes": 13953,
+        "sha256": "041dff2830c746f2b4ad4352ba8c5f274403067b6132ef68bf7f933622e26f61"
+      },
+      "spec_stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "runner_stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "runner_stderr": {
+        "bytes": 2194,
+        "sha256": "ec19213bd32b04c3e336059c5f259a3bb484c9b0cb6c06d115a2de2490f1cbb8"
+      },
+      "case4_excerpt": {
+        "bytes": 420,
+        "sha256": "657b2a28219ba9bf29d973e7e11947fe6284b496f8de87d011290452d39d8e2a"
+      }
+    },
+    "decodedBytesMatched": true,
+    "capturedFixture": "tests/fixtures/registration-race-pg17.6-568537c7.json",
+    "nativeExecutionSectionsObserved": 7,
+    "nativeCleanupCheckpointsObserved": 0,
+    "originalValidatorOutcome": "registration_guard_race_lock_wait_missing",
+    "currentValidatorOutcomeOnUnmodifiedCapture": "registration_guard_race_cleanup_checkpoint_invalid",
+    "qualification": "Current parser validates all seven execution sections before checking cleanup. Historical original output remains a FAIL; it contains no new committed cleanup checkpoint. No native output was synthesized or amended."
+  },
+  "change": {
+    "parser": "Bound each step record to its next header; match exact multiline SQL and own wait/completion result, complete ordered steps, own assert_case void result, and one final ordered committed cleanup result per permutation. Reject duplicate/borrowed markers and incomplete sections.",
+    "fixture": "Replace hidden control-connection NOTICE with final SELECT after explicit cleanup COMMIT. Require a different transaction ID from cleanup and absence of the dropped per-case schema. Preserve counter, resource/audit/FK snapshot, business residue and no-send assertions.",
+    "failureDiagnostic": "RAISE EXCEPTION preserves original SQLSTATE and reports phase plus constraint; does not retain original exception message or emit row payloads."
+  },
+  "officialBehavior": {
+    "source": "https://raw.githubusercontent.com/postgres/postgres/REL_17_6/src/test/isolation/isolationtester.c",
+    "resultFormatting": "https://raw.githubusercontent.com/postgres/postgres/REL_17_6/src/interfaces/libpq/fe-print.c",
+    "multiCommandResult": "https://www.postgresql.org/docs/17/libpq-exec.html",
+    "findings": [
+      "Control connection installs a blackhole NOTICE processor.",
+      "Wait printf includes the original SQL with embedded newlines.",
+      "PQexec returns the final command result; explicit COMMIT divides transactions.",
+      "Global teardown prints final tuple results; teardown errors alone do not force a nonzero process exit."
+    ]
+  },
+  "changedSourcePins": {
+    "supabase/tests/registration_enrollment_guarded_save_race.spec": "6f068df7a79a9783396ab79b86ba5cac08c97dad13296a3730e8da7fbe09f788",
+    "tests/fixtures/registration-race-pg17.6-568537c7.json": "3629dbb9e6e74bae09592c5ddceea6bbcef0ae8fde59849ed085041ab9ac20e0",
+    "tests/probe-registration-enrollment-guarded-save-concurrency.mjs": "15cedc76d48a5a2f16965cd0b4ca52d905013311f35c1391ad093681c0451f06",
+    "tests/registration-enrollment-race-probe.test.mjs": "94d4dfac8b483d7c57049f526560d6126069f504b38ede8965c539770fce61ca"
+  },
+  "preservedControls": {
+    "comparedAgainstCommit": "568537c70ea044af1f7ceed163ed35d6de4f692a",
+    "sessionDeclarationsAndBodiesUnchanged": true,
+    "steps": 26,
+    "permutations": 7,
+    "functions": {
+      "capture": "336cac2d5f832db87b5026052f5f268258efdd5c2e3325967f39f8cee0fff334",
+      "assert_case": "e5479e7eec58c08b1c9123f0d4c56ab0d2c7456710b25a6eaba75cac5ac419da"
+    },
+    "contextAndExecutionGuardsUnchanged": true,
+    "unchangedSourcePins": {
+      "supabase/tests/registration_enrollment_guarded_save_test.sql": "879621aa654cd9bff2193b68ca3b89fddbdb0c99d362b64c3ad090bdafaa4a1a",
+      "tests/registration-enrollment-guarded-save.test.mjs": "2777c5fa29f706f74e3b3b92fbccd3ff33c3d6a78a9935776755e0719c49ad53",
+      "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3",
+      "scripts/run-isolated-supabase-db-tests.mjs": "581731526c3ca61d284d597b83313e2b200f1a35c40e9f6439c1c12dabfa8439",
+      "supabase/tests/active_registration_workflow_postdeploy_readonly.sql": "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343",
+      "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
+    }
+  },
+  "localVerification": {
+    "runtime": "v24.19.0",
+    "command": "node --test tests/registration-enrollment-race-probe.test.mjs",
+    "scope": "source, parser, native historical-output regression and synthetic negative frames only",
+    "passed": 19,
+    "failed": 0,
+    "skipped": 0,
+    "newNativeNegativeMutations": 14,
+    "newSyntheticNegativeMutations": 27,
+    "existingMalformedGrammarVariantsRejected": 18,
+    "logSha256": "bb15ee231457aad92618775ab63d5d44063f42a49046712d4ed11fa8670dd2af",
+    "databaseExecuted": false,
+    "fullSuitesRerun": false
+  },
+  "privacy": {
+    "files": 49,
+    "knownOriginalIdentityMatches": 0,
+    "credentialPatternMatches": 0
+  },
+  "priorEvidenceReuse": "Only unchanged input pins may reuse earlier SQL127/SQL6/Linux10/postdeploy evidence. Parent reports source726 unchanged and cleanup5 empty for historical run; no new runtime evidence is claimed.",
+  "nextMacGate": [
+    "Exact next candidate SHA and source manifest verified.",
+    "Existing approved owned disposable PostgreSQL17 runner context, nonce/CWD/UID/config/loopback/timeouts unchanged.",
+    "All seven actual permutations have matching lock wait, completion, verification and committed cleanup checkpoints1-7.",
+    "Strict original probe and runner exit0; final owned-resource cleanup5 empty.",
+    "Verify new candidate input and runner source pins before and after execution; historical source726 count is not current-run evidence."
+  ],
+  "currentRaceRuntime": "PENDING new candidate Mac execution",
+  "independentExactSourceReview": "PENDING",
+  "finalRequiredReleaseChecks": "PENDING",
+  "candidateStatus": "candidate",
+  "operationalMutations": false,
+  "deployment": false
+}

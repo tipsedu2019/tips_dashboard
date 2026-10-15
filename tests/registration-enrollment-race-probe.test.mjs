@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -13,14 +14,30 @@ const environment = { PATH: "/synthetic/path", TASK_LOCAL_DB_URL: "postgresql://
   TASK_LOCAL_DB_NONCE: "a".repeat(32) };
 const cwd = "/tmp/tips-supabase-db-qa-registration-guard-local-20261013";
 const config = 'project_id = "tips_supabase_db_qa_abcdefabcdef"\n[db]\nport = 54329\nmajor_version = 17\n[studio]\nenabled = false\n';
+const nativeCapture = JSON.parse(await readFile(new URL("./fixtures/registration-race-pg17.6-568537c7.json", import.meta.url), "utf8"));
 
 // These small strings test the parser only. They are neither captured database
 // output nor a PostgreSQL expected-output artifact, and never certify a race.
 function syntheticProtocolFrames() {
   const permutations = [...embeddedSpec().matchAll(/^permutation\s+(.+)$/gm)]
-    .map(match => [...match[1].matchAll(/"([^"]+)"/g)].map(step => step[1]).join(" "));
-  return "Parsed test spec with 3 sessions\n" + RACE_CASES.map(([wait, verify], index) =>
-    `starting permutation: ${permutations[index]}\nstep ${wait}: synthetic parser fixture <waiting ...>\nstep ${wait}: <... completed>\nstep ${verify}: SELECT registration_guard_race_fixture.assert_case(${index + 1});\n(1 row)\n`).join("");
+    .map(match => [...match[1].matchAll(/"([^"]+)"/g)].map(step => step[1]));
+  const sql = new Map([...embeddedSpec().matchAll(/^step "([^"]+)"\s*\{([^}]*)\}/gm)]
+    .map(match => [match[1], match[2].replace(/^[ \t\r\f]*|[ \t\r\f]*$/g, "")]));
+  const table = (column, value = "") => {
+    const width = Math.max(column.length, value.length);
+    return `${column.padEnd(width)}\n${"-".repeat(width)}\n${value.padEnd(width)}\n(1 row)\n\n`;
+  };
+  return "Parsed test spec with 3 sessions\n" + RACE_CASES.map(([wait, verify], index) => {
+    let output = `starting permutation: ${permutations[index].join(" ")}\n`;
+    for (const step of permutations[index]) {
+      output += `step ${step}: ${sql.get(step)}${step === wait ? " <waiting ...>" : ""}\n`;
+      if (step === "a_commit") output += `step ${wait}: <... completed>\n${table("capture")}`;
+      if (step === verify) output += table("assert_case");
+    }
+    // Later actor() results cannot stand in for a missing assert_case result.
+    return output + table("actor").repeat(3)
+      + table("race_cleanup_checkpoint", `registration_guard_race_cleanup_committed:${index + 1}`);
+  }).join("");
 }
 
 test("portable race probe embeds the exact standalone spec and seven paired wait/verify cases", async () => {
@@ -225,14 +242,18 @@ test("race teardown removes case data and proves retained audit parents unchange
     "registration_guard_race_fixture_cleanup_incomplete' USING ERRCODE = '23514'",
     "SELECT completed_cases INTO STRICT", "v_completed >= 7", "count(*) FROM registration_guard_race_fixture.results",
     "case_number <> v_completed + 1", "registration_guard_race_lifecycle_order_invalid",
-    "UPDATE registration_guard_race_anchor.state SET completed_cases = v_completed + 1",
-    "registration_guard_race_case_cleaned:%", "actor(false)", "DROP SCHEMA registration_guard_race_fixture CASCADE", "COMMIT;"]);
+    "UPDATE registration_guard_race_anchor.state", "SET completed_cases = v_completed + 1, last_cleanup_xid = txid_current()",
+    "actor(false)", "DROP SCHEMA registration_guard_race_fixture CASCADE", "COMMIT;",
+    "SELECT 'registration_guard_race_cleanup_committed:'", "FROM registration_guard_race_anchor.state",
+    "last_cleanup_xid IS NOT NULL AND txid_current() <> last_cleanup_xid",
+    "to_regnamespace('registration_guard_race_fixture') IS NULL"]);
   for (const table of ["ops_tasks", "ops_registration_enrollments", "ops_registration_subject_tracks",
     "ops_registration_details", "ops_task_events"])
     assert.ok(teardown.includes(`EXISTS(SELECT 1 FROM public.${table}`), `missing cleanup check for ${table}`);
   assert.match(teardown, /EXISTS\(SELECT 1 FROM dashboard_private\.ops_registration_mutations WHERE actor_id = registration_guard_race_fixture\.sid\(1\)\)/);
   assert.match(teardown, /GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_constraint = CONSTRAINT_NAME/);
-  assert.match(teardown, /RAISE NOTICE 'registration_guard_race_cleanup_failed:phase=% sqlstate=% constraint=%', v_phase, v_state, v_constraint;\s+RAISE;/);
+  assert.match(teardown, /RAISE EXCEPTION USING ERRCODE = v_state, MESSAGE = format\(\s+'registration_guard_race_cleanup_failed:phase=%s sqlstate=%s constraint=%s', v_phase, v_state, v_constraint\)/);
+  assert.doesNotMatch(teardown, /RAISE NOTICE/);
   assert.equal([...teardown.matchAll(/DELETE FROM [\w.]+\s+WHERE/g)].length, 1);
   assert.doesNotMatch(source, /DELETE FROM (?:public\.(?:classes|profiles|teacher_catalogs|classroom_catalogs|dashboard_audit_logs)|auth\.users)|DISABLE TRIGGER|session_replication_role|ALTER TABLE public\./i);
 });
@@ -338,6 +359,107 @@ test("race parser rejects zero-exit SQL errors missing waits incomplete verifica
     { code: 0, stdout: stdout.replace("3 sessions", "2 sessions"), stderr: "" },
     { code: 0, stdout: stdout.replace("step verify_director_fk:", "step omitted:"), stderr: "" },
   ]) assert.throws(() => validateIsolationOutput(output), /registration_guard_race_/);
+});
+
+test("relayed native output retains the original byte counts and hashes without claiming a passing gate", () => {
+  const expected = {
+    spec_stdout: [13953, "041dff2830c746f2b4ad4352ba8c5f274403067b6132ef68bf7f933622e26f61"],
+    spec_stderr: [0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
+    runner_stdout: [0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
+    runner_stderr: [2194, "ec19213bd32b04c3e336059c5f259a3bb484c9b0cb6c06d115a2de2490f1cbb8"],
+    case4_excerpt: [420, "657b2a28219ba9bf29d973e7e11947fe6284b496f8de87d011290452d39d8e2a"],
+  };
+  assert.deepEqual(Object.keys(nativeCapture.files), Object.keys(expected));
+  for (const [name, [bytes, sha256]] of Object.entries(expected)) {
+    const file = nativeCapture.files[name];
+    assert.equal(Buffer.byteLength(file.text), bytes);
+    assert.equal(createHash("sha256").update(file.text).digest("hex"), sha256);
+    assert.equal(file.bytes, bytes);
+    assert.equal(file.sha256, sha256);
+  }
+  assert.ok(nativeCapture.files.spec_stdout.text.includes(nativeCapture.files.case4_excerpt.text));
+  assert.equal(nativeCapture.provenance.specExit, 0);
+  assert.equal(nativeCapture.provenance.probeRunnerExit, 1);
+  assert.equal(nativeCapture.provenance.strictGate, "FAIL");
+});
+
+test("native multiline wait and all seven verification frames reach the missing-checkpoint rejection", () => {
+  const stdout = nativeCapture.files.spec_stdout.text;
+  assert.match(nativeCapture.files.case4_excerpt.text, /original_canceled_rows\(\)\);\n <waiting \.\.\.>\n/);
+  // The validator checks ALL execution sections before checking any cleanup
+  // checkpoint. This specific rejection proves parsing reached that boundary;
+  // this unmodified historical capture must never certify the new lifecycle.
+  assert.throws(() => validateIsolationOutput({ code: 0, stdout, stderr: "" }),
+    { message: "registration_guard_race_cleanup_checkpoint_invalid" });
+  for (const [wait, verify] of RACE_CASES) {
+    assert.throws(() => validateIsolationOutput({ code: 0,
+      stdout: stdout.replace(`step ${wait}: <... completed>`, `step ${wait}: missing completion`), stderr: "" }),
+    { message: "registration_guard_race_lock_wait_missing" });
+    assert.throws(() => validateIsolationOutput({ code: 0,
+      stdout: stdout.replace(`step ${verify}:`, "step omitted:"), stderr: "" }),
+    { message: "registration_guard_race_step_order_invalid" });
+  }
+});
+
+test("parser rejects misplaced duplicate and truncated step frames without borrowing adjacent waits", () => {
+  const stdout = syntheticProtocolFrames();
+  const completion = "step b_save_one: <... completed>\ncapture\n-------\n       \n(1 row)\n\n";
+  const mutations = [
+    ["multiline wait missing", text => text.replace(/(original_canceled_rows\(\)\);\n) <waiting \.\.\.>/, "$1")],
+    ["borrow next step wait", text => text.replace(" <waiting ...>\nstep a_commit: COMMIT;", "\nstep a_commit: COMMIT; <waiting ...>")],
+    ["borrow next permutation wait", text => text.replace(" <waiting ...>", "")],
+    ["duplicate wait marker", text => text.replace("step a_commit:", "<waiting ...>\nstep a_commit:")],
+    ["truncated waiting SQL", text => text.replace("capture(1, 301, 'guard-race-1-b')", "capture(1, 301)")],
+    ["truncated ordinary SQL", text => text.replace("step a_commit: COMMIT;", "step a_commit: COMMIT")],
+    ["missing completion result", text => text.replace(completion, "step b_save_one: <... completed>\n")],
+    ["duplicate completion", text => text.replace(completion, completion.repeat(2))],
+    ["completion before releasing commit", text => text.replace("step a_commit: COMMIT;\n" + completion, completion + "step a_commit: COMMIT;\n")],
+    ["missing A commit", text => text.replace("step a_commit: COMMIT;\n", "")],
+    ["missing B commit", text => text.replace("step b_commit: COMMIT;\n", "")],
+    ["unknown step", text => text.replace("step a_commit:", "step unknown: SELECT 1;\nstep a_commit:")],
+    ["duplicate step", text => text.replace("step a_commit: COMMIT;\n", "step a_commit: COMMIT;\n".repeat(2))],
+  ];
+  for (const [name, mutate] of mutations) {
+    const changed = mutate(stdout);
+    assert.notEqual(changed, stdout, name);
+    assert.throws(() => validateIsolationOutput({ code: 0, stdout: changed, stderr: "" }), /registration_guard_race_/, name);
+  }
+});
+
+test("verification requires its own void result despite later actor results", () => {
+  const stdout = syntheticProtocolFrames();
+  const result = "assert_case\n-----------\n           \n(1 row)\n";
+  for (const replacement of ["", "actor\n-----\n     \n(1 row)\n",
+    "assert_case\n-----------\nunexpected\n(1 row)\n", "assert_case\n-----------\n(0 rows)\n"]) {
+    const changed = stdout.replace(result, replacement);
+    assert.notEqual(changed, stdout);
+    assert.throws(() => validateIsolationOutput({ code: 0, stdout: changed, stderr: "" }),
+      { message: "registration_guard_race_verification_missing" });
+  }
+});
+
+test("cleanup needs one ordered final committed result per permutation and rejects NOTICE substitutes", () => {
+  const stdout = syntheticProtocolFrames();
+  const checkpoint = stdout.match(/race_cleanup_checkpoint[ \t]*\n-+\nregistration_guard_race_cleanup_committed:1\n\(1 row\)\n\n/)[0];
+  const mutations = [
+    ["missing", text => text.replace(checkpoint, "")],
+    ["wrong case", text => text.replace("registration_guard_race_cleanup_committed:1", "registration_guard_race_cleanup_committed:2")],
+    ["duplicate", text => text.replace(checkpoint, checkpoint.repeat(2))],
+    ["wrong column", text => text.replace("race_cleanup_checkpoint", "unrelated_result")],
+    ["empty result", text => text.replace(checkpoint, "race_cleanup_checkpoint\n-----------------------\n(0 rows)\n\n")],
+    ["NOTICE alone", text => text.replace(checkpoint, "NOTICE: registration_guard_race_cleanup_committed:1\n")],
+    ["old uncommitted NOTICE", text => text.replace(checkpoint, "NOTICE: registration_guard_race_case_cleaned:1\n")],
+    ["before verification", text => text.replace(checkpoint, "").replace("step verify_one:", checkpoint + "step verify_one:")],
+    ["trailing output", text => text.replace(checkpoint, checkpoint + "unexpected trailing output\n")],
+    ["incomplete last case", text => text.slice(0, text.lastIndexOf("starting permutation:"))],
+  ];
+  for (const [name, mutate] of mutations) {
+    const changed = mutate(stdout);
+    assert.notEqual(changed, stdout, name);
+    assert.throws(() => validateIsolationOutput({ code: 0, stdout: changed, stderr: "" }), /registration_guard_race_/, name);
+  }
+  assert.equal(validateIsolationOutput({ code: 0, stdout, stderr: "" }).committedCleanups, 7,
+    "synthetic parser frames only; no executed cleanup is claimed");
 });
 
 test("runner-context mock invocation supplies exact spec and strips ambient PostgreSQL settings", async () => {

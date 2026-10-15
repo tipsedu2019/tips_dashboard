@@ -4,7 +4,51 @@ This is the single integration of the preserved registration candidate with main
 `1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). It is ready
 for the existing Mac operator to retrieve and validate, not for deployment.
 
-## Current Mac handoff: audit-preserving race lifecycle
+## Current Mac handoff: native output parsing and committed cleanup checkpoints
+
+Use the next exact commit supplied on the same branch. Current source digest:
+`71a998a9c280d1ce8938901ed067db1ce1888942deb53b7fbee9c064bb529192` (50 paths,
+including one historical native-output fixture). Details and exact pins are in
+`registration-operator-observation-race-parser-checkpoint-evidence.json`.
+
+Parent relayed the existing Mac run `615f9762df234344a9de2761588ebb9b` for
+`568537c70ea044af1f7ceed163ed35d6de4f692a`. JSON and HTML entity decoding recovered
+all five supplied byte counts and hashes exactly. Spec stdout is13953B,
+SHA256 `041dff2830c746f2b4ad4352ba8c5f274403067b6132ef68bf7f933622e26f61`.
+Spec stderr and runner stdout are empty. Runner stderr is2194B, and the case4
+excerpt is420B. The retained fixture contains synthetic data only. Spec exit0
+and probe/runner exit1 remain historical strict FAIL evidence.
+
+The original parser rejects the real multiline case4 wait. The revised parser
+accepts the execution shape of all seven sections, then rejects the unmodified
+native capture for missing committed cleanup checkpoints. It must continue to
+reject that old capture. No checkpoints were inserted into native output, and
+no new PostgreSQL run took place in cloud.
+
+PostgreSQL17.6 isolationtester suppresses every control-connection NOTICE and
+prints the final PQexec result set. Its global teardown can report an error
+without changing the process exit code. The fixture therefore emits its final
+one-row cleanup checkpoint SELECT after explicit COMMIT, checks a different
+transaction ID and absence of the dropped case schema. The counter is advanced
+inside the same transaction as residue, audit/resource/FK snapshot and no-send
+checks. Errors retain SQLSTATE with safe phase/constraint diagnostics. The
+seven business cases, all26 steps, session bodies, capture/assert_case bodies,
+product migration, guarded SQL and isolated runner remain byte-identical.
+
+Cloud Node24.19.0 race source/parser checks:19 passed,0 failed,0 skipped. Added
+native negative mutations14 and synthetic negative mutations27 cover missing,
+duplicate, misplaced and truncated steps; borrowed waits or result rows;
+missing/wrong/premature/duplicate checkpoints; NOTICE substitutes and incomplete
+cases. These are parser/source checks, not current DB or production evidence.
+
+For the existing Mac task, retain the approved owned DB context and bindings.
+Require all7 actual waits, completions, verification results and committed
+cleanup result rows1-7, strict probe/runner exit0, then final cleanup5 empty.
+Only unchanged input pins may reuse prior SQL/postdeploy/Linux results. Do not
+rerun the full suites for this fixture/parser correction. Independent review
+and all final required release gates remain pending; do not merge or deploy.
+
+## Historical handoff: audit-preserving race lifecycle
 
 Use the next exact commit supplied on the same branch. The existing Mac task
 reported Node22 12/12 PASS and native PG17.6 parsing of all3 sessions for
