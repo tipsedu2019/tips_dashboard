@@ -1,10 +1,67 @@
 # Registration operator and observation candidate
 
 This is the single integration of the preserved registration candidate with main
-`1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). It is ready
-for parser/source review. Runtime authorization and release gates remain blocked.
+`1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). The reviewed registration SQL is finalized without changing its bytes.
+Full final-source producer/consumer parity and release gates remain pending.
 
-## Current handoff: reject unconsumed SQL and duplicate assertion results
+## Current handoff: finalize reviewed registration metadata
+
+The finalization changes four implementation/test files: the registration status
+in the ordered manifest and source-owned receipt pin, plus their receipt and
+runner regression tests. The registration migration is now `final`, still at
+index169 in the ordered173 entries. Its SQL remains18189 bytes with SHA256
+`befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3`.
+All previous172 final entries, their order and SQL bytes are preserved. Runner
+execution guards,101 SQL paths,21 probe paths and the accepted AI migration
+inventory are unchanged.
+
+Current51-path source digest: `c24927e5e675da043e064aea487e8c26a6c78c9a3b784942da2f411cbba28f19`.
+The exact inputs are in `registration-operator-observation-inputs.json`. The
+historical evidence JSON and handoffs below retain their original source hashes,
+heads, failures and authorization observations; they are not current-run claims.
+
+The tests retain candidate refusal on copied synthetic manifests, status/hash/
+order/source-drift rejection, thin and retained parity rejection, empty runtime
+temp directories and zero external execution callbacks. Copied final-source
+fixtures now use the reviewed final bytes directly instead of promoting a
+candidate fixture. Final metadata does not supply a producer receipt or prove
+runtime parity.
+
+The current Mac finalization task is limited to the receipt/runner regressions,
+changed-file lint, committed base/head final and immutable history, migration
+layout and independent review of this narrow diff. Bind their original results
+to the final commit and before/after source pins in the external Mac receipt.
+Reuse build/type and prior Node/SQL/Linux/race evidence only for reviewed,
+unchanged effective inputs; do not add historical counts into a new run total.
+The approved4dc actual race7/7 plus ef57 offline parser acceptance remains scoped
+DB-stage evidence. An ef57 exact-native rerun is not independently mandatory.
+
+The user-approved local replacement for paid hosted checks preserves the same
+required validation and independent review. The repository records an earlier
+such decision in `2026-10-07-academic-calendar-inclusive-range.md:23`; its old
+86SQL/13probe counts are historical. Current strict parity requires the exact
+`AI_SQL_TESTS`101 and `AI_PROBES`21 lists and order from
+`scripts/lib/ai-producer-receipt.mjs`, matching both isolated workflows. Missing
+hosted status alone does not require billing or an additional approval. Keep
+hosted status and local evidence distinct.
+
+The next runtime step, outside this finalization task, is one full original
+runner invocation from the final clean HEAD with the existing verified Node22,
+CLI and cached images: `--review-head --lint --require-final --execute --authorized`,
+a unique `--request-id`, `--postdeploy-contract --transactional-preflight
+--verify-local-ledger --ai-producer-parity`, all101 `--test` and all21 `--probe`
+arguments in their exact source order. The runner must keep baseline parity/
+smoke, committed credential-prefix, both transactional rollbacks, local ledger,
+postdeploy and ownership/cleanup boundaries. It must generate the same-run
+private HTTP/chat captures and source-bound receipt, then run the real root
+consumers for tests3/pass3/skipped0 with unchanged source closure and the existing
+capture-start freshness window. Prior race or synthetic receipt unit results do
+not supply this evidence. Full101/21 execution is **NOT_RUN in this step**.
+
+No production SQL, merge, deployment, provider, authentication/permission change,
+image pull or environment installation is performed by this finalization.
+
+## Historical ef57 handoff: reject unconsumed SQL and duplicate assertion results
 
 Use the next exact commit supplied on the same branch for source/parser review.
 Current source digest: `1365bf829193d2139d03053cc8dc478046771b439d78202c661963f01aa73ac5`

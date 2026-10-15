@@ -3573,7 +3573,7 @@ test('AI producer parity is a fixed sole-execute phase and rejects a thin/retain
  ];
  const realHashes=new Map(await Promise.all(protectedPaths.map(async(path)=>[path,sha256(await readFile(new URL('../'+path,import.meta.url)))])));
  const realManifest=JSON.parse(await readFile(new URL('../'+protectedPaths[0],import.meta.url),'utf8'));
- assert.equal(REGISTRATION_ENROLLMENT_MIGRATION.status,'candidate');
+ assert.equal(REGISTRATION_ENROLLMENT_MIGRATION.status,'final');
  assert.deepEqual(realManifest.orderedNewMigrations.find(row=>row.fileName===REGISTRATION_ENROLLMENT_MIGRATION.fileName),REGISTRATION_ENROLLMENT_MIGRATION);
  assert.equal(realHashes.get(protectedPaths.at(-1)),REGISTRATION_ENROLLMENT_MIGRATION.sha256);
  const forbiddenCalls=[];
@@ -3584,9 +3584,9 @@ test('AI producer parity is a fixed sole-execute phase and rejects a thin/retain
  };
  const thinArgv=['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity'];
  try{
-  // The real candidate must still stop at the strict final gate. The selector
-  // assertions below use only the copied synthetic source and capture files.
-  await assert.rejects(runIsolatedSupabaseDbTests({...boundaries,argv:thinArgv}),/^Error: isolated_supabase_db_final_manifest_required$/u);
+  // Final metadata does not authorize a thin parity run. Candidate refusal and
+  // selector assertions below use only copied synthetic source/capture files.
+  await assert.rejects(runIsolatedSupabaseDbTests({...boundaries,argv:thinArgv}),/^Error: isolated_ai_parity_full_run_required$/u);
   assert.deepEqual(forbiddenCalls,[]);
   const root=await makeRepo(t);await configureEmptyReviewedRunnerRepo(root);
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
@@ -3597,6 +3597,14 @@ test('AI producer parity is a fixed sole-execute phase and rejects a thin/retain
   await writeFile(manifestPath,JSON.stringify(manifest));await activateCanonicalBaseline(root);
   await assert.rejects(lstat(join(root,'.git')),{code:'ENOENT'});
   const tempDirectory=await makeRunnerTempDirectory(t);
+  const finalManifestBytes=await readFile(manifestPath);
+  const candidateManifest=structuredClone(manifest);candidateManifest.orderedNewMigrations[0].status='candidate';
+  await writeFile(manifestPath,JSON.stringify(candidateManifest));
+  for(const argv of [['--review-head','--require-final'],thinArgv]){
+   await assert.rejects(runIsolatedSupabaseDbTests({...boundaries,root,tempDirectory,argv}),/^Error: isolated_supabase_db_final_manifest_required$/u);
+  }
+  assert.deepEqual(forbiddenCalls,[]);
+  await writeFile(manifestPath,finalManifestBytes);
   const plan=await runIsolatedSupabaseDbTests({...boundaries,root,argv:['--review-head','--require-final']});
   assert.equal(plan.status,'plan');assert.deepEqual(plan.manifest.orderedNewMigrations,manifest.orderedNewMigrations);
   await assert.rejects(runIsolatedSupabaseDbTests({...boundaries,root,tempDirectory,argv:thinArgv}),/^Error: isolated_ai_parity_full_run_required$/u);

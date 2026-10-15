@@ -1,12 +1,12 @@
 {
   "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
-  "sourceSha256": "1365bf829193d2139d03053cc8dc478046771b439d78202c661963f01aa73ac5",
+  "sourceSha256": "c24927e5e675da043e064aea487e8c26a6c78c9a3b784942da2f411cbba28f19",
   "sourcePathCount": 51,
   "source": [
     {
       "path": "scripts/lib/ai-producer-receipt.mjs",
       "exists": true,
-      "sha256": "92fca4e6e6870bc0088e98a160e10145e2f1264a3d3441dbfd5142633aa7fa5f"
+      "sha256": "c7485c40e6418229882608b44664da86864e4c81fb5a18dd6a37aed2f4d12204"
     },
     {
       "path": "scripts/run-isolated-supabase-db-tests.mjs",
@@ -116,7 +116,7 @@
     {
       "path": "supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
       "exists": true,
-      "sha256": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
+      "sha256": "dee4673a69fc32434acc88283955ee4380ba8ecc91bc3c203aa4771ac1a779dd"
     },
     {
       "path": "supabase/tests/active_registration_workflow_postdeploy_readonly.sql",
@@ -151,12 +151,12 @@
     {
       "path": "tests/helpers/ai-producer-receipt.test.mjs",
       "exists": true,
-      "sha256": "a0fe07798e873e205a14d494c8b45263fe97543e277483857d41d03ed6a2e700"
+      "sha256": "73a03ead9865f2ac35c0f0fda2310469fa14be2678e1c8823d95b0f5691588a2"
     },
     {
       "path": "tests/isolated-supabase-db-tests.test.mjs",
       "exists": true,
-      "sha256": "0f38e177ef94946331fcd9e56c99e12cd4948c0e564032e593e134c3f0593b91"
+      "sha256": "7c25b87036805a5cc16ecb000c3c357bf9f1206695db333c2c9edf3ee9c7c776"
     },
     {
       "path": "tests/ops-task-numbered-pagination.test.mjs",
@@ -259,5 +259,5 @@
       "sha256": "3aac93db1262c84d398e83478ba18af763b1f7ea709f30961e38b7a8ac86b035"
     }
   ],
-  "qualification": "One integrated candidate pinned to 51 source paths. Complete step/result consumption fixes two independently reproduced synthetic parser false positives. Historical native capture remains FAIL; no new DB/race/postdeploy execution. Independent review and runtime authorization remain unresolved; migration remains candidate."
+  "qualification": "Registration finalization of the reviewed ef57 source: only manifest/producer status and their receipt/runner regression contracts change. SQL bytes, existing172 final entries and ordered173 inventory remain unchanged. Historical runtime and parser receipts retain their original heads; full final-source101SQL/21probe producer-consumer parity remains NOT_RUN in this finalization step."
 }

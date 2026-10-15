@@ -20,7 +20,7 @@ import vm from 'node:vm';
 import {syncBuiltinESMExports} from 'node:module';
 import * as receiptProtocol from '../../scripts/lib/ai-producer-receipt.mjs';
 const hash=v=>createHash('sha256').update(v).digest('hex');
-const registrationPin={fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'candidate',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'};
+const registrationPin={fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'final',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'};
 const repositoryRoot=fileURLToPath(new URL('../../',import.meta.url));
 const isolatedWorkflows=['supabase-db-push.yml','supabase-sql-review.yml'];
 const legacyOccupancyTest='supabase/tests/makeup_legacy_approval_occupancy_test.sql';
@@ -180,14 +180,9 @@ async function isolatedFinalSourceFixture(t){
   assert.ok(!file.split('/').some(part=>part==='..'||part==='.git'||part==='node_modules'||part.startsWith('.env')));
   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(join(repositoryRoot,file)));
  }
- const helper=await readFile(join(root,helperPath),'utf8');
- const candidateDeclaration="export const REGISTRATION_ENROLLMENT_MIGRATION=Object.freeze({fileName:'"+registrationPin.fileName+"',status:'candidate',sha256:'"+registrationPin.sha256+"'});";
- assert.equal(helper.split(candidateDeclaration).length,2,'replace exactly the isolated registration pin');
- await writeFile(join(root,helperPath),helper.replace(candidateDeclaration,candidateDeclaration.replace("status:'candidate'","status:'final'")));
- manifest.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName).status='final';
- await writeFile(join(root,manifestPath),JSON.stringify(manifest));
  const isolatedProtocol=await import(pathToFileURL(join(root,helperPath)).href);
- assert.deepEqual(isolatedProtocol.REGISTRATION_ENROLLMENT_MIGRATION,{...registrationPin,status:'final'});
+  assert.deepEqual(isolatedProtocol.REGISTRATION_ENROLLMENT_MIGRATION,registrationPin);
+  assert.equal(registrationPin.status,'final');
  const source=await isolatedProtocol.snapshotAiSource(root);
  assert.equal(source.sourceHead,(await snapshotAiSource()).sourceHead);
  assert.equal(source.closure.find(row=>row.path===helperPath).sha256,hash(await readFile(join(root,helperPath))));
@@ -199,7 +194,7 @@ async function isolatedFinalSourceFixture(t){
  const isolatedRunner=await import(pathToFileURL(join(root,runnerPath)).href);
  return {root,run:isolatedRunner.runIsolatedSupabaseDbTests,realManifestBytes,assertRealSourcesUnchanged};
 }
-test('registration candidate is explicitly pinned in the closure without changing the accepted AI protocol',async()=>{
+test('registration final is explicitly pinned in the closure without changing the accepted AI protocol',async()=>{
  assert.deepEqual(receiptProtocol.REGISTRATION_ENROLLMENT_MIGRATION,registrationPin);
  const current=await snapshotAiSource();
  const path='supabase/migrations/'+registrationPin.fileName;
@@ -210,7 +205,7 @@ test('registration candidate is explicitly pinned in the closure without changin
  assert.equal(manifest.orderedNewMigrations.length,173);
  assert.deepEqual(manifest.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName),registrationPin);
 });
-test('registration candidate rejects missing, duplicate, reordered, hash, status and coordinated source drift',async()=>{
+test('registration final rejects missing, duplicate, reordered, hash, status and coordinated source drift',async()=>{
  assert.deepEqual(receiptProtocol.REGISTRATION_ENROLLMENT_MIGRATION,registrationPin);
  const warmSource=await snapshotAiSource();
  const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
@@ -244,7 +239,7 @@ test('registration candidate rejects missing, duplicate, reordered, hash, status
    ['same-length duplicate',rows=>rows[index]={...rows[index-1]}],
    ['reordered',rows=>[rows[index-1],rows[index]]=[rows[index],rows[index-1]]],
    ['hash drift',rows=>rows[index].sha256='0'.repeat(64)],
-   ['unauthorized final promotion',rows=>rows[index].status='final'],
+    ['unauthorized candidate demotion',rows=>rows[index].status='candidate'],
    ['unknown status',rows=>rows[index].status='draft'],
    ['filename drift',rows=>rows[index].fileName='20990101000000_unreviewed_registration.sql'],
   ]){
@@ -264,18 +259,28 @@ test('registration candidate rejects missing, duplicate, reordered, hash, status
   await rm(sqlPath);await assert.rejects(snapshotAiSource(root),/ENOENT/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
-test('real registration candidate still refuses strict final plans and execution before any process launch',async()=>{
+test('registration final plans and copied candidate refusals launch no external runner process',async(t)=>{
+  const fixture=await isolatedFinalSourceFixture(t);
  const manifestPath='supabase/test-baselines/dashboard-free-tier-v1.manifest.json';
  const before=await readFile(manifestPath);
  let launched=0;
- const forbidden=async()=>{launched++;throw Error('external process forbidden for real candidate refusal');};
+  const forbidden=async()=>{launched++;throw Error('external process forbidden for final plan or copied candidate refusal');};
+  const boundaries={executeProcess:forbidden,executeNetwork:forbidden,executeGit:forbidden,allocatePort:forbidden,createRelay:forbidden};
+  const plan=await runIsolatedSupabaseDbTests({...boundaries,argv:['--review-head','--require-final']});
+  assert.equal(plan.status,'plan');
+  assert.deepEqual(plan.manifest.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName),registrationPin);
+  const copiedManifestPath=join(fixture.root,manifestPath);
+  const candidate=JSON.parse(await readFile(copiedManifestPath,'utf8'));
+  candidate.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName).status='candidate';
+  await writeFile(copiedManifestPath,JSON.stringify(candidate));
  for(const argv of [
   ['--review-head','--require-final'],
   parityArguments({tests:AI_SQL_TESTS,probes:AI_PROBES}),
- ])await assert.rejects(runIsolatedSupabaseDbTests({argv,executeProcess:forbidden,executeNetwork:forbidden,executeGit:forbidden}),
+  ])await assert.rejects(fixture.run({...boundaries,root:fixture.root,argv}),
   /^Error: isolated_supabase_db_final_manifest_required$/);
  assert.equal(launched,0);
  assert.deepEqual(await readFile(manifestPath),before);
+  await fixture.assertRealSourcesUnchanged();
 });
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
  assert.equal(AI_SQL_TESTS.length,101);

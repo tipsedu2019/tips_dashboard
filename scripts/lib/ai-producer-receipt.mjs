@@ -121,9 +121,9 @@ export const TIMETABLE_CLOSE_MIGRATIONS=Object.freeze([
  Object.freeze({"fileName":"20261014180000_timetable_validation_unchanged_inputs.sql","status":"final","sha256":"cc7ada2b9a4670b38d431cc69c16b4e63d0008b40914f4d17594cfb0c1aafc7f"}),
  Object.freeze({"fileName":"20261014193500_legacy_context_binding_preparation.sql","status":"final","sha256":"70ef7db3791f04a8b9e42986d21e2afa6396f8967084b293c3f1f3c77889b5af"}),
 ]);
-// A source-reviewed candidate is bound into the closure, not promoted to final.
-// The isolated runner's strict final gate still rejects runtime producer parity.
-export const REGISTRATION_ENROLLMENT_MIGRATION=Object.freeze({fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'candidate',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'});
+// Finalize the reviewed registration SQL without changing its exact bytes.
+// Runtime producer parity still requires the full final-source run and receipt.
+export const REGISTRATION_ENROLLMENT_MIGRATION=Object.freeze({fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'final',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'});
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
  Object.freeze({fileName:'20261009082000_ops_legacy_dispatch_actor_null_guard.sql',status:'final',sha256:'191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3'}),
