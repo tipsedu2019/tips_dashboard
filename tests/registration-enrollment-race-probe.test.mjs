@@ -43,6 +43,118 @@ test("race fixture avoids braces inside SQL blocks consumed by the PostgreSQL is
   assert.match(source, /'role', 'authenticated'\)::text ELSE jsonb_build_object\(\)::text END, p_local\)/);
 });
 
+// Source-only check of the grammar subset used by this fixture, audited against
+// PostgreSQL REL_17_6 src/test/isolation/{specscanner.l,specparse.y}. SQL ends at
+// the first closing brace; quoted identifiers double quotes. Blocker/notices
+// syntax is unused here and intentionally rejected. This is not the PG parser.
+function parseRaceSpecStructure(source) {
+  const tokens = [];
+  const keywords = new Set(["setup", "teardown", "session", "step", "permutation", "notices"]);
+  const scanner = /([ \t\r\f\n]+)|(#[^\n\r]*)|(\{[^}]*\})|("(?:[^"\n]|"")*")|([A-Za-z_][A-Za-z0-9_$]*)/y;
+  let offset = 0;
+  while (offset < source.length) {
+    scanner.lastIndex = offset;
+    const token = scanner.exec(source);
+    assert.ok(token, `isolation spec invalid token at offset ${offset}`);
+    offset = scanner.lastIndex;
+    if (token[1] || token[2]) continue;
+    if (token[3]) tokens.push({ type: "sql", value: token[3].slice(1, -1) });
+    else if (token[4]) tokens.push({ type: "identifier", value: token[4].slice(1, -1).replaceAll('""', '"') });
+    else tokens.push({ type: keywords.has(token[5]) ? token[5] : "identifier", value: token[5] });
+  }
+  tokens.push({ type: "eof" });
+  let cursor = 0;
+  const peek = type => tokens[cursor].type === type;
+  const take = type => {
+    assert.ok(peek(type), `isolation spec expected ${type}, received ${tokens[cursor].type}`);
+    return tokens[cursor++].value;
+  };
+  const block = type => { take(type); return take("sql"); };
+  const setups = [];
+  while (peek("setup")) setups.push(block("setup"));
+  const teardown = peek("teardown") ? block("teardown") : null;
+  const sessions = [], stepNames = new Set(), sessionNames = new Set();
+  while (peek("session")) {
+    take("session");
+    const name = take("identifier");
+    assert.ok(!sessionNames.has(name), "isolation spec duplicate session");
+    sessionNames.add(name);
+    const setup = peek("setup") ? block("setup") : null;
+    const steps = [];
+    do {
+      take("step");
+      const step = take("identifier");
+      assert.ok(!stepNames.has(step), "isolation spec duplicate step");
+      stepNames.add(step);
+      steps.push({ name: step, sql: take("sql") });
+    } while (peek("step"));
+    const cleanup = peek("teardown") ? block("teardown") : null;
+    sessions.push({ name, setup, steps, teardown: cleanup });
+  }
+  assert.ok(sessions.length > 0, "isolation spec needs a session");
+  const permutations = [];
+  while (peek("permutation")) {
+    take("permutation");
+    const steps = [];
+    do {
+      const name = take("identifier");
+      assert.ok(stepNames.has(name), "isolation spec unknown permutation step");
+      steps.push(name);
+    } while (peek("identifier"));
+    permutations.push(steps);
+  }
+  take("eof");
+  return { setups, teardown, sessions, permutations };
+}
+
+test("complete race spec follows PG17 global and session declaration ordering", () => {
+  const parsed = parseRaceSpecStructure(embeddedSpec());
+  assert.equal(parsed.setups.length, 1);
+  assert.ok(parsed.teardown);
+  assert.deepEqual(parsed.sessions.map(({ name, steps }) => [name, steps.length]), [["a", 10], ["b", 9], ["verify", 7]]);
+  assert.ok(parsed.sessions.every(session => session.setup && session.teardown));
+  assert.equal(parsed.permutations.length, 7);
+  assert.equal(new Set(parsed.permutations.flat()).size, 26);
+});
+
+test("race grammar regression rejects misplaced cleanup and malformed declarations across the whole spec", () => {
+  const source = embeddedSpec();
+  const parsed = parseRaceSpecStructure(source);
+  const malformed = [];
+  for (const session of parsed.sessions) {
+    const start = source.indexOf(`session "${session.name}"`);
+    const end = start + source.slice(start).search(/\nteardown /);
+    const cleanupEnd = source.indexOf("\n", end + 1);
+    const cleanup = source.slice(end + 1, cleanupEnd);
+    const without = source.slice(0, end + 1) + source.slice(cleanupEnd + 1);
+    const firstStep = without.indexOf(`step "${session.steps[0].name}"`, start);
+    malformed.push(without.slice(0, firstStep) + cleanup + "\n" + without.slice(firstStep));
+  }
+  malformed.push(
+    source.replace("ELSE jsonb_build_object()::text END", "ELSE '{}' END"),
+    source.replace('step "a_begin"', 'setup { SELECT 1; }\nstep "a_begin"'),
+    source.replace('step "b_begin"', 'step "a_begin"'),
+    source.replace('session "b"', 'session "a"'),
+    source.replace('session "b"', 'teardown { SELECT 1; }\nsession "b"'),
+    source.replace('session "b"', 'setup { SELECT 1; }\nsession "b"'),
+    source.replace('session "a"', 'permutation "a_begin"\nsession "a"'),
+    source.replace('step "b_commit"', 'step'),
+    source.replace('permutation "a_begin"', 'permutation "missing_step"'),
+    source.replace(/^permutation[^\n]+/m, 'permutation'),
+    source + '\nsetup { SELECT 1; }',
+    source + '\n"unterminated',
+    source + '\nsetup { SELECT 1;',
+    'setup { SELECT 1; }',
+    'session "empty" teardown { SELECT 1; }',
+  );
+  for (const [index, invalid] of malformed.entries())
+    assert.throws(() => parseRaceSpecStructure(invalid), /isolation spec/, `malformed structure ${index + 1}`);
+  assert.equal(malformed.length, 18);
+  // Optional global/session setup, teardown, and explicit permutations match
+  // the official productions too; source policy still requires this race's 7.
+  assert.equal(parseRaceSpecStructure('# comment\nsession "a""b" step s { SELECT 1; }').sessions[0].name, 'a"b');
+});
+
 // Source boundary checks supplement the real PG17 run; they cannot certify SQL
 // execution, constraint success, or any concurrent outcome.
 function assertInOrder(source, fragments) {

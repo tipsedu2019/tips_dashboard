@@ -4,7 +4,63 @@ This is the single integration of the preserved registration candidate with main
 `1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). It is ready
 for the existing Mac operator to retrieve and validate, not for deployment.
 
-## Current Mac handoff: race scanner correction only
+## Current Mac handoff: session teardown grammar correction
+
+Use the next exact commit supplied on the same branch. The Mac operator reported
+that predecessor `4eb4b562870c950937a1d67f0293a96b6cebf27e` passed Node22 race
+contracts10/10 and a fresh postdeploy gate. Actual PostgreSQL17.6 isolationtester
+then rejected spec line288 during parsing: exit1, no signal, stdout0B/stderr25B,
+zero executed permutations. Receipt SHA256:
+`1677ed295b75d1648f02dd3691738a87a725ff3891aca7e9412d5b2483848e99`.
+The parent also confirmed unchanged source724, reusable SQL127/SQL6/Linux10 and
+cleanup5 PASS. These are reported Mac results, not new cloud executions.
+
+The official session production places optional setup before one or more steps
+and optional teardown after them. All three session teardowns were before their
+first steps. They now follow `a_commit`, `b_commit` and `verify_director_fk`.
+These three relocations are the entire spec change. Every SQL block body,
+all26 step bodies, all7 permutation lines, cleanup bodies and their relative
+order remain byte-identical. The embedded spec and its SHA256 are synchronized;
+probe executable logic, lock waits, output checks and timeouts are unchanged.
+
+The complete current spec was compared with the exact
+[PG17.6 grammar](https://raw.githubusercontent.com/postgres/postgres/REL_17_6/src/test/isolation/specparse.y)
+and [scanner](https://raw.githubusercontent.com/postgres/postgres/REL_17_6/src/test/isolation/specscanner.l):
+one global setup, one global teardown, three sessions, one setup and teardown per
+session, step counts10/9/7, and seven explicit permutations referencing all26
+defined steps. The audit covers token boundaries, comments, quoted identifiers,
+first-closing-brace SQL blocks, declaration order, cardinality and end of input.
+This spec uses no blocker/notices syntax.
+
+A narrow source validator now checks the grammar subset actually used here,
+failing closed on unused syntax. It is not the PostgreSQL parser and does not
+parse SQL. Regression coverage rejects18 malformed variants: premature teardown
+in each session, the prior brace-literal problem, duplicate/misplaced declarations,
+missing steps/identifiers, unknown or empty permutations and incomplete/trailing
+input. The full-structure test fails on the predecessor. Cloud Node24.19.0 passed
+all12 race source/parser tests after correction, with zero failures/skips.
+
+The existing Mac task `01a13a32-3a3b-77ca-a490-88ee40d720ad` should retrieve this
+single candidate and bind the new HEAD/spec/source pins to its verified wrapper
+and owned disposable PostgreSQL17 context. Run the changed race contracts and
+actual race7 through the existing approved path. Retain ownership, nonce,
+CWD/UID/config and postdeploy prerequisites; reuse only source-matched passing
+evidence. SQL127, SQL6, Linux10 and unchanged source724 do not need repetition.
+The focused contract command remains:
+
+```bash
+node --test --test-reporter=tap tests/registration-enrollment-race-probe.test.mjs
+```
+
+Record actual parser success, three sessions, seven permutations, seven observed
+waits/completions, seven verification results and original exits. Source parsing
+checks do not certify PostgreSQL execution. Product SQL/RLS and operational data
+are unchanged. Actual race and final required release checks remain pending;
+no deployment was performed. See
+`registration-operator-observation-race-grammar-evidence.json` for input hashes,
+regression results and provenance.
+
+## Historical Mac handoff: race scanner correction only
 
 Use the new exact commit supplied in this handoff on the same branch. The Mac
 operator reported that predecessor `2e5e6c735aa5f72f2a2b1c784ae2f81a25711df4`

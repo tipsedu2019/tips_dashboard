@@ -1,0 +1,108 @@
+{
+  "previousCandidateCommit": "4eb4b562870c950937a1d67f0293a96b6cebf27e",
+  "sourceSha256": "52f49232dec0a996cc7dea892dff4fb9205b4fca4d35a715ec68e423f007f44e",
+  "sourcePathCount": 49,
+  "reportedMacResults": {
+    "provenance": "Parent delegation reporting the existing Mac task; not rerun in cloud",
+    "taskId": "01a13a32-3a3b-77ca-a490-88ee40d720ad",
+    "diagnosisReceiptSha256": "1677ed295b75d1648f02dd3691738a87a725ff3891aca7e9412d5b2483848e99",
+    "node22RaceContracts": {
+      "passed": 10,
+      "failed": 0
+    },
+    "freshPostdeploy": "PASS",
+    "race7": {
+      "status": "FAILED specification parsing at line288",
+      "childExit": 1,
+      "signal": null,
+      "stdoutBytes": 0,
+      "stderrBytes": 25,
+      "executedCases": 0
+    },
+    "reusableEvidence": [
+      "guarded SQL127",
+      "SQL6",
+      "Linux10"
+    ],
+    "source724": "UNCHANGED (parent reported)",
+    "cleanup5": "PASS"
+  },
+  "cause": {
+    "officialGrammar": "https://raw.githubusercontent.com/postgres/postgres/REL_17_6/src/test/isolation/specparse.y",
+    "officialScanner": "https://raw.githubusercontent.com/postgres/postgres/REL_17_6/src/test/isolation/specscanner.l",
+    "rule": "Session requires optional setup, one or more steps, then optional teardown.",
+    "previousLines": [
+      288,
+      341,
+      380
+    ],
+    "correction": "Move each existing session teardown unchanged to after its final step."
+  },
+  "changedSourcePins": {
+    "supabase/tests/registration_enrollment_guarded_save_race.spec": "4c6118ba069e262d63bb395b881e9f7bd41abd5d60d984e7dc9a7339b9104b6c",
+    "tests/probe-registration-enrollment-guarded-save-concurrency.mjs": "5fc13f21b9ce9fd6c6f4b7590e1e87bfed0866dc49167e11dd89629794bc1901",
+    "tests/registration-enrollment-race-probe.test.mjs": "0df6d7ffe95cac111b62642753ff614d5d8b764d27c78adb93a6c01dcf167464"
+  },
+  "unchangedSourcePins": {
+    "supabase/tests/registration_enrollment_guarded_save_test.sql": "879621aa654cd9bff2193b68ca3b89fddbdb0c99d362b64c3ad090bdafaa4a1a",
+    "tests/registration-enrollment-guarded-save.test.mjs": "2777c5fa29f706f74e3b3b92fbccd3ff33c3d6a78a9935776755e0719c49ad53",
+    "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3",
+    "scripts/run-isolated-supabase-db-tests.mjs": "581731526c3ca61d284d597b83313e2b200f1a35c40e9f6439c1c12dabfa8439",
+    "supabase/tests/active_registration_workflow_postdeploy_readonly.sql": "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343",
+    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
+  },
+  "wholeSpecAudit": {
+    "globalSetups": 1,
+    "globalTeardowns": 1,
+    "sessions": 3,
+    "sessionStepCounts": [
+      10,
+      9,
+      7
+    ],
+    "sessionSetups": 3,
+    "sessionTeardowns": 3,
+    "sqlBlocks": 34,
+    "permutations": 7,
+    "distinctReferencedSteps": 26,
+    "coverage": [
+      "global and session declaration order/cardinality",
+      "complete token consumption through end of input",
+      "comments and identifiers including doubled quotes",
+      "first-closing-brace SQL block semantics",
+      "duplicate session/step names and permutation references"
+    ],
+    "unusedGrammarForms": [
+      "blocker annotations",
+      "notices counts"
+    ],
+    "limitation": "Source-only validator of this fixture grammar subset; not native PostgreSQL parser or SQL validation."
+  },
+  "localVerification": {
+    "runtime": "v24.19.0",
+    "scope": "Changed race source/parser suite only; no database or isolationtester executed",
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0,
+    "malformedVariantsRejected": 18,
+    "regressionFailsOnPredecessor": true,
+    "regressionBeforeLogSha256": "8b7ba7d4c62cd747309950f9b928e69e87315b0bd19ce7173313b6e23af887b9",
+    "passingLogSha256": "767d3799c3a99519c15d8b6e316e029adf5a4974da2969af764e5aa2b0f44ef2"
+  },
+  "preservedControls": {
+    "comparedAgainstCommit": "4eb4b562870c950937a1d67f0293a96b6cebf27e",
+    "specOnlyThreeSessionTeardownsRelocated": true,
+    "cleanupBodiesAndRelativeOrderUnchanged": true,
+    "unchangedStepBodies": 26,
+    "unchangedPermutations": 7,
+    "probeOnlyEmbeddedDataAndHashChanged": true,
+    "probeLogicSha256": "0222108666966a3585ea09221f556c67e7b144b5a73f27f45eeed61312c508f9",
+    "runtimeEvidence": false
+  },
+  "macHandoff": "Existing Mac task; bind next exact HEAD/spec/source pins to existing verified wrapper and approved owned PG17 context. Run changed race contracts and actual race7. Preserve context/postdeploy prerequisites, all locks, output assertions and original exits; reuse unchanged SQL127/SQL6/Linux10/source724 evidence.",
+  "currentRaceRuntime": "PENDING Mac",
+  "finalRequiredReleaseChecks": "PENDING",
+  "candidateStatus": "candidate",
+  "operationalMutations": false,
+  "deployment": false
+}

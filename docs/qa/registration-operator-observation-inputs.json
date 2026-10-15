@@ -1,6 +1,6 @@
 {
   "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
-  "sourceSha256": "db76eeeed58341f40a81b4abb3417312a20b3b350f3f4d2f99175fb1febb8548",
+  "sourceSha256": "52f49232dec0a996cc7dea892dff4fb9205b4fca4d35a715ec68e423f007f44e",
   "sourcePathCount": 49,
   "source": [
     {
@@ -126,7 +126,7 @@
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_race.spec",
       "exists": true,
-      "sha256": "7a28c7a97b470605ea970c5c77e8f85ccdd12d5d836bcfa17d31324a6b85e7fd"
+      "sha256": "4c6118ba069e262d63bb395b881e9f7bd41abd5d60d984e7dc9a7339b9104b6c"
     },
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_test.sql",
@@ -161,7 +161,7 @@
     {
       "path": "tests/probe-registration-enrollment-guarded-save-concurrency.mjs",
       "exists": true,
-      "sha256": "dbed1cbc974d02ee4ab5fc2e69f2e7ce1cf3b8e5b2b46f1c273f23f2193be03b"
+      "sha256": "5fc13f21b9ce9fd6c6f4b7590e1e87bfed0866dc49167e11dd89629794bc1901"
     },
     {
       "path": "tests/query-surface-budget.test.mjs",
@@ -191,7 +191,7 @@
     {
       "path": "tests/registration-enrollment-race-probe.test.mjs",
       "exists": true,
-      "sha256": "e265326708bb6b0e2e6b48042a1211a5df98571b19cb05a3e5d69d36be01b32c"
+      "sha256": "0df6d7ffe95cac111b62642753ff614d5d8b764d27c78adb93a6c01dcf167464"
     },
     {
       "path": "tests/registration-management-notification-actions.test.mjs",
@@ -249,5 +249,5 @@
       "sha256": "3aac93db1262c84d398e83478ba18af763b1f7ea709f30961e38b7a8ac86b035"
     }
   ],
-  "qualification": "One integrated candidate pinned to 49 source paths; documentation is outside the source digest. Migration remains candidate. Predecessor Mac guarded SQL127 and postdeploy passed; the current race-scanner correction awaits Mac PostgreSQL17 race7 validation."
+  "qualification": "One integrated candidate pinned to 49 source paths; documentation is outside the source digest. Migration remains candidate. Current race session-order correction awaits Mac PostgreSQL17 race7 validation; prior source-matched SQL/postdeploy/Linux evidence is reusable."
 }

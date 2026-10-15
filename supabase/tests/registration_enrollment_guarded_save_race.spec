@@ -285,7 +285,6 @@ setup
   SET timezone = 'Asia/Seoul';
   SET application_name = 'registration_guard_race_a';
 }
-teardown { ROLLBACK; RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 step "a_begin"
 {
   BEGIN;
@@ -329,6 +328,7 @@ step "a_hold_director_track"
 }
 step "a_assign_after_guard_task" { SELECT registration_guard_race_fixture.capture(7, 308, 'guard-race-7-director', jsonb_build_array(), 'director'); }
 step "a_commit" { COMMIT; }
+teardown { ROLLBACK; RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 
 session "b"
 setup
@@ -338,7 +338,6 @@ setup
   SET timezone = 'Asia/Seoul';
   SET application_name = 'registration_guard_race_b';
 }
-teardown { ROLLBACK; RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 step "b_begin"
 {
   BEGIN;
@@ -363,6 +362,7 @@ step "b_save_after_archive" { SELECT registration_guard_race_fixture.capture(5, 
 step "b_save_cross_track" { SELECT registration_guard_race_fixture.capture(6, 307, 'guard-race-6-shared'); }
 step "b_save_after_director" { SELECT registration_guard_race_fixture.capture(7, 308, 'guard-race-7-save'); }
 step "b_commit" { COMMIT; }
+teardown { ROLLBACK; RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 
 session "verify"
 setup
@@ -377,7 +377,6 @@ setup
     END IF;
   END; $$;
 }
-teardown { RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 step "verify_one" { SELECT registration_guard_race_fixture.assert_case(1); }
 step "verify_replay" { SELECT registration_guard_race_fixture.assert_case(2); }
 step "verify_status" { SELECT registration_guard_race_fixture.assert_case(3); }
@@ -385,6 +384,7 @@ step "verify_cancel" { SELECT registration_guard_race_fixture.assert_case(4); }
 step "verify_archive" { SELECT registration_guard_race_fixture.assert_case(5); }
 step "verify_cross_track" { SELECT registration_guard_race_fixture.assert_case(6); }
 step "verify_director_fk" { SELECT registration_guard_race_fixture.assert_case(7); }
+teardown { RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 
 # Each contender launches while A still holds the real transaction locks.
 # isolationtester must observe B blocked before moving on to A's commit.
