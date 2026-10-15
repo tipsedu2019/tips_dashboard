@@ -1,6 +1,6 @@
 {
   "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
-  "sourceSha256": "062b300d55899974b9fc17b9deb9554b33a0188d85eb62232f37eadd60d35cc8",
+  "sourceSha256": "a940b4676096e30f9256822b4cf55779f1d9fca33a0d0da7195aa2d07b1d4f41",
   "sourcePathCount": 49,
   "source": [
     {
@@ -131,7 +131,7 @@
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_test.sql",
       "exists": true,
-      "sha256": "6693b36dfdbd4b6c676086e23c24a26bce22fd3dda84f34378bd197632d06915"
+      "sha256": "879621aa654cd9bff2193b68ca3b89fddbdb0c99d362b64c3ad090bdafaa4a1a"
     },
     {
       "path": "tests/academic-operations-numbered-pagination.test.mjs",
@@ -186,7 +186,7 @@
     {
       "path": "tests/registration-enrollment-guarded-save.test.mjs",
       "exists": true,
-      "sha256": "fcfa57415590034f351fa32f0831a9cc2c9752be2843bebca7bc09724ee2995e"
+      "sha256": "2777c5fa29f706f74e3b3b92fbccd3ff33c3d6a78a9935776755e0719c49ad53"
     },
     {
       "path": "tests/registration-enrollment-race-probe.test.mjs",

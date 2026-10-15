@@ -77,3 +77,33 @@ test("draft pgTAP covers final installed definitions and exact SQLSTATEs without
   for (const boundary of ["registration_enrollment_details_refresh_required", "registration_mutation_request_conflict", "registration_observation_booking_required"]) assert.ok(sql.includes(boundary));
   assert.match(sql, /select \* from finish\(\);\s*rollback;/);
 });
+
+test("synthetic fixture establishes trigger authentication before domain seeds and flushes before clearing it", async () => {
+  const sql = await readFile(new URL("../supabase/tests/registration_enrollment_guarded_save_test.sql", import.meta.url), "utf8");
+  const bootstrap = sql.indexOf("insert into auth.users");
+  const profiles = sql.indexOf("insert into public.profiles");
+  const setupActor = sql.indexOf("select pg_temp.registration_guard_actor(1);", profiles);
+  const domainSetup = sql.indexOf("update public.profiles set teacher_catalog_id");
+  assert.ok(sql.indexOf("select pg_temp.registration_guard_actor(null);") < bootstrap);
+  assert.ok(bootstrap < profiles && profiles < setupActor && setupActor < domainSetup);
+  const seedEnd = sql.indexOf("create temporary table registration_guard_results");
+  const seeds = sql.slice(domainSetup, seedEnd);
+  for (const statement of seeds.matchAll(/^(?:insert into|update|delete from) public\.[a-z_]+/gmu)) {
+    const preceding = sql.slice(0, domainSetup + statement.index);
+    const actors = [...preceding.matchAll(/^select pg_temp\.registration_guard_actor\((\d+|null)\);/gmu)];
+    assert.equal(actors.at(-1)?.[1], "1", `${statement[0]} must have the fixture manager actor`);
+  }
+  assert.match(seeds, /'42501', 'registration_access_denied', 'historical enrollment seed rejects a missing JWT actor'/);
+  assert.match(seeds, /'42501', 'registration_manager_write_access_denied', 'historical enrollment seed rejects an unknown JWT account'/);
+  assert.match(seeds, /'42501', 'registration_manager_write_access_denied', 'forged admin metadata/);
+  assert.match(seeds, /savepoint registration_guard_fixture_checks;\s*set constraints all immediate;\s*rollback to savepoint registration_guard_fixture_checks;\s*release savepoint registration_guard_fixture_checks;/);
+  assert.match(sql, /set_config\('request.jwt.claim.role',\s*case when p_number is null then '' else 'authenticated' end, true\)/);
+  assert.match(sql, /set_config\('app.class_schedule_mutation', '', true\)/);
+  assert.match(sql, /reset role;\s*select pg_temp.registration_guard_actor\(7\);\s*update public.profiles set role = 'admin'/);
+  const flush = sql.lastIndexOf("set constraints all immediate;");
+  const noSend = sql.lastIndexOf("'detail saves and observation status edits never send");
+  const clear = sql.lastIndexOf("select pg_temp.registration_guard_actor(null);");
+  assert.ok(flush < noSend && noSend < clear && clear < sql.indexOf("select * from finish();"));
+  assert.match(sql.slice(sql.lastIndexOf("reset role;"), flush), /select pg_temp.registration_guard_actor\(1\);/);
+  assert.doesNotMatch(sql, /session_replication_role|disable\s+trigger|disable\s+row\s+level\s+security|alter\s+role|grant\s+.*\bon\s+public\./iu);
+});

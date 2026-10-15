@@ -4,6 +4,58 @@ This is the single integration of the preserved registration candidate with main
 `1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). It is ready
 for the existing Mac operator to retrieve and validate, not for deployment.
 
+## Current narrow rerun: fixture authentication
+
+The Mac run of `bde58ada982b4c1e01cb352598136d18ed83a35d` passed Node22 53/53,
+the layout verifier and Linux fixture10. Guarded-save SQL then stopped after20
+subtests at the historical enrollment INSERT (old line264):
+`registration_access_denied`, SQL file exit3 / gate exit1. Postdeploy and race7
+were not reached. Receipt SHA256:
+`00fa1fe299134ccc8bbb350d5d8a7c756dd793c6ae7027844768089e8d6ec90e`.
+
+That INSERT invokes the final `sync_registration_enrollment_lesson_session_v1`
+trigger, which requires a live JWT actor even for postgres seed writes. The
+fixture previously called its JWT helper only after all inserts. This is a test
+setup defect; the reported failure does not establish a product save defect.
+
+The fixture now clears both inherited JWT forms, creates its synthetic accounts,
+then binds and verifies the real active-manager fixture actor before domain
+seeding. Missing-account, missing-actor and forged-teacher seed attempts assert
+their exact42501 errors and absence of rows. The complete seed review also fixes
+legacy session identity/time/resource data, separates the three class schedules,
+and links the normalized lesson to its weekly slot. It releases the temporary
+schedule-write context immediately after the seed. A savepoint checks all
+deferred seed constraints while preserving their original timing for the RPCs.
+Role-revocation recovery uses a different active fixture admin. Final deferred
+checks run before history/no-send assertions and JWT cleanup, then everything
+rolls back. Production functions, constraints, roles, RLS and runner are unchanged.
+
+Use the exact new commit and verify the input manifest as described below.
+Reuse unchanged Node466, selected1, SQL6, Node22 correction checks and Linux10
+evidence. Only the fixture source test changed (five existing cases plus one new
+ordering/boundary case); run it with the existing Node22, then run this SQL alone:
+
+```bash
+node --test --test-reporter=tap tests/registration-enrollment-guarded-save.test.mjs
+node scripts/run-isolated-supabase-db-tests.mjs \
+  --review-head --execute --authorized \
+  --request-id registration-guard-fixture-auth-20261015 \
+  --test supabase/tests/registration_enrollment_guarded_save_test.sql
+```
+
+Use the existing verified `TASK_SUPABASE_CLI` and cached owned runtime. The runner
+retains its fixed baseline parity/smoke, credential-prefix, migration preparation
+and cleanup; the requested business SQL list contains only the failing file.
+Record its actual TAP total and exit status. This focused run does not satisfy
+the still-pending postdeploy/race or full release gates. Do not repeat fixture10
+or the prior whole gate for this fixture-only source change.
+
+The same missing-JWT ordering is also visible in the separate, still-unexecuted
+race spec setup: its initial enrollment INSERT precedes the session JWT setup.
+That race input is unchanged in this SQL-only correction and must be corrected
+before a future race7 run. The fixture audit and exact source hashes are recorded
+in `registration-operator-observation-fixture-auth-evidence.json`.
+
 ## Correction after the first Mac run
 
 The previous tested commit was `bd6fb3ade58f2f9b24ff2bb494bd62024508f9da`.
@@ -119,7 +171,10 @@ suite. Source pins, non-sensitive result counts and log hashes are recorded in
 `registration-operator-observation-correction-evidence.json`. These source and
 injected-process checks do not prove PostgreSQL or production success.
 
-## Minimal remaining checks
+## Historical validation instructions for bde58ada
+
+These commands preserve the earlier handoff. Use the current narrow invocation
+above for this fixture correction; broader runtime/release gates remain pending.
 
 From the exact checked-out commit, first verify the version and input hashes:
 

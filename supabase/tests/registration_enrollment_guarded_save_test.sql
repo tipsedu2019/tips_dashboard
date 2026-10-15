@@ -146,7 +146,8 @@ returns void language plpgsql as $$
 begin
   perform pg_catalog.set_config('request.jwt.claim.sub',
     coalesce(pg_temp.registration_guard_sid(p_number)::text, ''), true);
-  perform pg_catalog.set_config('request.jwt.claim.role', 'authenticated', true);
+  perform pg_catalog.set_config('request.jwt.claim.role',
+    case when p_number is null then '' else 'authenticated' end, true);
   perform pg_catalog.set_config('request.jwt.claims', case when p_number is null then '{}'
     else pg_catalog.jsonb_build_object('sub', pg_temp.registration_guard_sid(p_number),
       'role', 'authenticated', 'user_metadata', pg_catalog.jsonb_build_object('role', 'admin'))::text end, true);
@@ -165,6 +166,20 @@ returns jsonb language sql stable as $$
     'classStartSourceObservationId', null, 'sortOrder', p_sort_order));
 $$;
 
+-- A prior test must not lend this fixture an actor. Overwrite both JWT forms,
+-- including malformed inherited values, before creating the synthetic accounts.
+do $$ begin
+  perform set_config('request.jwt.claim.sub', 'malformed-fixture-sub', true);
+  perform set_config('request.jwt.claim.role', 'service_role', true);
+  perform set_config('request.jwt.claims', 'malformed-fixture-json', true);
+end; $$;
+select pg_temp.registration_guard_actor(null);
+select ok((select auth.uid()) is null and (select auth.role()) is null
+    and current_setting('request.jwt.claim.sub') = ''
+    and current_setting('request.jwt.claim.role') = ''
+    and current_setting('request.jwt.claims')::jsonb = '{}'::jsonb,
+  'fixture bootstrap clears malformed or stale JWT settings without inheriting an actor');
+
 insert into auth.users(id, aud, role, email, raw_app_meta_data, raw_user_meta_data, banned_until, deleted_at)
 select pg_temp.registration_guard_sid(number), 'authenticated', 'authenticated',
   'registration-guard-' || number || '@example.invalid',
@@ -179,13 +194,24 @@ select pg_temp.registration_guard_sid(number),
   '등록 저장 합성 계정', 'registration-guard-' || number || '@example.invalid'
 from generate_series(1, 7) number
 on conflict (id) do update set role = excluded.role, name = excluded.name, email = excluded.email;
+
+-- postgres supplies fixture DDL/seed privileges, but enrollment and registration
+-- triggers also require auth.uid() backed by a live admin/staff account.
+select pg_temp.registration_guard_actor(1);
+select ok(current_user = 'postgres'
+    and (select auth.uid()) = pg_temp.registration_guard_sid(1)
+    and (select auth.role()) = 'authenticated'
+    and current_setting('request.jwt.claims')::jsonb ->> 'sub' = pg_temp.registration_guard_sid(1)::text
+    and current_setting('request.jwt.claims')::jsonb ->> 'role' = 'authenticated'
+    and dashboard_private.registration_actor_is_active_manager_v1((select auth.uid())),
+  'fixture domain seeding has consistent JWT settings and an actual active manager');
 update public.profiles set teacher_catalog_id = null
 where id in (pg_temp.registration_guard_sid(2), pg_temp.registration_guard_sid(3));
 delete from public.teacher_catalogs
 where profile_id in (pg_temp.registration_guard_sid(2), pg_temp.registration_guard_sid(3));
 insert into public.teacher_catalogs(id, name, subjects, is_visible, sort_order, profile_id, account_email, dashboard_role)
 values
-  (pg_temp.registration_guard_sid(31), '등록 저장 합성 계정', array['영어'], true, 9971,
+  (pg_temp.registration_guard_sid(31), '등록 저장 합성 계정', array['영어', '수학'], true, 9971,
     pg_temp.registration_guard_sid(3), 'registration-guard-3@example.invalid', 'teacher'),
   (pg_temp.registration_guard_sid(33), '등록 저장 합성 운영교사', array['영어'], true, 9973,
     pg_temp.registration_guard_sid(2), 'registration-guard-2@example.invalid', 'staff');
@@ -194,31 +220,57 @@ update public.profiles set teacher_catalog_id = case id
   else pg_temp.registration_guard_sid(31) end
 where id in (pg_temp.registration_guard_sid(2), pg_temp.registration_guard_sid(3));
 insert into public.classroom_catalogs(id, name, subjects, is_visible, sort_order, campus)
-values (pg_temp.registration_guard_sid(32), '등록 저장 합성 강의실', array['영어'], true, 9972, '본관');
+values (pg_temp.registration_guard_sid(32), '등록 저장 합성 강의실', array['영어', '수학'], true, 9972, '본관');
+-- Complete, nonoverlapping weekly/dated occupancy also satisfies the current
+-- deferred timetable guard. The wrong-subject class remains a real math class.
 insert into public.classes(id, name, subject, status, teacher, room, schedule, schedule_storage_mode, schedule_plan)
 values
   (pg_temp.registration_guard_sid(21), '등록 저장 합성 영어반', '영어', '수업 진행 중',
-    '등록 저장 합성 계정', '등록 저장 합성 강의실', '화 18:00-20:00', 'legacy',
+    '등록 저장 합성 계정', '등록 저장 합성 강의실',
+    substr('일월화수목금토', extract(dow from current_date + 7)::integer + 1, 1) || ' 14:00-16:00', 'legacy',
     jsonb_build_object('sessions', jsonb_build_array(jsonb_build_object(
-      'date', current_date + 7, 'sessionNumber', 1, 'scheduleState', 'active')))),
+      'date', current_date + 7, 'sessionNumber', 1, 'scheduleState', 'active',
+      'sessionKey', to_char(current_date + 7, 'YYYY-MM-DD') || ':1',
+      'startTime', '14:00', 'endTime', '16:00',
+      'teacherCatalogId', pg_temp.registration_guard_sid(31), 'classroomCatalogId', pg_temp.registration_guard_sid(32))))),
   (pg_temp.registration_guard_sid(22), '등록 저장 합성 정규화반', '영어', '수업 진행 중',
-    '등록 저장 합성 계정', '등록 저장 합성 강의실', '화 18:00-20:00', 'normalized', '{"sessions":[]}'::jsonb),
+    '등록 저장 합성 계정', '등록 저장 합성 강의실',
+    substr('일월화수목금토', extract(dow from current_date + 7)::integer + 1, 1) || ' 18:00-20:00',
+    'normalized', '{"sessions":[]}'::jsonb),
   (pg_temp.registration_guard_sid(23), '등록 저장 합성 타과목반', '수학', '수업 진행 중',
-    '등록 저장 합성 계정', '등록 저장 합성 강의실', '화 18:00-20:00', 'legacy',
+    '등록 저장 합성 계정', '등록 저장 합성 강의실',
+    substr('일월화수목금토', extract(dow from current_date + 7)::integer + 1, 1) || ' 10:00-12:00', 'legacy',
     jsonb_build_object('sessions', jsonb_build_array(jsonb_build_object(
-      'date', current_date + 7, 'sessionNumber', 1, 'scheduleState', 'active'))));
+      'date', current_date + 7, 'sessionNumber', 1, 'scheduleState', 'active',
+      'sessionKey', to_char(current_date + 7, 'YYYY-MM-DD') || ':1',
+      'startTime', '10:00', 'endTime', '12:00',
+      'teacherCatalogId', pg_temp.registration_guard_sid(31), 'classroomCatalogId', pg_temp.registration_guard_sid(32)))));
 do $$ begin
   perform dashboard_private.with_continuous_class_schedule_audit_context_v1(
     pg_temp.registration_guard_sid(22), pg_temp.registration_guard_sid(42),
     'registration_enrollment_guarded_save_test');
 end; $$;
-insert into public.class_lesson_sessions(id, class_id, session_key, session_date, schedule_state,
+insert into public.class_schedule_slots(id, class_id, weekday, start_time, end_time,
+  teacher_catalog_id, teacher_name, classroom_catalog_id, classroom_name)
+values (pg_temp.registration_guard_sid(43), pg_temp.registration_guard_sid(22),
+  extract(dow from current_date + 7)::smallint, '18:00', '20:00',
+  pg_temp.registration_guard_sid(31), '등록 저장 합성 계정',
+  pg_temp.registration_guard_sid(32), '등록 저장 합성 강의실');
+insert into public.class_lesson_sessions(id, class_id, source_schedule_slot_id, session_key, session_date, schedule_state,
   start_time, end_time, teacher_catalog_id, teacher_name_snapshot,
   classroom_catalog_id, classroom_name_snapshot, origin, revision)
-values (pg_temp.registration_guard_sid(41), pg_temp.registration_guard_sid(22),
+values (pg_temp.registration_guard_sid(41), pg_temp.registration_guard_sid(22), pg_temp.registration_guard_sid(43),
   to_char(current_date + 7, 'YYYY-MM-DD') || ':1', current_date + 7, 'active', '18:00', '20:00',
   pg_temp.registration_guard_sid(31), '등록 저장 합성 계정',
   pg_temp.registration_guard_sid(32), '등록 저장 합성 강의실', 'manual', 1);
+-- The schedule-write context belongs only to the one normalized lesson seed.
+do $$ begin
+  perform set_config('app.class_schedule_mutation', '', true);
+  perform set_config('app.class_schedule_class_id', '', true);
+  perform set_config('app.class_schedule_request_key', '', true);
+  perform set_config('app.class_schedule_request_operation', '', true);
+  perform set_config('app.class_schedule_change_reason', '', true);
+end; $$;
 
 create temporary table registration_guard_cases(
   number integer primary key, initial_status text not null, review_required boolean not null default false
@@ -256,6 +308,28 @@ values (pg_temp.registration_guard_sid(520), pg_temp.registration_guard_sid(220)
 insert into public.students(id, name, grade, school, status, class_ids, waitlist_class_ids)
 values (pg_temp.registration_guard_sid(51), '등록 저장 합성 대기학생', '중2', '합성중', '퇴원', '[]',
   jsonb_build_array(pg_temp.registration_guard_sid(21)));
+
+-- Exercise the actual INSERT triggers before seeding the historical rows. These
+-- failures must roll back; neither postgres nor forged metadata supplies a JWT
+-- actor or grants a teacher/unknown account registration write access.
+select pg_temp.registration_guard_actor(null);
+select throws_ok($$insert into public.ops_registration_enrollments(id, track_id, class_id, status)
+  values (pg_temp.registration_guard_sid(699), pg_temp.registration_guard_sid(320),
+    pg_temp.registration_guard_sid(21), 'canceled')$$,
+  '42501', 'registration_access_denied', 'historical enrollment seed rejects a missing JWT actor');
+select pg_temp.registration_guard_actor(99);
+select throws_ok($$insert into public.ops_registration_enrollments(id, track_id, class_id, status)
+  values (pg_temp.registration_guard_sid(699), pg_temp.registration_guard_sid(320),
+    pg_temp.registration_guard_sid(21), 'canceled')$$,
+  '42501', 'registration_manager_write_access_denied', 'historical enrollment seed rejects an unknown JWT account');
+select pg_temp.registration_guard_actor(3);
+select throws_ok($$insert into public.ops_registration_enrollments(id, track_id, class_id, status)
+  values (pg_temp.registration_guard_sid(699), pg_temp.registration_guard_sid(320),
+    pg_temp.registration_guard_sid(21), 'canceled')$$,
+  '42501', 'registration_manager_write_access_denied', 'forged admin metadata cannot authorize the teacher seed actor');
+select pg_temp.registration_guard_actor(1);
+select is((select count(*) from public.ops_registration_enrollments where id = pg_temp.registration_guard_sid(699)),
+  0::bigint, 'all rejected seed attempts leave no enrollment row');
 insert into public.ops_registration_enrollments(id, track_id, class_id, status, admission_batch_id, student_id, roster_active)
 values
   (pg_temp.registration_guard_sid(620), pg_temp.registration_guard_sid(320), pg_temp.registration_guard_sid(21),
@@ -279,8 +353,8 @@ select pg_temp.registration_guard_sid(800 + number), pg_temp.registration_guard_
   case when number = 25 then 'legacy' else 'normalized' end,
   case when number = 25 then null else pg_temp.registration_guard_sid(41) end,
   case when number = 25 then to_char(current_date + 7, 'YYYY-MM-DD') || ':1' else null end,
-  current_date + 7, (current_date + 7 + time '18:00') at time zone 'Asia/Seoul',
-  (current_date + 7 + time '20:00') at time zone 'Asia/Seoul', 'active',
+  current_date + 7, (current_date + 7 + case when number = 25 then time '14:00' else time '18:00' end) at time zone 'Asia/Seoul',
+  (current_date + 7 + case when number = 25 then time '16:00' else time '20:00' end) at time zone 'Asia/Seoul', 'active',
   case when number = 25 then null else 1 end, case when number = 25 then repeat('a', 64) else null end,
   case when number = 25 then jsonb_build_object('authority', 'legacy',
       'sessionKey', to_char(current_date + 7, 'YYYY-MM-DD') || ':1', 'contentHash', repeat('a', 64))
@@ -292,6 +366,13 @@ select pg_temp.registration_guard_sid(800 + number), pg_temp.registration_guard_
   case when number = 29 then pg_temp.registration_guard_sid(1) else null end,
   case when number = 29 then now() else null end
 from (values (24), (25), (26), (27), (29)) fixture(number);
+
+-- Validate the complete seed graph now, then restore the original constraint
+-- timing before exercising multi-statement RPCs. No seed row is rolled back.
+savepoint registration_guard_fixture_checks;
+set constraints all immediate;
+rollback to savepoint registration_guard_fixture_checks;
+release savepoint registration_guard_fixture_checks;
 
 create temporary table registration_guard_results(result_key text primary key, response jsonb not null) on commit drop;
 grant all on registration_guard_results to authenticated;
@@ -579,6 +660,7 @@ select lives_ok($$select public.save_registration_enrollment_details_guarded_v2(
   'an active admin whose ban expired can save registration details');
 
 reset role;
+select pg_temp.registration_guard_actor(7);
 update public.profiles set role = 'teacher' where id = pg_temp.registration_guard_sid(1);
 select pg_temp.registration_guard_actor(1);
 set local role authenticated;
@@ -586,9 +668,11 @@ select throws_ok($$select public.save_registration_enrollment_details_guarded_v2
   pg_temp.registration_guard_rows(), '[]', 1, 'guard-first')$$,
   '42501', 'registration_access_denied', 'a receipt cannot bypass role revocation');
 reset role;
+select pg_temp.registration_guard_actor(7);
 update public.profiles set role = 'admin' where id = pg_temp.registration_guard_sid(1);
 update public.ops_registration_subject_tracks set archived_at = now(), archived_by = pg_temp.registration_guard_sid(1)
 where id = pg_temp.registration_guard_sid(301);
+select pg_temp.registration_guard_actor(1);
 set local role authenticated;
 select throws_ok($$select public.save_registration_enrollment_details_guarded_v2(pg_temp.registration_guard_sid(301),
   pg_temp.registration_guard_rows(), '[]', 1, 'guard-first')$$,
@@ -643,6 +727,10 @@ select throws_ok($$select public.set_registration_workflow_status_v1(pg_temp.reg
   '42501', 'registration_access_denied', 'a selected session does not grant workflow-edit permission to its teacher');
 
 reset role;
+select pg_temp.registration_guard_actor(1);
+-- Flush while the fixture manager is still authenticated, before history and
+-- no-send comparisons, so deferred effects cannot escape those assertions.
+set constraints all immediate;
 select is((select count(*) from dashboard_private.ops_registration_mutations
   where request_key in ('guard-observation-missing', 'guard-observation-canceled',
     'guard-observation-canceled-appointment', 'guard-observation-other-track', 'guard-observation-decided',
@@ -676,7 +764,8 @@ select is(jsonb_build_object(
   'detail saves and observation status edits never send or enqueue provider/customer/observation work');
 
 select pg_temp.registration_guard_actor(null);
--- Flush deferred checks against the final fixtures before reporting completion.
-set constraints all immediate;
+select ok((select auth.uid()) is null and (select auth.role()) is null
+    and current_setting('request.jwt.claims')::jsonb = '{}'::jsonb,
+  'fixture cleanup clears both JWT representations after all deferred checks');
 select * from finish();
 rollback;
