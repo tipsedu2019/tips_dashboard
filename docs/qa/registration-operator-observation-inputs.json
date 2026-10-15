@@ -1,7 +1,7 @@
 {
   "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
-  "sourceSha256": "71a998a9c280d1ce8938901ed067db1ce1888942deb53b7fbee9c064bb529192",
-  "sourcePathCount": 50,
+  "sourceSha256": "1365bf829193d2139d03053cc8dc478046771b439d78202c661963f01aa73ac5",
+  "sourcePathCount": 51,
   "source": [
     {
       "path": "scripts/lib/ai-producer-receipt.mjs",
@@ -139,6 +139,11 @@
       "sha256": "f58330959f051166585da117ff33f33df450d50cdb5dfb5ccd59bb8100bc5577"
     },
     {
+      "path": "tests/fixtures/registration-race-parser-review-4dc7f49b.json",
+      "exists": true,
+      "sha256": "234e1147d4b8c8a66a0dacef9b5db5d7d12057529a36c0a49a78b66b8a5b248f"
+    },
+    {
       "path": "tests/fixtures/registration-race-pg17.6-568537c7.json",
       "exists": true,
       "sha256": "3629dbb9e6e74bae09592c5ddceea6bbcef0ae8fde59849ed085041ab9ac20e0"
@@ -166,7 +171,7 @@
     {
       "path": "tests/probe-registration-enrollment-guarded-save-concurrency.mjs",
       "exists": true,
-      "sha256": "15cedc76d48a5a2f16965cd0b4ca52d905013311f35c1391ad093681c0451f06"
+      "sha256": "a3d827d1f00d168ffd771918d5cf1c250f0cbbcc0270536aac48daab0e6ef3c9"
     },
     {
       "path": "tests/query-surface-budget.test.mjs",
@@ -196,7 +201,7 @@
     {
       "path": "tests/registration-enrollment-race-probe.test.mjs",
       "exists": true,
-      "sha256": "94d4dfac8b483d7c57049f526560d6126069f504b38ede8965c539770fce61ca"
+      "sha256": "20815e6e446196a0d6dc119d33235d147881d87d8efb3f4df3cf8c98b3a37088"
     },
     {
       "path": "tests/registration-management-notification-actions.test.mjs",
@@ -254,5 +259,5 @@
       "sha256": "3aac93db1262c84d398e83478ba18af763b1f7ea709f30961e38b7a8ac86b035"
     }
   ],
-  "qualification": "One integrated candidate pinned to 50 source paths; documentation is outside the source digest. Native historical output is a verified FAIL fixture, not a passing runtime. Parser and committed cleanup observability changes await Mac PostgreSQL17 verification; migration remains candidate."
+  "qualification": "One integrated candidate pinned to 51 source paths. Complete step/result consumption fixes two independently reproduced synthetic parser false positives. Historical native capture remains FAIL; no new DB/race/postdeploy execution. Independent review and runtime authorization remain unresolved; migration remains candidate."
 }

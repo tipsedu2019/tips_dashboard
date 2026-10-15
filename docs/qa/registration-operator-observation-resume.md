@@ -2,9 +2,51 @@
 
 This is the single integration of the preserved registration candidate with main
 `1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). It is ready
-for the existing Mac operator to retrieve and validate, not for deployment.
+for parser/source review. Runtime authorization and release gates remain blocked.
 
-## Current Mac handoff: native output parsing and committed cleanup checkpoints
+## Current handoff: reject unconsumed SQL and duplicate assertion results
+
+Use the next exact commit supplied on the same branch for source/parser review.
+Current source digest: `1365bf829193d2139d03053cc8dc478046771b439d78202c661963f01aa73ac5`
+(51 paths, including native and synthetic historical fixtures). Exact pins and
+before/after evidence are in
+`registration-operator-observation-race-complete-frames-evidence.json`.
+
+Independent Mac review of `4dc7f49b181988fbbb3ac392e01adcda320cae78` passed its19
+Node22 tests but found two synthetic parser false positives: an extra SQL line
+after COMMIT and a duplicate assert_case result. Review receipt SHA256:
+`fe73fedef54fc29c2e0652981b6924c9d1a7fb144f9cb2e19588150c3ab79f66`.
+The original baseline and both malformed inputs were reproduced byte-for-byte
+against the supplied sizes/SHA256, and the old parser accepted all three.
+The review fixture retains those exact strings and replacements.
+
+The parser now consumes the complete SQL/result record for every ordinary step,
+including the exact expected number of actor/capture/id tables. It requires
+one assertion result, then three session teardown actor results and one final
+cleanup checkpoint. Extra SQL or tables cannot remain between these records.
+Only the two observed rollback warnings are accepted in their known positions.
+
+The old synthetic baseline omitted ordinary result tables, so it is rejected
+under the stricter contract too. Updated complete synthetic frames reuse those
+tables from the unchanged native capture. They pass before and after the fix;
+applying the two original mutations changes old PASS into the respective
+step-result and assertion-count rejections. The real historical native capture
+still reaches its missing-checkpoint rejection and remains strict FAIL.
+
+Final cloud Node24.19.0 affected-file checks:23 passed,0 failed,0 skipped. Tests
+cover extra text across all ordinary step occurrences, missing/duplicate/wrong
+result tables, duplicate assertions in every case, and malformed teardown tails.
+These are source/parser tests. SQL spec, business assertions, product migration,
+runner execution/context guards and original native fixture are byte-identical.
+
+No actual race or postdeploy was run for this correction. Parent reported that
+the Mac reviewer rejected DB launch by interpreting prior approval as limited
+to candidate2e5e6c73. No retry, escalation or alternate permission route was
+attempted. Do not launch a DB run from this handoff. New independent source
+review and resolution of the runtime authorization scope remain with the parent;
+all final release gates remain BLOCKED. Do not merge, apply SQL or deploy.
+
+## Historical handoff: native output parsing and committed cleanup checkpoints
 
 Use the next exact commit supplied on the same branch. Current source digest:
 `71a998a9c280d1ce8938901ed067db1ce1888942deb53b7fbee9c064bb529192` (50 paths,

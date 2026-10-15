@@ -53,6 +53,22 @@ export function validateIsolatedContext({ environment, cwd, config }) {
 
 // PostgreSQL isolationtester can return zero after a step emits ERROR or a
 // teardown fails. Its exit code alone is never sufficient runtime evidence.
+// PG17 PQprint uses aligned single-column tables for this fixed spec. Consume
+// complete tables; a valid SQL/result prefix cannot excuse extra output.
+function singleColumnResult(column, value = "") {
+  const width = Math.max(column.length, value.length);
+  return `${column.padEnd(width)}\n${"-".repeat(width)}\n${value.padEnd(width)}\n(1 row)\n\n`;
+}
+
+function expectedStepResult(name, sql) {
+  if (name === "a_commit" || name === "b_commit") return "";
+  if (name === "a_begin" || name === "b_begin") return singleColumnResult("actor");
+  const lockedIds = { a_cancel_fixture: [204, 304], a_archive_fixture: [205], a_hold_director_track: [308] }[name];
+  if (lockedIds) return lockedIds.map(id => singleColumnResult("id", `a9710000-0000-4000-8000-${String(id).padStart(12, "0")}`)).join("");
+  if (/^SELECT registration_guard_race_fixture\.capture\(/.test(sql)) return singleColumnResult("capture");
+  fail("registration_guard_race_step_result_contract_missing");
+}
+
 export function validateIsolationOutput({ code, stdout, stderr }) {
   if (code !== 0 || typeof stdout !== "string" || typeof stderr !== "string") fail("registration_guard_race_process_failed");
   if (/(?:^|\n)\s*(?:ERROR|FATAL|PANIC):|timed out|canceling step|failed:|failed to|unexpected result|mutually-blocking/i.test(`${stdout}\n${stderr}`)) {
@@ -66,6 +82,7 @@ export function validateIsolationOutput({ code, stdout, stderr }) {
     .map(match => [...match[1].matchAll(/"([^"]+)"/g)].map(step => step[1]).join(" "));
   const stepSql = new Map([...embeddedSpec().matchAll(/^step "([^"]+)"\s*\{([^}]*)\}/gm)]
     .map(match => [match[1], match[2].trim()]));
+  const cleanupResults = [];
   for (const [index, section] of sections.entries()) {
     const [waitStep, verifyStep] = RACE_CASES[index];
     if (section.split("\n", 1)[0].trim() !== specPermutations[index]) fail("registration_guard_race_permutation_order_invalid");
@@ -93,26 +110,41 @@ export function validateIsolationOutput({ code, stdout, stderr }) {
       fail("registration_guard_race_step_order_invalid");
     }
     for (const record of launched) {
-      if (record !== waits[0] && !record.body.trimStart().startsWith(`${stepSql.get(record.name)}\n`)) {
+      if (record === waits[0]) continue;
+      const sql = stepSql.get(record.name);
+      const body = record.body.trimStart();
+      if (!body.startsWith(`${sql}\n`)) {
         fail("registration_guard_race_step_sql_invalid");
+      }
+      if (record.name !== verifyStep && body.slice(sql.length).trim() !== expectedStepResult(record.name, sql).trim()) {
+        fail("registration_guard_race_step_result_invalid");
       }
     }
     const verification = launched.find(record => record.name === verifyStep);
     const result = verification.body.trimStart().slice(stepSql.get(verifyStep).length);
-    // Match this assertion's own one-column void result, before session
-    // teardown's actor() rows. A later unrelated '(1 row)' cannot satisfy it.
-    if (!/^\s*assert_case[ \t]*\n-+\n[ \t]*\n\(1 row\)(?:\n|$)/.test(result)) {
+    // Exactly one assertion table, then each session's own teardown result.
+    // Only the observed ROLLBACK warning is optional, in its known position.
+    const assertionTable = singleColumnResult("assert_case");
+    if (!result.trimStart().startsWith(assertionTable)) {
       fail("registration_guard_race_verification_missing");
     }
+    if ((result.match(/^assert_case[ \t]*$/gm) || []).length !== 1) fail("registration_guard_race_verification_result_count_invalid");
+    let tail = result.trimStart().slice(assertionTable.length);
+    for (const session of ["a", "b", "verify"]) {
+      tail = tail.trimStart();
+      const warning = `${session}: WARNING:  there is no transaction in progress\n`;
+      if (session !== "verify" && tail.startsWith(warning)) tail = tail.slice(warning.length);
+      const actorTable = singleColumnResult("actor");
+      if (!tail.startsWith(actorTable)) fail("registration_guard_race_session_teardown_result_invalid");
+      tail = tail.slice(actorTable.length);
+    }
+    cleanupResults.push(tail);
   }
   // Validate every execution section before checking lifecycle output. Old
   // native captures without checkpoints must still fail this complete gate.
-  for (const [index, section] of sections.entries()) {
+  for (const [index, result] of cleanupResults.entries()) {
     const marker = `registration_guard_race_cleanup_committed:${index + 1}`;
-    const checkpoint = new RegExp(`(?:^|\\n)race_cleanup_checkpoint[ \\t]*\\n-+\\n${marker}[ \\t]*\\n\\(1 row\\)[ \\t\\n]*$`);
-    if ((section.match(/^race_cleanup_checkpoint[ \t]*$/gm) || []).length !== 1
-      || (section.match(/^registration_guard_race_cleanup_committed:[^\n]*$/gm) || []).length !== 1
-      || !checkpoint.test(section)) {
+    if (result.trim() !== singleColumnResult("race_cleanup_checkpoint", marker).trim()) {
       fail("registration_guard_race_cleanup_checkpoint_invalid");
     }
   }

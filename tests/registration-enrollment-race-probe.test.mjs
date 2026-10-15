@@ -15,6 +15,7 @@ const environment = { PATH: "/synthetic/path", TASK_LOCAL_DB_URL: "postgresql://
 const cwd = "/tmp/tips-supabase-db-qa-registration-guard-local-20261013";
 const config = 'project_id = "tips_supabase_db_qa_abcdefabcdef"\n[db]\nport = 54329\nmajor_version = 17\n[studio]\nenabled = false\n';
 const nativeCapture = JSON.parse(await readFile(new URL("./fixtures/registration-race-pg17.6-568537c7.json", import.meta.url), "utf8"));
+const reviewCapture = JSON.parse(await readFile(new URL("./fixtures/registration-race-parser-review-4dc7f49b.json", import.meta.url), "utf8"));
 
 // These small strings test the parser only. They are neither captured database
 // output nor a PostgreSQL expected-output artifact, and never certify a race.
@@ -27,10 +28,21 @@ function syntheticProtocolFrames() {
     const width = Math.max(column.length, value.length);
     return `${column.padEnd(width)}\n${"-".repeat(width)}\n${value.padEnd(width)}\n(1 row)\n\n`;
   };
+  // Ordinary step tables are copied from the unchanged historical native
+  // capture, rather than guessed by the synthetic generator or validator.
+  const nativeSteps = new Map([...nativeCapture.files.spec_stdout.text.matchAll(/^step ([^:\n]+): ([\s\S]*?)(?=^step |^starting permutation:|$(?![\s\S]))/gm)]
+    .filter(match => !match[2].startsWith("<... completed>"))
+    .map(match => [match[1], match[2]]));
   return "Parsed test spec with 3 sessions\n" + RACE_CASES.map(([wait, verify], index) => {
     let output = `starting permutation: ${permutations[index].join(" ")}\n`;
     for (const step of permutations[index]) {
       output += `step ${step}: ${sql.get(step)}${step === wait ? " <waiting ...>" : ""}\n`;
+      if (step !== wait && step !== verify) {
+        const body = nativeSteps.get(step).trimStart();
+        const expectedSql = sql.get(step).trim();
+        assert.ok(body.startsWith(expectedSql + "\n"));
+        output += body.slice(expectedSql.length).trimStart();
+      }
       if (step === "a_commit") output += `step ${wait}: <... completed>\n${table("capture")}`;
       if (step === verify) output += table("assert_case");
     }
@@ -399,6 +411,86 @@ test("native multiline wait and all seven verification frames reach the missing-
       stdout: stdout.replace(`step ${verify}:`, "step omitted:"), stderr: "" }),
     { message: "registration_guard_race_step_order_invalid" });
   }
+});
+
+test("Mac review counterexamples retain their exact hashes and are never accepted", () => {
+  const inputs = [["S", reviewCapture.baselineStdout], ...reviewCapture.counterexamples.map(example =>
+    [example.name, reviewCapture.baselineStdout.replace(example.find, example.replacement)])];
+  for (const [name, stdout] of inputs) {
+    const pin = reviewCapture.cases.find(example => example.name === name);
+    assert.equal(Buffer.byteLength(stdout), pin.bytes);
+    assert.equal(createHash("sha256").update(stdout).digest("hex"), pin.sha256);
+    // The historical baseline omits ordinary result tables; this stricter
+    // contract rejects it too. Test each defect independently below using
+    // complete, native-shaped synthetic frames, not that incomplete baseline.
+    assert.throws(() => validateIsolationOutput({ code: 0, stdout, stderr: "" }),
+      { message: "registration_guard_race_step_result_invalid" });
+  }
+});
+
+test("both Mac review mutations fail for their own defect on complete synthetic frames", () => {
+  const stdout = syntheticProtocolFrames();
+  assert.equal(validateIsolationOutput({ code: 0, stdout, stderr: "" }).status, "passed");
+  for (const [index, example] of reviewCapture.counterexamples.entries()) {
+    const changed = stdout.replace(example.find, example.replacement);
+    assert.notEqual(changed, stdout);
+    assert.throws(() => validateIsolationOutput({ code: 0, stdout: changed, stderr: "" }),
+      { message: index === 0 ? "registration_guard_race_step_result_invalid"
+        : "registration_guard_race_verification_result_count_invalid" });
+  }
+});
+
+test("ordinary steps require their complete expected result and reject all unconsumed text", () => {
+  const stdout = syntheticProtocolFrames();
+  const sections = stdout.split(/^starting permutation:/m).slice(1);
+  for (const [index, section] of sections.entries()) {
+    const [wait, verify] = RACE_CASES[index];
+    const headers = [...section.matchAll(/^step ([^:\n]+): /gm)];
+    for (const [position, header] of headers.entries()) {
+      if (header[1] === wait || header[1] === verify) continue;
+      const frame = section.slice(header.index, headers[position + 1]?.index ?? section.length);
+      const parts = stdout.split(/^starting permutation:/m);
+      const end = header.index + frame.length;
+      parts[index + 1] = section.slice(0, end) + "SET application_name = 'tampered';\n" + section.slice(end);
+      const changed = parts.join("starting permutation:");
+      assert.throws(() => validateIsolationOutput({ code: 0, stdout: changed, stderr: "" }),
+        { message: "registration_guard_race_step_result_invalid" }, header[1]);
+    }
+  }
+  const actor = "actor\n-----\n     \n(1 row)\n\n";
+  const capture = "capture\n-------\n       \n(1 row)\n\n";
+  for (const result of [actor, capture]) {
+    for (const replacement of ["", result.repeat(2)]) {
+      assert.throws(() => validateIsolationOutput({ code: 0, stdout: stdout.replace(result, replacement), stderr: "" }),
+        { message: "registration_guard_race_step_result_invalid" });
+    }
+  }
+  assert.throws(() => validateIsolationOutput({ code: 0,
+    stdout: stdout.replace("a9710000-0000-4000-8000-000000000204", "a9710000-0000-4000-8000-000000000999"), stderr: "" }),
+  { message: "registration_guard_race_step_result_invalid" });
+});
+
+test("each assertion has one result and session teardown cannot hide extra tables or text", () => {
+  const stdout = syntheticProtocolFrames();
+  const assertion = "assert_case\n-----------\n           \n(1 row)\n\n";
+  const actor = "actor\n-----\n     \n(1 row)\n\n";
+  for (let index = 0; index < RACE_CASES.length; index += 1) {
+    const parts = stdout.split(assertion);
+    parts[index + 1] = assertion + parts[index + 1];
+    assert.throws(() => validateIsolationOutput({ code: 0, stdout: parts.join(assertion), stderr: "" }),
+      { message: "registration_guard_race_verification_result_count_invalid" });
+  }
+  for (const suffix of ["", actor.repeat(2), "SET application_name = 'tampered';\n" + actor.repeat(3),
+    actor.repeat(3) + "SET application_name = 'tampered';\n", actor.repeat(4),
+    "a: WARNING:  unknown warning\n" + actor.repeat(3)]) {
+    const changed = stdout.replace(assertion + actor.repeat(3), assertion + suffix);
+    assert.notEqual(changed, stdout);
+    assert.throws(() => validateIsolationOutput({ code: 0, stdout: changed, stderr: "" }), /registration_guard_race_/);
+  }
+  const observedWarnings = `a: WARNING:  there is no transaction in progress\n${actor}b: WARNING:  there is no transaction in progress\n${actor}${actor}`;
+  assert.equal(validateIsolationOutput({ code: 0,
+    stdout: stdout.replace(assertion + actor.repeat(3), assertion + observedWarnings), stderr: "" }).status, "passed",
+  "allow only the two observed rollback warnings in their session positions; synthetic frames are not runtime evidence");
 });
 
 test("parser rejects misplaced duplicate and truncated step frames without borrowing adjacent waits", () => {
