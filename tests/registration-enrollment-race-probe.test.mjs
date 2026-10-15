@@ -33,6 +33,83 @@ test("portable race probe embeds the exact standalone spec and seven paired wait
   assert.match(source, /permutation[^\n]*a_hold_director_track[^\n]*b_save_after_director[^\n]*a_assign_after_guard_task/);
 });
 
+// Source boundary checks supplement the real PG17 run; they cannot certify SQL
+// execution, constraint success, or any concurrent outcome.
+function assertInOrder(source, fragments) {
+  let cursor = 0;
+  for (const fragment of fragments) {
+    const found = source.indexOf(fragment, cursor);
+    assert.notEqual(found, -1, `missing or out-of-order fixture boundary: ${fragment}`);
+    cursor = found + fragment.length;
+  }
+}
+
+test("race seed verifies a live manager before domain writes and commits complete schedule inputs", () => {
+  const source = embeddedSpec();
+  const setup = source.slice(source.indexOf("setup\n{"), source.indexOf("\nteardown\n{"));
+  assertInOrder(setup, ["BEGIN;", "RESET ROLE;", "current_user <> 'postgres'",
+    "test.registration_guard.approved_local_db", "actor(false, false)",
+    "INSERT INTO auth.users", "INSERT INTO public.profiles", "actor(true)",
+    "INSERT INTO public.teacher_catalogs", "INSERT INTO public.classroom_catalogs",
+    "INSERT INTO public.classes", "INSERT INTO public.ops_registration_enrollments",
+    "SET CONSTRAINTS ALL IMMEDIATE", "INSERT INTO registration_guard_race_fixture.baseline",
+    "actor(false)", "COMMIT;"]);
+  const helper = setup.slice(setup.indexOf("CREATE FUNCTION registration_guard_race_fixture.actor"),
+    setup.indexOf("REVOKE ALL ON FUNCTION registration_guard_race_fixture.actor"));
+  assert.match(helper, /SECURITY INVOKER SET search_path = ''/);
+  for (const key of ["request.jwt.claim.sub", "request.jwt.claim.role", "request.jwt.claims"])
+    assert.ok(helper.includes(`set_config('${key}'`));
+  assert.match(helper, /auth\.uid\(\)\) IS DISTINCT FROM registration_guard_race_fixture\.sid\(1\)/);
+  assert.match(helper, /auth\.role\(\)\) IS DISTINCT FROM 'authenticated'/);
+  assert.match(helper, /registration_actor_is_active_manager_v1\(\(SELECT auth\.uid\(\)\)\)/);
+  assert.match(helper, /auth\.uid\(\)\) IS NOT NULL OR \(SELECT auth\.role\(\)\) IS NOT NULL/);
+  assert.match(helper, /registration_guard_race_fixture_actor_invalid' USING ERRCODE = '42501'/);
+  assert.match(helper, /registration_guard_race_fixture_actor_not_cleared' USING ERRCODE = '42501'/);
+  const seedClass = setup.slice(setup.indexOf("INSERT INTO public.classes"), setup.indexOf("INSERT INTO public.ops_tasks"));
+  assert.match(seedClass, /extract\(dow FROM current_date \+ 7\)/);
+  assert.match(seedClass, /'sessionKey', to_char\(current_date \+ 7, 'YYYY-MM-DD'\) \|\| ':1'/);
+  assert.match(seedClass, /'startTime', '18:00', 'endTime', '20:00'/);
+  assert.match(seedClass, /'teacherCatalogId', registration_guard_race_fixture\.sid\(31\)/);
+  assert.match(seedClass, /'classroomCatalogId', registration_guard_race_fixture\.sid\(32\)/);
+  assert.doesNotMatch(source, /DISABLE TRIGGER|session_replication_role|GRANT[^;]+ON (?:public|dashboard_private)\./i);
+});
+
+test("race writers enter authenticated transactions while verification retains its private read role", () => {
+  const source = embeddedSpec();
+  for (const [name, next] of [["a", "b"], ["b", "verify"]]) {
+    const session = source.slice(source.indexOf(`session "${name}"`), source.indexOf(`session "${next}"`));
+    const begin = session.slice(session.indexOf(`step "${name}_begin"`), session.indexOf(`step "${name}_save_one"`));
+    assertInOrder(session, ["setup", "RESET ROLE;", "actor(false, false)",
+      `SET application_name = 'registration_guard_race_${name}'`]);
+    assertInOrder(begin, ["BEGIN;", "SET LOCAL statement_timeout = '30s'", "actor(true)",
+      "SET LOCAL ROLE authenticated", "current_user <> 'authenticated'",
+      "auth.role()) IS DISTINCT FROM 'authenticated'", "auth.uid()) IS DISTINCT FROM registration_guard_race_fixture.sid(1)",
+      "registration_guard_race_writer_context_invalid' USING ERRCODE = '42501'"]);
+    assert.match(session, /teardown \{ ROLLBACK; RESET ROLE; SELECT registration_guard_race_fixture\.actor\(false, false\); \}/);
+  }
+  const verify = source.slice(source.indexOf('session "verify"'), source.indexOf("\npermutation "));
+  assertInOrder(verify, ["setup", "RESET ROLE;", "actor(false, false)", "current_user <> 'postgres'",
+    "registration_guard_race_verifier_role_invalid", "teardown", "RESET ROLE;", "actor(false, false)"]);
+  assert.doesNotMatch(verify, /SET (?:LOCAL )?ROLE authenticated|actor\(true\)/);
+  assert.equal([...verify.matchAll(/SELECT registration_guard_race_fixture\.assert_case\([1-7]\)/g)].length, 7);
+});
+
+test("race teardown keeps its actor through deferred cleanup and then removes scoped accounts and resources", () => {
+  const source = embeddedSpec();
+  const teardown = source.slice(source.indexOf("\nteardown\n{"), source.indexOf('\nsession "a"'));
+  assertInOrder(teardown, ["BEGIN;", "RESET ROLE;", "actor(true)", "DELETE FROM public.ops_tasks",
+    "DELETE FROM public.classes", "DELETE FROM public.teacher_catalogs", "DELETE FROM public.classroom_catalogs",
+    "SET CONSTRAINTS ALL IMMEDIATE", "actor(false)", "DELETE FROM public.profiles", "DELETE FROM auth.users",
+    "registration_guard_race_fixture_cleanup_incomplete' USING ERRCODE = '23514'",
+    "DROP SCHEMA registration_guard_race_fixture CASCADE", "COMMIT;"]);
+  for (const table of ["ops_tasks", "ops_registration_enrollments", "ops_registration_subject_tracks",
+    "ops_registration_details", "classes", "teacher_catalogs", "classroom_catalogs", "profiles"])
+    assert.ok(teardown.includes(`EXISTS(SELECT 1 FROM public.${table}`), `missing cleanup check for ${table}`);
+  assert.match(teardown, /EXISTS\(SELECT 1 FROM dashboard_private\.ops_registration_mutations WHERE actor_id = registration_guard_race_fixture\.sid\(1\)\)/);
+  assert.match(teardown, /EXISTS\(SELECT 1 FROM auth\.users WHERE id = registration_guard_race_fixture\.sid\(1\)\)/);
+  assert.equal([...teardown.matchAll(/DELETE FROM [\w.]+\s+WHERE/g)].length, 6);
+});
+
 test("race probe plan does not read connection config or spawn a process", async () => {
   const forbidden = async () => { assert.fail("plan must perform no SQL or process work"); };
   const noEnvironment = await runRaceProbe({ environment: {}, readConfig: forbidden, execute: forbidden });

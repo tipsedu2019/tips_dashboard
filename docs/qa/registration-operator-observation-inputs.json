@@ -1,6 +1,6 @@
 {
   "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
-  "sourceSha256": "a940b4676096e30f9256822b4cf55779f1d9fca33a0d0da7195aa2d07b1d4f41",
+  "sourceSha256": "2606829a785888144cc7cf7fbf9334edf8ef4667926a378b90b470d2cb7ac28a",
   "sourcePathCount": 49,
   "source": [
     {
@@ -126,7 +126,7 @@
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_race.spec",
       "exists": true,
-      "sha256": "c59b3977bf67a175b87a96b3afc7b421396d3d0c2b402825978757395c60164c"
+      "sha256": "8f90fe059f22c2330965ce9ee373992314947abe56c8796627751c61c8eec993"
     },
     {
       "path": "supabase/tests/registration_enrollment_guarded_save_test.sql",
@@ -161,7 +161,7 @@
     {
       "path": "tests/probe-registration-enrollment-guarded-save-concurrency.mjs",
       "exists": true,
-      "sha256": "43650f87f2fa2b354d079de0be4e5598c5e959a9df35ca6c776a27aee4cc8ad4"
+      "sha256": "27ddf23db351fb013a7cf0bfc0632ab97c6ba72718b7616e1bd6eb364e59f1ee"
     },
     {
       "path": "tests/query-surface-budget.test.mjs",
@@ -191,7 +191,7 @@
     {
       "path": "tests/registration-enrollment-race-probe.test.mjs",
       "exists": true,
-      "sha256": "3d730e25824f812326b2b29c81e1472d0c88723c35ee14e6b49b560a3f27a76c"
+      "sha256": "8490e0e95d57cdeec692c3c3f795bcb8f063aac46a801b74728ab8a7da70e66f"
     },
     {
       "path": "tests/registration-management-notification-actions.test.mjs",
@@ -249,5 +249,5 @@
       "sha256": "3aac93db1262c84d398e83478ba18af763b1f7ea709f30961e38b7a8ac86b035"
     }
   ],
-  "qualification": "One integrated candidate; original 42 paths plus three browser fixture-identity consumers. Documentation is outside the source digest. SQL remains candidate; DB verification not yet executed."
+  "qualification": "One integrated candidate pinned to 49 source paths; documentation is outside the source digest. Migration remains candidate. Current SQL/race fixture changes await Mac PostgreSQL17 validation; earlier per-input evidence is historical."
 }

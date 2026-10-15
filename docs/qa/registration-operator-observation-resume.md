@@ -4,57 +4,95 @@ This is the single integration of the preserved registration candidate with main
 `1c2159d6924596072ab7fda76fbf24458e384b4b` (PR144, including PR143). It is ready
 for the existing Mac operator to retrieve and validate, not for deployment.
 
-## Current narrow rerun: fixture authentication
+## Current Mac handoff: both fixture authentication corrections
 
-The Mac run of `bde58ada982b4c1e01cb352598136d18ed83a35d` passed Node22 53/53,
-the layout verifier and Linux fixture10. Guarded-save SQL then stopped after20
+The final candidate combines the SQL-fixture correction from
+`c1681c7951c3ea092751da640b0545da235a9ef4` with the race-fixture correction on the
+same branch. Retrieve the exact final commit supplied in the handoff; verify its
+49-path input manifest before executing it.
+
+The last Mac run of `bde58ada982b4c1e01cb352598136d18ed83a35d` passed Node22 53/53,
+the layout verifier and Linux fixture10. Guarded-save SQL stopped after 20
 subtests at the historical enrollment INSERT (old line264):
 `registration_access_denied`, SQL file exit3 / gate exit1. Postdeploy and race7
 were not reached. Receipt SHA256:
 `00fa1fe299134ccc8bbb350d5d8a7c756dd793c6ae7027844768089e8d6ec90e`.
 
 That INSERT invokes the final `sync_registration_enrollment_lesson_session_v1`
-trigger, which requires a live JWT actor even for postgres seed writes. The
-fixture previously called its JWT helper only after all inserts. This is a test
-setup defect; the reported failure does not establish a product save defect.
+trigger, which requires a live JWT actor even for postgres seed writes. Both
+fixtures previously configured JWT only after their enrollment seed INSERTs.
+This is a confirmed fixture setup defect; that failure does not establish a
+product save defect. Production functions, constraints, RLS, roles and the
+isolated DB runner remain unchanged by these two fixture corrections.
 
-The fixture now clears both inherited JWT forms, creates its synthetic accounts,
-then binds and verifies the real active-manager fixture actor before domain
-seeding. Missing-account, missing-actor and forged-teacher seed attempts assert
-their exact42501 errors and absence of rows. The complete seed review also fixes
-legacy session identity/time/resource data, separates the three class schedules,
-and links the normalized lesson to its weekly slot. It releases the temporary
-schedule-write context immediately after the seed. A savepoint checks all
-deferred seed constraints while preserving their original timing for the RPCs.
-Role-revocation recovery uses a different active fixture admin. Final deferred
-checks run before history/no-send assertions and JWT cleanup, then everything
-rolls back. Production functions, constraints, roles, RLS and runner are unchanged.
+The SQL fixture clears all three JWT settings, creates synthetic accounts, then
+binds and verifies the active manager before domain seeding. Missing-account,
+missing-actor and forged-teacher seed attempts assert exact42501 errors and
+absence of rows. Its complete seed includes legacy session identity/time/resource
+data, three nonoverlapping schedules, and a normalized lesson linked to its
+weekly slot. It releases temporary schedule-write context after seeding and
+checks deferred seed constraints in a savepoint that restores their original
+timing. Role-revocation recovery uses a distinct active synthetic admin. Final
+deferred checks precede history/no-send assertions, JWT cleanup and rollback.
 
-Use the exact new commit and verify the input manifest as described below.
-Reuse unchanged Node466, selected1, SQL6, Node22 correction checks and Linux10
-evidence. Only the fixture source test changed (five existing cases plus one new
-ordering/boundary case); run it with the existing Node22, then run this SQL alone:
+The race fixture now uses the same live-actor prerequisite for global setup.
+Its single legacy class has explicit session identity, time and synthetic
+teacher/room resources. Setup commits only after deferred seed checks. A/B clear
+inherited JWT settings, verify the active actor, enter `authenticated`, and
+assert their current role and claims. Their transaction teardown rolls back,
+resets role and clears claims. The verification session explicitly remains
+postgres so it can inspect private receipts and archived rows. Global teardown
+uses the active manager to delete only its scoped business rows and resources,
+flushes deferred checks, clears JWT before deleting fixture accounts, asserts
+zero scoped leftovers, then drops the fixture schema and commits.
+
+PostgreSQL17 isolationtester runs session teardowns before global teardown; this
+allows session cleanup to use the fixture helper before the schema is dropped.
+This ordering was checked against the
+[official PostgreSQL17 source](https://raw.githubusercontent.com/postgres/postgres/REL_17_STABLE/src/test/isolation/isolationtester.c).
+
+All seven permutation lines, 24 non-entry steps, `capture` and `assert_case` are
+byte-identical to c1681c79. The portable probe changes only its embedded spec and
+SHA256 literal. Wait/completion counts, SQL/teardown error rejection, exact
+permutation order, verification output requirements and all timeouts are
+unchanged. Cancellation/archive contenders still exercise fixture lock
+boundaries, not those UI flows.
+
+Cloud Node24.19.0 passed 15 focused source/parser tests (SQL6 + race9), with no
+failures or skips. This includes the existing six probe tests plus three new
+setup/session/teardown boundary tests. These checks use source assertions and
+synthetic parser frames; they do not certify SQL execution or concurrent results.
+The SQL-only c1681c79 report is historical:
+`registration-operator-observation-fixture-auth-evidence.json`. Its then-open race
+finding is addressed by the current source and recorded in
+`registration-operator-observation-race-fixture-evidence.json`.
+
+Reuse prior evidence only for unchanged inputs: Node466, selected1, SQL6,
+Node22 correction checks and Linux10. On the existing Node22 runtime, run the two
+changed fixture contract files, then the focused owned-DB gate below. Keep all
+existing gate flags and run the race through the postdeploy-gated probe path:
 
 ```bash
-node --test --test-reporter=tap tests/registration-enrollment-guarded-save.test.mjs
+node --test --test-reporter=tap \
+  tests/registration-enrollment-guarded-save.test.mjs \
+  tests/registration-enrollment-race-probe.test.mjs
 node scripts/run-isolated-supabase-db-tests.mjs \
-  --review-head --execute --authorized \
-  --request-id registration-guard-fixture-auth-20261015 \
-  --test supabase/tests/registration_enrollment_guarded_save_test.sql
+  --review-head --lint --execute --authorized \
+  --request-id registration-guard-final-fixtures-20261015 \
+  --postdeploy-contract --transactional-preflight --verify-local-ledger \
+  --test supabase/tests/registration_enrollment_guarded_save_test.sql \
+  --probe tests/probe-registration-enrollment-guarded-save-concurrency.mjs
 ```
 
-Use the existing verified `TASK_SUPABASE_CLI` and cached owned runtime. The runner
-retains its fixed baseline parity/smoke, credential-prefix, migration preparation
-and cleanup; the requested business SQL list contains only the failing file.
-Record its actual TAP total and exit status. This focused run does not satisfy
-the still-pending postdeploy/race or full release gates. Do not repeat fixture10
-or the prior whole gate for this fixture-only source change.
-
-The same missing-JWT ordering is also visible in the separate, still-unexecuted
-race spec setup: its initial enrollment INSERT precedes the session JWT setup.
-That race input is unchanged in this SQL-only correction and must be corrected
-before a future race7 run. The fixture audit and exact source hashes are recorded
-in `registration-operator-observation-fixture-auth-evidence.json`.
+Use the existing verified `TASK_SUPABASE_CLI`, cached owned runtime and verified
+isolationtester wrapper described below; rebind its exact HEAD/source pins and
+new owned DB context. Retain baseline parity/smoke, credential-prefix, migration
+preparation, both transactional checks, local ledger, lint and cleanup. Record
+the actual TAP total, seven completed permutations with seven real lock waits,
+all seven verification results and original exit statuses. Postdeploy failure
+must stop the probe. Preserve only the structured diagnostic booleans described
+below. Current SQL/race execution and exact-source independent review remain
+pending; do not label prior or synthetic evidence as a current runtime pass.
 
 ## Correction after the first Mac run
 
@@ -173,8 +211,8 @@ injected-process checks do not prove PostgreSQL or production success.
 
 ## Historical validation instructions for bde58ada
 
-These commands preserve the earlier handoff. Use the current narrow invocation
-above for this fixture correction; broader runtime/release gates remain pending.
+These commands preserve the earlier handoff. Use the current combined invocation
+above for both fixture corrections; broader runtime/release gates remain pending.
 
 From the exact checked-out commit, first verify the version and input hashes:
 

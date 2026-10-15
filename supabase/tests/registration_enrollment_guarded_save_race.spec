@@ -7,10 +7,13 @@
 
 setup
 {
+  BEGIN;
+  RESET ROLE;
   SET timezone = 'Asia/Seoul';
   DO $$
   BEGIN
-    IF current_setting('test.registration_guard.approved_local_db', true) IS DISTINCT FROM 'on' THEN
+    IF current_user <> 'postgres'
+      OR current_setting('test.registration_guard.approved_local_db', true) IS DISTINCT FROM 'on' THEN
       RAISE EXCEPTION 'registration_guard_isolated_runner_required' USING ERRCODE = '42501';
     END IF;
   END;
@@ -20,6 +23,27 @@ setup
   RETURNS uuid LANGUAGE sql IMMUTABLE AS $$
     SELECT ('a9710000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid;
   $$;
+  CREATE FUNCTION registration_guard_race_fixture.actor(p_active boolean, p_local boolean DEFAULT true)
+  RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
+  BEGIN
+    PERFORM set_config('request.jwt.claim.sub',
+      CASE WHEN p_active THEN registration_guard_race_fixture.sid(1)::text ELSE '' END, p_local);
+    PERFORM set_config('request.jwt.claim.role', CASE WHEN p_active THEN 'authenticated' ELSE '' END, p_local);
+    PERFORM set_config('request.jwt.claims', CASE WHEN p_active THEN jsonb_build_object(
+      'sub', registration_guard_race_fixture.sid(1), 'role', 'authenticated')::text ELSE '{}' END, p_local);
+    IF p_active THEN
+      IF (SELECT auth.uid()) IS DISTINCT FROM registration_guard_race_fixture.sid(1)
+        OR (SELECT auth.role()) IS DISTINCT FROM 'authenticated'
+        OR NOT dashboard_private.registration_actor_is_active_manager_v1((SELECT auth.uid())) THEN
+        RAISE EXCEPTION 'registration_guard_race_fixture_actor_invalid' USING ERRCODE = '42501';
+      END IF;
+    ELSIF (SELECT auth.uid()) IS NOT NULL OR (SELECT auth.role()) IS NOT NULL THEN
+      RAISE EXCEPTION 'registration_guard_race_fixture_actor_not_cleared' USING ERRCODE = '42501';
+    END IF;
+  END;
+  $$;
+  REVOKE ALL ON FUNCTION registration_guard_race_fixture.actor(boolean,boolean) FROM PUBLIC;
+  SELECT registration_guard_race_fixture.actor(false, false);
   CREATE FUNCTION registration_guard_race_fixture.rows()
   RETURNS jsonb LANGUAGE sql STABLE AS $$
     SELECT jsonb_build_array(jsonb_build_object(
@@ -81,10 +105,21 @@ setup
   VALUES(registration_guard_race_fixture.sid(1), 'admin', '등록 저장 동시성 합성 운영자',
     'registration-guard-race@example.invalid')
   ON CONFLICT(id) DO UPDATE SET role = excluded.role, name = excluded.name, email = excluded.email;
-  INSERT INTO public.classes(id, name, subject, status, schedule_storage_mode, schedule_plan)
-  VALUES(registration_guard_race_fixture.sid(21), '등록 저장 동시성 합성반', '영어', '수업 진행 중', 'legacy',
+  SELECT registration_guard_race_fixture.actor(true);
+  INSERT INTO public.teacher_catalogs(id, name, subjects, is_visible, sort_order)
+  VALUES(registration_guard_race_fixture.sid(31), '등록 저장 동시성 합성 교사', ARRAY['영어'], true, 9981);
+  INSERT INTO public.classroom_catalogs(id, name, subjects, is_visible, sort_order, campus)
+  VALUES(registration_guard_race_fixture.sid(32), '등록 저장 동시성 합성 강의실', ARRAY['영어'], true, 9982, '본관');
+  INSERT INTO public.classes(id, name, subject, status, teacher, room, schedule, schedule_storage_mode, schedule_plan)
+  VALUES(registration_guard_race_fixture.sid(21), '등록 저장 동시성 합성반', '영어', '수업 진행 중',
+    '등록 저장 동시성 합성 교사', '등록 저장 동시성 합성 강의실',
+    substr('일월화수목금토', extract(dow FROM current_date + 7)::integer + 1, 1) || ' 18:00-20:00', 'legacy',
     jsonb_build_object('sessions', jsonb_build_array(jsonb_build_object(
-      'date', current_date + 7, 'sessionNumber', 1, 'scheduleState', 'active'))));
+      'date', current_date + 7, 'sessionNumber', 1, 'scheduleState', 'active',
+      'sessionKey', to_char(current_date + 7, 'YYYY-MM-DD') || ':1',
+      'startTime', '18:00', 'endTime', '20:00',
+      'teacherCatalogId', registration_guard_race_fixture.sid(31),
+      'classroomCatalogId', registration_guard_race_fixture.sid(32)))));
   INSERT INTO public.ops_tasks(id, title, type, status, requested_by, student_name, subject, campus, priority)
   SELECT registration_guard_race_fixture.sid(200 + n), '등록 저장 동시성 합성 ' || n,
     'registration', 'requested', registration_guard_race_fixture.sid(1),
@@ -104,6 +139,8 @@ setup
   INSERT INTO public.ops_registration_enrollments(id, track_id, class_id, status, sort_order)
   VALUES(registration_guard_race_fixture.sid(604), registration_guard_race_fixture.sid(304),
     registration_guard_race_fixture.sid(21), 'planned', 0);
+  -- Commit only a fully valid seed graph; keep the manager until checks finish.
+  SET CONSTRAINTS ALL IMMEDIATE;
   INSERT INTO registration_guard_race_fixture.baseline
   SELECT jsonb_build_object(
     'events', (SELECT count(*) FROM dashboard_private.notification_events),
@@ -200,33 +237,67 @@ setup
     END IF;
   END;
   $$;
+  SELECT registration_guard_race_fixture.actor(false);
+  COMMIT;
 }
 
 teardown
 {
+  BEGIN;
+  RESET ROLE;
+  SELECT registration_guard_race_fixture.actor(true);
   DELETE FROM public.ops_tasks
   WHERE id IN (SELECT registration_guard_race_fixture.sid(200 + n) FROM generate_series(1, 8) n);
   DELETE FROM public.classes WHERE id = registration_guard_race_fixture.sid(21);
+  DELETE FROM public.teacher_catalogs WHERE id = registration_guard_race_fixture.sid(31);
+  DELETE FROM public.classroom_catalogs WHERE id = registration_guard_race_fixture.sid(32);
+  SET CONSTRAINTS ALL IMMEDIATE;
+  -- Clear JWT before deleting the account referenced by it and audit triggers.
+  SELECT registration_guard_race_fixture.actor(false);
   DELETE FROM public.profiles WHERE id = registration_guard_race_fixture.sid(1);
   DELETE FROM auth.users WHERE id = registration_guard_race_fixture.sid(1);
+  DO $$ BEGIN
+    IF EXISTS(SELECT 1 FROM public.ops_tasks
+        WHERE id IN (SELECT registration_guard_race_fixture.sid(200 + n) FROM generate_series(1, 8) n))
+      OR EXISTS(SELECT 1 FROM public.ops_registration_enrollments WHERE class_id = registration_guard_race_fixture.sid(21))
+      OR EXISTS(SELECT 1 FROM public.ops_registration_subject_tracks
+        WHERE id IN (SELECT registration_guard_race_fixture.sid(300 + n) FROM generate_series(1, 8) n))
+      OR EXISTS(SELECT 1 FROM public.ops_registration_details
+        WHERE task_id IN (SELECT registration_guard_race_fixture.sid(200 + n) FROM generate_series(1, 8) n))
+      OR EXISTS(SELECT 1 FROM dashboard_private.ops_registration_mutations WHERE actor_id = registration_guard_race_fixture.sid(1))
+      OR EXISTS(SELECT 1 FROM public.classes WHERE id = registration_guard_race_fixture.sid(21))
+      OR EXISTS(SELECT 1 FROM public.teacher_catalogs WHERE id = registration_guard_race_fixture.sid(31))
+      OR EXISTS(SELECT 1 FROM public.classroom_catalogs WHERE id = registration_guard_race_fixture.sid(32))
+      OR EXISTS(SELECT 1 FROM public.profiles WHERE id = registration_guard_race_fixture.sid(1))
+      OR EXISTS(SELECT 1 FROM auth.users WHERE id = registration_guard_race_fixture.sid(1)) THEN
+      RAISE EXCEPTION 'registration_guard_race_fixture_cleanup_incomplete' USING ERRCODE = '23514';
+    END IF;
+  END; $$;
   DROP SCHEMA registration_guard_race_fixture CASCADE;
+  COMMIT;
 }
 
 session "a"
 setup
 {
+  RESET ROLE;
+  SELECT registration_guard_race_fixture.actor(false, false);
   SET timezone = 'Asia/Seoul';
   SET application_name = 'registration_guard_race_a';
 }
-teardown { ROLLBACK; }
+teardown { ROLLBACK; RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 step "a_begin"
 {
   BEGIN;
   SET LOCAL statement_timeout = '30s';
-  SELECT set_config('request.jwt.claim.sub', registration_guard_race_fixture.sid(1)::text, true);
-  SELECT set_config('request.jwt.claims', jsonb_build_object(
-    'sub', registration_guard_race_fixture.sid(1), 'role', 'authenticated')::text, true);
+  SELECT registration_guard_race_fixture.actor(true);
   SET LOCAL ROLE authenticated;
+  DO $$ BEGIN
+    IF current_user <> 'authenticated' OR (SELECT auth.role()) IS DISTINCT FROM 'authenticated'
+      OR (SELECT auth.uid()) IS DISTINCT FROM registration_guard_race_fixture.sid(1) THEN
+      RAISE EXCEPTION 'registration_guard_race_writer_context_invalid' USING ERRCODE = '42501';
+    END IF;
+  END; $$;
 }
 step "a_save_one" { SELECT registration_guard_race_fixture.capture(1, 301, 'guard-race-1-a'); }
 step "a_save_replay" { SELECT registration_guard_race_fixture.capture(2, 302, 'guard-race-2-shared'); }
@@ -262,18 +333,24 @@ step "a_commit" { COMMIT; }
 session "b"
 setup
 {
+  RESET ROLE;
+  SELECT registration_guard_race_fixture.actor(false, false);
   SET timezone = 'Asia/Seoul';
   SET application_name = 'registration_guard_race_b';
 }
-teardown { ROLLBACK; }
+teardown { ROLLBACK; RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 step "b_begin"
 {
   BEGIN;
   SET LOCAL statement_timeout = '30s';
-  SELECT set_config('request.jwt.claim.sub', registration_guard_race_fixture.sid(1)::text, true);
-  SELECT set_config('request.jwt.claims', jsonb_build_object(
-    'sub', registration_guard_race_fixture.sid(1), 'role', 'authenticated')::text, true);
+  SELECT registration_guard_race_fixture.actor(true);
   SET LOCAL ROLE authenticated;
+  DO $$ BEGIN
+    IF current_user <> 'authenticated' OR (SELECT auth.role()) IS DISTINCT FROM 'authenticated'
+      OR (SELECT auth.uid()) IS DISTINCT FROM registration_guard_race_fixture.sid(1) THEN
+      RAISE EXCEPTION 'registration_guard_race_writer_context_invalid' USING ERRCODE = '42501';
+    END IF;
+  END; $$;
 }
 step "b_save_one" { SELECT registration_guard_race_fixture.capture(1, 301, 'guard-race-1-b'); }
 step "b_save_replay" { SELECT registration_guard_race_fixture.capture(2, 302, 'guard-race-2-shared'); }
@@ -288,6 +365,19 @@ step "b_save_after_director" { SELECT registration_guard_race_fixture.capture(7,
 step "b_commit" { COMMIT; }
 
 session "verify"
+setup
+{
+  RESET ROLE;
+  SELECT registration_guard_race_fixture.actor(false, false);
+  SET timezone = 'Asia/Seoul';
+  SET application_name = 'registration_guard_race_verify';
+  DO $$ BEGIN
+    IF current_user <> 'postgres' THEN
+      RAISE EXCEPTION 'registration_guard_race_verifier_role_invalid' USING ERRCODE = '42501';
+    END IF;
+  END; $$;
+}
+teardown { RESET ROLE; SELECT registration_guard_race_fixture.actor(false, false); }
 step "verify_one" { SELECT registration_guard_race_fixture.assert_case(1); }
 step "verify_replay" { SELECT registration_guard_race_fixture.assert_case(2); }
 step "verify_status" { SELECT registration_guard_race_fixture.assert_case(3); }
