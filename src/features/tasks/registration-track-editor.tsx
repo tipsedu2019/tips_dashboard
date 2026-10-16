@@ -52,10 +52,7 @@ import {
 import {
   RegistrationObservationFeedbackPanel,
   getRegistrationObservationFeedbackMountPlan,
-  getRegistrationObservationFeedbackRefreshPlan,
-  loadRegistrationObservationFeedbackForOwnedPanel,
   shouldMountRegistrationObservationFeedbackOnly,
-  type RegistrationObservationFeedbackActions,
 } from "./registration-observation-feedback-panel"
 import {
   REGISTRATION_TRACK_STATUS_LABELS,
@@ -98,11 +95,9 @@ import {
 } from "./registration-observation-model"
 import {
   cancelRegistrationObservation,
-  decideRegistrationObservation,
   loadRegistrationObservationFeedback,
   loadRegistrationObservationManagerDetail,
   loadRegistrationObservationSessions,
-  recordRegistrationObservationAttendance,
   saveRegistrationObservationBooking,
   type RegistrationObservationClient,
 } from "./registration-observation-service"
@@ -151,15 +146,6 @@ const registrationObservationActions: RegistrationObservationActions = {
   saveRegistrationObservationBooking: (input) => saveRegistrationObservationBooking(registrationObservationClient, input),
   cancelRegistrationObservation: (input) => cancelRegistrationObservation(registrationObservationClient, input),
 }
-const registrationObservationFeedbackActions: RegistrationObservationFeedbackActions = {
-  recordRegistrationObservationAttendance: (input) => (
-    recordRegistrationObservationAttendance(registrationObservationClient, input)
-  ),
-  decideRegistrationObservation: (input) => (
-    decideRegistrationObservation(registrationObservationClient, input)
-  ),
-}
-
 export type RegistrationTrackViewerRole = "admin" | "staff" | "assistant" | "teacher" | null
 
 export type RegistrationApplicationProps = {
@@ -429,7 +415,6 @@ export function RegistrationApplication({
     activeDeepLinkedAttempt
     && ["completed", "no_show", "canceled"].includes(activeDeepLinkedAttempt.status),
   )
-  const activeDeepLinkedAttemptCanceled = activeDeepLinkedAttempt?.status === "canceled"
   const deepLinkedObservationHistoryEligible = activeDeepLinkedAttemptTerminal
     && canManageActiveObservation
   const activeObservationTrackIdRef = useRef(activeTrack?.id || null)
@@ -884,110 +869,6 @@ export function RegistrationApplication({
     viewerId,
   ])
 
-  const refreshActiveObservationFeedback = useCallback(async (
-    observationId: string = activeFeedbackObservationId || "",
-  ) => {
-    if (
-      !canManageActiveObservation
-      || !activeTrack
-      || !observationId
-      || !viewerId
-      || observationRuntime.runtimeVersion !== 1
-    ) return null
-    const ownershipKey = `${detail.task.id}:${activeTrack.id}:${observationId}`
-    const currentOwnershipKey = activeObservationFeedbackKeyRef.current
-    const refreshPlan = getRegistrationObservationFeedbackRefreshPlan({
-      requestedOwnershipKey: ownershipKey,
-      currentOwnershipKey,
-    })
-    if (!refreshPlan.mutatePanelState) {
-      return loadRegistrationObservationFeedbackForOwnedPanel({
-        requestedOwnershipKey: ownershipKey,
-        currentOwnershipKey,
-        load: () => loadRegistrationObservationFeedback(
-          registrationObservationClient,
-          observationId,
-          { force: true },
-        ),
-      })
-    }
-    const feedbackRequestContext = {
-      targetKey: ownershipKey,
-      viewerId,
-      runtimeVersion: observationRuntime.runtimeVersion,
-    } as const
-    const feedbackRequestToken = observationFeedbackLoadOwnershipRef.current.begin(feedbackRequestContext)
-    setObservationFeedbackLoading(true)
-    setObservationFeedbackError("")
-    const refreshedDetail = loadRegistrationObservationFeedbackForOwnedPanel({
-      requestedOwnershipKey: ownershipKey,
-      currentOwnershipKey,
-      load: () => loadRegistrationObservationFeedback(
-        registrationObservationClient,
-        observationId,
-        { force: true },
-      ),
-    })
-    try {
-      const nextDetail = await refreshedDetail
-      if (!nextDetail) return null
-      const currentFeedbackRequestContext = {
-        targetKey: activeObservationFeedbackKeyRef.current,
-        viewerId: activeObservationViewerIdRef.current,
-        runtimeVersion: activeObservationRuntimeVersionRef.current,
-      } as const
-      if (observationFeedbackLoadOwnershipRef.current.owns(
-        feedbackRequestToken,
-        currentFeedbackRequestContext,
-      )) setObservationFeedbackDetail(nextDetail)
-      return nextDetail
-    } catch (error) {
-      const currentFeedbackRequestContext = {
-        targetKey: activeObservationFeedbackKeyRef.current,
-        viewerId: activeObservationViewerIdRef.current,
-        runtimeVersion: activeObservationRuntimeVersionRef.current,
-      } as const
-      if (observationFeedbackLoadOwnershipRef.current.owns(
-        feedbackRequestToken,
-        currentFeedbackRequestContext,
-      )) {
-        setObservationFeedbackError(getRegistrationObservationFeedbackErrorState(error).message)
-        setObservationFeedbackLoading(false)
-        observationFeedbackLoadOwnershipRef.current.invalidate(feedbackRequestToken)
-      }
-      throw error
-    } finally {
-      const currentFeedbackRequestContext = {
-        targetKey: activeObservationFeedbackKeyRef.current,
-        viewerId: activeObservationViewerIdRef.current,
-        runtimeVersion: activeObservationRuntimeVersionRef.current,
-      } as const
-      if (observationFeedbackLoadOwnershipRef.current.owns(
-        feedbackRequestToken,
-        currentFeedbackRequestContext,
-      )) setObservationFeedbackLoading(false)
-    }
-  }, [
-    activeFeedbackObservationId,
-    activeTrack,
-    canManageActiveObservation,
-    detail.task.id,
-    observationRuntime.runtimeVersion,
-    viewerId,
-  ])
-
-  const handleObservationFeedbackSaved = useCallback(async (
-    saved: RegistrationObservationFeedbackDetail,
-  ) => {
-    await handleObservationSaved()
-    await refreshActiveObservationFeedback(saved.observationId)
-  }, [handleObservationSaved, refreshActiveObservationFeedback])
-
-  const reloadObservationFeedback = useCallback(async () => {
-    if (!activeFeedbackObservationId) return
-    await handleObservationSaved()
-    await refreshActiveObservationFeedback(activeFeedbackObservationId)
-  }, [activeFeedbackObservationId, handleObservationSaved, refreshActiveObservationFeedback])
   const observationSectionLockReason = !canManageActiveObservation
     ? "청강 예약을 처리할 권한이 없습니다"
     : observationWorkspaceAvailable
@@ -1034,11 +915,11 @@ export function RegistrationApplication({
   const waitingState = splitPlacementState()
   const registrationState = splitPlacementState(currentEnrollmentWindowComplete)
   const focusedContext = trackContexts.find((context) => context.track.id === activeTrackId) || null
-  const workflowStatusOptions = activeGenericTrack
+  const workflowStatusOptions = activeTrack
     ? getRegistrationWorkflowStatusOptions({
       viewerId,
       viewerRole,
-      directorProfileId: activeGenericTrack.directorProfileId,
+      directorProfileId: activeTrack.directorProfileId,
     })
     : []
   const notificationReadiness = getRegistrationManagementNotificationReadiness({
@@ -1050,25 +931,28 @@ export function RegistrationApplication({
   })
   async function changeWorkflowStatus(nextStatus: string) {
     if (!canManageCase) return
-    if (!activeGenericTrack || nextStatus === activeGenericTrack.workflowStatus || workflowStatusSaving) return
+    if (!activeTrack || nextStatus === activeTrack.workflowStatus || workflowStatusSaving) return
     const nextOption = workflowStatusOptions.find((option) => option.value === nextStatus)
     if (!nextOption) return
     setWorkflowStatusSaving(true)
     onWarning("")
     try {
       const receipt = await setRegistrationWorkflowStatus({
-        trackId: activeGenericTrack.id,
+        trackId: activeTrack.id,
         workflowStatus: nextOption.value as OpsRegistrationWorkflowStatus,
-        expectedWorkflowRevision: activeGenericTrack.workflowRevision,
-        requestKey: `registration-workflow-status:${activeGenericTrack.id}:${crypto.randomUUID()}`,
+        expectedWorkflowRevision: activeTrack.workflowRevision,
+        requestKey: `registration-workflow-status:${activeTrack.id}:${crypto.randomUUID()}`,
       })
       if (nextOption.value === "registered" && receipt.sourceEventIds.length > 0) {
         const delivery = await dispatchRegistrationSubjectNotificationSources(receipt.sourceEventIds, notificationToken)
         if (delivery.failedSourceEventIds.length > 0) onWarning("등록 상태를 저장했습니다. 과목팀 알림 전달 결과를 확인해 주세요.")
       }
-      await onReload(activeGenericTrack.id)
+      await onReload(activeTrack.id)
     } catch (error) {
-      onWarning(errorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
+      const diagnostic = error && typeof error === "object" && "message" in error ? String(error.message) : ""
+      onWarning(diagnostic.includes("registration_observation_booking_required")
+        ? "청강 반과 회차를 선택해 예약을 저장한 뒤 청강 신청으로 변경하세요."
+        : errorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
     } finally {
       setWorkflowStatusSaving(false)
     }
@@ -1519,21 +1403,11 @@ export function RegistrationApplication({
       <RegistrationObservationFeedbackPanel
         key={activeFeedbackObservationId}
         detail={observationFeedbackDetail}
-        canRecordAttendance={!activeDeepLinkedAttemptTerminal
-          && canManageCase
-          && !activeFeedbackHistoryOnlyMode}
-        canDecide={!activeDeepLinkedAttemptCanceled
-          && !activeFeedbackHistoryOnlyMode
-          && canManageCase}
-        actions={registrationObservationFeedbackActions}
-        onSaved={handleObservationFeedbackSaved}
-        onReload={reloadObservationFeedback}
-        onDirtyChange={(dirty) => setObservationDirty(`observation:decision-${activeFeedbackObservationId}`, dirty)}
       />
     ) : observationFeedbackError ? (
       <p role="alert" className="text-sm text-destructive">{observationFeedbackError}</p>
     ) : observationFeedbackLoading ? (
-      <p className="text-sm text-muted-foreground">청강 확인 정보를 불러오는 중입니다.</p>
+      <p className="text-sm text-muted-foreground">기존 청강 이력을 불러오는 중입니다.</p>
     ) : null
 
   const registrationSection = (
@@ -1613,19 +1487,19 @@ export function RegistrationApplication({
               panelIdsByTrackId={subjectPanelIdsByTrackId}
               onValueChange={handleSubjectTabChange}
             />
-            {activeGenericTrack ? (
+            {activeTrack ? (
               <div data-registration-workflow-status="" className="flex min-w-0 items-center gap-2">
                 <span className="shrink-0 text-xs font-medium text-muted-foreground">진행상태</span>
                 <RegistrationSelect
-                  aria-label={`${activeGenericTrack.subject} 진행상태`}
-                  value={activeGenericTrack.workflowStatus}
+                  aria-label={`${activeTrack.subject} 진행상태`}
+                  value={activeTrack.workflowStatus}
                   disabled={!canManageCase || workflowStatusSaving || workflowStatusOptions.length === 0}
                   onValueChange={(value) => void changeWorkflowStatus(value)}
                   placeholder="진행상태 선택"
                   className="w-full data-[size=default]:h-11 sm:w-48 sm:data-[size=default]:h-9"
                   options={[
-                    { value: activeGenericTrack.workflowStatus, label: REGISTRATION_WORKFLOW_STATUS_LABELS[activeGenericTrack.workflowStatus] },
-                    ...workflowStatusOptions.filter((option) => option.value !== activeGenericTrack.workflowStatus),
+                    { value: activeTrack.workflowStatus, label: REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus] },
+                    ...workflowStatusOptions.filter((option) => option.value !== activeTrack.workflowStatus),
                   ]}
                 />
               </div>

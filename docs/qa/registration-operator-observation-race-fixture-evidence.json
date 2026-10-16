@@ -1,0 +1,73 @@
+{
+  "previousCandidateCommit": "c1681c7951c3ea092751da640b0545da235a9ef4",
+  "sourceSha256": "2606829a785888144cc7cf7fbf9334edf8ef4667926a378b90b470d2cb7ac28a",
+  "sourcePathCount": 49,
+  "scope": "Same candidate branch; correct the previously identified race setup JWT prerequisite and complete synthetic schedule/session/teardown prerequisites. No product change.",
+  "changedSourcePins": {
+    "supabase/tests/registration_enrollment_guarded_save_race.spec": "8f90fe059f22c2330965ce9ee373992314947abe56c8796627751c61c8eec993",
+    "tests/probe-registration-enrollment-guarded-save-concurrency.mjs": "27ddf23db351fb013a7cf0bfc0632ab97c6ba72718b7616e1bd6eb364e59f1ee",
+    "tests/registration-enrollment-race-probe.test.mjs": "8490e0e95d57cdeec692c3c3f795bcb8f063aac46a801b74728ab8a7da70e66f"
+  },
+  "unchangedSourcePins": {
+    "supabase/tests/registration_enrollment_guarded_save_test.sql": "879621aa654cd9bff2193b68ca3b89fddbdb0c99d362b64c3ad090bdafaa4a1a",
+    "tests/registration-enrollment-guarded-save.test.mjs": "2777c5fa29f706f74e3b3b92fbccd3ff33c3d6a78a9935776755e0719c49ad53",
+    "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3",
+    "scripts/run-isolated-supabase-db-tests.mjs": "581731526c3ca61d284d597b83313e2b200f1a35c40e9f6439c1c12dabfa8439",
+    "supabase/tests/active_registration_workflow_postdeploy_readonly.sql": "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343",
+    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
+  },
+  "localVerification": {
+    "scope": "Source and synthetic parser checks only; no database or isolationtester executed",
+    "runtime": "v24.19.0",
+    "passed": 15,
+    "failed": 0,
+    "skipped": 0,
+    "guardedSaveSourceTests": 6,
+    "raceSourceAndParserTests": 9,
+    "logSha256": "48328db5ed6c898b640735fe9c8037ba6abd00538fa0891bcc05c40489695046"
+  },
+  "preservedRaceControls": {
+    "comparedAgainstCommit": "c1681c7951c3ea092751da640b0545da235a9ef4",
+    "contestedStepsUnchanged": 24,
+    "changedEntrySteps": [
+      "a_begin",
+      "b_begin"
+    ],
+    "unchangedFunctionSha256": {
+      "capture": "336cac2d5f832db87b5026052f5f268258efdd5c2e3325967f39f8cee0fff334",
+      "assert_case": "e5479e7eec58c08b1c9123f0d4c56ab0d2c7456710b25a6eaba75cac5ac419da"
+    },
+    "permutationsUnchanged": 7,
+    "probeOnlyEmbeddedDataAndHashChanged": true,
+    "probeLogicSha256": "0222108666966a3585ea09221f556c67e7b144b5a73f27f45eeed61312c508f9",
+    "runtimeEvidence": false
+  },
+  "audit": {
+    "setup": "Require approved local postgres context; clear all three JWT settings; create synthetic auth/profile; verify live manager before catalogs/class/task/track/enrollment DML; flush deferred checks before baseline and commit.",
+    "schedule": "Legacy class has matching weekday, explicit date/session key/time and synthetic teacher/classroom catalog IDs. No timetable product functions changed.",
+    "writers": "A/B reset inherited role and claims; begin with unchanged 30s timeout; validate active actor before SET LOCAL ROLE authenticated and explicit role/auth assertions. Existing deliberate postgres cancellation/archive fixture steps are unchanged.",
+    "verifier": "Reset to and require postgres with cleared JWT, preserving private receipt and archived-row read access without product grants.",
+    "sessionTeardown": "A/B rollback, reset role and clear claims; verify resets role and clears claims. PostgreSQL17 runs session teardown before global teardown.",
+    "globalTeardown": "Keep manager while deleting scoped tasks, class and catalogs and flushing deferred constraints; clear JWT before profile/auth deletion; assert no scoped leftovers; drop only fixture schema and commit.",
+    "postgresOrderingSource": "https://raw.githubusercontent.com/postgres/postgres/REL_17_STABLE/src/test/isolation/isolationtester.c",
+    "productAccess": "All production RLS/ACL/authentication/constraints/triggers unchanged; no product role grants, trigger disabling or session replication override."
+  },
+  "historicalEvidence": {
+    "sqlFixtureCorrection": "registration-operator-observation-fixture-auth-evidence.json",
+    "thenOpenRaceFindingAddressedInSource": true,
+    "priorMacReceiptSha256": "00fa1fe299134ccc8bbb350d5d8a7c756dd793c6ae7027844768089e8d6ec90e",
+    "priorGuardedSaveSql": "FAILED fixture INSERT after20 subtests",
+    "priorPostdeploy": "NOT_REACHED",
+    "priorRace7": "NOT_REACHED"
+  },
+  "currentRuntimeStatus": {
+    "node22Focused": "PENDING Mac",
+    "guardedSaveSql": "PENDING Mac",
+    "postdeploy": "PENDING Mac",
+    "race7": "PENDING Mac",
+    "exactSourceIndependentReview": "PENDING"
+  },
+  "candidateStatus": "candidate",
+  "operationalMutations": false,
+  "deployment": false
+}

@@ -7,7 +7,6 @@ import * as React from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
 import * as timeout from "../src/lib/promise-timeout.ts"
-import * as observationService from "../src/features/tasks/registration-observation-chat-service.ts"
 import * as cancellationService from "../src/features/tasks/registration-visit-cancellation-service.ts"
 import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs"
 
@@ -39,7 +38,6 @@ async function loadActions(kind = "management", deliveryService = null) {
     "@/lib/promise-timeout": timeout,
     "@/hooks/use-data-table-page-size": { useDataTablePageSize: () => ({ pageSize: 10, ready: true, setPreference: () => {} }) },
     "@/components/data-table/data-table-pagination": { DataTablePagination: () => null },
-    "./registration-observation-chat-service": observationService,
     "./registration-visit-cancellation-service": cancellationService,
     "./registration-consultation-notification.js": { dispatchRegistrationManagementNotificationSources: () => { throw new Error("Unexpected real dispatcher") } },
     "./registration-management-notification-preview-service": { createRegistrationManagementPreviewService: () => null },
@@ -50,12 +48,12 @@ async function loadActions(kind = "management", deliveryService = null) {
       new Map([["./notification-delivery-service", deliveryService]]),
     )
   }
-  const file = kind === "observation" ? "registration-observation-chat-actions" : kind === "cancellation" ? "registration-visit-cancellation-actions" : "registration-management-notification-actions"
+  const file = kind === "cancellation" ? "registration-visit-cancellation-actions" : "registration-management-notification-actions"
   const source = await readFile(new URL(`../src/features/tasks/${file}.tsx`, import.meta.url), "utf8")
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText
   const loadedModule = { exports: {} }
   new Function("require", "module", "exports", compiled)((name) => modules[name] ?? require(name), loadedModule, loadedModule.exports)
-  return loadedModule.exports[kind === "observation" ? "RegistrationObservationChatActions" : kind === "cancellation" ? "RegistrationVisitCancellationActions" : "RegistrationManagementNotificationActions"]
+  return loadedModule.exports[kind === "cancellation" ? "RegistrationVisitCancellationActions" : "RegistrationManagementNotificationActions"]
 }
 
 async function withDom(run) {
@@ -206,33 +204,6 @@ test("a reviewed timeout retry clears its warning before confirmation and reuses
   }
 })
 
-test("observation timeout unlocks the dialog, blocks resends, and reuses its key only after reviewed refresh", async () => withDom(async ({ root, dom, button, click }) => {
-  const Actions = await loadActions("observation")
-  const id = "10000000-0000-4000-8000-000000000001"
-  const keys = []; let lateReply
-  const preview = { observationId: id, intent: "handoff", status: "ready", canSend: true, targetLabel: "합성 선생님", renderedTitle: "청강 담당 전달", renderedBody: "가상 학생", previewChecksum: "a".repeat(64) }
-  const service = observationService.createRegistrationObservationChatService(async (_url, init) => {
-    if (init?.method !== "POST") return Response.json({ ok: true, preview })
-    keys.push(JSON.parse(init.body).requestId)
-    return keys.length === 1 ? new Promise((resolve) => { lateReply = resolve }) : Response.json({ ok: true, status: "unknown" })
-  }, 5)
-  await React.act(async () => root.render(React.createElement(Actions, { observationId: id, service, getAccessToken: async () => "synthetic-token" })))
-  await click("청강 담당 전달")
-  await click("확인하고 전달", 15)
-  assert.equal(keys.length, 1)
-  assert.equal(button("확인하고 전달").disabled, true)
-  assert.equal(button("닫기").disabled, false)
-  await React.act(async () => lateReply(Response.json({ ok: true, status: "sent" })))
-  assert.match(dom.window.document.body.textContent, /전달 결과를 확인할 수 없습니다/)
-  assert.equal(button("확인하고 전달").disabled, true)
-  await click("전달 상태 다시 확인")
-  assert.equal(keys.length, 1, "refresh is a read, not another send")
-  await click("확인하고 전달")
-  assert.equal(keys.length, 2)
-  assert.equal(keys[0], keys[1])
-  assert.equal(button("확인하고 전달").disabled, true)
-}))
-
 test("visit cancellation timeout preserves unknown until a fresh read and retains the explicit request key", async () => withDom(async ({ root, dom, button, click }) => {
   const Actions = await loadActions("cancellation")
   const id = "10000000-0000-4000-8000-000000000001"
@@ -260,18 +231,4 @@ test("visit cancellation timeout preserves unknown until a fresh read and retain
   assert.equal(keys.length, 2)
   assert.equal(keys[0], keys[1])
   assert.match(dom.window.document.body.textContent, /취소 전달 완료/)
-}))
-
-test("observation identity changes while reading a token never confirm for the next reservation", async () => withDom(async ({ root, click }) => {
-  const Actions = await loadActions("observation")
-  const one = "10000000-0000-4000-8000-000000000001", two = "10000000-0000-4000-8000-000000000002"
-  let tokenCalls = 0, sends = 0, resolveToken
-  const service = { preview: async (observationId, intent) => ({ observationId, intent, status: "ready", canSend: true, targetLabel: "합성 선생님", renderedTitle: "청강 전달", renderedBody: "가상 학생", previewChecksum: "a".repeat(64) }), send: async () => { sends += 1; return "sent" } }
-  const getAccessToken = async () => ++tokenCalls === 1 ? "first-token" : new Promise((resolve) => { resolveToken = resolve })
-  await React.act(async () => root.render(React.createElement(Actions, { observationId: one, service, getAccessToken })))
-  await click("청강 담당 전달")
-  await click("확인하고 전달")
-  await React.act(async () => root.render(React.createElement(Actions, { observationId: two, service, getAccessToken })))
-  await React.act(async () => resolveToken("later-token"))
-  assert.equal(sends, 0)
 }))

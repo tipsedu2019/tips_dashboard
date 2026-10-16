@@ -851,6 +851,11 @@
       "sha256": "cf8bec62963545e209ea4d18c5b7276ff75a62e93fac1e5bddbb55ab7c5922c0"
     },
     {
+      "fileName": "20261013084134_registration_enrollment_guarded_save.sql",
+      "status": "final",
+      "sha256": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3"
+    },
+    {
       "fileName": "20261013193200_timetable_shared_validation_workset.sql",
       "status": "final",
       "sha256": "f5df6c1d0494ff8f0d5ad75251e1b3592ee5a14b7a532eb43534413976886559"

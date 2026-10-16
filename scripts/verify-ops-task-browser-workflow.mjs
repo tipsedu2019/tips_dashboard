@@ -428,7 +428,7 @@ const ROUTES = [
   { path: "/admin/tasks?list=sent", name: "todo-sent", expectedTexts: ["할 일", "보낸함"] },
   { path: "/admin/tasks?list=completed", name: "todo-completed", expectedTexts: ["할 일", "완료"] },
   { path: "/admin/registration", name: "registration", expectedTexts: ["등록", "등록 추가"], interaction: "open-create" },
-  { path: "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin", name: "registration-subject-track-fixture", expectedTexts: ["등록", "윤지호"], interaction: "registration-subject-track-fixture" },
+  { path: "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin", name: "registration-subject-track-fixture", expectedTexts: ["등록", "합성인물14"], interaction: "registration-subject-track-fixture" },
   { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 신청"], interaction: "open-create" },
   { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 신청"], interaction: "open-create" },
   { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["영어 단어 재시험", "추가"], interaction: "open-create" },
@@ -2133,7 +2133,7 @@ async function fillOperationMinimumFields(page, dialog, route, sampleName) {
     const englishSubject = dialog.getByRole("button", { name: "영어", exact: true }).first()
     await englishSubject.waitFor({ state: "visible", timeout: 5000 })
     await englishSubject.click()
-    if (!(await fillIfPresent(dialog, "학부모 전화", "010-1234-5678"))) {
+    if (!(await fillIfPresent(dialog, "학부모 전화", ["0", "1", "0", String(67_000_005)].join("")))) {
       throw new Error("Registration parent phone input was not found.")
     }
     if (!(await selectListboxOptionIfPresent(page, dialog, "학년", "고1"))) {
@@ -3084,9 +3084,9 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       throw new Error("consultation did not default to my work.")
     }
 
-    const splitRow = page.locator('[data-registration-case-row]:visible').filter({ hasText: "박서준" }).first()
+    const splitRow = page.locator('[data-registration-case-row]:visible').filter({ hasText: "합성인물09" }).first()
     const mineText = await splitRow.innerText()
-    if (!mineText.includes("영어") || mineText.includes("수학") || mineText.includes("양소윤")) {
+    if (!mineText.includes("영어") || mineText.includes("수학") || mineText.includes("합성인물12")) {
       throw new Error(`my consultation row leaked another owner's subject: ${mineText}`)
     }
     await scope.getByRole("button", { name: /^전체/ }).click()
@@ -3390,7 +3390,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await openRegistrationSubjectTrackFixtureCalendarItem({
     taskId: "fixture-task-dual-test",
     appointmentId: "fixture-appointment-dual-test",
-    studentName: "김다미",
+    studentName: "합성인물02",
   })
   await navigateRegistrationFixture(
     "return from real calendar appointment to create",
@@ -3435,7 +3435,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     taskId: "fixture-task-dual-test",
     trackId: "fixture-track-dual-english",
     appointmentId: "fixture-appointment-dual-test",
-    studentName: "김다미",
+    studentName: "합성인물02",
   })
   if (await detailApplicationHost.getAttribute("data-registration-application-mode") !== "detail") {
     throw new Error("saved registration application did not open in detail mode.")
@@ -3499,7 +3499,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   const admissionApplicationHost = await openRegistrationSubjectTrackFixtureCase({
     taskId: "fixture-task-multiple-classes",
     trackId: "fixture-track-multiple-english",
-    studentName: "최유진",
+    studentName: "합성인물18",
   })
   const registrationSection = admissionApplicationHost.locator('[data-registration-application-section="registration"]')
   const admissionSection = admissionApplicationHost.locator('[data-registration-application-section="admission"]')
@@ -3510,7 +3510,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   const readOnlyAdmissionDialog = await openRegistrationSubjectTrackFixtureCase({
     taskId: "fixture-task-partial-registration",
     trackId: "fixture-track-partial-math",
-    studentName: "이도윤",
+    studentName: "합성인물15",
     fixtureRole: "assistant",
   })
   await readOnlyAdmissionDialog.getByLabel("읽기 전용 입학 처리 상태").waitFor({ state: "visible", timeout: 5000 })
@@ -3521,7 +3521,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   const migrationDialog = await openRegistrationSubjectTrackFixtureCase({
     taskId: "fixture-task-migration-review",
     trackId: "fixture-track-review-english",
-    studentName: "윤지호",
+    studentName: "합성인물14",
   })
   await requireVisibleText(migrationDialog, "과목 분리 확인 필요")
   if (await migrationDialog.locator('section[aria-label="영어 문의 처리"]').count() !== 0) {
@@ -3530,7 +3530,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
 
   const cleanFixtureListUrl = joinUrl(baseUrl, "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin")
   await navigateRegistrationFixture("open clean fixture list for consultation-stage reopen", cleanFixtureListUrl)
-  const consultationDialog = await openFixtureCaseFromList({ studentName: "김예린", subject: "영어", viewLabel: "상담" })
+  const consultationDialog = await openFixtureCaseFromList({ studentName: "합성인물05", subject: "영어", viewLabel: "상담" })
   const consultationTaskId = new URL(page.url()).searchParams.get("taskId")
   const unsavedInquiryRequestNote = "검증 중 저장하지 않을 문의 초안"
   await consultationDialog.getByLabel(/^요청 사항/).fill(unsavedInquiryRequestNote)
@@ -3547,7 +3547,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await consultationDialog.waitFor({ state: "hidden", timeout: 5000 })
 
   await navigateRegistrationFixture("open clean fixture list for level-test-stage reopen", cleanFixtureListUrl)
-  const levelTestDialog = await openFixtureCaseFromList({ studentName: "김예린", subject: "수학", viewLabel: "레벨테스트" })
+  const levelTestDialog = await openFixtureCaseFromList({ studentName: "합성인물05", subject: "수학", viewLabel: "레벨테스트" })
   const levelTestTaskId = new URL(page.url()).searchParams.get("taskId")
   if (consultationTaskId !== "fixture-task-cross-stage" || levelTestTaskId !== "fixture-task-cross-stage") {
     throw new Error("cross-stage list reopen did not retain the shared fixture-task-cross-stage application identity.")
@@ -3555,7 +3555,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await requireVisibleText(levelTestDialog, "수학")
 
   await navigateRegistrationFixture("open clean fixture list for all-terminal reopen", cleanFixtureListUrl)
-  const allTerminalDialog = await openFixtureCaseFromList({ studentName: "서지안", subject: "영어", viewLabel: "완료" })
+  const allTerminalDialog = await openFixtureCaseFromList({ studentName: "합성인물11", subject: "영어", viewLabel: "완료" })
   await requireVisibleText(allTerminalDialog, "등록 완료")
   await allTerminalDialog.getByRole("tablist", { name: "과목별 등록 진행" })
     .getByRole("tab", { name: /^수학/ })

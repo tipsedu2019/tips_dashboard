@@ -1,3 +1,4 @@
+import { REGISTRATION_SYNTHETIC_PHONES } from "../src/features/tasks/registration-track-fixtures.ts";
 import { registrationDefaultTextbookIds } from "../src/features/tasks/registration-class-options.ts"
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -188,6 +189,12 @@ function createRegistrationEditorHookHarness() {
       for (const slot of slots) slot?.cleanup?.()
       pendingEffects = []
     },
+    remount() {
+      for (const slot of slots) slot?.cleanup?.()
+      slots.length = 0
+      cursor = 0
+      pendingEffects = []
+    },
   }
 }
 
@@ -235,6 +242,7 @@ async function loadMountedRegistrationEnrollmentEditor({
   loadClassDetails,
   saveEnrollmentDetails = async () => undefined,
   setAdmissionChecklist = async () => undefined,
+  cancelEnrollment = async () => undefined,
   componentName = "RegistrationEnrollmentEditor",
 }) {
   const fileName = new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url)
@@ -263,7 +271,7 @@ async function loadMountedRegistrationEnrollmentEditor({
   const registrationService = {
     advanceRegistrationAdmissionBatch: async () => undefined,
     cancelRegistrationAdmissionBatch: async () => undefined,
-    cancelRegistrationEnrollment: async () => undefined,
+    cancelRegistrationEnrollment: cancelEnrollment,
     completeRegistrationAdmissionBatch: async () => undefined,
     createRegistrationMutationRequestKey(kind, entityId) {
       requestKeySequence += 1
@@ -309,6 +317,23 @@ async function loadMountedRegistrationEnrollmentEditor({
   })
   factory(runtimeRequire, runtimeModule, runtimeModule.exports)
   return runtimeModule.exports[componentName]
+}
+
+async function loadActualGuardedEnrollmentService(rpc) {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-service.ts", import.meta.url), "utf8")
+  const start = source.indexOf("// registration-track-service-factory:start")
+  const end = source.indexOf("// registration-track-service-factory:end")
+  assert.ok(start >= 0 && end > start)
+  const output = ts.transpileModule(`${source.slice(start, end)}\nmodule.exports = { createRegistrationTrackService };`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const importedModule = { exports: {} }
+  vm.runInNewContext(output, { module: importedModule, exports: importedModule.exports, setTimeout, clearTimeout, AbortController, AbortSignal })
+  return importedModule.exports.createRegistrationTrackService({ rpc }, {
+    probeRuntime: async () => ({ mode: "ready", version: 1 }),
+    probeIntakeRuntime: async () => ({ available: true, version: 2 }),
+    invalidatePublicClassesCacheAfterMutation: async () => undefined,
+  })
 }
 
 async function loadMountedRegistrationApplication({
@@ -592,7 +617,7 @@ const mountedRegistrationObservation = Object.freeze({
   taskId: MOUNTED_REGISTRATION_TASK_ID,
   trackId: MOUNTED_REGISTRATION_TRACK_ID,
   appointmentId: "76000000-0000-4000-8000-000000000007",
-  studentName: "김학생",
+  studentName: "합성인물06",
   studentGrade: "중2",
   subject: "영어",
   classId: MOUNTED_REGISTRATION_CLASS_ID,
@@ -601,13 +626,13 @@ const mountedRegistrationObservation = Object.freeze({
   startsAt: "2026-08-17T10:00:00.000Z",
   endsAt: "2026-08-17T11:30:00.000Z",
   classroomName: "101호",
-  teacherName: "박선생",
+  teacherName: "합성인물10",
   status: "completed",
   attendance: "attended",
   suitabilityResult: "fit",
   feedbackReason: "수업 참여가 안정적입니다.",
   proxySubmitted: false,
-  feedbackSubmittedByName: "박선생",
+  feedbackSubmittedByName: "합성인물10",
   feedbackSubmittedAt: "2026-08-17T12:00:00.000Z",
   revision: 3,
   feedbackRevision: 2,
@@ -634,6 +659,8 @@ function mountedRegistrationEditorProps(overrides = {}) {
       taskId: MOUNTED_REGISTRATION_TASK_ID,
       subject: "영어",
       status: "enrollment_decided",
+      workflowStatus: "consultation_completed",
+      workflowRevision: 1,
       stageEnteredAt: "2026-08-18T00:00:00.000Z",
       observationFeedbackRevision: 2,
       enrollmentDetailRows: [],
@@ -739,7 +766,7 @@ test("waiting and registration summaries omit unexplained duplicate fields", asy
 test("saved registration keeps the status selector and uses progress only for section navigation", async () => {
   const detail = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
 
-  assert.match(detail, /aria-label=\{`\$\{activeGenericTrack\.subject\} 진행상태`\}/)
+  assert.match(detail, /aria-label=\{`\$\{activeTrack\.subject\} 진행상태`\}/)
   assert.equal((detail.match(/data-registration-workflow-status=/g) || []).length, 1)
   assert.doesNotMatch(detail, /changeObservationWorkflowStatus/)
   assert.doesNotMatch(detail, /registrationObservationActions\.withdrawRegistrationObservation/)
@@ -1182,15 +1209,15 @@ function fixtureTasks() {
     id: "case-1",
     type: "registration",
     status: "requested",
-    title: "등록: 김다미",
-    studentName: "김다미",
+    title: "등록: 합성인물02",
+    studentName: "합성인물02",
     registrationTracks: [
       {
         id: "eng",
         subject: "영어",
         status: "consultation_waiting",
         directorProfileId: "director-1",
-        directorName: "강부희",
+        directorName: "합성인물01",
         stageEnteredAt: "2026-07-10T00:00:00Z",
         phoneReadyAt: "2026-07-10T02:00:00Z",
         phoneReadySource: "inquiry",
@@ -1201,7 +1228,7 @@ function fixtureTasks() {
         subject: "수학",
         status: "level_test_scheduled",
         directorProfileId: "director-2",
-        directorName: "양소윤",
+        directorName: "합성인물12",
         stageEnteredAt: "2026-07-11T00:00:00Z",
         migrationReviewRequired: false,
       },
@@ -1330,16 +1357,16 @@ test("application search narrows the selected view by student, phone, subject, d
   } = await loadCaseListModel();
   const tasks = fixtureTasks();
   tasks[0].registration = {
-    parentPhone: "010-1234-5678",
-    studentPhone: "010-8765-4321",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parentFormatted,
+    studentPhone: REGISTRATION_SYNTHETIC_PHONES.searchStudentFormatted,
   };
   tasks.push({
     ...tasks[0],
     id: "case-visit",
-    title: "등록: 박방문",
-    studentName: "박방문",
+    title: "등록: 합성인물08",
+    studentName: "합성인물08",
     registration: {
-      parentPhone: "010-9999-0000",
+      parentPhone: REGISTRATION_SYNTHETIC_PHONES.searchOtherParentFormatted,
       studentPhone: "",
     },
     registrationTracks: [{
@@ -1347,21 +1374,21 @@ test("application search narrows the selected view by student, phone, subject, d
       id: "math-visit",
       subject: "수학",
       status: "visit_consultation_scheduled",
-      directorName: "이상담",
+      directorName: "합성인물16",
       visitScheduledAt: "2026-07-20T09:00:00Z",
       visitPlace: "별관 상담실",
     }],
   });
   const items = buildRegistrationCaseListItems(tasks);
 
-  for (const query of ["김다미", "1234-5678", "영어", "강부희"]) {
+  for (const query of ["합성인물02", REGISTRATION_SYNTHETIC_PHONES.parentFormatted.split("-").slice(1).join("-"), "영어", "합성인물01"]) {
     assert.deepEqual(
       plain(filterRegistrationCaseListItems(items, "consulting", query).map((item) => item.taskId)),
       ["case-1"],
       `${query} should find only the matching application`,
     );
   }
-  for (const query of ["박방문", "9999-0000", "이상담", "별관 상담실"]) {
+  for (const query of ["합성인물08", REGISTRATION_SYNTHETIC_PHONES.searchOtherParentFormatted.split("-").slice(1).join("-"), "합성인물16", "별관 상담실"]) {
     assert.deepEqual(
       plain(filterRegistrationCaseListItems(items, "consulting", query).map((item) => item.taskId)),
       ["case-visit"],
@@ -1576,8 +1603,8 @@ test("case list keeps the Notion-like workflow status editable in place without 
   assert.match(source, /getRegistrationInlineWorkflowStatusOptions/);
   assert.match(source, /<RegistrationSelect/);
   assert.match(source, /aria-label=\{`\$\{track\.subject\} \$\{studentName\} 진행상태`\}/);
-  assert.match(source, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)\) \{[\s\S]*?return <RegistrationTrackStatusBadge/);
-  assert.match(source, /onValueChange=\{\(value\) => \{[\s\S]*?const nextStatus = options\.find\(\(option\) => option\.value === value\)\?\.value[\s\S]*?if \(nextStatus\) onStatusChange\(track, nextStatus\)/);
+  assert.match(source, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)[\s\S]*?track\.workflowStatus !== "observation_requested"[\s\S]*?return <RegistrationTrackStatusBadge/);
+  assert.match(source, /onValueChange=\{\(value\) => \{[\s\S]*?const nextStatus = options\.find\(\(option\) => option\.value === value\)\?\.value[\s\S]*?nextStatus !== "observation_feedback_pending"[\s\S]*?nextStatus !== "observation_completed"[\s\S]*?onStatusChange\(track, nextStatus\)/);
   assert.doesNotMatch(source, /value as OpsRegistrationWorkflowStatus/);
   assert.match(source, /event\.stopPropagation\(\)/);
   assert.match(source, /onOpen\(item\.taskId, targetTrack\.trackId\)/);
@@ -1594,6 +1621,51 @@ test("case list keeps the Notion-like workflow status editable in place without 
   assert.match(workspace, /expectedWorkflowRevision: track\.workflowRevision/);
   assert.match(workspace, /onStatusChange=\{\(track, workflowStatus\)/);
 });
+
+test("inline requested-observation status preserves role and historical-target boundaries", async () => {
+  const source = await readListSource()
+  const controlSource = "function RegistrationTrackStatusControl(" + sourceBetween(source, "function RegistrationTrackStatusControl(", "function formatRegistrationCaseTime(")
+  const statusModel = await import("../src/features/tasks/registration-workflow-status.js")
+  const output = ts.transpileModule(`${controlSource}\nmodule.exports = RegistrationTrackStatusControl`, {
+    fileName: "registration-inline-status.tsx",
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText
+  const loadedModule = { exports: {} }
+  const Badge = () => null
+  vm.runInNewContext(output, {
+    ...statusModel,
+    RegistrationSelect,
+    RegistrationTrackStatusBadge: Badge,
+    module: loadedModule,
+    exports: loadedModule.exports,
+    require,
+  })
+  const control = loadedModule.exports
+  for (const viewerRole of ["admin", "staff", "teacher", "assistant", null]) {
+    const calls = []
+    const track = { trackId: "synthetic-track", subject: "영어", workflowStatus: "observation_requested", directorProfileId: null }
+    const view = control({ studentName: "합성 학생", track, viewerRole, disabled: false, onStatusChange: (...args) => calls.push(args) })
+    if (viewerRole !== "admin" && viewerRole !== "staff") {
+      assert.equal(view.type, Badge)
+      assert.deepEqual(calls, [])
+      continue
+    }
+    const props = view.props.children.props
+    assert.equal(props.value, "observation_requested")
+    assert.equal(props.options.filter((item) => item.value === "observation_requested").length, 1)
+    for (const historicStatus of ["observation_feedback_pending", "observation_completed"]) {
+      assert.equal(props.options.some((item) => item.value === historicStatus), false)
+      props.onValueChange(historicStatus)
+      const historicView = control({ studentName: "합성 학생", track: { ...track, workflowStatus: historicStatus }, viewerRole, disabled: false, onStatusChange: (...args) => calls.push(args) })
+      assert.equal(historicView.type, Badge)
+    }
+    assert.equal(calls.length, 0)
+    props.onValueChange("enrollment_requested")
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0][0], track)
+    assert.equal(calls[0][1], "enrollment_requested")
+  }
+})
 
 test("workspace derives tab counts from application cases before filtering the selected view", async () => {
   const source = await readWorkspaceSource();
@@ -1821,7 +1893,7 @@ test("inquiry subject conflicts keep independent facts and submit the opened sub
     onWarning: () => assert.fail("a stale subject save must use the conflict result"),
   });
   const result = await runtime.exports({
-    studentName: " 학생 ", schoolGrade: "중2", schoolName: "학교", parentPhone: "01000000000",
+    studentName: " 학생 ", schoolGrade: "중2", schoolName: "학교", parentPhone: REGISTRATION_SYNTHETIC_PHONES.inquiryParent,
     studentPhone: "", campus: "본관", inquiryAt: "2026-09-07T18:00", requestNote: "내 입력", priority: "normal",
     subjects: ["영어", "과학"],
   }, "same-request");
@@ -1937,8 +2009,7 @@ test("registration application threads the exact deep-linked attempt into the re
   assert.match(detail, /activeFeedbackObservationId = activeDeepLinkedAttempt\?\.observationId/)
   assert.doesNotMatch(detail, /activeFeedbackTeacherProfileId/)
   assert.doesNotMatch(detail, /viewerId === activeDeepLinkedAttempt\?\.teacherProfileId/)
-  assert.match(detail, /canRecordAttendance=\{!activeDeepLinkedAttemptTerminal[\s\S]*?canManageCase/)
-  assert.match(detail, /canDecide=\{!activeDeepLinkedAttemptCanceled[\s\S]*?canManageCase/)
+  assert.doesNotMatch(detail, /canRecordAttendance=|canDecide=|registrationObservationFeedbackActions|recordRegistrationObservationAttendance|decideRegistrationObservation/)
   assert.doesNotMatch(detail, /canEditFeedback=/)
 })
 
@@ -1983,9 +2054,9 @@ test("mounted registration application accepts only its canonical observation bo
     loadFeedback: async () => null,
   })
   const props = {
-    task: { id: taskId, title: "김학생 등록", studentName: "김학생", type: "registration" },
+    task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06", type: "registration" },
     detail: {
-      task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+      task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06", registration: null },
       commonRevision: 1,
       tracks: [{
         id: trackId,
@@ -2130,7 +2201,7 @@ test("mounted registration application accepts only its canonical observation bo
   }
 })
 
-test("legacy observation status selector resolves to its decoupled manual target", async () => {
+test("observation status selector displays its real current stage and uses guarded generic changes", async () => {
   const taskId = "76600000-0000-4000-8000-000000000001"
   const trackId = "76600000-0000-4000-8000-000000000002"
   const directorId = "76600000-0000-4000-8000-000000000003"
@@ -2242,7 +2313,7 @@ test("legacy observation status selector resolves to its decoupled manual target
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
       statusSelect.props.options.map((option) => option.value),
-      ["waiting_current_class"],
+      ["observation_requested", "waiting_current_class"],
     )
 
     hookHarness.flushEffects()
@@ -2261,15 +2332,18 @@ test("legacy observation status selector resolves to its decoupled manual target
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
       statusSelect.props.options.map((option) => option.value),
-      ["waiting_current_class"],
+      ["observation_requested", "waiting_current_class"],
     )
 
     statusSelect.props.onValueChange("waiting_current_class")
     await flushMountedRegistrationWork()
 
     assert.equal(withdrawalCalls.length, 0)
-    assert.equal(genericStatusCalls.length, 0)
-    assert.deepEqual(reloadCalls, [])
+    assert.equal(genericStatusCalls.length, 1)
+    assert.equal(genericStatusCalls[0].trackId, trackId)
+    assert.equal(genericStatusCalls[0].workflowStatus, "waiting_current_class")
+    assert.equal(genericStatusCalls[0].expectedWorkflowRevision, 5)
+    assert.deepEqual(reloadCalls, [trackId])
   } finally {
     hookHarness.cleanup()
     globalThis.window = originalWindow
@@ -2322,9 +2396,9 @@ test("mounted consultation status selector never starts an observation process",
     notificationCalls,
   })
   const props = {
-    task: { id: taskId, title: "수학 등록", studentName: "김학생", type: "registration" },
+    task: { id: taskId, title: "수학 등록", studentName: "합성인물06", type: "registration" },
     detail: {
-      task: { id: taskId, title: "수학 등록", studentName: "김학생", registration: null },
+      task: { id: taskId, title: "수학 등록", studentName: "합성인물06", registration: null },
       commonRevision: 1,
       tracks: [{
         id: trackId,
@@ -2434,12 +2508,12 @@ test("mounted teacher registration detail keeps every mutation surface read-only
     ],
   })
   const props = {
-    task: { id: taskId, title: "교사 읽기 전용 등록", studentName: "김학생", type: "registration" },
+    task: { id: taskId, title: "교사 읽기 전용 등록", studentName: "합성인물06", type: "registration" },
     detail: {
       task: {
         id: taskId,
         title: "교사 읽기 전용 등록",
-        studentName: "김학생",
+        studentName: "합성인물06",
         registration: { schoolGrade: "중2", inquiryAt: "2026-09-01T10:00:00+09:00" },
       },
       commonRevision: 1,
@@ -2546,7 +2620,7 @@ test("mounted pre-observation detail exposes an empty booking table independentl
     loadFeedback: async () => null,
   })
   const props = {
-    task: { id: taskId, title: "영어 등록", studentName: "김학생", type: "registration" },
+    task: { id: taskId, title: "영어 등록", studentName: "합성인물06", type: "registration" },
     detail: {
       tracks: [{
         id: trackId,
@@ -2562,7 +2636,7 @@ test("mounted pre-observation detail exposes an empty booking table independentl
         legacy: false,
         waitingKind: null,
       }],
-      task: { id: taskId, title: "영어 등록", studentName: "김학생", registration: null },
+      task: { id: taskId, title: "영어 등록", studentName: "합성인물06", registration: null },
       commonRevision: 1,
       appointments: [],
       levelTests: [],
@@ -2632,7 +2706,7 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
     endsAt: "2026-08-10T11:30:00.000Z",
     teacherCatalogId: "77000000-0000-4000-8000-000000000007",
     teacherProfileId: teacherId,
-    teacherName: "김선생",
+    teacherName: "합성인물04",
     classroomCatalogId: "77000000-0000-4000-8000-000000000008",
     classroomName: "301호",
     campus: "본관",
@@ -2724,9 +2798,9 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
       },
     })
     const props = {
-      task: { id: taskId, title: "김학생 등록", studentName: "김학생", type: "registration" },
+      task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06", type: "registration" },
       detail: {
-        task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+        task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06", registration: null },
         commonRevision: 1,
         tracks: [{
           id: trackId,
@@ -2813,13 +2887,13 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
           assert.equal(feedback, null)
           continue
         }
-        assert.equal(feedback.canRecordAttendance, false)
+        assert.equal("canRecordAttendance" in feedback, false)
         assert.equal("canEditFeedback" in feedback, false, roleCase.label)
-        assert.equal(feedback.canDecide, false, roleCase.label)
+        assert.equal("canDecide" in feedback, false, roleCase.label)
       }
     })
 
-    await t.test("undecided completed and no-show attempts keep admin and staff decisions only", async () => {
+    await t.test("undecided completed and no-show attempts preserve history with no confirmation mutations", async () => {
       for (const status of ["completed", "no_show"]) {
         for (const roleCase of roleCases) {
           const feedback = await mountTerminalHistory({ status, decisionKind: null, roleCase })
@@ -2827,9 +2901,11 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
             assert.equal(feedback, null)
             continue
           }
-          assert.equal(feedback.canRecordAttendance, false)
+          assert.equal("canRecordAttendance" in feedback, false)
           assert.equal("canEditFeedback" in feedback, false, `${roleCase.label}:${status}`)
-          assert.equal(feedback.canDecide, roleCase.canManageCase, `${roleCase.label}:${status}`)
+          assert.equal("canDecide" in feedback, false, `${roleCase.label}:${status}`)
+          assert.equal("actions" in feedback, false)
+          assert.equal("onSaved" in feedback, false)
         }
       }
     })
@@ -2841,9 +2917,9 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
           assert.equal(feedback, null)
           continue
         }
-        assert.equal(feedback.canRecordAttendance, false)
+        assert.equal("canRecordAttendance" in feedback, false)
         assert.equal("canEditFeedback" in feedback, false, roleCase.label)
-        assert.equal(feedback.canDecide, false, roleCase.label)
+        assert.equal("canDecide" in feedback, false, roleCase.label)
       }
     })
   } finally {
@@ -2889,9 +2965,9 @@ test("mounted observation child loads reject A-B-A and passive overwrites", asyn
   })
   const tracks = [track(trackA, "영어"), track(trackB, "수학")]
   const applicationProps = (focusTrackId, observationRuntime = { available: true, runtimeVersion: 1 }) => ({
-    task: { id: taskId, title: "김학생 등록", studentName: "김학생", type: "registration" },
+    task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06", type: "registration" },
     detail: {
-      task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+      task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06", registration: null },
       commonRevision: 1,
       tracks,
       appointments: [],
@@ -2996,79 +3072,39 @@ test("mounted observation child loads reject A-B-A and passive overwrites", asyn
       }
     })
 
-    await t.test("forced post-save feedback outranks an older passive refresh", async () => {
-      const managerRequests = []
-      const feedbackRequests = []
+    await t.test("historic feedback commits only the newest A-B-A read and exposes no write callbacks", async () => {
+      const requests = []
       const hookHarness = createRegistrationEditorHookHarness()
       const mounted = await loadMountedRegistrationApplication({
         hookHarness,
-        loadManagerDetail: (_client, { trackId }) => {
+        loadManagerDetail: async (_client, { trackId }) => managerDetail(trackId, trackId, { ...currentObservation, trackId }),
+        loadFeedback: (_client, requestedObservationId) => {
           const deferred = createControlledPromise()
-          managerRequests.push({ trackId, deferred })
-          return deferred.promise
-        },
-        loadFeedback: (_client, requestedObservationId, options) => {
-          const deferred = createControlledPromise()
-          feedbackRequests.push({ observationId: requestedObservationId, options, deferred })
+          requests.push({ observationId: requestedObservationId, deferred })
           return deferred.promise
         },
       })
-      const props = applicationProps(trackA)
       try {
-        hookHarness.render(mounted.RegistrationApplication, props)
-        hookHarness.flushEffects()
-        managerRequests[0].deferred.resolve(managerDetail(trackA, "initial-manager", currentObservation))
-        await flushMountedRegistrationWork()
-        let view = hookHarness.render(mounted.RegistrationApplication, props)
-        hookHarness.flushEffects()
-        assert.equal(feedbackRequests.length, 1)
-        feedbackRequests[0].deferred.resolve({
-          observationId,
-          status: "completed",
-          decisionKind: null,
-          marker: "initial-feedback",
-        })
-        await flushMountedRegistrationWork()
-        view = hookHarness.render(mounted.RegistrationApplication, props)
-        hookHarness.flushEffects()
-        const initialPanel = findFeedback(view, mounted)
-        assert.equal(initialPanel.props.detail.marker, "initial-feedback")
-
-        hookHarness.render(mounted.RegistrationApplication, applicationProps(trackA, { available: false, runtimeVersion: 1 }))
-        hookHarness.flushEffects()
-        hookHarness.render(mounted.RegistrationApplication, props)
-        hookHarness.flushEffects()
-        assert.equal(managerRequests.length, 2)
-        managerRequests[1].deferred.resolve(managerDetail(trackA, "passive-manager", currentObservation))
-        await flushMountedRegistrationWork()
-        view = hookHarness.render(mounted.RegistrationApplication, props)
-        hookHarness.flushEffects()
-        assert.equal(feedbackRequests.length, 2)
-        assert.equal(feedbackRequests[1].options, undefined)
-
-        const saved = {
-          observationId,
-          status: "completed",
-          decisionKind: null,
-          marker: "saved-feedback",
+        for (const focusTrackId of [trackA, trackB, trackA]) {
+          hookHarness.render(mounted.RegistrationApplication, applicationProps(focusTrackId))
+          hookHarness.flushEffects()
+          await flushMountedRegistrationWork()
+          hookHarness.render(mounted.RegistrationApplication, applicationProps(focusTrackId))
+          hookHarness.flushEffects()
         }
-        const savedRefresh = initialPanel.props.onSaved(saved)
-        assert.equal(managerRequests.length, 3)
-        managerRequests[2].deferred.resolve(managerDetail(trackA, "forced-manager", currentObservation))
+        assert.equal(requests.length, 3)
+        requests[2].deferred.resolve({ observationId, status: "completed", marker: "latest-history" })
         await flushMountedRegistrationWork()
-        assert.equal(feedbackRequests.length, 3)
-        assert.deepEqual(feedbackRequests[2].options, { force: true })
-        feedbackRequests[2].deferred.resolve({ ...saved, marker: "forced-feedback" })
-        await savedRefresh
-        view = hookHarness.render(mounted.RegistrationApplication, props)
+        let view = hookHarness.render(mounted.RegistrationApplication, applicationProps(trackA))
         hookHarness.flushEffects()
-        assert.equal(findFeedback(view, mounted).props.detail.marker, "forced-feedback")
-
-        feedbackRequests[1].deferred.resolve({ ...saved, marker: "passive-stale" })
+        assert.equal(findFeedback(view, mounted).props.detail.marker, "latest-history")
+        assert.deepEqual(Object.keys(findFeedback(view, mounted).props), ["detail"])
+        requests[0].deferred.resolve({ observationId, status: "completed", marker: "stale-A-history" })
+        requests[1].deferred.resolve({ observationId, status: "completed", marker: "stale-B-history" })
         await flushMountedRegistrationWork()
-        view = hookHarness.render(mounted.RegistrationApplication, props)
+        view = hookHarness.render(mounted.RegistrationApplication, applicationProps(trackA))
         hookHarness.flushEffects()
-        assert.equal(findFeedback(view, mounted).props.detail.marker, "forced-feedback")
+        assert.equal(findFeedback(view, mounted).props.detail.marker, "latest-history")
       } finally {
         hookHarness.cleanup()
       }
@@ -3172,7 +3208,7 @@ test("bounded execution windows never lock factual or status editing and only fe
   assert.equal((application.match(/readOnly=\{!canManageAppointments\}/g) || []).length, 2)
   assert.equal((application.match(/canOpenCustomerMessage=\{canManageAppointments\}/g) || []).length, 2)
   assert.match(application, /permissions=\{\{ canManage: admissionEditable, readOnly: !admissionEditable \}\}/)
-  assert.match(application, /aria-label=\{`\$\{activeGenericTrack\.subject\} 진행상태`\}[\s\S]*?disabled=\{!canManageCase/)
+  assert.match(application, /aria-label=\{`\$\{activeTrack\.subject\} 진행상태`\}[\s\S]*?disabled=\{!canManageCase/)
   assert.match(application, /<RegistrationInquiryEditor[\s\S]*?canEdit=\{canManageCase\}/)
 })
 
@@ -3189,9 +3225,9 @@ test("mounted incomplete execution windows lock only their process sections", as
   })
   try {
     const view = hookHarness.render(mounted.RegistrationApplication, {
-      task: { id: taskId, title: "김학생 등록", studentName: "김학생" },
+      task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06" },
       detail: {
-        task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+        task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06", registration: null },
         commonRevision: 1,
         tracks: [{
           id: trackId,
@@ -3292,7 +3328,7 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
   const taskId = "7a000000-0000-4000-8000-000000000001"
   const trackId = "7a000000-0000-4000-8000-000000000002"
   const baseDetail = {
-    task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+    task: { id: taskId, title: "합성인물06 등록", studentName: "합성인물06", registration: null },
     commonRevision: 1,
     events: [{
       id: "history-event", trackId, eventType: "case_created", subject: "영어",
@@ -3883,7 +3919,7 @@ test("phone and visit consultation completion share one inline subject outcome e
   assert.doesNotMatch(stageSource, /onOpenOutcome|전화상담 완료|방문상담 완료/)
   assert.doesNotMatch(application, /onOpenOutcome=\{/)
   assert.doesNotMatch(application, /청강 피드백을 불러오는 중입니다/)
-  assert.match(application, /청강 확인 정보를 불러오는 중입니다/)
+  assert.match(application, /기존 청강 이력을 불러오는 중입니다/)
 })
 
 test("registration stage selects have subject-specific accessible names", async () => {
@@ -4665,7 +4701,7 @@ test("an unrelated subject open batch does not block registered draft editing", 
   const canEditBlock = sourceBetween(editorBlock, "const canEditRows", "const selectedCancelEnrollment")
   assert.match(canEditBlock, /permissions\.canManage[\s\S]*?&& !rowsRefreshPending/)
   assert.doesNotMatch(canEditBlock, /trackHasOpenBatch|openBatch/)
-  assert.match(editorBlock, /if \(!enrollment \|\| saving \|\| cancellationRefreshPending \|\| trackHasOpenBatch\) return/)
+  assert.match(editorBlock, /if \(!isCurrentEditableScope\(\)[\s\S]*?\|\| !enrollment \|\| saving \|\| cancellationRefreshPending \|\| trackHasOpenBatch\) return/)
   const service = await readFile(new URL("../src/features/tasks/registration-track-service.ts", import.meta.url), "utf8")
   const saveBlock = sourceBetween(service, "async function saveRegistrationEnrollmentRows", "async function claimRegistrationAdmissionMessage")
   assert.doesNotMatch(saveBlock, /admissionBatches|hasOtherOpenBatch/)
@@ -4949,7 +4985,7 @@ test("enrollment rows and persisted cancellations report and recover separate ow
   assert.match(block, /canonicalKeyRef/)
   assert.match(editor, /getRegistrationEnrollmentDirtyKey/)
   assert.match(editor, /clearRegistrationEnrollmentDrafts\(detail\.task\.id\)/)
-  assert.match(actions, /key=\{`enrollment:\$\{track\.id\}`\}/)
+  assert.match(actions, /key=\{`enrollment:\$\{detail\.task\.id\}:\$\{track\.id\}:\$\{viewerId\}`\}/)
 })
 
 test("level-test result saving retains its draft until the mutation commits", async () => {
@@ -5192,6 +5228,268 @@ test("mounted enrollment editor saves multiple textbooks and retains them after 
     const readOnly = hookHarness.render(Editor, { ...props, permissions: { canManage: false } })
     assert.equal(select(readOnly).props.disabled, true)
   } finally { hookHarness.cleanup() }
+})
+
+test("mounted guarded enrollment keeps the opened snapshot across a dirty refresh and rejects duplicate callbacks", async () => {
+  const hooks = createRegistrationEditorHookHarness()
+  const pending = createControlledPromise()
+  const calls = []
+  const Editor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness: hooks, loadObservation: async () => null,
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+    saveEnrollmentDetails: async (input) => { calls.push(input); return pending.promise },
+  })
+  const rowId = "76000000-0000-4000-8000-000000000066"
+  const enrollment = { id: rowId, trackId: MOUNTED_REGISTRATION_TRACK_ID,
+    classId: MOUNTED_REGISTRATION_CLASS_ID, textbookId: null, textbookIds: [],
+    classStartDate: null, classStartSessionKey: null, classStartSession: null,
+    classStartLessonSessionId: null, classStartSourceObservationId: null,
+    status: "planned", studentId: null, admissionBatchId: null, rosterActive: false, sortOrder: 0 }
+  const props = mountedRegistrationEditorProps({ enrollments: [enrollment] })
+  const render = (input = props) => { hooks.flushEffects(); return hooks.render(Editor, input) }
+  try {
+    let view = render(); hooks.flushEffects(); await flushMountedRegistrationWork(); view = render()
+    findMountedRegistrationElement(view, el => el.props.subject === "영어" && el.props.rowIndex === 1 && Array.isArray(el.props.sessions), "calendar")
+      .props.onSelect(findMountedRegistrationElement(view, el => el.props.subject === "영어" && el.props.rowIndex === 1 && Array.isArray(el.props.sessions), "calendar").props.sessions[0])
+    view = render(); hooks.flushEffects()
+    const refreshed = { ...props, track: { ...props.track, workflowRevision: 9 }, enrollments: [{ ...enrollment, status: "canceled" }] }
+    view = render(refreshed); hooks.flushEffects(); view = render(refreshed)
+    const click = findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 등록 정보 저장", "save").props.onClick
+    click(); click(); await flushMountedRegistrationWork()
+    assert.equal(calls.length, 1, "same-render callbacks produce one mutation")
+    assert.equal(calls[0].expectedWorkflowRevision, 1, "a sibling refresh cannot replace a dirty editor's opened revision")
+    assert.equal(calls[0].expectedRows[0].id, rowId, "canceled-row freshness uses the saved draft identity")
+    pending.reject({ code: "23514", message: "registration_enrollment_details_refresh_required" })
+    await flushMountedRegistrationWork(); view = render(refreshed)
+    const calendar = findMountedRegistrationElement(view, el => el.props.subject === "영어" && el.props.rowIndex === 1 && Array.isArray(el.props.sessions), "preserved calendar")
+    assert.equal(calendar.props.valueDate, "2026-08-24", "a stale save preserves the selected start date")
+  } finally { hooks.cleanup() }
+})
+
+test("mounted committed enrollment hydrates canonical IDs and recovers a failed refresh without resaving", async () => {
+  const hooks = createRegistrationEditorHookHarness()
+  const calls = []
+  let reloads = 0
+  const canonicalId = "76000000-0000-4000-8000-000000000077"
+  const Editor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness: hooks, loadObservation: async () => null,
+    loadClassDetails: async () => mountedRegistrationClassDetails(),
+    saveEnrollmentDetails: async input => { calls.push(input); return { trackId: input.trackId,
+      rows: input.rows.map(row => ({ ...row, id: canonicalId })), workflowStatus: "enrollment_requested",
+      workflowRevision: 2, workflowStatusEnteredAt: "2026-10-13T09:00:00Z", statusChanged: true,
+      externalReconciliationRequired: false } },
+  })
+  const props = mountedRegistrationEditorProps({ onReload: async () => { reloads += 1; if (reloads === 1) throw new Error("refresh failed") } })
+  const render = () => { hooks.flushEffects(); return hooks.render(Editor, props) }
+  try {
+    let view = render(); hooks.flushEffects()
+    findMountedRegistrationElement(view, el => el.props.label === "영어 수업 1 선택", "class").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = render(); hooks.flushEffects(); await flushMountedRegistrationWork(); view = render(); hooks.flushEffects(); view = render()
+    const click = findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 등록 정보 저장", "save").props.onClick
+    click(); await flushMountedRegistrationWork(); view = render()
+    assert.equal(calls.length, 1)
+    assert.equal(reloads, 1)
+    click(); await flushMountedRegistrationWork()
+    assert.equal(calls.length, 1, "even a retained pre-commit callback cannot resubmit after failed refresh")
+    findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 수업 최신 내용 다시 불러오기", "recover committed save").props.onClick()
+    await flushMountedRegistrationWork(); view = render()
+    assert.equal(reloads, 2)
+    assert.equal(calls.length, 1, "recovery only rereads the committed result")
+    assert.match(collectMountedRegistrationText(view).join(" "), /수강 취소/, "the hydrated canonical row is persisted")
+  } finally { hooks.cleanup() }
+})
+
+test("mounted externalized facts refresh clean values while a dirty correction retains its opened snapshot", async () => {
+  const hooks = createRegistrationEditorHookHarness()
+  const calls = []
+  const book = "76000000-0000-4000-8000-000000000081"
+  const details = mountedRegistrationClassDetails()
+  details[MOUNTED_REGISTRATION_CLASS_ID].textbookIds = [book]
+  const Editor = await loadMountedRegistrationEnrollmentEditor({ hookHarness: hooks,
+    loadObservation: async () => null, loadClassDetails: async () => details,
+    saveEnrollmentDetails: async input => { calls.push(input); throw new Error("synthetic correction blocked") },
+  })
+  const row = { classId: MOUNTED_REGISTRATION_CLASS_ID, textbookId: null, textbookIds: [],
+    classStartDate: null, classStartSessionKey: null, classStartSession: null, sortOrder: 0 }
+  const props = mountedRegistrationEditorProps({
+    track: { ...mountedRegistrationEditorProps().track, enrollmentDetailRows: [row] },
+    enrollments: [{ ...row, id: "76000000-0000-4000-8000-000000000099", trackId: MOUNTED_REGISTRATION_TRACK_ID,
+      status: "planned", rosterActive: false, studentId: "synthetic-student", admissionBatchId: "synthetic-batch" }],
+    classes: [{ id: MOUNTED_REGISTRATION_CLASS_ID, label: "중2 영어 A반", subject: "영어", textbookIds: [book] }],
+    textbooks: [{ id: book, label: "합성 교재" }],
+  })
+  const render = input => { hooks.flushEffects(); return hooks.render(Editor, input) }
+  const calendar = view => findMountedRegistrationElement(view, el => el.props.subject === "영어" && el.props.rowIndex === 1 && Array.isArray(el.props.sessions), "calendar")
+  try {
+    let view = render(props); hooks.flushEffects(); await flushMountedRegistrationWork(); view = render(props)
+    const correctedRow = { ...row, classStartDate: "2026-08-24", classStartSessionKey: MOUNTED_REGISTRATION_FUTURE_SESSION_KEY,
+      classStartSession: "2회차", classStartLessonSessionId: "76000000-0000-4000-8000-000000000007" }
+    const cleanRefresh = { ...props, track: { ...props.track, enrollmentDetailRows: [correctedRow] } }
+    view = render(cleanRefresh); hooks.flushEffects(); view = render(cleanRefresh); hooks.flushEffects(); view = render(cleanRefresh)
+    assert.equal(calendar(view).props.valueDate, "2026-08-24", "clean canonical corrections become visible before a new edit")
+    findMountedRegistrationElement(view, el => el.props.label === "영어 수업 1 교재 선택", "textbook").props.onValuesChange([book])
+    view = render(cleanRefresh); hooks.flushEffects()
+    const concurrent = { ...cleanRefresh, track: { ...cleanRefresh.track, enrollmentDetailRows: [{ ...correctedRow, textbookIds: [book], textbookId: book }] } }
+    view = render(concurrent); hooks.flushEffects(); view = render(concurrent)
+    findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 등록 정보 저장", "save").props.onClick()
+    await flushMountedRegistrationWork()
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].expectedRows[0].classStartDate, "2026-08-24")
+    assert.deepEqual(calls[0].expectedRows[0].textbookIds, [], "dirty edits retain the facts from before the collaborator's correction")
+    assert.deepEqual(calls[0].rows[0].textbookIds, [book], "the local correction remains intact")
+  } finally { hooks.cleanup() }
+})
+
+test("mounted enrollment shares one mutation guard between save and cancel and blocks cross-owner writes after committed refresh failure", async () => {
+  for (const firstAction of ["save", "cancel"]) {
+    const hooks = createRegistrationEditorHookHarness()
+    const pending = createControlledPromise()
+    const saves = []
+    const cancels = []
+    const row = { id: "76000000-0000-4000-8000-000000000099", trackId: MOUNTED_REGISTRATION_TRACK_ID,
+      classId: MOUNTED_REGISTRATION_CLASS_ID, textbookId: null, textbookIds: [],
+      classStartDate: null, classStartSessionKey: null, classStartSession: null, sortOrder: 0,
+      status: "planned", rosterActive: false, studentId: null, admissionBatchId: null }
+    const Editor = await loadMountedRegistrationEnrollmentEditor({ hookHarness: hooks,
+      loadObservation: async () => null, loadClassDetails: async () => mountedRegistrationClassDetails(),
+      saveEnrollmentDetails: async input => { saves.push(input); return pending.promise },
+      cancelEnrollment: async input => { cancels.push(input); return pending.promise },
+    })
+    const props = mountedRegistrationEditorProps({ enrollments: [row], onReload: async () => { throw new Error("reload failed") } })
+    const render = () => { hooks.flushEffects(); return hooks.render(Editor, props) }
+    try {
+      let view = render(); hooks.flushEffects(); await flushMountedRegistrationWork(); view = render()
+      const calendar = findMountedRegistrationElement(view, el => el.props.subject === "영어" && el.props.rowIndex === 1 && Array.isArray(el.props.sessions), "calendar")
+      calendar.props.onSelect(calendar.props.sessions[0]); view = render(); hooks.flushEffects()
+      findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 수업 1 수강 취소", "open cancel").props.onClick()
+      view = render()
+      findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 수강 취소 사유", "reason").props.onChange({ target: { value: "합성 취소" } })
+      view = render()
+      const save = findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 등록 정보 저장", "save").props.onClick
+      const cancel = findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 수강 취소 확인", "cancel").props.onClick
+      if (firstAction === "save") { save(); cancel() } else { cancel(); save() }
+      await flushMountedRegistrationWork()
+      assert.equal(saves.length + cancels.length, 1, "same-render competing owners send one write")
+      pending.resolve(firstAction === "save" ? { trackId: props.track.id, rows: saves[0].rows, workflowRevision: 2,
+        workflowStatus: "enrollment_requested", externalReconciliationRequired: false } : {})
+      await flushMountedRegistrationWork(); view = render()
+      if (firstAction === "save") cancel(); else save()
+      await flushMountedRegistrationWork()
+      assert.equal(saves.length + cancels.length, 1, "a committed refresh failure blocks every other write owner")
+      assert.equal(findMountedRegistrationElements(view, el => String(el.props["aria-label"] || "").includes("최신 내용 다시 불러오기")).length, 1)
+    } finally { hooks.cleanup() }
+  }
+})
+
+test("mounted enrollment refuses retained callbacks after permission actor active scope changes and unmount", async () => {
+  for (const change of ["permission", "actor", "inactive", "unmount"]) {
+    const hooks = createRegistrationEditorHookHarness()
+    const calls = []
+    const Editor = await loadMountedRegistrationEnrollmentEditor({ hookHarness: hooks,
+      loadObservation: async () => null, loadClassDetails: async () => mountedRegistrationClassDetails(),
+      saveEnrollmentDetails: async input => { calls.push(input); throw new Error("must not submit") },
+    })
+    const props = mountedRegistrationEditorProps()
+    const render = input => { hooks.flushEffects(); return hooks.render(Editor, input) }
+    try {
+      let view = render(props); hooks.flushEffects()
+      findMountedRegistrationElement(view, el => el.props.label === "영어 수업 1 선택", "class").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+      view = render(props); hooks.flushEffects(); await flushMountedRegistrationWork(); view = render(props)
+      const click = findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 등록 정보 저장", "save").props.onClick
+      if (change === "unmount") hooks.cleanup()
+      else render(change === "actor" ? { ...props, viewerId: "different-viewer" }
+        : change === "inactive" ? { ...props, active: false } : { ...props, permissions: { canManage: false } })
+      click(); await flushMountedRegistrationWork()
+      assert.equal(calls.length, 0, `retained callback blocked after ${change}`)
+    } finally { hooks.cleanup() }
+  }
+})
+
+test("actual guarded service rejects an empty saved reply before the editor can clear a nonempty draft", async () => {
+  const hooks = createRegistrationEditorHookHarness()
+  const calls = []
+  const warnings = []
+  let reloads = 0
+  const service = await loadActualGuardedEnrollmentService((name, args) => {
+    calls.push([name, args])
+    return Promise.resolve({ data: { trackId: args.p_track_id, rows: [], workflowStatus: "consultation_completed",
+      workflowRevision: args.p_expected_workflow_revision, workflowStatusEnteredAt: "2026-10-13T09:00:00Z",
+      statusChanged: false, externalReconciliationRequired: false }, error: null })
+  })
+  const Editor = await loadMountedRegistrationEnrollmentEditor({ hookHarness: hooks,
+    loadObservation: async () => null, loadClassDetails: async () => mountedRegistrationClassDetails(),
+    saveEnrollmentDetails: input => service.saveRegistrationEnrollmentDetails(input) })
+  const props = mountedRegistrationEditorProps({ onReload: async () => { reloads += 1 }, onWarning: value => warnings.push(value) })
+  const render = () => { hooks.flushEffects(); return hooks.render(Editor, props) }
+  try {
+    let view = render(); hooks.flushEffects()
+    findMountedRegistrationElement(view, el => el.props.label === "영어 수업 1 선택", "class").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = render(); hooks.flushEffects(); await flushMountedRegistrationWork(); view = render()
+    findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 등록 정보 저장", "save").props.onClick()
+    await flushMountedRegistrationWork(); view = render()
+    assert.equal(calls.length, 1)
+    assert.equal(reloads, 0, "malformed success cannot enter committed reload")
+    assert.equal(findMountedRegistrationElement(view, el => el.props.label === "영어 수업 1 선택", "preserved draft").props.value, MOUNTED_REGISTRATION_CLASS_ID)
+    assert.match(warnings.at(-1), /저장 결과를 확인하지 못했습니다/)
+  } finally { hooks.cleanup() }
+})
+
+test("enrollment accepts its already-sent result on an inactive tab and suppresses refresh callbacks after owner loss", async () => {
+  for (const change of ["inactive", "unmount-during-refresh"]) {
+    const hooks = createRegistrationEditorHookHarness()
+    const saved = createControlledPromise()
+    const reload = createControlledPromise()
+    const warnings = []
+    let request
+    let reloads = 0
+    const Editor = await loadMountedRegistrationEnrollmentEditor({ hookHarness: hooks,
+      loadObservation: async () => null, loadClassDetails: async () => mountedRegistrationClassDetails(),
+      saveEnrollmentDetails: async input => { request = input; return saved.promise } })
+    const props = mountedRegistrationEditorProps({ onReload: async () => { reloads += 1; return reload.promise },
+      onWarning: value => warnings.push(value) })
+    const render = input => { hooks.flushEffects(); return hooks.render(Editor, input) }
+    try {
+      let view = render(props); hooks.flushEffects()
+      findMountedRegistrationElement(view, el => el.props.label === "영어 수업 1 선택", "class").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+      view = render(props); hooks.flushEffects(); await flushMountedRegistrationWork(); view = render(props)
+      findMountedRegistrationElement(view, el => el.props["aria-label"] === "영어 등록 정보 저장", "save").props.onClick()
+      await flushMountedRegistrationWork()
+      const inactive = { ...props, active: false }
+      if (change === "inactive") render(inactive)
+      saved.resolve({ trackId: request.trackId, rows: request.rows.map(row => ({ ...row,
+        id: "76000000-0000-4000-8000-000000000077" })), workflowRevision: 1, externalReconciliationRequired: false })
+      await flushMountedRegistrationWork()
+      assert.equal(reloads, 1, "a hidden same-actor track still accepts its own committed response")
+      if (change === "unmount-during-refresh") {
+        hooks.cleanup(); reload.reject(new Error("late refresh failure"))
+        await flushMountedRegistrationWork()
+        assert.deepEqual(warnings.filter(Boolean), [], "a lost owner cannot issue refresh warnings")
+      } else {
+        reload.resolve(); await flushMountedRegistrationWork(); view = render(inactive)
+        assert.match(collectMountedRegistrationText(view).join(" "), /수강 취소/, "the canonical generated ID is hydrated on the inactive track")
+      }
+    } finally { hooks.cleanup() }
+  }
+})
+
+test("enrollment cache restores same-viewer navigation and isolates another viewer's draft", async () => {
+  const hooks = createRegistrationEditorHookHarness()
+  const Editor = await loadMountedRegistrationEnrollmentEditor({ hookHarness: hooks,
+    loadObservation: async () => null, loadClassDetails: async () => mountedRegistrationClassDetails() })
+  const props = mountedRegistrationEditorProps()
+  const render = input => { hooks.flushEffects(); return hooks.render(Editor, input) }
+  const classChoice = view => findMountedRegistrationElement(view, el => el.props.label === "영어 수업 1 선택", "class")
+  try {
+    let view = render(props); hooks.flushEffects()
+    classChoice(view).props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = render(props); hooks.flushEffects(); await flushMountedRegistrationWork(); view = render(props); hooks.flushEffects()
+    hooks.remount()
+    view = render(props); hooks.flushEffects()
+    assert.equal(classChoice(view).props.value, MOUNTED_REGISTRATION_CLASS_ID, "same viewer retains an unsaved navigation draft")
+    hooks.remount()
+    view = render({ ...props, viewerId: "other-viewer" }); hooks.flushEffects()
+    assert.equal(classChoice(view).props.value, "", "another viewer starts with its own canonical data")
+  } finally { hooks.cleanup() }
 })
 
 test("inactive enrollment defers its observation read until the subject is selected", async () => {

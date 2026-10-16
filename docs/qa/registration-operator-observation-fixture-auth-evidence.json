@@ -1,0 +1,59 @@
+{
+  "previousTestedCommit": "bde58ada982b4c1e01cb352598136d18ed83a35d",
+  "priorMacReceiptSha256": "00fa1fe299134ccc8bbb350d5d8a7c756dd793c6ae7027844768089e8d6ec90e",
+  "priorMacResults": {
+    "node22": {
+      "passed": 53,
+      "failed": 0
+    },
+    "layout": "PASS",
+    "linuxFixture10": "PASS",
+    "guardedSaveSql": {
+      "completedSubtestsBeforeSeedFailure": 20,
+      "error": "registration_access_denied",
+      "fileExit": 3,
+      "gateExit": 1
+    },
+    "postdeploy": "NOT_REACHED",
+    "race7": "NOT_REACHED"
+  },
+  "sourceSha256": "a940b4676096e30f9256822b4cf55779f1d9fca33a0d0da7195aa2d07b1d4f41",
+  "sourcePathCount": 49,
+  "changedFixtureSha256": "879621aa654cd9bff2193b68ca3b89fddbdb0c99d362b64c3ad090bdafaa4a1a",
+  "localVerification": {
+    "scope": "Source ordering and boundary regression only; no DB executed in cloud",
+    "runtime": "Node24.19.0",
+    "passed": 6,
+    "failed": 0,
+    "skipped": 0,
+    "logSha256": "9440032bfa57b9ef306fa16de1645a1082fca3ad568eafa62b0da7ec51f9cc90"
+  },
+  "audit": {
+    "bootstrap": "Clear malformed/stale sub, role and JSON claims; create synthetic account/profile rows; set consistent active manager before domain writes.",
+    "initialEnrollmentTriggers": "Final 20260809104000 sync trigger requires auth.uid and active account. Final 20260901111000 all-write fence requires actual admin/staff for non-null actor. Negative inserts assert missing actor, unknown account and forged teacher claims with exact42501 errors.",
+    "timetable": "Provide explicit legacy session key/time/catalog IDs, nonoverlapping times and matching weekdays. Link normalized lesson to complete weekly slot. Clear five schedule-context GUCs after seed. Preserve production final 20261014180000 deferred validator.",
+    "seedConstraints": "Flush in a savepoint after the complete graph; roll back only the validation checkpoint to restore default constraint timing.",
+    "temporaryPrivileges": "Only existing temporary results/cases grants; private snapshots read after reset role. No persistent role/grant/constraint changes.",
+    "roleTests": "Use a distinct active synthetic admin for fixture profile restoration, then restore original actor for replay/archive checks.",
+    "cleanup": "Drop fault trigger and disable fault setting; restore active manager before final deferred checks; compare history/no-send after flush; clear all JWT representations; finish and rollback."
+  },
+  "unchangedSourcePins": {
+    "scripts/run-isolated-supabase-db-tests.mjs": "581731526c3ca61d284d597b83313e2b200f1a35c40e9f6439c1c12dabfa8439",
+    "scripts/run-isolated-postgres-fixture-tests.mjs": "b6eafd82f1094179fb61ce6b67d2aa8a6d7edc631d8f9cd87fead8860f310cb3",
+    "supabase/tests/active_registration_workflow_postdeploy_readonly.sql": "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343",
+    "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3",
+    "tests/probe-registration-enrollment-guarded-save-concurrency.mjs": "43650f87f2fa2b354d079de0be4e5598c5e959a9df35ca6c776a27aee4cc8ad4",
+    "supabase/tests/registration_enrollment_guarded_save_race.spec": "c59b3977bf67a175b87a96b3afc7b421396d3d0c2b402825978757395c60164c",
+    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
+  },
+  "separateUnreachedFinding": {
+    "path": "supabase/tests/registration_enrollment_guarded_save_race.spec",
+    "finding": "Setup enrollment INSERT occurs before session JWT configuration; same auth precondition needs a separate race-fixture correction.",
+    "changed": false,
+    "runtimeVerified": false
+  },
+  "productDefectEstablished": false,
+  "newDatabaseRuntimeResult": "PENDING Mac single-SQL run",
+  "candidateStatus": "candidate",
+  "operationalMutations": false
+}

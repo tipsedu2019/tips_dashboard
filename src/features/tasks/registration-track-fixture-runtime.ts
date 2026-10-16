@@ -103,6 +103,23 @@ function getActiveFixtureAdapter() {
   return activeFixtureAdapters[activeFixtureAdapters.length - 1] || null
 }
 
+export function hasRegistrationSubjectTrackFixtureContext(): boolean {
+  // Registration can precede adapter readiness or outlive its URL activation.
+  // Treat every registered adapter, including malformed adapters, as fixture
+  // context rather than allowing an implicit production-client fallback.
+  if (activeFixtureAdapters.length > 0) return true
+  try {
+    if (typeof window === "undefined") return false
+    const search = window.location?.search
+    if (typeof search !== "string") return true
+    // Empty, duplicate and unrecognized fixture values are still fixture
+    // context. An unreadable browser state must also fail closed.
+    return new URLSearchParams(search).has("fixture")
+  } catch {
+    return true
+  }
+}
+
 function isRegistrationSubjectTrackFixtureUrlActive() {
   if (typeof window === "undefined") return false
   return shouldEnableRegistrationSubjectTrackFixture(

@@ -21,7 +21,7 @@ const CASES = Object.freeze([
     trackId: "fixture-track-dual-english",
     appointmentId: "fixture-appointment-dual-test",
     trigger: "예약 안내 알림톡",
-    body: "TIPS 레벨테스트 예약 안내\n김다미 학생의 영어, 수학 레벨테스트가 예약되었습니다.",
+    body: "TIPS 레벨테스트 예약 안내\n합성인물02 학생의 영어, 수학 레벨테스트가 예약되었습니다.",
   },
   {
     messageKind: "appointment_reminder",
@@ -29,7 +29,7 @@ const CASES = Object.freeze([
     trackId: "fixture-track-dual-english",
     appointmentId: "fixture-appointment-dual-test",
     trigger: "리마인드 알림톡",
-    body: "TIPS 예약 리마인드\n김다미 학생의 레벨테스트 일정을 다시 안내드립니다.",
+    body: "TIPS 예약 리마인드\n합성인물02 학생의 레벨테스트 일정을 다시 안내드립니다.",
   },
   {
     messageKind: "visit_consultation_booking",
@@ -37,21 +37,21 @@ const CASES = Object.freeze([
     trackId: "fixture-track-split-english",
     appointmentId: "fixture-appointment-split-visit",
     trigger: "예약 안내 알림톡",
-    body: "TIPS 방문상담 예약 안내\n박서준 학생의 방문상담이 예약되었습니다.",
+    body: "TIPS 방문상담 예약 안내\n합성인물09 학생의 방문상담이 예약되었습니다.",
   },
   {
     messageKind: "waiting_notice",
     taskId: "fixture-task-waiting-notice",
     trackId: "fixture-track-waiting-notice-english",
     trigger: "대기 안내 알림톡",
-    body: "TIPS 대기 안내\n문하늘 학생의 영어 신규반 대기 신청이 접수되었습니다.",
+    body: "TIPS 대기 안내\n합성인물07 학생의 영어 신규반 대기 신청이 접수되었습니다.",
   },
   {
     messageKind: "admission_application",
     taskId: "fixture-task-multiple-classes",
     trackId: "fixture-track-multiple-english",
     trigger: "입학신청서 알림톡",
-    body: "TIPS 입학신청서 안내\n최유진 학생의 입학신청서를 확인해 주세요.",
+    body: "TIPS 입학신청서 안내\n합성인물18 학생의 입학신청서를 확인해 주세요.",
     unknown: true,
   },
 ])

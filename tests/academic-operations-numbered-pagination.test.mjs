@@ -49,6 +49,45 @@ function academicRow(n) {
 }
 const operationsRow = (n) => ({ id: id(n), name: `[가] 수업 ${n}`, subject: '수학', grade: '고1', schedule: '', termId: null,
   teacherName: null, termName: null, syncGroupId: null, syncGroupName: null, status: '', updatedAt: null });
+
+function installDebounceClock(t) {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const pending = new Map();
+  let now = 0;
+  // Only the search debounce is virtual. React scheduling and request deadlines
+  // retain their real clocks, so slow rendering cannot consume the typing window.
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay !== 250 || typeof callback !== 'function') return originalSetTimeout(callback, delay, ...args);
+    const timer = {};
+    pending.set(timer, { at: now + delay, callback, args });
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    if (!pending.delete(timer)) originalClearTimeout(timer);
+  };
+  t.after(() => {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    pending.clear();
+  });
+  return {
+    get pendingCount() { return pending.size; },
+    advance(milliseconds) {
+      const target = now + milliseconds;
+      while (true) {
+        const next = [...pending].filter(([, task]) => task.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next) break;
+        const [timer, task] = next;
+        now = task.at;
+        pending.delete(timer);
+        task.callback(...task.args);
+      }
+      now = target;
+    },
+  };
+}
+
 function response(domain, request, totalCount = 260, patch = {}) {
   const { p_page: page, p_page_size: pageSize } = request.args;
   const rows = Array.from({ length: Math.min(pageSize, Math.max(0, totalCount - (page - 1) * pageSize)) }, (_, i) =>
@@ -726,20 +765,27 @@ for (const domain of ['academic', 'operations']) {
 for (const domain of ['academic', 'operations']) test(`${domain}: search coalesces typing, respects IME, Enter, clear and history`, async (t) => {
   const page = await setup(t, domain, { workspace: true });
   await act(async () => page.finish(page.numbered()[0]));
+  const clock = installDebounceClock(t);
   const input = () => document.querySelector('input[type="search"]');
   const handlers = () => input()[Object.keys(input()).find(key => key.startsWith('__reactProps'))];
   for (const value of ['a', 'ab', 'abc', 'abcd']) await act(async () => handlers().onChange({ target: { value }, nativeEvent: {} }));
   assert.equal(page.numbered().length, 1);
-  await act(async () => new Promise(resolve => setTimeout(resolve, 280)));
+  assert.equal(clock.pendingCount, 1, 'rapid changes retain only the newest debounce callback');
+  await act(async () => clock.advance(249));
+  assert.equal(page.numbered().length, 1, 'typing dispatches no search before the 250ms boundary');
+  await act(async () => clock.advance(1));
   assert.equal(page.numbered().length, 2);
   assert.equal(page.numbered().at(-1).args.p_filters.search, 'abcd');
+  assert.deepEqual(page.numbered().map(request => request.args.p_filters.search), ['', 'abcd'], 'intermediate input never reaches the reader');
   await act(async () => handlers().onCompositionStart());
   await act(async () => handlers().onChange({ target: { value: 'ㄱ' }, nativeEvent: { isComposing: true } }));
-  await act(async () => new Promise(resolve => setTimeout(resolve, 280)));
+  await act(async () => clock.advance(250));
   assert.equal(page.numbered().length, 2);
+  assert.equal(clock.pendingCount, 0, 'IME input schedules no search');
   await act(async () => handlers().onCompositionEnd({ currentTarget: { value: '가' } }));
   await act(async () => handlers().onKeyDown({ key: 'Enter', nativeEvent: { isComposing: false }, preventDefault() {} }));
   assert.equal(page.numbered().at(-1).args.p_filters.search, '가');
+  assert.equal(clock.pendingCount, 0, 'Enter cancels the delayed commit after committing immediately');
   await act(async () => handlers().onChange({ target: { value: '' }, nativeEvent: {} }));
   assert.equal(page.numbered().at(-1).args.p_filters.search, '');
   await act(async () => handlers().onChange({ target: { value: 'pending' }, nativeEvent: {} }));
@@ -747,6 +793,7 @@ for (const domain of ['academic', 'operations']) test(`${domain}: search coalesc
   assert.equal(page.numbered().at(-1).args.p_filters.search, 'restored');
   assert.equal(page.numbered().at(-1).args.p_page, 3);
   const count = page.numbered().length;
-  await act(async () => new Promise(resolve => setTimeout(resolve, 280)));
+  await act(async () => clock.advance(250));
   assert.equal(page.numbered().length, count, 'old timer cannot override restored search');
+  assert.equal(clock.pendingCount, 0, 'history restoration cancels the old debounce callback');
 });

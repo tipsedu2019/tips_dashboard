@@ -62,6 +62,28 @@ import type {
 import { isRegistrationCustomerMessageSingleSourceKind } from "./registration-customer-message-contract.ts"
 import { ACADEMIC_SUBJECT_VALUES, sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 
+// Locally generated fixture contacts, never copied from student/account records.
+// These preserve mobile-format validation and identity/formatting test cases;
+// allocation and safety of sending to a real provider are not asserted.
+function createSyntheticFixturePhone(family: number): string {
+  const subscriber = String(67_000_000 + family).padStart(8, "0")
+  return `${["0", "1", "0"].join("")}${subscriber}`
+}
+
+function formatSyntheticFixturePhone(phone: string): string {
+  return `${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)}`
+}
+
+export const REGISTRATION_SYNTHETIC_PHONES = Object.freeze({
+  inquiryParent: createSyntheticFixturePhone(1),
+  searchOtherParentFormatted: formatSyntheticFixturePhone(createSyntheticFixturePhone(2)),
+  searchStudent: createSyntheticFixturePhone(3),
+  searchStudentFormatted: formatSyntheticFixturePhone(createSyntheticFixturePhone(3)),
+  student: createSyntheticFixturePhone(4),
+  parent: createSyntheticFixturePhone(5),
+  parentFormatted: formatSyntheticFixturePhone(createSyntheticFixturePhone(5)),
+})
+
 const FIXTURE_NOW = "2026-07-13T09:00:00+09:00"
 const FIXTURE_ACTOR_ID = "fixture-profile-staff"
 const REGISTRATION_SUBJECT_ORDER: readonly RegistrationSubject[] = ACADEMIC_SUBJECT_VALUES
@@ -71,9 +93,9 @@ const FIXTURE_SUBJECT_KEYS: Record<RegistrationSubject, string> = {
   과학: "science",
 }
 const FIXTURE_DIRECTORS: Record<RegistrationSubject, { profileId: string; name: string }> = {
-  영어: { profileId: "fixture-profile-english-director", name: "강부희" },
-  수학: { profileId: "fixture-profile-math-director", name: "양소윤" },
-  과학: { profileId: "fixture-profile-science-director", name: "김법균" },
+  영어: { profileId: "fixture-profile-english-director", name: "합성인물01" },
+  수학: { profileId: "fixture-profile-math-director", name: "합성인물12" },
+  과학: { profileId: "fixture-profile-science-director", name: "합성인물03" },
 }
 const REGISTRATION_INITIAL_ACTIONS = ["inquiry", "level_test", "direct_phone", "visit"] as const
 type RegistrationInitialAction = typeof REGISTRATION_INITIAL_ACTIONS[number]
@@ -295,45 +317,45 @@ type FixtureCustomerMessageSource = Readonly<{
 export const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessageSingleSourceKind, Record<string, FixtureCustomerMessageSource>> = {
   level_test_booking: {
     "fixture-appointment-dual-test": {
-      studentName: "김다미", recipientLast4: "5678", sourceRevision: 1,
+      studentName: "합성인물02", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어, 수학", scheduleLabel: "2026년 7월 15일 10:00", placeLabel: "본관" },
-      body: "TIPS 레벨테스트 예약 안내\n김다미 학생의 영어, 수학 레벨테스트가 예약되었습니다.",
+      body: "TIPS 레벨테스트 예약 안내\n합성인물02 학생의 영어, 수학 레벨테스트가 예약되었습니다.",
       buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
     "fixture-appointment-calendar-neighbor": {
-      studentName: "오하늘", recipientLast4: "5678", sourceRevision: 1,
+      studentName: "합성인물13", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어", scheduleLabel: "2026년 7월 15일 11:00", placeLabel: "본관" },
-      body: "TIPS 레벨테스트 예약 안내\n오하늘 학생의 영어 레벨테스트가 예약되었습니다.",
+      body: "TIPS 레벨테스트 예약 안내\n합성인물13 학생의 영어 레벨테스트가 예약되었습니다.",
       buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
   },
   visit_consultation_booking: {
     "fixture-appointment-split-visit": {
-      studentName: "박서준", recipientLast4: "5678", sourceRevision: 1,
+      studentName: "합성인물09", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어", scheduleLabel: "2026년 7월 16일 14:00", placeLabel: "본관" },
-      body: "TIPS 방문상담 예약 안내\n박서준 학생의 방문상담이 예약되었습니다.",
+      body: "TIPS 방문상담 예약 안내\n합성인물09 학생의 방문상담이 예약되었습니다.",
       buttons: [{ name: "상담 안내", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
   },
   appointment_reminder: {
     "fixture-appointment-dual-test": {
-      studentName: "김다미", recipientLast4: "5678", sourceRevision: 1,
+      studentName: "합성인물02", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어, 수학", scheduleLabel: "2026년 7월 15일 10:00", placeLabel: "본관" },
-      body: "TIPS 예약 리마인드\n김다미 학생의 레벨테스트 일정을 다시 안내드립니다.",
+      body: "TIPS 예약 리마인드\n합성인물02 학생의 레벨테스트 일정을 다시 안내드립니다.",
       buttons: [{ name: "예약 확인", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
   },
   waiting_notice: {
     "fixture-track-waiting-notice-english": {
-      studentName: "문하늘", recipientLast4: "5678", sourceRevision: 1,
+      studentName: "합성인물07", recipientLast4: "5678", sourceRevision: 1,
       facts: { subjectLabel: "영어", waitingKindLabel: "신규반 대기", waitingDetailLabel: "고1 영어 정규 A" },
-      body: "TIPS 대기 안내\n문하늘 학생의 영어 신규반 대기 신청이 접수되었습니다.",
+      body: "TIPS 대기 안내\n합성인물07 학생의 영어 신규반 대기 신청이 접수되었습니다.",
       buttons: [{ name: "대기 안내", type: "WL", host: "tips.edu" }, { name: "문의하기", type: "WL", host: "tipsedu.channel.io" }],
     },
   },
   admission_application: {
     "fixture-task-multiple-classes": {
-      studentName: "최유진", recipientLast4: "5678", sourceRevision: 1,
+      studentName: "합성인물18", recipientLast4: "5678", sourceRevision: 1,
       facts: {
         subjectLabel: "영어",
         admissionPlans: [{
@@ -348,7 +370,7 @@ export const FIXTURE_CUSTOMER_MESSAGE_SOURCES: Record<RegistrationCustomerMessag
       },
       body: [
         "TIPS 입학신청서 안내",
-        "최유진 학생의 입학신청서를 확인해 주세요.",
+        "합성인물18 학생의 입학신청서를 확인해 주세요.",
         "",
         "과목/수업: [영어] 중2 영어 A반",
         "교재: 능률 VOCA",
@@ -1775,8 +1797,8 @@ function taskTemplate(input: {
       inquiryAt: "2026-07-12T09:00:00+09:00",
       schoolGrade: "고1",
       schoolName: "중앙고",
-      parentPhone: "01012345678",
-      studentPhone: "01098765432",
+      parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
+      studentPhone: REGISTRATION_SYNTHETIC_PHONES.student,
       counselor: "",
       requestNote: "브라우저 QA 전용 고정 fixture",
       admissionNoticeSent: false,
@@ -1854,6 +1876,7 @@ function enrollment(input: Partial<OpsRegistrationEnrollment> & Pick<OpsRegistra
     classStartDate: input.classStartDate ?? "2026-07-20",
     classStartSessionKey: input.classStartSessionKey ?? "2026-07-20:1",
     classStartLessonSessionId: input.classStartLessonSessionId ?? null,
+    classStartSourceObservationId: input.classStartSourceObservationId ?? null,
     classStartSession: input.classStartSession ?? "1회차",
     status: input.status || "planned",
     makeeduRegistered: Boolean(input.makeeduRegistered),
@@ -1949,9 +1972,9 @@ function classOption(input: {
   startDate: string
 }): OpsRegistrationClassDetail {
   const teacherBySubject: Record<RegistrationSubject, string> = {
-    영어: "강부희",
-    수학: "양소윤",
-    과학: "김법균",
+    영어: "합성인물01",
+    수학: "합성인물12",
+    과학: "합성인물03",
   }
   const roomBySubject: Record<RegistrationSubject, string> = {
     영어: "201",
@@ -1986,7 +2009,7 @@ function buildFixtureCases() {
     track({ id: "fixture-track-dual-english", taskId: dualTaskId, subject: "영어", status: "level_test_scheduled" }),
     track({ id: "fixture-track-dual-math", taskId: dualTaskId, subject: "수학", status: "level_test_scheduled" }),
   ]
-  const dualTask = taskTemplate({ id: dualTaskId, studentName: "김다미", subject: "영어, 수학", tracks: dualTracks })
+  const dualTask = taskTemplate({ id: dualTaskId, studentName: "합성인물02", subject: "영어, 수학", tracks: dualTracks })
   const dualAppointment: OpsRegistrationAppointment = {
     id: "fixture-appointment-dual-test",
     taskId: dualTaskId,
@@ -2020,7 +2043,7 @@ function buildFixtureCases() {
   ]
   const calendarNeighborTask = taskTemplate({
     id: calendarNeighborTaskId,
-    studentName: "오하늘",
+    studentName: "합성인물13",
     subject: "영어",
     tracks: calendarNeighborTracks,
   })
@@ -2051,7 +2074,7 @@ function buildFixtureCases() {
     track({ id: "fixture-track-split-english", taskId: splitTaskId, subject: "영어", status: "visit_consultation_scheduled" }),
     track({ id: "fixture-track-split-math", taskId: splitTaskId, subject: "수학", status: "consultation_waiting", stageEnteredAt: "2026-07-10T09:00:00+09:00" }),
   ]
-  const splitTask = taskTemplate({ id: splitTaskId, studentName: "박서준", subject: "영어, 수학", tracks: splitTracks })
+  const splitTask = taskTemplate({ id: splitTaskId, studentName: "합성인물09", subject: "영어, 수학", tracks: splitTracks })
   const visitAppointment: OpsRegistrationAppointment = {
     id: "fixture-appointment-split-visit",
     taskId: splitTaskId,
@@ -2101,7 +2124,7 @@ function buildFixtureCases() {
     track({ id: "fixture-track-cross-english", taskId: crossStageTaskId, subject: "영어", status: "consultation_waiting", stageEnteredAt: "2026-07-09T09:00:00+09:00" }),
     track({ id: "fixture-track-cross-math", taskId: crossStageTaskId, subject: "수학", status: "level_test_scheduled" }),
   ]
-  const crossStageTask = taskTemplate({ id: crossStageTaskId, studentName: "김예린", subject: "영어, 수학", tracks: crossStageTracks })
+  const crossStageTask = taskTemplate({ id: crossStageTaskId, studentName: "합성인물05", subject: "영어, 수학", tracks: crossStageTracks })
   const crossStageAppointment: OpsRegistrationAppointment = {
     id: "fixture-appointment-cross-math-test",
     taskId: crossStageTaskId,
@@ -2144,7 +2167,7 @@ function buildFixtureCases() {
     track({ id: "fixture-track-partial-english", taskId: partialTaskId, subject: "영어", status: "registered" }),
     track({ id: "fixture-track-partial-math", taskId: partialTaskId, subject: "수학", status: "enrollment_processing" }),
   ]
-  const partialTask = taskTemplate({ id: partialTaskId, studentName: "이도윤", subject: "영어, 수학", tracks: partialTracks })
+  const partialTask = taskTemplate({ id: partialTaskId, studentName: "합성인물15", subject: "영어, 수학", tracks: partialTracks })
   partialTask.registration = { ...partialTask.registration, admissionNoticeSent: true }
   const completedAdmission = batch({ id: "fixture-batch-partial-1", taskId: partialTaskId, revisionNumber: 1, status: "completed", invoiceSentAt: FIXTURE_NOW, paymentConfirmedAt: FIXTURE_NOW })
   const openAdmission = batch({ id: "fixture-batch-partial-2", taskId: partialTaskId, revisionNumber: 2, status: "draft" })
@@ -2160,7 +2183,7 @@ function buildFixtureCases() {
   ]
   const allTerminalTask = taskTemplate({
     id: allTerminalTaskId,
-    studentName: "서지안",
+    studentName: "합성인물11",
     subject: "영어, 수학",
     tracks: allTerminalTracks,
   })
@@ -2207,7 +2230,7 @@ function buildFixtureCases() {
 
   const multipleTaskId = "fixture-task-multiple-classes"
   const multipleTracks = [track({ id: "fixture-track-multiple-english", taskId: multipleTaskId, subject: "영어", status: "enrollment_decided" })]
-  const multipleTask = taskTemplate({ id: multipleTaskId, studentName: "최유진", subject: "영어", tracks: multipleTracks })
+  const multipleTask = taskTemplate({ id: multipleTaskId, studentName: "합성인물18", subject: "영어", tracks: multipleTracks })
   const multipleEnrollments = [
     enrollment({ id: "fixture-enrollment-multiple-a", trackId: multipleTracks[0].id, classId: "fixture-class-eng-a", textbookId: "fixture-textbook-eng-a", admissionBatchId: null, status: "planned", sortOrder: 0 }),
     enrollment({ id: "fixture-enrollment-multiple-special", trackId: multipleTracks[0].id, classId: "fixture-class-eng-special", textbookId: null, admissionBatchId: null, classStartDate: "2026-07-21", classStartSessionKey: "2026-07-21:1", classStartSession: "1회차", status: "planned", sortOrder: 1 }),
@@ -2230,21 +2253,21 @@ function buildFixtureCases() {
   }
   const waitingTask = taskTemplate({
     id: waitingTaskId,
-    studentName: "문하늘",
+    studentName: "합성인물07",
     subject: "영어",
     tracks: waitingTracks,
   })
 
   const decidedTaskId = "fixture-task-enrollment-decided"
   const decidedTracks = [track({ id: "fixture-track-enrollment-decided-english", taskId: decidedTaskId, subject: "영어", status: "enrollment_decided" })]
-  const decidedTask = taskTemplate({ id: decidedTaskId, studentName: "정하린", subject: "영어", tracks: decidedTracks })
+  const decidedTask = taskTemplate({ id: decidedTaskId, studentName: "합성인물17", subject: "영어", tracks: decidedTracks })
 
   const siblingTaskId = "fixture-task-admission-sibling"
   const siblingTracks = [
     track({ id: "fixture-track-admission-sibling-english", taskId: siblingTaskId, subject: "영어", status: "level_test_scheduled" }),
     track({ id: "fixture-track-admission-sibling-math", taskId: siblingTaskId, subject: "수학", status: "enrollment_processing" }),
   ]
-  const siblingTask = taskTemplate({ id: siblingTaskId, studentName: "한시우", subject: "영어, 수학", tracks: siblingTracks })
+  const siblingTask = taskTemplate({ id: siblingTaskId, studentName: "합성인물19", subject: "영어, 수학", tracks: siblingTracks })
   siblingTask.registration = { ...siblingTask.registration, admissionNoticeSent: true }
   const siblingAppointment: OpsRegistrationAppointment = {
     id: "fixture-appointment-admission-sibling",
@@ -2282,7 +2305,7 @@ function buildFixtureCases() {
     track({ id: "fixture-track-review-english", taskId: reviewTaskId, subject: "영어", status: "migration_review", directorProfileId: null, directorName: "", migrationReviewRequired: true }),
     track({ id: "fixture-track-review-math", taskId: reviewTaskId, subject: "수학", status: "migration_review", directorProfileId: null, directorName: "", migrationReviewRequired: true }),
   ]
-  const reviewTask = taskTemplate({ id: reviewTaskId, studentName: "윤지호", subject: "영어, 수학", tracks: reviewTracks })
+  const reviewTask = taskTemplate({ id: reviewTaskId, studentName: "합성인물14", subject: "영어, 수학", tracks: reviewTracks })
   const migrationLegacy: NonNullable<OpsRegistrationCaseDetail["migrationLegacy"]> = {
     snapshotMissing: false,
     pipelineStatus: "3. 상담 진행",
@@ -2351,7 +2374,7 @@ function createRegistrationObservationFixtureState(): RegistrationObservationFix
     endsAt: "2026-08-15T02:00:00.000Z",
     teacherCatalogId: FIXTURE_OBSERVATION_IDS.teacherCatalog,
     teacherProfileId: FIXTURE_OBSERVATION_IDS.teacherProfile,
-    teacherName: "강부희",
+    teacherName: "합성인물01",
     classroomCatalogId: FIXTURE_OBSERVATION_IDS.classroom,
     classroomName: "본관 301호",
     campus: "본관",
@@ -2423,16 +2446,16 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
     { id: "fixture-textbook-science-a", label: "고1 과학 기본서", publisher: "TIPS", subject: "과학" },
   ]
   const profiles: OpsProfileOption[] = [
-    { id: "fixture-profile-english-director", label: "강부희", email: "english-director@fixture.local", loginId: "fixture-english-director", role: "admin" },
-    { id: "fixture-profile-math-director", label: "양소윤", email: "math-director@fixture.local", loginId: "fixture-math-director", role: "admin" },
-    { id: "fixture-profile-science-director", label: "김법균", email: "science-director@fixture.local", loginId: "fixture-science-director", role: "teacher" },
+    { id: "fixture-profile-english-director", label: "합성인물01", email: "english-director@fixture.local", loginId: "fixture-english-director", role: "admin" },
+    { id: "fixture-profile-math-director", label: "합성인물12", email: "math-director@fixture.local", loginId: "fixture-math-director", role: "admin" },
+    { id: "fixture-profile-science-director", label: "합성인물03", email: "science-director@fixture.local", loginId: "fixture-science-director", role: "teacher" },
     { id: "fixture-profile-staff", label: "운영팀", email: "staff@fixture.local", loginId: "fixture-staff", role: "staff" },
     { id: "fixture-profile-assistant", label: "조교", email: "assistant@fixture.local", loginId: "fixture-assistant", role: "assistant" },
   ]
   const teachers: OpsTeacherOption[] = [
-    { id: "fixture-teacher-english", label: "강부희", subjects: ["영어"], profileId: "fixture-profile-english-director", accountEmail: "english-director@fixture.local", sortOrder: 1 },
-    { id: "fixture-teacher-math", label: "양소윤", subjects: ["수학"], profileId: "fixture-profile-math-director", accountEmail: "math-director@fixture.local", sortOrder: 2 },
-    { id: "fixture-teacher-science", label: "김법균", subjects: ["과학", "과학팀"], profileId: "fixture-profile-science-director", accountEmail: "science-director@fixture.local", sortOrder: 3 },
+    { id: "fixture-teacher-english", label: "합성인물01", subjects: ["영어"], profileId: "fixture-profile-english-director", accountEmail: "english-director@fixture.local", sortOrder: 1 },
+    { id: "fixture-teacher-math", label: "합성인물12", subjects: ["수학"], profileId: "fixture-profile-math-director", accountEmail: "math-director@fixture.local", sortOrder: 2 },
+    { id: "fixture-teacher-science", label: "합성인물03", subjects: ["과학", "과학팀"], profileId: "fixture-profile-science-director", accountEmail: "science-director@fixture.local", sortOrder: 3 },
   ]
   const schools: OpsSchoolOption[] = [
     { id: "fixture-school-elementary", name: "새봄초", category: "elementary", sortOrder: 1 },
@@ -3484,6 +3507,31 @@ function createFixtureRegistrationCaseWithInitialWorkflow(
   }
 }
 
+function fixtureEnrollmentSaveSnapshot(rows: readonly Record<string, unknown>[]) {
+  return rows.map((row, index) => ({
+    id: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(row.id || ""))
+      ? String(row.id) : null,
+    classId: String(row.classId || ""),
+    textbookId: Array.isArray(row.textbookIds) ? row.textbookIds[0] || null : row.textbookId || null,
+    textbookIds: Array.isArray(row.textbookIds) ? row.textbookIds : row.textbookId ? [row.textbookId] : [],
+    classStartDate: row.classStartDate || null,
+    classStartSessionKey: row.classStartSessionKey || null,
+    classStartLessonSessionId: row.classStartLessonSessionId || null,
+    classStartSession: row.classStartSession || null,
+    classStartSourceObservationId: row.classStartSourceObservationId || null,
+    sortOrder: Number(row.sortOrder ?? index),
+  })).sort((left, right) => left.classId.localeCompare(right.classId) || String(left.id).localeCompare(String(right.id)))
+}
+
+function fixtureMutableEnrollment(row: OpsRegistrationEnrollment) {
+  return row.status === "planned" && !row.admissionBatchId && !row.studentId && !row.rosterActive
+    && !row.rosterReleasedAt && !row.rosterReleaseReason && !row.rosterReleaseSourceTaskId && !row.rosterReleaseKind
+}
+
+function fixtureEnrollmentSaveError(message: string, code: "22023" | "23514"): never {
+  throw Object.assign(new Error(message), { code })
+}
+
 export function reduceRegistrationSubjectTrackFixture(
   current: RegistrationSubjectTrackFixtureState,
   command: RegistrationSubjectTrackFixtureCommand,
@@ -4200,19 +4248,51 @@ export function reduceRegistrationSubjectTrackFixture(
     case "saveRegistrationEnrollmentRows": {
       const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
       const trackId = asText(payload, "trackId")
-      const selectedTrack = detail.tracks.find((item) => item.id === trackId)
-      if (command.type === "saveRegistrationEnrollmentDetails" && detail.enrollments.some((item) => (
+      const selectedTrack = requireCase(detail.tracks.find((item) => item.id === trackId), "track_not_found")
+      const inputRows = payload.rows as Array<Record<string, unknown>> || []
+      for (const row of inputRows) {
+        const schedule = [row.classStartDate, row.classStartSessionKey, row.classStartSession]
+        if (row.classStartSourceObservationId
+          ? !row.classStartDate || !row.classStartSessionKey
+          : schedule.some(Boolean) && !schedule.every(Boolean)) {
+          fixtureEnrollmentSaveError("registration_enrollment_schedule_incomplete", "22023")
+        }
+      }
+      const externalized = detail.enrollments.some((item) => (
         item.trackId === trackId && (item.admissionBatchId || item.rosterActive)
-      ))) {
+      ))
+      if (command.type === "saveRegistrationEnrollmentDetails") {
+        const currentRows = externalized ? selectedTrack.enrollmentDetailRows || []
+          : detail.enrollments.filter((item) => item.trackId === trackId && fixtureMutableEnrollment(item))
+        if (!Array.isArray(payload.expectedRows)
+          || Number(payload.expectedWorkflowRevision) !== selectedTrack.workflowRevision
+          || JSON.stringify(fixtureEnrollmentSaveSnapshot(currentRows as unknown as Record<string, unknown>[]))
+            !== JSON.stringify(fixtureEnrollmentSaveSnapshot(payload.expectedRows as Record<string, unknown>[]))) {
+          fixtureEnrollmentSaveError("registration_enrollment_details_refresh_required", "23514")
+        }
+      }
+      if (command.type === "saveRegistrationEnrollmentDetails" && externalized) {
         const rows = clone(payload.rows as NonNullable<OpsRegistrationTrackSummary["enrollmentDetailRows"]>)
         if (selectedTrack) selectedTrack.enrollmentDetailRows = rows
         syncCase(state, detail)
-        result = { trackId, rows, externalReconciliationRequired: true }
+        result = { trackId, rows, externalReconciliationRequired: true,
+          workflowStatus: selectedTrack.workflowStatus, workflowRevision: selectedTrack.workflowRevision,
+          workflowStatusEnteredAt: selectedTrack.workflowStatusEnteredAt, statusChanged: false }
         break
       }
-      const immutable = detail.enrollments.filter((item) => item.trackId !== trackId || item.admissionBatchId || item.status !== "planned")
-      const rows = (payload.rows as Array<Record<string, unknown>> || []).map((row, index) => enrollment({
-        id: String(row.id || `fixture-enrollment-${trackId}-${index + 1}`),
+      const mutable = detail.enrollments.filter((item) => item.trackId === trackId && fixtureMutableEnrollment(item))
+      const immutable = detail.enrollments.filter((item) => item.trackId !== trackId || !fixtureMutableEnrollment(item))
+      if (new Set(inputRows.map(row => row.classId)).size !== inputRows.length) {
+        fixtureEnrollmentSaveError("registration_enrollment_rows_duplicate_class", "22023")
+      }
+      const rows = inputRows.map((row, index) => {
+        if (row.id && !mutable.some(item => item.id === row.id)) {
+          fixtureEnrollmentSaveError("registration_enrollment_draft_not_editable", "23514")
+        }
+        const candidates = mutable.filter(item => item.classId === row.classId)
+        if (!row.id && candidates.length > 1) fixtureEnrollmentSaveError("registration_enrollment_draft_ambiguous", "23514")
+        const saved = enrollment({
+        id: String(row.id || candidates[0]?.id || nextId(state, "enrollment")),
         trackId,
         classId: String(row.classId || ""),
         textbookId: row.textbookId ? String(row.textbookId) : null,
@@ -4220,13 +4300,38 @@ export function reduceRegistrationSubjectTrackFixture(
         classStartDate: row.classStartDate ? String(row.classStartDate) : null,
         classStartSessionKey: row.classStartSessionKey ? String(row.classStartSessionKey) : null,
         classStartSession: row.classStartSession ? String(row.classStartSession) : null,
+        classStartLessonSessionId: row.classStartLessonSessionId ? String(row.classStartLessonSessionId) : null,
+        classStartSourceObservationId: row.classStartSourceObservationId ? String(row.classStartSourceObservationId) : null,
         sortOrder: Number(row.sortOrder ?? index),
         status: "planned",
-      }))
-      detail.enrollments = [...immutable, ...rows]
+      })
+        // Historical fixture defaults must not invent a selected start session.
+        return { ...saved,
+          classStartDate: row.classStartDate ? String(row.classStartDate) : null,
+          classStartSessionKey: row.classStartSessionKey ? String(row.classStartSessionKey) : null,
+          classStartSession: row.classStartSession ? String(row.classStartSession) : null }
+      })
+      const writtenIds = new Set(rows.map(row => row.id))
+      const removed = mutable.filter(row => !writtenIds.has(row.id)).map(row => ({ ...row,
+        status: "canceled" as const, updatedAt: FIXTURE_NOW }))
+      detail.enrollments = [...immutable, ...removed, ...rows]
       if (selectedTrack) selectedTrack.enrollmentDetailRows = rows
+      const statusChanged = command.type === "saveRegistrationEnrollmentDetails"
+        && !selectedTrack.migrationReviewRequired && rows.length > 0
+        && ["inquiry", "level_test_requested", "consultation_requested", "consultation_completed",
+          "waiting_current_class", "waiting_new_class", "waiting_next_opening", "observation_requested",
+          "observation_feedback_pending", "observation_completed"].includes(selectedTrack.workflowStatus)
+        && rows.every((row) => row.classStartDate && row.classStartSessionKey && row.classStartSession)
+      if (statusChanged) {
+        selectedTrack.workflowStatus = "enrollment_requested"
+        selectedTrack.workflowRevision += 1
+        selectedTrack.workflowStatusEnteredAt = FIXTURE_NOW
+        selectedTrack.observationReturnWorkflowStatus = null
+      }
       syncCase(state, detail)
-      result = { trackId, rows, externalReconciliationRequired: false }
+      result = { trackId, rows, externalReconciliationRequired: false,
+        workflowStatus: selectedTrack.workflowStatus, workflowRevision: selectedTrack.workflowRevision,
+        workflowStatusEnteredAt: selectedTrack.workflowStatusEnteredAt, statusChanged }
       break
     }
     case "cancelRegistrationEnrollment": {

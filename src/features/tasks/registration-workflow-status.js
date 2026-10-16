@@ -6,6 +6,7 @@ export const REGISTRATION_WORKFLOW_STATUSES = Object.freeze([
   "waiting_current_class",
   "waiting_new_class",
   "waiting_next_opening",
+  "observation_requested",
   "enrollment_requested",
   "payment_in_progress",
   "registered",
@@ -20,9 +21,9 @@ export const REGISTRATION_OBSERVATION_WORKFLOW_STATUSES = Object.freeze([
 ])
 
 export const REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES = Object.freeze([
-  ...REGISTRATION_WORKFLOW_STATUSES.slice(0, 7),
-  ...REGISTRATION_OBSERVATION_WORKFLOW_STATUSES,
-  ...REGISTRATION_WORKFLOW_STATUSES.slice(7),
+  ...REGISTRATION_WORKFLOW_STATUSES.slice(0, 8),
+  ...REGISTRATION_OBSERVATION_WORKFLOW_STATUSES.slice(1),
+  ...REGISTRATION_WORKFLOW_STATUSES.slice(8),
 ])
 
 export const REGISTRATION_WORKFLOW_VIEWS = Object.freeze([
@@ -45,7 +46,7 @@ export const REGISTRATION_WORKFLOW_STATUS_LABELS = Object.freeze({
   waiting_current_class: "현재반 대기 신청",
   waiting_new_class: "신규반 대기 신청",
   waiting_next_opening: "다음 개강 알림 요청",
-  observation_requested: "청강 예약 필요",
+  observation_requested: "청강 신청",
   observation_feedback_pending: "원장 확인 대기",
   observation_completed: "청강 완료",
   enrollment_requested: "등록 신청",
@@ -123,9 +124,8 @@ export function getRegistrationWorkflowStatusOptions(input = {}) {
 
 export function getRegistrationInlineWorkflowStatusOptions(input = {}) {
   const currentStatus = text(input.currentStatus)
-  if (isRegistrationObservationWorkflowStatus(currentStatus)) return []
   const allowed = getRegistrationWorkflowStatusOptions(input)
-  const current = REGISTRATION_WORKFLOW_STATUSES.includes(currentStatus)
+  const current = REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES.includes(currentStatus)
     ? [workflowStatusOption(currentStatus)]
     : []
   return [

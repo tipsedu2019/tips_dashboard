@@ -1881,7 +1881,14 @@ function exactDebtKey({ surface, file, symbol, reason }) {
 }
 
 async function sourceAt({ root, file, revision, includeWorktree }) {
-  if (includeWorktree) return readFile(resolve(root, file), "utf8")
+  if (includeWorktree) {
+    try {
+      return await readFile(resolve(root, file), "utf8")
+    } catch (error) {
+      if (error.code === "ENOENT") return null
+      throw error
+    }
+  }
   try {
     return git(root, ["show", `${revision}:${file}`])
   } catch (error) {

@@ -1,3 +1,4 @@
+import { REGISTRATION_SYNTHETIC_PHONES } from "../src/features/tasks/registration-track-fixtures.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -234,9 +235,9 @@ test("observation summary types are broad while generic mutations stay narrow", 
       PublicGenericDetailStatus,
       OpsRegistrationWorkflowStatus
     >>;
-    type ObservationStatusCannotUseGenericMutation = Assert<Equal<
+    type ObservationRequestCanUseGenericMutation = Assert<Equal<
       Extract<"observation_requested", GenericMutationStatus>,
-      never
+      "observation_requested"
     >>;
   `);
 
@@ -945,10 +946,10 @@ test("generic and observation summary modes isolate projection cache inflight ep
 
 function initialWorkflowCreateInput() {
   return {
-    studentName: "김다미",
+    studentName: "합성인물02",
     schoolGrade: "고1",
     schoolName: "중앙고",
-    parentPhone: "01012345678",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
     studentPhone: "",
     campus: "본관",
     inquiryAt: "2026-07-16T01:00:00Z",
@@ -1162,7 +1163,7 @@ test("calendar raw loader uses the canonical half-open scheduled query without c
   const row = {
     appointment_id: "appointment-calendar-1",
     task_id: "task-calendar-1",
-    student_name: "김다미",
+    student_name: "합성인물02",
     kind: "level_test",
     scheduled_at: "2026-07-15T10:00:00+09:00",
     place: "본관 201호",
@@ -1276,11 +1277,11 @@ function detailRows(table) {
     return {
       data: {
         id: "task-1",
-        title: "김다미 등록",
+        title: "합성인물02 등록",
         type: "registration",
         status: "in_progress",
         priority: "normal",
-        student_name: "김다미",
+        student_name: "합성인물02",
         campus: "본관",
         subject: "영어, 수학",
         created_at: "2026-07-12T01:00:00Z",
@@ -1292,7 +1293,7 @@ function detailRows(table) {
           school_grade: "고1",
           school_name: "중앙여고",
           inquiry_at: "2026-07-12T01:00:00Z",
-          parent_phone: "01012345678",
+          parent_phone: REGISTRATION_SYNTHETIC_PHONES.parent,
           student_phone: "",
           request_note: "방문 희망",
         },
@@ -1334,7 +1335,7 @@ function detailRows(table) {
         stage_entered_at: "2026-07-12T01:30:00Z",
         phone_ready_at: "2026-07-12T01:00:00Z",
         phone_ready_source: "inquiry",
-        director: { id: "director-1", name: "강부희" },
+        director: { id: "director-1", name: "합성인물01" },
         level_tests: [{
           id: "test-1", track_id: "track-1", appointment_id: "appointment-1",
           attempt_number: 1, status: "completed", started_at: "2026-07-13T01:00:00Z",
@@ -1987,7 +1988,7 @@ test("an exact all-null observation summary is concealed while partial null rema
   );
 });
 
-test("generic summary reads fail closed before observation workflow states reach legacy UI", async () => {
+test("generic summary reads fail closed for historical observation feedback states", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     queryHandler: () => ({ data: [{
@@ -1995,7 +1996,7 @@ test("generic summary reads fail closed before observation workflow states reach
       task_id: "task-1",
       subject: "영어",
       pipeline_status: "visit_consultation_scheduled",
-      workflow_status: "observation_requested",
+      workflow_status: "observation_feedback_pending",
       ...inertObservationSummaryRow,
     }], error: null }),
   });
@@ -2140,7 +2141,7 @@ test("track summary loader embeds director names without a profile lookup waterf
   const harness = createClient({
     queryHandler(query) {
       if (query.table === "profiles") {
-        return { data: [{ id: "director-1", name: "강부희" }], error: null };
+        return { data: [{ id: "director-1", name: "합성인물01" }], error: null };
       }
       const embedsDirector = query.columns.includes(
         "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
@@ -2148,7 +2149,7 @@ test("track summary loader embeds director names without a profile lookup waterf
       return { data: ["track-1", "track-2"].map((id) => ({
         id, task_id: "task-1", subject: id === "track-1" ? "영어" : "수학",
         pipeline_status: "inquiry", director_profile_id: "director-1",
-        director: embedsDirector ? { id: "director-1", name: "강부희" } : null,
+        director: embedsDirector ? { id: "director-1", name: "합성인물01" } : null,
         director_assignment_source: "default", director_assignment_rule_key: "rule",
         waiting_kind: null, level_test_retake_decision: null,
         migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
@@ -2160,7 +2161,7 @@ test("track summary loader embeds director names without a profile lookup waterf
 
   const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
 
-  assert.deepEqual(result.tracks.map((track) => track.directorName), ["강부희", "강부희"]);
+  assert.deepEqual(result.tracks.map((track) => track.directorName), ["합성인물01", "합성인물01"]);
   assert.equal(harness.queries.length, 1);
   assert.match(
     harness.queries[0].columns,
@@ -2248,7 +2249,7 @@ test("legacy and maintenance are explicit and legacy summaries remain per subjec
   const service = createRegistrationTrackService(createClient().client, readyOptions());
   const legacy = service.createLegacyTrackSummaries([{
     taskId: "task-1", subjects: ["영어", "수학"], status: "waiting",
-    directorName: "강부희", stageEnteredAt: "2026-07-12T01:00:00Z",
+    directorName: "합성인물01", stageEnteredAt: "2026-07-12T01:00:00Z",
   }]);
   assert.deepEqual(legacy.map((track) => [
     track.subject, track.legacy, track.phoneReadyAt, track.phoneReadySource,
@@ -2937,7 +2938,7 @@ test("dedicated manager detail preserves the observation schedule and place hidd
     endsAt: "2026-08-14T10:37:00+09:00",
     teacherCatalogId: ids.teacherCatalog,
     teacherProfileId: ids.teacherProfile,
-    teacherName: "강부희",
+    teacherName: "합성인물01",
     classroomCatalogId: ids.classroom,
     classroomName: caseDetailObservationSecrets.place,
     campus: "본관",
@@ -3095,7 +3096,7 @@ test("observation first lesson loader never scans attempts and fails closed on d
   assert.equal(feedbackCalls, 2, "each non-null scalar performs exactly one dedicated detail read");
 });
 
-test("observation-aware detail is broad while default detail fails closed and cannot share its cache", async () => {
+test("observation-aware historical detail is broad while default detail fails closed and cannot share its cache", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     queryHandler(query) {
@@ -3103,7 +3104,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
         const track = detailRows("ops_registration_subject_tracks").data[0];
         return { data: [{
           ...track,
-          workflow_status: "observation_requested",
+          workflow_status: "observation_feedback_pending",
           workflow_revision: 5,
           ...inertObservationSummaryRow,
         }], error: null };
@@ -3114,7 +3115,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
           ...result,
           data: result.data.map((row) => ({
             ...row,
-            workflow_status: "observation_requested",
+            workflow_status: "observation_feedback_pending",
             workflow_revision: 5,
             observation_attempt_count: 0,
           })),
@@ -3128,7 +3129,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
   const broad = await service.loadCaseDetail("task-1", "viewer-1", {
     observationAware: true,
   });
-  assert.equal(broad.tracks[0].workflowStatus, "observation_requested");
+  assert.equal(broad.tracks[0].workflowStatus, "observation_feedback_pending");
   assert.equal(broad.tracks[0].workflowRevision, 5);
   assert.equal(broad.tracks[0].observationSummaryVisible, true);
   assert.equal(
@@ -3669,7 +3670,7 @@ test("detail loader bounds current and historical rows, maps them, and shares sa
 
   assert.equal(harness.queries.length, 10);
   assert.equal(detail.commonRevision, 3);
-  assert.equal(detail.tracks[0].directorName, "강부희");
+  assert.equal(detail.tracks[0].directorName, "합성인물01");
   assert.equal(detail.tracks[0].phoneReadyAt, "2026-07-12T01:00:00Z");
   assert.equal(detail.tracks[0].phoneReadySource, "inquiry");
   assert.equal(detail.admissionApplicationMessageStatus, "failed_hold");
@@ -3765,7 +3766,7 @@ test("registration option loader starts five reads, includes schools, excludes s
   const { createRegistrationTrackService } = await loadFactory();
   const gates = new Map(["profiles", "classes", "textbooks", "teacher_catalogs", "academic_schools"].map((table) => [table, deferred()]));
   const rows = {
-    profiles: [{ id: "director-1", name: "강부희", email: "director@test", role: "admin", login_id: "director" }],
+    profiles: [{ id: "director-1", name: "합성인물01", email: "director@test", role: "admin", login_id: "director" }],
     classes: [
       { id: "class-1", name: "고1 영어", subject: "영어", grade: "고1", teacher: "교사", room: "1", textbook_ids: ["book-1"], status: "운영" },
       { id: "class-2", name: "폐강", subject: "영어", grade: "고1", teacher: "교사", room: "2", textbook_ids: [], status: "폐강" },
@@ -3968,9 +3969,9 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   }));
   const key = "request-key";
 
-  await service.createRegistrationCase({ studentName: "김다미", schoolGrade: "고1", schoolName: "중앙여고", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "2026-07-12T01:00:00Z", subjects: ["영어", "수학"], requestNote: "", priority: "normal", requestKey: key });
+  await service.createRegistrationCase({ studentName: "합성인물02", schoolGrade: "고1", schoolName: "중앙여고", parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent, studentPhone: "", campus: "본관", inquiryAt: "2026-07-12T01:00:00Z", subjects: ["영어", "수학"], requestNote: "", priority: "normal", requestKey: key });
   await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: ["영어"], expectedSubjects: ["영어"], requestKey: key });
-  await service.updateRegistrationCaseCommon({ taskId: "task-1", studentName: "김다미", schoolGrade: "고1", schoolName: "", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "   ", requestNote: "", priority: "normal", expectedCommonRevision: 3, requestKey: key });
+  await service.updateRegistrationCaseCommon({ taskId: "task-1", studentName: "합성인물02", schoolGrade: "고1", schoolName: "", parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent, studentPhone: "", campus: "본관", inquiryAt: "   ", requestNote: "", priority: "normal", expectedCommonRevision: 3, requestKey: key });
   await service.routeRegistrationInquiry({ trackId: "track-1", destination: "waiting", waitingKind: "current_term_opening", classId: "", requestKey: key });
   await service.assignRegistrationTrackDirector({ trackId: "track-1", directorProfileId: "", assignmentSource: "manual", ruleKey: "", expectedCommonRevision: 3, requestKey: key });
   await service.saveRegistrationSharedAppointment({ appointmentId: "", taskId: "task-1", kind: "level_test", scheduledAt: "2026-07-13T01:00:00Z", place: "본관", trackIds: ["track-1"], replaceRemaining: false, expectedNotificationRevision: 0, requestKey: key });
@@ -4104,7 +4105,7 @@ test("admission completion uses the injected post-commit public cache invalidato
 test("first lesson source serialization sends regular sentinel as null and maps the exact response key", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const sourceObservationId = "74000000-0000-4000-8000-000000000001";
-  const persistedSourceObservationId = "74000000-0000-4000-8000-000000000002";
+  const persistedSourceObservationId = sourceObservationId;
   const rows = [{
     classId: "74000000-0000-4000-8000-000000000010",
     textbookId: null,
@@ -4126,12 +4127,15 @@ test("first lesson source serialization sends regular sentinel as null and maps 
   }];
   const harness = createClient({
     rpcHandler(name, args) {
-      assert.equal(name, "save_registration_enrollment_details_v1");
+      assert.equal(name, "save_registration_enrollment_details_guarded_v2");
       return { data: {
         trackId: "74000000-0000-4000-8000-000000000030",
-        rows: args.p_rows.map((row, index) => index === 0
-          ? { ...row, classStartSourceObservationId: persistedSourceObservationId }
-          : row),
+        workflowStatus: "enrollment_requested", workflowRevision: 2,
+        workflowStatusEnteredAt: "2026-10-13T09:00:00Z", statusChanged: true,
+        externalReconciliationRequired: false,
+        rows: args.p_rows.map((row, index) => ({ ...row, id: row.id || row.classId,
+          textbookIds: row.textbookIds || (row.textbookId ? [row.textbookId] : []),
+          ...(index === 0 ? { classStartSourceObservationId: persistedSourceObservationId } : {}) })),
       }, error: null };
     },
   });
@@ -4140,6 +4144,8 @@ test("first lesson source serialization sends regular sentinel as null and maps 
   const result = await service.saveRegistrationEnrollmentDetails({
     trackId: "74000000-0000-4000-8000-000000000030",
     rows,
+    expectedRows: [],
+    expectedWorkflowRevision: 1,
     requestKey: "first-lesson-source",
   });
 
@@ -4308,11 +4314,11 @@ test("initial workflow create uses the exact atomic payload and maps the complet
     onMutationSuccess: () => { mutationInvalidations += 1; },
   }));
   const input = {
-    studentName: "김다미",
+    studentName: "합성인물02",
     schoolGrade: "고1",
     schoolName: "중앙여고",
-    parentPhone: "01012345678",
-    studentPhone: "01087654321",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
+    studentPhone: REGISTRATION_SYNTHETIC_PHONES.searchStudent,
     campus: "본관",
     inquiryAt: "2026-07-12T01:00:00Z",
     subjects: ["영어", "수학"],
@@ -4785,7 +4791,7 @@ test("incomplete profile or teacher identity makes the director catalog partial"
   const harness = createClient({
     queryHandler(query) {
       if (query.table === "profiles") {
-        return { data: [{ id: "profile-1", name: "강부희", email: "", role: "", login_id: "" }], error: null };
+        return { data: [{ id: "profile-1", name: "합성인물01", email: "", role: "", login_id: "" }], error: null };
       }
       if (query.table === "teacher_catalogs") {
         return { data: [{
@@ -4943,10 +4949,10 @@ test("unified inquiry save performs one sorted atomic RPC request", async () => 
 
   const result = await service.saveRegistrationCaseInquiry({
     taskId: "task-1",
-    studentName: "김다미",
+    studentName: "합성인물02",
     schoolGrade: "고1",
     schoolName: "중앙여고",
-    parentPhone: "01012345678",
+    parentPhone: REGISTRATION_SYNTHETIC_PHONES.parent,
     studentPhone: "",
     campus: "본관",
     inquiryAt: "2026-07-12T01:00:00Z",
@@ -4961,10 +4967,10 @@ test("unified inquiry save performs one sorted atomic RPC request", async () => 
   assert.equal(harness.rpcCalls.length, 1)
   assert.deepEqual(JSON.parse(JSON.stringify(harness.rpcCalls[0])), ["save_registration_case_inquiry_v1", {
     p_task_id: "task-1",
-    p_student_name: "김다미",
+    p_student_name: "합성인물02",
     p_school_grade: "고1",
     p_school_name: "중앙여고",
-    p_parent_phone: "01012345678",
+    p_parent_phone: REGISTRATION_SYNTHETIC_PHONES.parent,
     p_student_phone: null,
     p_campus: "본관",
     p_inquiry_at: "2026-07-12T01:00:00Z",
@@ -5116,14 +5122,20 @@ test("enrollment detail save sends and hydrates every selected textbook, includi
   const { createRegistrationTrackService } = await loadFactory();
   const books = ["74000000-0000-4000-8000-000000000041", "74000000-0000-4000-8000-000000000042"];
   const harness = createClient({ rpcHandler(name, args) {
-    assert.equal(name, "save_registration_enrollment_details_v1");
-    return { data: { trackId: args.p_track_id, rows: args.p_rows }, error: null };
+    assert.equal(name, "save_registration_enrollment_details_guarded_v2");
+    return { data: { trackId: args.p_track_id, rows: args.p_rows.map(row => ({ ...row, id: row.id || row.classId,
+      textbookIds: row.textbookIds || (row.textbookId ? [row.textbookId] : []) })),
+      workflowStatus: "inquiry", workflowRevision: 1,
+      workflowStatusEnteredAt: "2026-10-13T09:00:00Z", statusChanged: false,
+      externalReconciliationRequired: false,
+    }, error: null };
   } });
   const service = createRegistrationTrackService(harness.client, readyOptions());
   for (const selected of [books, []]) {
     const result = await service.saveRegistrationEnrollmentDetails({
       trackId: "74000000-0000-4000-8000-000000000030",
-      rows: [{ classId: "74000000-0000-4000-8000-000000000010", textbookIds: selected }],
+      rows: [{ classId: "74000000-0000-4000-8000-000000000010", textbookIds: selected, sortOrder: 0 }],
+      expectedRows: [], expectedWorkflowRevision: 1,
       requestKey: `textbooks-${selected.length}`,
     });
     assert.deepEqual(Array.from(harness.rpcCalls.at(-1)[1].p_rows[0].textbookIds), selected);
@@ -5132,10 +5144,138 @@ test("enrollment detail save sends and hydrates every selected textbook, includi
   }
   const legacy = await service.saveRegistrationEnrollmentDetails({
     trackId: "74000000-0000-4000-8000-000000000030",
-    rows: [{ classId: "74000000-0000-4000-8000-000000000010", textbookId: books[0] }],
+    rows: [{ classId: "74000000-0000-4000-8000-000000000010", textbookId: books[0], sortOrder: 0 }],
+    expectedRows: [], expectedWorkflowRevision: 1,
     requestKey: "legacy-textbook",
   });
   assert.deepEqual(Array.from(legacy.rows[0].textbookIds), [books[0]]);
+});
+
+test("guarded enrollment save carries the opened snapshot in one RPC and preserves the key after a lost reply", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const calls = [];
+  const expectedRows = [{ id: "74000000-0000-4000-8000-000000000099", classId: "74000000-0000-4000-8000-000000000010", sortOrder: 0 }];
+  const input = { trackId: "track-1", rows: expectedRows, expectedRows, expectedWorkflowRevision: 4, requestKey: "guarded-lost-response" };
+  const original = JSON.stringify(input);
+  const harness = createClient({ rpcHandler(name, args) {
+    calls.push([name, args]);
+    if (calls.length === 1) return { data: null, error: { code: "NETWORK", message: "reply lost" } };
+    return { data: { trackId: "track-1", rows: args.p_rows.map(row => ({ ...row,
+      textbookIds: row.textbookIds || (row.textbookId ? [row.textbookId] : []) })), workflowStatus: "enrollment_requested", workflowRevision: 5,
+      workflowStatusEnteredAt: "2026-10-13T09:00:00Z", statusChanged: true, externalReconciliationRequired: false }, error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.saveRegistrationEnrollmentDetails(input), error => error.code === "NETWORK");
+  assert.equal(calls.length, 1, "lost responses are not retried automatically");
+  const result = await service.saveRegistrationEnrollmentDetails(input);
+  assert.equal(result.workflowStatus, "enrollment_requested");
+  assert.equal(result.workflowRevision, 5);
+  assert.equal(result.statusChanged, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), JSON.parse(JSON.stringify(calls[1])));
+  assert.equal(calls[0][0], "save_registration_enrollment_details_guarded_v2");
+  assert.equal(calls[0][1].p_expected_workflow_revision, 4);
+  assert.equal(calls[0][1].p_expected_rows[0].id, expectedRows[0].id);
+  assert.equal(JSON.stringify(input), original, "the opened snapshot remains immutable");
+  assert.equal(harness.rpcCalls.some(([name]) => name === "set_registration_workflow_status_v1"), false,
+    "a second status RPC would break atomicity");
+});
+
+test("guarded enrollment save rejects absent snapshots before RPC and propagates stale SQLSTATE without a fallback write", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const stale = { code: "23514", message: "registration_enrollment_details_refresh_required" };
+  const harness = createClient({ rpcHandler() { return { data: null, error: stale }; } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.saveRegistrationEnrollmentDetails({ trackId: "track-1", rows: [], requestKey: "no-snapshot" }),
+    /registration_enrollment_details_snapshot_required/);
+  assert.equal(harness.rpcCalls.length, 0);
+  await assert.rejects(service.saveRegistrationEnrollmentDetails({ trackId: "track-1", rows: [], expectedRows: [],
+    expectedWorkflowRevision: 2, requestKey: "stale" }), error => error === stale);
+  assert.equal(harness.rpcCalls.length, 1);
+  assert.equal(harness.rpcCalls[0][0], "save_registration_enrollment_details_guarded_v2");
+});
+
+test("guarded enrollment result must match the saved track and include its persisted status revision", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const result of [
+    { trackId: "different-track", rows: [], workflowStatus: "enrollment_requested", workflowRevision: 2 },
+    { trackId: "track-1", rows: [], workflowStatus: "inquiry", workflowRevision: 0 },
+    { trackId: "track-1", rows: [], workflowStatus: "unknown", workflowRevision: 2 },
+  ]) {
+    const harness = createClient({ rpcHandler: () => ({ data: result, error: null }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    await assert.rejects(service.saveRegistrationEnrollmentDetails({ trackId: "track-1", rows: [], expectedRows: [],
+      expectedWorkflowRevision: 1, requestKey: "invalid-result" }), /registration_enrollment_details_response_invalid/);
+    assert.equal(harness.rpcCalls.length, 1);
+  }
+});
+
+test("guarded enrollment refuses malformed rows flags timestamps and incoherent revision transitions", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const valid = { trackId: "track-1", rows: [], workflowStatus: "consultation_completed", workflowRevision: 4,
+    workflowStatusEnteredAt: "2026-10-13T09:00:00Z", statusChanged: false, externalReconciliationRequired: false };
+  for (const response of [
+    { ...valid, rows: undefined }, { ...valid, rows: {} }, { ...valid, rows: [null] },
+    { ...valid, statusChanged: "false" }, { ...valid, externalReconciliationRequired: "false" },
+    { ...valid, workflowRevision: true }, { ...valid, workflowRevision: "4" },
+    { ...valid, workflowStatus: "enrollment_requested", statusChanged: true },
+    { ...valid, workflowStatus: "enrollment_requested", statusChanged: true, workflowRevision: 19 },
+    { ...valid, workflowStatus: "registered", statusChanged: true, workflowRevision: 5 },
+    { ...valid, workflowStatus: "enrollment_requested", statusChanged: true, workflowRevision: 5, externalReconciliationRequired: true },
+    { ...valid, workflowStatusEnteredAt: "not-a-date" },
+  ]) {
+    const harness = createClient({ rpcHandler: () => ({ data: response, error: null }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    const input = { trackId: "track-1", rows: [], expectedRows: [], expectedWorkflowRevision: 4, requestKey: "malformed" };
+    const snapshot = JSON.stringify(input);
+    await assert.rejects(service.saveRegistrationEnrollmentDetails(input), /registration_enrollment_details_response_invalid/);
+    assert.equal(JSON.stringify(input), snapshot);
+    assert.equal(harness.rpcCalls.length, 1);
+  }
+  for (const response of [valid, { ...valid, workflowStatus: "enrollment_requested", workflowRevision: 5, statusChanged: true }]) {
+    const harness = createClient({ rpcHandler: () => ({ data: response, error: null }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    const saved = await service.saveRegistrationEnrollmentDetails({ trackId: "track-1", rows: [], expectedRows: [],
+      expectedWorkflowRevision: 4, requestKey: "coherent-response" });
+    assert.equal(saved.workflowRevision, response.workflowRevision);
+  }
+});
+
+test("guarded enrollment result preserves submitted row cardinality class identity and canonical IDs", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const request = { classId: "74000000-0000-4000-8000-000000000010", sortOrder: 0 };
+  const canonical = { ...request, id: "74000000-0000-4000-8000-000000000099", textbookId: null, textbookIds: [],
+    classStartDate: null, classStartSessionKey: null, classStartLessonSessionId: null,
+    classStartSession: null, classStartSourceObservationId: null };
+  const valid = { trackId: "track-1", rows: [canonical], workflowStatus: "consultation_completed", workflowRevision: 4,
+    workflowStatusEnteredAt: "2026-10-13T09:00:00Z", statusChanged: false, externalReconciliationRequired: false };
+  for (const rows of [[], [{ ...canonical, classId: "74000000-0000-4000-8000-000000000020" }],
+    [{ ...canonical, id: undefined }], [{ ...canonical, id: null }], [{ ...canonical, textbookIds: null }],
+    [{ ...canonical, classStartDate: {} }], [{ ...canonical, classStartSessionKey: true }]]) {
+    const harness = createClient({ rpcHandler: () => ({ data: { ...valid, rows }, error: null }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    const input = { trackId: "track-1", rows: [request], expectedRows: [], expectedWorkflowRevision: 4, requestKey: "bad-rows" };
+    const before = JSON.stringify(input);
+    await assert.rejects(service.saveRegistrationEnrollmentDetails(input), /registration_enrollment_details_response_invalid/);
+    assert.equal(JSON.stringify(input), before);
+  }
+  for (const response of [valid, { ...valid, rows: [{ ...canonical, id: null }], externalReconciliationRequired: true }]) {
+    const harness = createClient({ rpcHandler: () => ({ data: response, error: null }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    const saved = await service.saveRegistrationEnrollmentDetails({ trackId: "track-1", rows: [request], expectedRows: [],
+      expectedWorkflowRevision: 4, requestKey: "valid-rows" });
+    assert.equal(saved.rows.length, 1);
+    assert.equal(saved.rows[0].classId, request.classId);
+  }
+  const source = "74000000-0000-4000-8000-000000000055";
+  const correction = { ...request, classStartDate: "2026-08-24", classStartSessionKey: "legacy-source",
+    classStartSourceObservationId: source };
+  const producer = { ...valid, externalReconciliationRequired: true, rows: [{ ...canonical, ...correction, id: null }] };
+  const harness = createClient({ rpcHandler: () => ({ data: producer, error: null }) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const saved = await service.saveRegistrationEnrollmentDetails({ trackId: "track-1", rows: [correction], expectedRows: [],
+    expectedWorkflowRevision: 4, requestKey: "source-fact-correction" });
+  assert.equal(saved.rows[0].classStartSourceObservationId, source);
+  assert.equal(saved.rows[0].classStartSession, null, "the final normalizer allows nullable source labels in externalized corrections");
 });
 
 test("detail observations keep raw SDK failures private and preserve error identity, sharing and retries", async () => {

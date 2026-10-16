@@ -5,12 +5,14 @@ import { Label } from "@/components/ui/label"
 import { RegistrationSelect } from "./registration-select"
 import { registrationClassGradeOptions, registrationClassOptions, UNASSIGNED_CLASS_GRADE, type RegistrationClassChoice } from "./registration-class-options"
 
-export function RegistrationClassSelect({ classes, value, onValueChange, label, disabled }: {
+export function RegistrationClassSelect({ classes, value, onValueChange, label, disabled, invalid, describedBy }: {
   classes: readonly RegistrationClassChoice[]
   value: string
   onValueChange: (value: string) => void
   label: string
   disabled?: boolean
+  invalid?: boolean
+  describedBy?: string
 }) {
   const [grade, setGrade] = useState("")
   const gradeOptions = registrationClassGradeOptions(classes)
@@ -34,6 +36,8 @@ export function RegistrationClassSelect({ classes, value, onValueChange, label, 
         <span>반</span>
         <RegistrationSelect
           aria-label={label}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
           value={value}
           selectedLabel={selected?.label || (value ? "반 정보 확인 필요" : "반 선택")}
           placeholder="반 선택"

@@ -1,0 +1,115 @@
+{
+  "previousCandidateCommit": "4dc7f49b181988fbbb3ac392e01adcda320cae78",
+  "sourceSha256": "1365bf829193d2139d03053cc8dc478046771b439d78202c661963f01aa73ac5",
+  "sourcePathCount": 51,
+  "independentMacReview": {
+    "receiptSha256": "fe73fedef54fc29c2e0652981b6924c9d1a7fb144f9cb2e19588150c3ab79f66",
+    "runtime": "Node22.18.0 darwin arm64",
+    "nodeTestsPassed": 19,
+    "parserFalsePositives": 2,
+    "gate": "BLOCKED",
+    "actualRaceExecuted": false,
+    "postdeployExecuted": false,
+    "dbLaunch": "Parent reported reviewer rejection because approval was interpreted as limited to candidate2e5e6c73. No retry or alternate authorization route attempted."
+  },
+  "originalReproduction": {
+    "candidate": "4dc7f49b181988fbbb3ac392e01adcda320cae78",
+    "macReviewReceipt": "fe73fedef54fc29c2e0652981b6924c9d1a7fb144f9cb2e19588150c3ab79f66",
+    "kind": "synthetic parser inputs; no SQL execution",
+    "runtime": "v24.19.0",
+    "cases": [
+      {
+        "name": "S",
+        "bytes": 13224,
+        "sha256": "910d16daeeea3a33b25f00a54ba0bc9698c703c40c1588a70428f3ea51a60ec3",
+        "originalOutcome": "passed"
+      },
+      {
+        "name": "input1",
+        "bytes": 13259,
+        "sha256": "9910185de29e999d3ce4ef5b54c331eb5d32e246eeedab0a5e963b9cf777d6bd",
+        "originalOutcome": "passed"
+      },
+      {
+        "name": "input2",
+        "bytes": 13269,
+        "sha256": "e793fcb4da143534ca2c3fbb6e8723e81646057701404ad6fcd9b007a67bb44a",
+        "originalOutcome": "passed"
+      }
+    ],
+    "originalProbeSha256": "15cedc76d48a5a2f16965cd0b4ca52d905013311f35c1391ad093681c0451f06"
+  },
+  "completeFrameComparison": {
+    "kind": "synthetic parser comparison; no database executed",
+    "outcomes": [
+      {
+        "name": "completeSyntheticBaseline",
+        "bytes": 14247,
+        "sha256": "0260a54312c67014a9e29e2efb3346a6e3e711f1f4e7b6f4f9618c6b6846f369",
+        "before": "passed",
+        "after": "passed"
+      },
+      {
+        "name": "input1",
+        "bytes": 14282,
+        "sha256": "52ff99d7e01eb24e30133ef4b364cbfe80c65bf4efc05f6dc63ae21ba32e410e",
+        "before": "passed",
+        "after": "registration_guard_race_step_result_invalid"
+      },
+      {
+        "name": "input2",
+        "bytes": 14292,
+        "sha256": "4f109a344a6b00ae03debf2b31a4e57230d5e519f6712666d49c2a64f08a8a90",
+        "before": "passed",
+        "after": "registration_guard_race_verification_result_count_invalid"
+      }
+    ]
+  },
+  "fix": {
+    "ordinarySteps": "Require exact expected SQL followed only by the complete expected actor/capture/locked-id result tables, or no table for COMMIT. Reject extra SQL, extra or missing result tables and wrong IDs.",
+    "verification": "Require exactly one own assert_case table, then the three session teardown actor tables; consume the whole remainder as one ordered cleanup checkpoint. Only the two native observed rollback warnings are optional at their own session positions.",
+    "syntheticFixtures": "Preserve original review baseline and mutations exactly. That historical baseline omitted ordinary tables and is now rejected too. Complete synthetic frames obtain ordinary result tables from the immutable native capture; both review mutations are separately tested against this complete baseline.",
+    "nativeEvidence": "Unmodified PG17.6 historical output still passes execution-shape validation then fails missing cleanup checkpoints. No native success evidence added."
+  },
+  "preservedControls": {
+    "comparedAgainstCommit": "4dc7f49b181988fbbb3ac392e01adcda320cae78",
+    "unchangedSourcePins": {
+      "supabase/tests/registration_enrollment_guarded_save_race.spec": "6f068df7a79a9783396ab79b86ba5cac08c97dad13296a3730e8da7fbe09f788",
+      "supabase/tests/registration_enrollment_guarded_save_test.sql": "879621aa654cd9bff2193b68ca3b89fddbdb0c99d362b64c3ad090bdafaa4a1a",
+      "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3",
+      "scripts/run-isolated-supabase-db-tests.mjs": "581731526c3ca61d284d597b83313e2b200f1a35c40e9f6439c1c12dabfa8439",
+      "supabase/tests/active_registration_workflow_postdeploy_readonly.sql": "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343",
+      "tests/fixtures/registration-race-pg17.6-568537c7.json": "3629dbb9e6e74bae09592c5ddceea6bbcef0ae8fde59849ed085041ab9ac20e0"
+    },
+    "probeEmbeddingPlanAndContextUnchanged": true,
+    "probeExecutionAndCliUnchanged": true,
+    "specAndAllBusinessAssertionsUnchanged": true
+  },
+  "changedSourcePins": {
+    "tests/fixtures/registration-race-parser-review-4dc7f49b.json": "234e1147d4b8c8a66a0dacef9b5db5d7d12057529a36c0a49a78b66b8a5b248f",
+    "tests/probe-registration-enrollment-guarded-save-concurrency.mjs": "a3d827d1f00d168ffd771918d5cf1c250f0cbbcc0270536aac48daab0e6ef3c9",
+    "tests/registration-enrollment-race-probe.test.mjs": "20815e6e446196a0d6dc119d33235d147881d87d8efb3f4df3cf8c98b3a37088"
+  },
+  "localVerification": {
+    "runtime": "v24.19.0",
+    "command": "node --test tests/registration-enrollment-race-probe.test.mjs",
+    "passed": 23,
+    "failed": 0,
+    "skipped": 0,
+    "logSha256": "12a8c9583dffd178abd24069451075bc921bcffbff4390717c363ee647d2af90",
+    "scope": "Only the affected source/parser suite and bounded before/after parser reproduction; no full-suite or database execution.",
+    "intermediateHarnessCorrection": "Changed mutation construction to position-based insertion, avoiding JavaScript replacement-string interpretation of SQL dollar quotes.",
+    "sqlExecuted": false
+  },
+  "privacy": {
+    "files": 50,
+    "knownOriginalIdentityMatches": 0,
+    "credentialPatternMatches": 0
+  },
+  "currentRaceRuntime": "NOT_RUN; launch authorization unresolved",
+  "independentExactSourceReview": "PENDING new candidate review",
+  "finalRequiredReleaseChecks": "BLOCKED",
+  "candidateStatus": "candidate",
+  "operationalMutations": false,
+  "deployment": false
+}

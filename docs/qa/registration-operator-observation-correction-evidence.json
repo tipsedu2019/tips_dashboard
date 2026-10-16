@@ -1,0 +1,158 @@
+{
+  "previousTestedCommit": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+  "baseSha": "1c2159d6924596072ab7fda76fbf24458e384b4b",
+  "sourceSha256": "062b300d55899974b9fc17b9deb9554b33a0188d85eb62232f37eadd60d35cc8",
+  "sourcePathCount": 49,
+  "sourcePins": {
+    "scripts/run-isolated-supabase-db-tests.mjs": "581731526c3ca61d284d597b83313e2b200f1a35c40e9f6439c1c12dabfa8439",
+    "supabase/tests/registration_enrollment_guarded_save_test.sql": "6693b36dfdbd4b6c676086e23c24a26bce22fd3dda84f34378bd197632d06915",
+    "supabase/tests/active_registration_workflow_postdeploy_readonly.sql": "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343",
+    "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3",
+    "tests/probe-registration-enrollment-guarded-save-concurrency.mjs": "43650f87f2fa2b354d079de0be4e5598c5e959a9df35ca6c776a27aee4cc8ad4",
+    "supabase/tests/registration_enrollment_guarded_save_race.spec": "c59b3977bf67a175b87a96b3afc7b421396d3d0c2b402825978757395c60164c"
+  },
+  "priorMacReceiptSha256": "7a1aac7e1effe5897fec158489967b5bf1f5594b896b293bc18472bd70acb243",
+  "priorMacResults": {
+    "node22Passed": 488,
+    "node22SelectedPassed": 1,
+    "linuxFixturePassed": 10,
+    "linuxFixtureSkipped": 0,
+    "businessSqlFilesPassed": 6,
+    "businessSqlFilesFailed": 1,
+    "guardedSqlSubtestsBeforeFixtureInsertFailure": 20,
+    "reportedAggregateSqlAssertions": 173,
+    "race": "NOT_RUN before version call/sessions/permutations"
+  },
+  "correctionResults": [
+    {
+      "suite": "receipt",
+      "runtime": "Node24.19.0",
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0,
+      "logSha256": "b7fa07f49c1c33064ac5de593f774cec03b85afd8c9ea1a6dd2d893d372b800d"
+    },
+    {
+      "suite": "runner",
+      "runtime": "Node24.19.0",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "logSha256": "11cae1a4cb0ea6ea795b2dd55d2b618fb0b043ab01182e1eefc949cdda2034c5"
+    },
+    {
+      "suite": "contracts",
+      "runtime": "Node24.19.0",
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "logSha256": "2b32c7626d58552e667b232e0d5898e5021c97404880a444cd733bb32959415f"
+    },
+    {
+      "suite": "layout-focused",
+      "runtime": "Node24.19.0",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "logSha256": "bce500ba0ae99b4da81c079e2a5e8335d7c88c9a02e06747cc6534e0effb8ccb"
+    },
+    {
+      "check": "supabase-migration-layout verifier",
+      "runtime": "Node24.19.0",
+      "status": "PASS",
+      "logSha256": "487a77776cd6fe21f8fd3b4a079471a86cb955b03ffda043d43ac7bfa122fcf1"
+    }
+  ],
+  "localPassedTotal": 53,
+  "evidenceScope": "Source and injected-process tests, supplemental Node24 only; no new DB runtime or production verification.",
+  "broaderPredicateSweep": {
+    "status": "INTERRUPTED",
+    "exitCode": 130,
+    "passingEvidence": false,
+    "reason": "Superseded for this correction by focused observation-predicate tests; default full suite preserved."
+  },
+  "preservedInputs": [
+    {
+      "path": "supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3"
+    },
+    {
+      "path": "supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "8acc8b3f35bbf651cec656253136e25855958df92755a19958f21a8d7400eb1f"
+    },
+    {
+      "path": "tests/probe-registration-enrollment-guarded-save-concurrency.mjs",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "43650f87f2fa2b354d079de0be4e5598c5e959a9df35ca6c776a27aee4cc8ad4"
+    },
+    {
+      "path": "supabase/tests/registration_enrollment_guarded_save_race.spec",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "c59b3977bf67a175b87a96b3afc7b421396d3d0c2b402825978757395c60164c"
+    },
+    {
+      "path": "supabase/tests/registration_manager_write_and_integrity_fence_test.sql",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "a770a5d0a9c21ddd135749685a621e6f923d3d1da0f1c922ce9609f715ff89dd"
+    },
+    {
+      "path": "supabase/tests/registration_collaboration_write_role_test.sql",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "be452feb9e17077b317c8598f38af90bad2e5ad2881a19d4d3c6613695948a23"
+    },
+    {
+      "path": "supabase/tests/registration_observation_booking_test.sql",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "ee7fe2d0f2fca24a2d29da5e63d43b86afba6050bc72812a2327c3bfeb173660"
+    },
+    {
+      "path": "supabase/tests/registration_observation_status_independence_test.sql",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "f05af69d14d03f5445aa39bd5f6b69ebd949b4033050c3d793c22ac84dc999d3"
+    },
+    {
+      "path": "supabase/tests/registration_manual_workflow_status_test.sql",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "d4e72688fed6d97dfa9ef126fd88a73d508655e8850026d2e346506726eab98f"
+    },
+    {
+      "path": "supabase/tests/active_registration_workflow_sqlstate_contract_test.sql",
+      "unchangedFrom": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+      "sha256": "c770e0c53793920ba1cc27e4e6c0709ca1153cd82288f7dc5892faafd3d73966"
+    }
+  ],
+  "diagnosis": {
+    "priorCommit": "bd6fb3ade58f2f9b24ff2bb494bd62024508f9da",
+    "macReceiptSha256": "7a1aac7e1effe5897fec158489967b5bf1f5594b896b293bc18472bd70acb243",
+    "classification": "source diagnosis; final DB condition booleans pending next owned isolated run",
+    "confirmed": [
+      {
+        "kind": "fixture_constraint",
+        "constraint": "ops_registration_subject_tracks_check1",
+        "requiredInvariant": "(pipeline_status = migration_review) = migration_review_required",
+        "case": 16,
+        "productionConstraintChanged": false
+      },
+      {
+        "kind": "postdeploy_source_incompatibility",
+        "functionKey": "workflow_private",
+        "oldForbiddenLikePattern": "%registration_observation_%",
+        "requiredGuardMarker": "registration_observation_booking_required",
+        "oldPredicateRejectsRequiredMarker": true,
+        "actualPriorStdoutRetained": false,
+        "additionalRuntimeFailuresExcluded": false
+      }
+    ]
+  },
+  "remaining": [
+    "Node22 focused correction regressions",
+    "Corrected guarded-save pgTAP on owned isolated DB",
+    "Postdeploy contract and failure condition booleans if needed",
+    "Seven real race permutations with verified existing PG17.6 binary/wrapper",
+    "Independent exact-source review and unchanged required release gates"
+  ],
+  "candidateStatus": "candidate",
+  "operationalMutations": false
+}

@@ -116,6 +116,67 @@ export function validateIsolatedPostdeployContractOutput(value) {
   if (typeof value !== "string" || value.trim() !== "t") fail("isolated_supabase_db_postdeploy_contract_invalid");
   return true;
 }
+// Diagnostic projection of this repository's reviewed SQL layout, not a SQL
+// parser or an alternate gate. Preserve every predicate and the read-only
+// transaction; reject layout drift instead of guessing. Never output definitions
+// or rows. A failed original contract always fails, even if this query succeeds.
+export function buildIsolatedPostdeployDiagnostics(source) {
+  const marker = "\nselect (\n";
+  const ending = "\n) as contract_ok;\nrollback;\n";
+  if (typeof source !== "string" || !source.startsWith("begin transaction read only;\n")
+    || source.split(marker).length !== 2 || !source.endsWith(ending)) {
+    fail("isolated_supabase_db_postdeploy_diagnostic_layout_invalid");
+  }
+  const [prefix, tail] = source.split(marker);
+  const predicates = tail.slice(0, -ending.length).split("\n  and ");
+  const invalidPrefix = "not exists (\n    select 1\n    from functions\n    where ";
+  const invalidSuffix = "\n  )";
+  const functionKeys = [...prefix.matchAll(/\(\s*'([a-z0-9_]+)',\s*'[^']+'::text,/gu)].map((match) => match[1]);
+  if (predicates.length !== 50 || functionKeys.length !== 77 || new Set(functionKeys).size !== 77
+    || !predicates[1].startsWith(invalidPrefix) || !predicates[1].endsWith(invalidSuffix)) {
+    fail("isolated_supabase_db_postdeploy_diagnostic_layout_invalid");
+  }
+  let offset = prefix.length + marker.length;
+  const checkKeys = predicates.map((predicate, index) => {
+    const start = source.indexOf(predicate, offset);
+    const line = source.slice(0, start).split("\n").length;
+    offset = start + predicate.length;
+    return `condition_${String(index + 1).padStart(2, "0")}_line_${line}`;
+  });
+  const invalidFunction = predicates[1].slice(invalidPrefix.length, -invalidSuffix.length);
+  predicates[1] = "not exists (select 1 from function_diagnostics where not passed)";
+  const sql = `${prefix},
+function_diagnostics as (
+  select function_key, (${invalidFunction}) is not true as passed from functions
+),
+contract_diagnostics(check_name, passed) as (
+  values ${predicates.map((predicate, index) => `('${checkKeys[index]}', (${predicate}) is true)`).join(",\n  ")}
+)
+select pg_catalog.jsonb_build_object(
+  'checks', (select pg_catalog.jsonb_object_agg(check_name, passed) from contract_diagnostics),
+  'functions', (select pg_catalog.jsonb_object_agg(function_key, passed) from function_diagnostics)
+);
+rollback;
+`;
+  return { sql, checkKeys, functionKeys };
+}
+export function validateIsolatedPostdeployDiagnosticsOutput(value, { checkKeys, functionKeys }) {
+  // Only the exact source-derived key set and booleans can reach the log.
+  if (typeof value !== "string" || Buffer.byteLength(value) > 32768) {
+    fail("isolated_supabase_db_postdeploy_diagnostic_output_invalid");
+  }
+  let parsed;
+  try { parsed = JSON.parse(value); } catch { fail("isolated_supabase_db_postdeploy_diagnostic_output_invalid"); }
+  const exactObject = (object, keys, predicate) => object !== null && typeof object === "object"
+    && !Array.isArray(object) && Object.keys(object).length === keys.length
+    && keys.every((key) => Object.hasOwn(object, key) && predicate(object[key]));
+  if (!exactObject(parsed, ["checks", "functions"], (object) => object !== null)
+    || !exactObject(parsed.checks, checkKeys, (passed) => typeof passed === "boolean")
+    || !exactObject(parsed.functions, functionKeys, (passed) => typeof passed === "boolean")) {
+    fail("isolated_supabase_db_postdeploy_diagnostic_output_invalid");
+  }
+  return parsed;
+}
 export function sanitizeChildDiagnostic(value) {
   if (typeof value !== "string") return "";
   return value
@@ -1041,7 +1102,30 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
         }));
         fail("isolated_supabase_db_child_failed");
       }
-      validateIsolatedPostdeployContractOutput(result.stdout);
+      try {
+        validateIsolatedPostdeployContractOutput(result.stdout);
+      } catch (contractError) {
+        const stdout = typeof result.stdout === "string" ? result.stdout : "";
+        log(JSON.stringify({ event: "isolated_supabase_db_postdeploy_contract_failed",
+          exitCode: result.code, stdoutBytes: Buffer.byteLength(stdout),
+          stderrBytes: typeof result.stderr === "string" ? Buffer.byteLength(result.stderr) : 0,
+          outputKind: stdout.trim() === "f" ? "false" : stdout.trim() === "" ? "empty" : "unexpected" }));
+        try {
+          const diagnostic = buildIsolatedPostdeployDiagnostics(postdeployContract.contents.toString("utf8"));
+          const diagnosticResult = await executeProcess({ command: "docker",
+            args: ["exec", `supabase_db_${runtime.projectId}`, "psql", "--quiet", "--tuples-only", "--no-align",
+              "--set", "ON_ERROR_STOP=1", "--username", "postgres", "--dbname", "postgres", "--command", diagnostic.sql],
+            cwd: runtime.tempRoot, env: cleanEnvironment });
+          if (diagnosticResult.code !== 0) fail("isolated_supabase_db_postdeploy_diagnostic_child_failed");
+          const checks = validateIsolatedPostdeployDiagnosticsOutput(diagnosticResult.stdout, diagnostic);
+          log(JSON.stringify({ event: "isolated_supabase_db_postdeploy_diagnostics",
+            contractSha256: sha256(postdeployContract.contents), ...checks }));
+        } catch {
+          // Do not print arbitrary child output, exceptions, or function bodies.
+          log(JSON.stringify({ event: "isolated_supabase_db_postdeploy_diagnostics_unavailable" }));
+        }
+        throw contractError;
+      }
     }
     const status = await invoke(["status", "--workdir", runtime.tempRoot, "--output", "json"]);
     const localDbUrl = parseLocalDbUrl(status.stdout, runtime.ports.db);

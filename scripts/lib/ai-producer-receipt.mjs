@@ -43,6 +43,7 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/tests/timetable_shared_validation_workset_test.sql',
  'supabase/tests/timetable_close_gateway_validation_reuse_test.sql',
  'supabase/tests/legacy_context_binding_preparation_test.sql',
+ 'supabase/migrations/20261013084134_registration_enrollment_guarded_save.sql',
  'supabase/migrations/20261008140556_ai_agent_thread_replies.sql',
  'supabase/tests/ai_agent_thread_replies_test.sql',
  'supabase/tests/ai_agent_nonexpiring_chat_test.sql',
@@ -108,7 +109,7 @@ export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  NONEXPIRING_CHAT_MIGRATION,
 ]);
 // Preserve the reviewed ac84 inventory and exact main addition.
-// Only explicitly pinned withdrawal, Chat, PR126 and timetable migrations extend it.
+// Only explicitly pinned withdrawal, Chat, PR126, timetable and registration migrations extend it.
 // A future migration requires an explicit review of these source-owned pins.
 const REVIEWED_MANIFEST_PREFIX_SHA256='80a6a4d06fe190ef65e9c926392cf187995c07ce1a25c275ac07dc9d72df79c2';
 const MAIN_MIGRATION=Object.freeze({fileName:'20261007135140_textbook_latest_count_read_aggregation.sql',status:'final',sha256:'1491b4b824c343e23dc24b83e1be41214f5fda197813dca012c252a9b541cb23'});
@@ -120,6 +121,9 @@ export const TIMETABLE_CLOSE_MIGRATIONS=Object.freeze([
  Object.freeze({"fileName":"20261014180000_timetable_validation_unchanged_inputs.sql","status":"final","sha256":"cc7ada2b9a4670b38d431cc69c16b4e63d0008b40914f4d17594cfb0c1aafc7f"}),
  Object.freeze({"fileName":"20261014193500_legacy_context_binding_preparation.sql","status":"final","sha256":"70ef7db3791f04a8b9e42986d21e2afa6396f8967084b293c3f1f3c77889b5af"}),
 ]);
+// Finalize the reviewed registration SQL without changing its exact bytes.
+// Runtime producer parity still requires the full final-source run and receipt.
+export const REGISTRATION_ENROLLMENT_MIGRATION=Object.freeze({fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'final',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'});
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
  Object.freeze({fileName:'20261009082000_ops_legacy_dispatch_actor_null_guard.sql',status:'final',sha256:'191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3'}),
@@ -174,18 +178,19 @@ export async function snapshotAiSource(root=ROOT){
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
  const withdrawalNames=CURRENT_WITHDRAWAL_MIGRATIONS.map(m=>m.fileName);
  const integratedNames=[...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].map(m=>m.fileName);
- const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && !integratedNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName);
+ const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && !integratedNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==REGISTRATION_ENROLLMENT_MIGRATION.fileName);
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,172,'AI canonical manifest inventory');
- const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
+ assert.equal(manifest.orderedNewMigrations.length,173,'AI canonical manifest inventory');
+ const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS,REGISTRATION_ENROLLMENT_MIGRATION].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');
  for(const m of CURRENT_WITHDRAWAL_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed withdrawal migration source drift');
  for(const m of CURRENT_PR126_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed PR126 migration source drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',TIMETABLE_VALIDATION_MIGRATION.fileName))),TIMETABLE_VALIDATION_MIGRATION.sha256,'timetable validation migration source drift');
  for(const m of TIMETABLE_CLOSE_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'timetable close migration source drift');
+ assert.equal(hash(await readFile(join(root,'supabase/migrations',REGISTRATION_ENROLLMENT_MIGRATION.fileName))),REGISTRATION_ENROLLMENT_MIGRATION.sha256,'registration enrollment migration source drift');
  assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
  for(const m of CURRENT_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
  const sourceHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}}).trim();

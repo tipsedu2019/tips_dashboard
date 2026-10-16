@@ -527,8 +527,12 @@ export function getRegistrationEnrollmentStartSaveErrorMessage(error, fallback =
   if (
     source.includes("registration_observation_class_start_source_invalid")
   ) return "청강 회차 정보가 변경되었습니다. 현재 수업 일정을 다시 선택해 주세요."
-  if (source.includes("registration_invalid_source_state")) {
+  if (source.includes("registration_invalid_source_state")
+    || source.includes("registration_enrollment_details_refresh_required")) {
     return "등록 상태가 변경되었습니다. 최신 내용을 다시 불러와 주세요."
+  }
+  if (source.includes("registration_enrollment_details_response_invalid")) {
+    return "저장 결과를 확인하지 못했습니다. 최신 내용을 다시 불러와 주세요."
   }
   return message || enrollmentText(fallback) || "수업 정보를 저장하지 못했습니다."
 }

@@ -32,11 +32,11 @@ const {
   updateRegistrationApplicationDirtyKeys,
 } = application
 
-test("observation keeps the previous registration workflow visible", () => {
+test("requested observation stays visible while legacy confirmation statuses retain their saved fact workflow", () => {
   assert.equal(resolveRegistrationWorkspaceWorkflowStatus({
     workflowStatus: "observation_requested",
     observationReturnWorkflowStatus: "consultation_completed",
-  }), "consultation_completed")
+  }), "observation_requested")
   assert.equal(resolveRegistrationWorkspaceWorkflowStatus({
     workflowStatus: "observation_feedback_pending",
     observationReturnWorkflowStatus: "waiting_current_class",
@@ -690,8 +690,8 @@ test("an inquiry draft survives a consultation reload until its own canonical re
 
 test("common revision conflicts retain attempted values beside canonical latest values", () => {
   const rows = getRegistrationCommonConflictRows({
-    attempted: { studentName: "김학생", schoolGrade: "중2", requestNote: "내가 입력한 요청" },
-    latest: { studentName: "김학생", schoolGrade: "중3", requestNote: "다른 담당자의 최신 요청" },
+    attempted: { studentName: "합성인물06", schoolGrade: "중2", requestNote: "내가 입력한 요청" },
+    latest: { studentName: "합성인물06", schoolGrade: "중3", requestNote: "다른 담당자의 최신 요청" },
     labels: { studentName: "학생명", schoolGrade: "학년", requestNote: "요청 사항" },
   })
 

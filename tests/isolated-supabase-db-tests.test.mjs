@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { watch } from "node:fs";
 import { lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -495,6 +496,78 @@ test("isolated DB runner exposes an explicit final-only lifecycle gate", async (
       () => validateIsolatedPostdeployContractOutput(invalid),
       /isolated_supabase_db_postdeploy_contract_invalid/,
     );
+  }
+});
+
+test("postdeploy diagnostics retain every predicate and accept only source-keyed booleans", async () => {
+  const { buildIsolatedPostdeployDiagnostics, validateIsolatedPostdeployDiagnosticsOutput } = await import(runnerUrl.href);
+  const source = await readFile(new URL("../supabase/tests/active_registration_workflow_postdeploy_readonly.sql", import.meta.url), "utf8");
+  const diagnostic = buildIsolatedPostdeployDiagnostics(source);
+  assert.equal(diagnostic.checkKeys.length, 50);
+  assert.equal(diagnostic.functionKeys.length, 77);
+  assert.ok(Buffer.byteLength(diagnostic.sql) < 128 * 1024, "Docker exec must fit the Linux single-argument limit");
+  assert.ok(diagnostic.sql.startsWith("begin transaction read only;\nset local statement_timeout = '5s';\nset local lock_timeout = '1s';"));
+  assert.ok(diagnostic.sql.endsWith("rollback;\n"));
+  const predicates = source.split("\nselect (\n")[1].split("\n) as contract_ok;")[0].split("\n  and ");
+  for (const [index, predicate] of predicates.entries()) {
+    assert.ok(diagnostic.sql.includes(index === 1
+      ? predicate.slice("not exists (\n    select 1\n    from functions\n    where ".length, -"\n  )".length)
+      : predicate), `predicate ${index + 1} must remain byte-identical`);
+  }
+  for (const changed of [source.replace("\nselect (\n", "\nselect(\n"), source.replace("\n  and ", "\n and "), source.replace("begin transaction read only;", "begin;")]) {
+    assert.throws(() => buildIsolatedPostdeployDiagnostics(changed), /diagnostic_layout_invalid/);
+  }
+  const expected = {
+    checks: Object.fromEntries(diagnostic.checkKeys.map((key) => [key, true])),
+    functions: Object.fromEntries(diagnostic.functionKeys.map((key) => [key, key !== "workflow_private"])),
+  };
+  assert.deepEqual(validateIsolatedPostdeployDiagnosticsOutput(JSON.stringify(expected), diagnostic), expected);
+  for (const invalid of ["", "t", "f", JSON.stringify(expected) + "\n{}", "x".repeat(32769),
+    JSON.stringify({ ...expected, extra: "synthetic-private-output" }),
+    JSON.stringify({ ...expected, functions: { ...expected.functions, workflow_private: "synthetic-private-output" } }),
+    JSON.stringify({ ...expected, functions: { ...expected.functions, workflow_private: null } }),
+    JSON.stringify({ ...expected, checks: {} })]) {
+    assert.throws(() => validateIsolatedPostdeployDiagnosticsOutput(invalid, diagnostic), /diagnostic_output_invalid/);
+  }
+});
+
+test("postdeploy failure diagnostics cannot admit a failed gate or leak child output and always clean up", async (t) => {
+  const { runIsolatedSupabaseDbTests, buildIsolatedPostdeployDiagnostics } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const source = await readFile(join(root, "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"), "utf8");
+  const diagnostic = buildIsolatedPostdeployDiagnostics(source);
+  const booleans = { checks: Object.fromEntries(diagnostic.checkKeys.map((key) => [key, true])),
+    functions: Object.fromEntries(diagnostic.functionKeys.map((key) => [key, true])) };
+  for (const [stdout, diagnosticResult, kind, diagnosticEvent] of [
+    ["f\n", { code: 0, stdout: JSON.stringify(booleans) }, "false", "isolated_supabase_db_postdeploy_diagnostics"],
+    ["", { code: 0, stdout: "synthetic-private-output" }, "empty", "isolated_supabase_db_postdeploy_diagnostics_unavailable"],
+    ["t\nt\nsynthetic-private-output", { code: 1, stdout: "synthetic-private-output" }, "unexpected", "isolated_supabase_db_postdeploy_diagnostics_unavailable"],
+  ]) {
+    const calls = [], logs = [];
+    await assert.rejects(runIsolatedSupabaseDbTests({ root, executeNetwork: isolatedNetworkFixture,
+      argv: ["--execute", "--authorized", "--request-id", "postdeploy-diagnostic-failure", "--postdeploy-contract"],
+      allocatePort: (() => { let port = 55740; return () => ++port; })(), log: (line) => logs.push(line),
+      executeProcess: async (invocation) => {
+        calls.push(invocation);
+        if (invocation.command === "docker") {
+          assert.equal(invocation.args[0], "exec");
+          const original = invocation.args.at(-1) === source;
+          if (!original) assert.equal(invocation.args.at(-1), diagnostic.sql);
+          return { ...(original ? { code: 0, stdout } : diagnosticResult), stderr: "synthetic-private-stderr" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    }), /isolated_supabase_db_postdeploy_contract_invalid/);
+    const summaries = logs.map((line) => JSON.parse(line));
+    assert.equal(summaries.find((row) => row.event === "isolated_supabase_db_postdeploy_contract_failed").outputKind, kind);
+    assert.ok(summaries.some((row) => row.event === diagnosticEvent));
+    assert.doesNotMatch(logs.join("\n"), /synthetic-private/);
+    assert.equal(calls.filter((call) => call.command === "docker").length, 2);
+    assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
+    assert.equal(calls.filter((call) => call.args[0] === "status" || call.command === process.execPath).length, 0);
+    assert.equal(calls.filter((call) => call.command === "docker")[0].args[1],
+      calls.filter((call) => call.command === "docker")[1].args[1]);
   }
 });
 
@@ -3442,40 +3515,158 @@ test("isolated CI relay refuses other containers and inherited production enviro
   }
 });
 
-test("isolated CI abort waits for the owned child to exit before returning to cleanup", async (t) => {
+test("isolated CI abort waits for the owned child to exit before returning to cleanup", { timeout: 6000 }, async (t) => {
+  const fixtureStarted = Date.now();
   const { processResult } = await import(runnerUrl.href);
   const root = await makeRunnerTempDirectory(t);
+  const preAborted = new AbortController();
+  preAborted.abort();
+  await assert.rejects(processResult(process.execPath, ["--input-type=module", "-e", "import {writeFileSync} from 'node:fs';process.on('SIGTERM',()=>process.exit(0));writeFileSync('pre-aborted-started','unexpected');setInterval(()=>{},1000);"], {
+    cwd: root, env: { PATH: process.env.PATH }, signal: preAborted.signal,
+  }), (error) => error.name === "AbortError");
+  assert.deepEqual(await readdir(root), [], "an already-aborted actual child must fail closed before readiness");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 400);
+  let timer, watcher, rejectReady;
+  const ready = new Promise((resolveReady, reject) => {
+    rejectReady = reject;
+    watcher = watch(root, (_event, file) => {
+      if (file === "pid") readFile(join(root, "pid"), "utf8").then(value => resolveReady(Number(value)), reject);
+    });
+    watcher.on("error", reject);
+  });
+  const abortStartup = () => { controller.abort(); rejectReady(t.signal.reason); };
+  t.signal.addEventListener("abort", abortStartup, { once: true });
+  if (t.signal.aborted) abortStartup();
+  const command = "import {writeFileSync,renameSync} from 'node:fs'; process.on('SIGTERM',()=>setTimeout(()=>{writeFileSync('owned-child-reaped','yes');process.exit(0)},75)); setInterval(()=>{},1000);writeFileSync('pid.pending',String(process.pid));renameSync('pid.pending','pid');";
+  const child = processResult(process.execPath, ["--input-type=module", "-e", command], {
+    cwd: root, env: { PATH: process.env.PATH }, signal: controller.signal,
+  });
   try {
-    const command = "import {writeFileSync} from 'node:fs'; process.on('SIGTERM',()=>setTimeout(()=>{writeFileSync('owned-child-reaped','yes');process.exit(0)},75)); setInterval(()=>{},1000);";
-    await assert.rejects(processResult(process.execPath, ["--input-type=module", "-e", command], {
-      cwd: root, env: { PATH: process.env.PATH }, signal: controller.signal,
-    }), (error) => error.name === "AbortError");
+    const pid = await Promise.race([ready, child.then(() => { throw Error("owned fixture exited before readiness"); })]);
+    assert.ok(Number.isInteger(pid) && pid > 0, "readiness requires the actual child PID");
+    process.kill(pid, 0);
+    watcher.close();
+    // The same owned child is ready to handle TERM before its 400ms abort.
+    timer = setTimeout(() => controller.abort(), 400);
+    await assert.rejects(child, (error) => error.name === "AbortError");
+    assert.equal(controller.signal.aborted, true);
     assert.equal(await readFile(join(root, "owned-child-reaped"), "utf8"), "yes");
-  } finally { clearTimeout(timer); }
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    assert.ok(Date.now() - fixtureStarted < 5500, "startup readiness and graceful reaping must remain bounded");
+  } finally {
+    clearTimeout(timer);
+    t.signal.removeEventListener("abort", abortStartup);
+    try { watcher?.close(); } finally { controller.abort(); await child.catch(() => {}); }
+  }
 });
 
-test('AI producer parity is a fixed sole-execute phase and rejects a thin/retained run before process launch',async()=>{
- const {parseIsolatedDbArguments,runIsolatedSupabaseDbTests}=await import(runnerUrl.href);
+test('AI producer parity is a fixed sole-execute phase and rejects a thin/retained run before process launch',async(t)=>{
+ const {parseIsolatedDbArguments,runIsolatedSupabaseDbTests,sha256}=await import(runnerUrl.href);
+ const {AI_SQL_TESTS,AI_PROBES,REGISTRATION_ENROLLMENT_MIGRATION}=await import('../scripts/lib/ai-producer-receipt.mjs');
  assert.equal(parseIsolatedDbArguments(['--ai-producer-parity']).aiProducerParity,true);
- let launched=0;
- await assert.rejects(runIsolatedSupabaseDbTests({argv:['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity'],executeProcess:async()=>{launched++;throw Error('must not launch');}}),/isolated_ai_parity_full_run_required/);
- assert.equal(launched,0);
- const {AI_SQL_TESTS,AI_PROBES}=await import('../scripts/lib/ai-producer-receipt.mjs');
- await assert.rejects(runIsolatedSupabaseDbTests({argv:['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity','--transactional-preflight','--verify-local-ledger',...AI_SQL_TESTS.flatMap(p=>['--test',p]),...AI_PROBES.flatMap(p=>['--probe',p])],retainTempRoot:true,executeProcess:async()=>{launched++;throw Error('must not launch');}}),/isolated_ai_parity_full_run_required/);
- assert.equal(launched,0);
+ const protectedPaths=[
+  'supabase/test-baselines/dashboard-free-tier-v1.manifest.json',
+  'scripts/run-isolated-supabase-db-tests.mjs',
+  'scripts/lib/ai-producer-receipt.mjs',
+  'tests/helpers/ai-producer-receipt.test.mjs',
+  'supabase/migrations/'+REGISTRATION_ENROLLMENT_MIGRATION.fileName,
+ ];
+ const realHashes=new Map(await Promise.all(protectedPaths.map(async(path)=>[path,sha256(await readFile(new URL('../'+path,import.meta.url)))])));
+ const realManifest=JSON.parse(await readFile(new URL('../'+protectedPaths[0],import.meta.url),'utf8'));
+ assert.equal(REGISTRATION_ENROLLMENT_MIGRATION.status,'final');
+ assert.deepEqual(realManifest.orderedNewMigrations.find(row=>row.fileName===REGISTRATION_ENROLLMENT_MIGRATION.fileName),REGISTRATION_ENROLLMENT_MIGRATION);
+ assert.equal(realHashes.get(protectedPaths.at(-1)),REGISTRATION_ENROLLMENT_MIGRATION.sha256);
+ const forbiddenCalls=[];
+ const forbid=(boundary)=>async()=>{forbiddenCalls.push(boundary);throw Error(boundary+' must not run');};
+ const boundaries={
+  executeProcess:forbid('process'),executeNetwork:forbid('network'),executeGit:forbid('git'),
+  allocatePort:forbid('port'),createRelay:forbid('relay'),
+ };
+ const thinArgv=['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity'];
+ try{
+  // Final metadata does not authorize a thin parity run. Candidate refusal and
+  // selector assertions below use only copied synthetic source/capture files.
+  await assert.rejects(runIsolatedSupabaseDbTests({...boundaries,argv:thinArgv}),/^Error: isolated_ai_parity_full_run_required$/u);
+  assert.deepEqual(forbiddenCalls,[]);
+  const root=await makeRepo(t);await configureEmptyReviewedRunnerRepo(root);
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
+  const fixtureSource='select 1;\n';
+  manifest.orderedNewMigrations=[{fileName:'20260814000000_ai_parity_selector_fixture.sql',status:'final',sha256:sha256(fixtureSource)}];
+  await writeFile(join(root,'supabase/migrations',manifest.orderedNewMigrations[0].fileName),fixtureSource);
+  await writeFile(manifestPath,JSON.stringify(manifest));await activateCanonicalBaseline(root);
+  await assert.rejects(lstat(join(root,'.git')),{code:'ENOENT'});
+  const tempDirectory=await makeRunnerTempDirectory(t);
+  const finalManifestBytes=await readFile(manifestPath);
+  const candidateManifest=structuredClone(manifest);candidateManifest.orderedNewMigrations[0].status='candidate';
+  await writeFile(manifestPath,JSON.stringify(candidateManifest));
+  for(const argv of [['--review-head','--require-final'],thinArgv]){
+   await assert.rejects(runIsolatedSupabaseDbTests({...boundaries,root,tempDirectory,argv}),/^Error: isolated_supabase_db_final_manifest_required$/u);
+  }
+  assert.deepEqual(forbiddenCalls,[]);
+  await writeFile(manifestPath,finalManifestBytes);
+  const plan=await runIsolatedSupabaseDbTests({...boundaries,root,argv:['--review-head','--require-final']});
+  assert.equal(plan.status,'plan');assert.deepEqual(plan.manifest.orderedNewMigrations,manifest.orderedNewMigrations);
+  await assert.rejects(runIsolatedSupabaseDbTests({...boundaries,root,tempDirectory,argv:thinArgv}),/^Error: isolated_ai_parity_full_run_required$/u);
+  assert.deepEqual(forbiddenCalls,[]);
+  const fullArgv=[...thinArgv,'--lint','--postdeploy-contract','--transactional-preflight','--verify-local-ledger',...AI_SQL_TESTS.flatMap(p=>['--test',p]),...AI_PROBES.flatMap(p=>['--probe',p])];
+  await assert.rejects(runIsolatedSupabaseDbTests({...boundaries,root,tempDirectory,argv:fullArgv,retainTempRoot:true}),/^Error: isolated_ai_parity_full_run_required$/u);
+  assert.deepEqual(forbiddenCalls,[]);
+  assert.deepEqual(await readdir(tempDirectory),[],'selector refusal must not create a runtime or receipt');
+ }finally{
+  for(const [path,expected] of realHashes)assert.equal(sha256(await readFile(new URL('../'+path,import.meta.url))),expected,path+' remains byte-identical');
+ }
 });
 
 test('host deadline bounds a real pre-test hang and confirms TERM/KILL reaping', {timeout:6000},async(t)=>{
+ const fixtureStarted=Date.now();
  const runner=await import(runnerUrl.href);
  assert.equal(typeof runner.executeProcessWithDeadline,'function');
+ // The default executor still bounds an actual child that never reaches ready.
+ const unreadyRoot=await makeRunnerTempDirectory(t);
+ await assert.rejects(runner.executeProcessWithDeadline({command:process.execPath,args:['--input-type=module','-e',"setInterval(()=>{},1000);await new Promise(()=>{});"],cwd:unreadyRoot,env:{PATH:process.env.PATH},signal:t.signal}, {timeoutMs:250}),/^Error: isolated_supabase_db_host_deadline_exceeded$/u);
+ assert.deepEqual(await readdir(unreadyRoot),[]);
  const root=await makeRunnerTempDirectory(t);
- const command="import {writeFileSync} from 'node:fs'; writeFileSync('pid',String(process.pid)); process.on('SIGTERM',()=>writeFileSync('term','seen')); setInterval(()=>{},1000);";
- const started=Date.now();
- await assert.rejects(runner.executeProcessWithDeadline({command:process.execPath,args:['--input-type=module','-e',command],cwd:root,env:{PATH:process.env.PATH}}, {timeoutMs:250}),/isolated_supabase_db_host_deadline_exceeded/);
- assert.ok(Date.now()-started<5500,'host hang must have a finite deadline and reaping grace');
- const pid=Number(await readFile(join(root,'pid'),'utf8'));assert.equal(await readFile(join(root,'term'),'utf8'),'seen');assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
+ const command="import {writeFileSync,renameSync} from 'node:fs'; process.on('SIGTERM',()=>writeFileSync('term','seen')); setInterval(()=>{},1000); writeFileSync('pid.pending',String(process.pid));renameSync('pid.pending','pid');";
+ const invocation={command:process.execPath,args:['--input-type=module','-e',command],cwd:root,env:{PATH:process.env.PATH}};
+ const owned=new AbortController();
+ let watcher,rejectReady;
+ const ready=new Promise((resolveReady,reject)=>{
+  rejectReady=reject;
+  watcher=watch(root,(_event,file)=>{
+   if(file==='pid')readFile(join(root,'pid'),'utf8').then(value=>resolveReady(Number(value)),reject);
+  });
+  watcher.on('error',reject);
+ });
+ // Watch before launching; the atomic marker follows handler and hang setup.
+ const abortStartup=()=>{owned.abort();rejectReady(t.signal.reason);};
+ t.signal.addEventListener('abort',abortStartup,{once:true});
+ if(t.signal.aborted)abortStartup();
+ const child=runner.processResult(invocation.command,invocation.args,{...invocation,signal:owned.signal});
+ try{
+  const pid=await Promise.race([ready,child.then(()=>{throw Error('owned fixture exited before readiness');})]);
+  assert.ok(Number.isInteger(pid)&&pid>0,'readiness requires the actual child PID');
+  process.kill(pid,0);
+  watcher.close();
+  let deadlineAborted=false;
+  const started=Date.now();
+  await assert.rejects(runner.executeProcessWithDeadline(invocation,{timeoutMs:250,executeProcess:async({signal})=>{
+   const abortOwned=()=>{deadlineAborted=true;owned.abort();};
+   signal.addEventListener('abort',abortOwned,{once:true});
+   if(signal.aborted)abortOwned();
+   try{return await child;}finally{signal.removeEventListener('abort',abortOwned);}
+  }}),/^Error: isolated_supabase_db_host_deadline_exceeded$/u);
+  assert.equal(deadlineAborted,true,'the scoped host deadline must cancel the same ready child');
+  const elapsed=Date.now()-started;
+  assert.ok(elapsed>=2000,'the TERM handler keeps the child alive until the actual KILL grace expires');
+  assert.ok(elapsed<5500,'host hang must have a finite deadline and reaping grace');
+  assert.equal(await readFile(join(root,'term'),'utf8'),'seen');
+  assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
+  assert.ok(Date.now()-fixtureStarted<5500,'startup readiness and reaping must fit the existing fixture bound');
+ }finally{
+  t.signal.removeEventListener('abort',abortStartup);
+  try{watcher?.close();}finally{owned.abort();await child.catch(()=>{});}
+ }
 });
 
 test('host deadline rejects a late successful executor after cancellation',async()=>{
