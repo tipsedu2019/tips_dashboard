@@ -8,9 +8,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard";
 
 /** One active editor owns its dirty state; this hook only confirms navigation. */
-export function useDraftNavigation({ dirty, description = "변경사항을 버리고 이동할까요?" }: {
+export function useDraftNavigation({ dirty, description = "변경사항을 버리고 이동할까요?", confirmLabel = "변경사항 버리기" }: {
   dirty: boolean;
   description?: string;
+  confirmLabel?: string;
 }) {
   const router = useRouter();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
@@ -58,7 +59,7 @@ export function useDraftNavigation({ dirty, description = "변경사항을 버�
           <Button type="button" variant="destructive" onClick={() => {
             confirmedRef.current = true;
             setConfirmationOpen(false);
-          }}>변경사항 버리기</Button>
+          }}>{confirmLabel}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

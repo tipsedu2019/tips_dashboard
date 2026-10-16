@@ -218,6 +218,28 @@ export type PlanMutationResult = {
   slots: PlanSlot[];
   removedItemIds: string[];
 };
+/** One immutable request contains the final state of every changed draft item. */
+export type BatchPlanItemEdit =
+  | Pick<SavePlanItemCommand, 'operation' | 'item' | 'expectedItemRevision' | 'slots'>
+  | Pick<DeletePlanItemCommand, 'operation' | 'itemId' | 'expectedItemRevision'>;
+export type BatchPlanItemsCommand = {
+  operation: 'save_batch';
+  planId: string;
+  expectedMetaRevision: number;
+  expectedChangeSequence: number;
+  expectedShadowFingerprint: string;
+  requestKey: string;
+  edits: BatchPlanItemEdit[];
+};
+export type BatchSaveResult = {
+  planId: string;
+  requestKey: string;
+  committedMetaRevision: number;
+  committedChangeSequence: number;
+  acknowledgements: Array<{ itemId: string; operation: 'save' | 'delete'; itemRevision: number | null }>;
+  /** The immutable snapshot at commit; a replay must not replace a newer read. */
+  snapshot: PlanSnapshot;
+};
 export type TimetableTargetPeriod =
   | { targetStartDate?: null; targetEndDate?: null }
   | { targetStartDate: string; targetEndDate: string };
@@ -258,7 +280,7 @@ export type TimetablePlanRpcContract = {
   get_timetable_plan_revision_v1: { Args: { p_plan_id: string }; Returns: PlanRevision };
   list_timetable_share_candidates_v1: { Args: Record<string, never>; Returns: ShareCandidate[] };
   mutate_timetable_plan_v1: { Args: { p_command: PlanCommand }; Returns: { plan: PlanMetadata } };
-  mutate_timetable_plan_item_v1: { Args: { p_command: SavePlanItemCommand | DeletePlanItemCommand }; Returns: PlanMutationResult };
+  mutate_timetable_plan_item_v1: { Args: { p_command: SavePlanItemCommand | DeletePlanItemCommand | BatchPlanItemsCommand }; Returns: PlanMutationResult | BatchSaveResult };
 };
 
 /** Task 7 uses this same selection for preview and commit. */

@@ -1,3 +1,7 @@
+-- Provider user IDs in this fixture are newly authored, locally chosen synthetic numeric identifiers.
+-- They were not copied from provider-account data and retain the numeric grammar required by these tests.
+-- This fixture-only choice does not establish global provider nonassignment.
+
 begin;
 select plan(24);
 set local statement_timeout='120s';
@@ -120,11 +124,11 @@ insert into v2_result values('disconnected',public.get_registration_management_n
 select is((select v->>'status' from v2_result where k='disconnected'),'connection_missing','disconnected room blocks send with a reason');
 update public.google_chat_webhook_settings set connection_state='legacy_active',webhook_url='https://chat.googleapis.com/v1/spaces/fixture/messages?key=fixture&token=fixture',revision=revision+1 where channel='admin';
 insert into dashboard_private.google_chat_profile_identities(profile_id,account_email_snapshot,chat_user_id,source,verification_status,verified_at,last_sync_status,last_sync_at,identity_revision)
-values('99830000-0000-4000-8000-000000000001','v2-admin@example.invalid','998312345','manual','verified',now(),'ok',now(),1);
+values('99830000-0000-4000-8000-000000000001','v2-admin@example.invalid','990000005','manual','verified',now(),'ok',now(),1);
 insert into dashboard_private.notification_rule_mention_settings(rule_id,mention_enabled,revision) select id,true,1 from dashboard_private.notification_rules where workflow_key='registration' and event_key='registration.case_created' and channel_key='google_chat' on conflict(rule_id) do update set mention_enabled=true;
 select pg_temp.set_v2_actor('99830000-0000-4000-8000-000000000001'); set local role authenticated;
 insert into v2_result values('ready',public.get_registration_management_notification_preview_v1('99830000-0000-4000-8000-000000000111',7)); reset role;
-select is((select jsonb_build_object('canSend',v->'canSend','mentions',v->'mentionUserNames') from v2_result where k='ready'),'{"canSend":true,"mentions":["users/998312345"]}'::jsonb,'preview contains only verified active director mention');
+select is((select jsonb_build_object('canSend',v->'canSend','mentions',v->'mentionUserNames') from v2_result where k='ready'),'{"canSend":true,"mentions":["users/990000005"]}'::jsonb,'preview contains only verified active director mention');
 select is((select count(*) from public.ops_task_events where task_id='99830000-0000-4000-8000-000000000101' and dashboard_private.try_registration_event_jsonb_object(after_value)->>'event_type'='registration_management_notification_requested'),0::bigint,'successful preview also creates no source');
 update public.ops_registration_details set school_grade='중3' where task_id='99830000-0000-4000-8000-000000000101';
 select pg_temp.set_v2_actor('99830000-0000-4000-8000-000000000001'); set local role authenticated;

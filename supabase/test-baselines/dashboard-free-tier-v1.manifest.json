@@ -846,6 +846,11 @@
       "sha256": "8c6c0897694d935bbcb276d19ffdf8376146d42fe7da767d9508c6d626ef8886"
     },
     {
+      "fileName": "20261013051620_timetable_plan_atomic_batch_save.sql",
+      "status": "final",
+      "sha256": "d84407072b358e36d071d38d7c0818568716a8566683d1059121637e85e2b4a7"
+    },
+    {
       "fileName": "20261013070534_timetable_reader_explicit_native_resolution.sql",
       "status": "final",
       "sha256": "cf8bec62963545e209ea4d18c5b7276ff75a62e93fac1e5bddbb55ab7c5922c0"

@@ -158,6 +158,9 @@ jobs:
             --test supabase/tests/timetable_plan_no_send_test.sql \
             --test supabase/tests/timetable_plan_permissions_test.sql \
             --test supabase/tests/timetable_plan_storage_test.sql \
+            --test supabase/tests/timetable_plan_batch_save_test.sql \
+            --probe tests/probe-timetable-batch-save-dto.mjs \
+            --probe tests/probe-timetable-batch-save-concurrency.mjs \
             --test supabase/tests/timetable_plan_transfers_test.sql \
             --test supabase/tests/timetable_schedule_mutation_safety_test.sql \
             --test supabase/tests/timetable_scoped_occupancy_test.sql \

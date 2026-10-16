@@ -46,7 +46,7 @@ select ok(not has_function_privilege('authenticated', 'dashboard_private.registr
 set local role authenticated;
 select pg_temp.cancel_actor('authenticated', '9ac10000-0000-4000-8000-000000000100');
 insert into cancel_fixture values ('case', public.create_registration_case(
-  '취소 검증 학생', '중1', '검증중', '01099990000', null,
+  '취소 검증 학생', '중1', '검증중', 'fixture-contact-ah-01070340001', null,
   '본관', now(), array['영어'], '취소 검증', 'normal', 'visit-cancel-case'));
 insert into cancel_fixture
 select 'booking', public.save_registration_appointment_details_v1(null, (data ->> 'taskId')::uuid,

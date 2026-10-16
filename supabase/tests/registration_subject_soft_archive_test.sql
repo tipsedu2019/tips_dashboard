@@ -326,14 +326,14 @@ insert into public.ops_registration_details(
 values
   (
     '98600000-0000-4000-8000-000000000101',
-    '2026-09-01 18:49+09', '중2', '보관중', '01098601001',
+    '2026-09-01 18:49+09', '중2', '보관중', 'fixture-contact-af-01070320019',
     null, '기존 이력 유지', 1, '6. 수납 확인', '기존 원장',
     true, true, true,
     '{"applicationSent":true,"makeeduRegistered":true,"invoiceSent":true,"paymentConfirmed":true,"registrationCompleted":false}'::jsonb
   ),
   (
     '98600000-0000-4000-8000-000000000102',
-    '2026-09-01 18:50+09', '중3', '통합중', '01098601002',
+    '2026-09-01 18:50+09', '중3', '통합중', 'fixture-contact-ag-01070330020',
     null, '통합 저장 전', 1, '7. 등록 완료', '기존 원장',
     true, true, true,
     '{"applicationSent":true,"makeeduRegistered":true,"invoiceSent":true,"paymentConfirmed":true,"registrationCompleted":true}'::jsonb
@@ -835,7 +835,7 @@ set local role authenticated;
 select throws_ok(
   $$select public.save_registration_case_inquiry_v1(
     '98600000-0000-4000-8000-000000000102',
-    '통합저장학생', '중3', '통합중', '01098601002', null,
+    '통합저장학생', '중3', '통합중', 'fixture-contact-ag-01070330020', null,
     '별관', '2026-09-01 18:50+09', 'stale common', 'normal',
     2, array['영어']::text[], array[]::text[],
     'subject-unified-stale-common'
@@ -848,7 +848,7 @@ select throws_ok(
 select throws_ok(
   $$select public.save_registration_case_inquiry_v1(
     '98600000-0000-4000-8000-000000000102',
-    '통합저장학생', '중3', '통합중', '01098601002', null,
+    '통합저장학생', '중3', '통합중', 'fixture-contact-ag-01070330020', null,
     '별관', '2026-09-01 18:50+09', 'stale subjects', 'normal',
     1, array['수학']::text[], array[]::text[],
     'subject-unified-stale-subjects'

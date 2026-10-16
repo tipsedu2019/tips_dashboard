@@ -289,7 +289,7 @@ insert into public.students(
 values (
   '98900000-0000-4000-8000-000000000201',
   '연결학생', 'flat-common-linked', '연결중', '중1',
-  '01098902001', '01098901001', '재원', '[]'::jsonb, '[]'::jsonb
+  'fixture-contact-w-01070230018', 'fixture-contact-x-01070240019', '재원', '[]'::jsonb, '[]'::jsonb
 );
 
 insert into public.classes(
@@ -332,12 +332,12 @@ values
   (
     '98900000-0000-4000-8000-000000000401',
     '2026-09-01 18:49+09', '중1', '연결중',
-    '01098901001', '01098902001', '수정 전', 1, true
+    'fixture-contact-x-01070240019', 'fixture-contact-w-01070230018', '수정 전', 1, true
   ),
   (
     '98900000-0000-4000-8000-000000000411',
     '2026-09-01 19:00+09', '중2', '관리중',
-    '01098901002', null, '관리팀 수정 전', 1, false
+    'fixture-contact-y-01070250020', null, '관리팀 수정 전', 1, false
   );
 
 insert into public.ops_registration_subject_tracks(
@@ -406,7 +406,7 @@ values (
   '98900000-0000-4000-8000-000000000721',
   '98900000-0000-4000-8000-000000000401',
   'admission_application', 'flat-common-active-message',
-  'pending', true, '1001',
+  'pending', true, '0019',
   '98900000-0000-4000-8000-000000000001', now(), now()
 );
 
@@ -613,8 +613,8 @@ select ok(
   (
     select student.name = '연결학생'
       and student.school = '연결중'
-      and student.contact = '01098902001'
-      and student.parent_contact = '01098901001'
+      and student.contact = 'fixture-contact-w-01070230018'
+      and student.parent_contact = 'fixture-contact-x-01070240019'
     from public.students student
     where student.id = '98900000-0000-4000-8000-000000000201'
   )

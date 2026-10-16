@@ -1,3 +1,7 @@
+-- Provider user IDs in this fixture are newly authored, locally chosen synthetic numeric identifiers.
+-- They were not copied from provider-account data and retain the numeric grammar required by these tests.
+-- This fixture-only choice does not establish global provider nonassignment.
+
 begin;
 
 select plan(70);
@@ -740,7 +744,7 @@ insert into public.ops_registration_details(
 )
 values (
   '99450000-0000-4000-8000-000000000301', '중3', '테스트중',
-  '01000000000', null, 'Chat mention fixture'
+  'fixture-contact-a-01070010001', null, 'Chat mention fixture'
 );
 
 insert into public.ops_registration_subject_tracks(
@@ -918,7 +922,7 @@ values (
   pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000101',
-    ' CHAT-TEACHER-A@EXAMPLE.INVALID ', 'auto', '111111111', 'verified', 0,
+    ' CHAT-TEACHER-A@EXAMPLE.INVALID ', 'auto', '990000001', 'verified', 0,
     '99450000-0000-4000-8000-000000000901'
   )
 );
@@ -933,7 +937,7 @@ select is(
     'profileName', '담당 교사 A',
     'accountEmail', 'chat-teacher-a@example.invalid',
     'dashboardRole', 'teacher',
-    'chatUserId', '111111111', 'resourceName', 'users/111111111',
+    'chatUserId', '990000001', 'resourceName', 'users/990000001',
     'source', 'directory', 'verificationStatus', 'verified',
     'lastSyncStatus', 'ok', 'identityRevision', '1', 'eligible', true
   ),
@@ -944,7 +948,7 @@ select is(
   pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000101',
-    'chat-teacher-a@example.invalid', 'auto', '111111111', 'verified', 0,
+    'chat-teacher-a@example.invalid', 'auto', '990000001', 'verified', 0,
     '99450000-0000-4000-8000-000000000901'
   ) - 'verifiedAt' - 'lastSyncAt',
   (
@@ -967,7 +971,7 @@ select throws_ok(
   $$select pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000101',
-    'chat-teacher-a@example.invalid', 'manual', '111111111', 'verified', 1,
+    'chat-teacher-a@example.invalid', 'manual', '990000001', 'verified', 1,
     '99450000-0000-4000-8000-000000000901'
   )$$,
   '22023', 'idempotency_key_reused',
@@ -978,7 +982,7 @@ select throws_ok(
   $$select pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000101',
-    'chat-teacher-a@example.invalid', 'auto', '111111111', 'verified', 0,
+    'chat-teacher-a@example.invalid', 'auto', '990000001', 'verified', 0,
     '99450000-0000-4000-8000-000000000902'
   )$$,
   '40001', 'google_chat_profile_identity_revision_conflict',
@@ -989,7 +993,7 @@ select is(
   pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000002',
     '99450000-0000-4000-8000-000000000102',
-    'chat-teacher-b@example.invalid', 'manual', '222222222', 'verified', 0,
+    'chat-teacher-b@example.invalid', 'manual', '990000002', 'verified', 0,
     '99450000-0000-4000-8000-000000000903'
   ) ->> 'source',
   'manual',
@@ -1011,7 +1015,7 @@ select is(
   pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000105',
-    'chat-mismatch@example.invalid', 'auto', '444444444', 'verified', 0,
+    'chat-mismatch@example.invalid', 'auto', '990000003', 'verified', 0,
     '99450000-0000-4000-8000-000000000905'
   ) ->> 'verificationStatus',
   'verified',
@@ -1045,7 +1049,7 @@ select is(
   pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000101',
-    'chat-teacher-a@example.invalid', 'auto', '111111111', 'verified', 2,
+    'chat-teacher-a@example.invalid', 'auto', '990000001', 'verified', 2,
     '99450000-0000-4000-8000-000000000908'
   ) ->> 'identityRevision',
   '3',
@@ -1059,7 +1063,7 @@ select is(
     'chat-teacher-a@example.invalid', 'auto', null, 'provider_error', 3,
     '99450000-0000-4000-8000-000000000909'
   ) -> 'chatUserId',
-  '"111111111"'::jsonb,
+  '"990000001"'::jsonb,
   'provider error preserves the verified ID when current email still matches'
 );
 
@@ -1085,7 +1089,7 @@ select is(
   pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000101',
-    'chat-teacher-a-new@example.invalid', 'auto', '111111111', 'verified', 5,
+    'chat-teacher-a-new@example.invalid', 'auto', '990000001', 'verified', 5,
     '99450000-0000-4000-8000-000000000911'
   ) ->> 'identityRevision',
   '6',
@@ -1096,7 +1100,7 @@ select throws_ok(
   $$select pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000105',
-    'chat-mismatch@example.invalid', 'manual', '222222222', 'verified', 2,
+    'chat-mismatch@example.invalid', 'manual', '990000002', 'verified', 2,
     '99450000-0000-4000-8000-000000000912'
   )$$,
   '23505', null,
@@ -1111,7 +1115,7 @@ select throws_ok(
   $$select pg_temp.chat_apply_identity(
     '99450000-0000-4000-8000-000000000001',
     '99450000-0000-4000-8000-000000000101',
-    'chat-teacher-a-new@example.invalid', 'auto', '111111111', 'verified', 0,
+    'chat-teacher-a-new@example.invalid', 'auto', '990000001', 'verified', 0,
     '99450000-0000-4000-8000-000000000901'
   )$$,
   '42501', 'google_chat_profile_mentions_access_denied',
@@ -1344,7 +1348,7 @@ select is(
       '99450000-0000-4000-8000-000000000102'::uuid,
       '99450000-0000-4000-8000-000000000101'::uuid
     ],
-    'user_names', array['users/222222222', 'users/111111111'],
+    'user_names', array['users/990000002', 'users/990000001'],
     'omitted', pg_catalog.jsonb_build_array(
       pg_catalog.jsonb_build_object('profile_id', '99450000-0000-4000-8000-000000000105', 'reason', 'identity_unverified'),
       pg_catalog.jsonb_build_object('profile_id', '99450000-0000-4000-8000-000000000103', 'reason', 'profile_inactive'),
@@ -1382,7 +1386,7 @@ values (
 
 select is(
   (select payload -> 'user_names' from pg_temp.chat_mention_results where label = 'snapshot_enabled'),
-  '["users/222222222","users/111111111"]'::jsonb,
+  '["users/990000002","users/990000001"]'::jsonb,
   'first enabled prepare freezes exact canonical user names'
 );
 
@@ -1461,7 +1465,7 @@ select throws_ok(
 
 select throws_ok(
   $$update dashboard_private.notification_delivery_mention_snapshots
-    set user_names = array['users/999999999']
+    set user_names = array['users/990000004']
     where delivery_id = '99450000-0000-4000-8000-000000000701'$$,
   '55000', 'google_chat_mention_row_immutable',
   'delivery mention snapshots are immutable after insert'

@@ -69,7 +69,7 @@ select dblink_exec('archive_delivery_lock_setup', $remote$
       '98719999-0000-4000-8000-000000000001', '잠금분리학생'
     );
     insert into public.ops_registration_details(task_id, parent_phone)
-    values ('98719999-0000-4000-8000-000000000101', '01098719999');
+    values ('98719999-0000-4000-8000-000000000101', 'fixture-contact-t-01070200016');
     insert into public.ops_registration_subject_tracks(
       id, task_id, subject, pipeline_status, migration_review_required,
       workflow_status, workflow_revision, director_profile_id,
@@ -541,7 +541,7 @@ values (
 );
 
 insert into public.ops_registration_details(task_id, parent_phone)
-values ('98710000-0000-4000-8000-000000000101', '01098710001');
+values ('98710000-0000-4000-8000-000000000101', 'fixture-contact-u-01070210006');
 
 insert into public.ops_registration_subject_tracks(
   id, task_id, subject, pipeline_status, migration_review_required,
@@ -698,7 +698,7 @@ select
   fixture.preview_id,
   '98710000-0000-4000-8000-000000000101', fixture.bundle_id,
   fixture.message_kind, fixture.source_fingerprint, repeat('0', 64),
-  repeat(fixture.recipient_digit, 64), '0001', fixture.message_kind,
+  repeat(fixture.recipient_digit, 64), '0006', fixture.message_kind,
   1, repeat('c', 64), repeat('d', 64), repeat('e', 64), repeat('f', 64),
   '98710000-0000-4000-8000-000000000001'
 from (
@@ -1207,7 +1207,7 @@ insert into public.ops_registration_customer_message_previews(
 select
   '98710000-0000-4000-8000-000000000561',
   manifest.task_id, manifest.id, 'visit_consultation_booking_bundle',
-  manifest.source_fingerprint, repeat('0', 64), repeat('a', 64), '0001',
+  manifest.source_fingerprint, repeat('0', 64), repeat('a', 64), '0006',
   'visit_consultation_booking_bundle', 1, repeat('c', 64),
   repeat('d', 64), repeat('e', 64), repeat('f', 64),
   '98710000-0000-4000-8000-000000000001'
