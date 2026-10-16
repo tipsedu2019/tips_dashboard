@@ -249,7 +249,11 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
             if (intent.command.operation === 'archive') {
                 setList(value => value ? { ...value, plans: value.plans.filter(plan => plan.id !== intent.command.planId) } : value);
                 (onCommitted ?? onChange)(null);
-            } else if (created || intent.command.operation === 'restore') (onCommitted ?? onChange)(result.plan.id);
+            } else if (created || intent.command.operation === 'restore') {
+                const refreshSelected = intent.command.operation === 'restore' && displayedPlan.current === result.plan.id;
+                (onCommitted ?? onChange)(result.plan.id);
+                if (refreshSelected) await onRefresh();
+            }
             else await onRefresh();
         } catch (e) {
             if (isCurrent(owner, epoch)) {

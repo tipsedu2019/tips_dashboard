@@ -8,6 +8,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import ts from 'typescript';
 import * as recovery from '../src/features/academic/timetable-plan-recovery.ts';
+import { createTimetablePlanController } from '../src/features/academic/timetable-plan-model.ts';
 const require = createRequire(import.meta.url);
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => {resolve=a;reject=b;}); return {promise,resolve,reject}; };
 const h = React.createElement;
@@ -18,7 +19,7 @@ const rpc = async (name, args) => {
  const response = await fetch(`http://127.0.0.1:3262/rest/v1/rpc/${name}`, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(args)});
  const result = await response.json();assert.ok(response.ok,JSON.stringify(result));return result;
 };
-async function harness({plans=[],archivedPages=[],initialPlan=null,committed=false}={}) {
+async function harness({plans=[],archivedPages=[],initialPlan=null,committed=false,onRefresh=async()=>{}}={}) {
  const dom = new JSDOM('<div id="root"></div>', {url:'http://127.0.0.1/'});
  const old = {sessionStorage:globalThis.sessionStorage,window:globalThis.window,document:globalThis.document,IS_REACT_ACT_ENVIRONMENT:globalThis.IS_REACT_ACT_ENVIRONMENT};
  Object.assign(globalThis,{sessionStorage:dom.window.sessionStorage,window:dom.window,document:dom.window.document,IS_REACT_ACT_ENVIRONMENT:true});
@@ -48,7 +49,7 @@ async function harness({plans=[],archivedPages=[],initialPlan=null,committed=fal
  const runtime={exports:{}};vm.runInThisContext(`(function(require,module,exports){${compiled}\n})`)(key=>mocks[key]||require(key),runtime,runtime.exports);
  let root=createRoot(document.getElementById('root'));
  let snapshot=realDb ? await rpc('get_timetable_plan_v1',{p_plan_id:'ae260000-0000-4000-8000-000000000001'}) : {plan:initialPlan??{id:'source',name:'원본',state:'draft',metaRevision:1,targetStartDate:null,targetEndDate:null},members:[],permissions:{canManage:true}};
- const render=()=>act(async()=>root.render(h(runtime.exports.TimetablePlanPicker,{planId:snapshot?.plan.id??null,snapshot,onChange:id=>changes.push(id),...(committed?{onCommitted:id=>changes.push(id)}:{}),onRefresh:async()=>{},requestAction:action=>action()})));
+ const render=()=>act(async()=>root.render(h(runtime.exports.TimetablePlanPicker,{planId:snapshot?.plan.id??null,snapshot,onChange:id=>changes.push(id),...(committed?{onCommitted:id=>changes.push(id)}:{}),onRefresh,requestAction:action=>action()})));
  await render();
  const click=async text=>act(async()=>{const button=[...document.querySelectorAll('button')].find(b=>b.textContent===text);assert.ok(button,text);button.click();});
  const input=async value=>act(async()=>{const el=document.getElementById('plan-name');el.value=value;el.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
@@ -163,14 +164,44 @@ test('delete synchronously blocks same-tick duplicate confirmation',async()=>{
 });
 test('restore lists archived-only across pages on explicit entry and fixes the selected target',async()=>{
  const active=metadata('active','활성 프리셋'),deleted=metadata('deleted','삭제한 프리셋','archived',8);
- const f=await harness({archivedPages:[{plans:[active],total:2,canManage:true},{plans:[deleted],total:2,canManage:true}]});try{
+ const refreshed=[];
+ const f=await harness({archivedPages:[{plans:[active],total:2,canManage:true},{plans:[deleted],total:2,canManage:true}],onRefresh:async()=>{refreshed.push('other');}});try{
   assert.equal(f.listCalls.some(call=>call.archived),false);await f.click('삭제한 프리셋 복구');
   assert.deepEqual(f.listCalls.filter(call=>call.archived).map(call=>call.page),[1,2]);
   assert.doesNotMatch(document.querySelector('[data-dialog]').textContent,/활성 프리셋/);await f.click('삭제한 프리셋');
   await f.setSnapshot({plan:metadata('other','다른 프리셋'),permissions:{canManage:true}});await f.submit();
   assert.deepEqual({...f.calls[0],requestKey:'fixed'},{operation:'restore',planId:'deleted',expectedMetaRevision:8,requestKey:'fixed'});
   await f.resolve(0,{plan:metadata('deleted','삭제한 프리셋','draft',9)});assert.deepEqual(f.changes,['deleted']);
+  assert.deepEqual(refreshed,[],'selecting a restored different plan must not refresh the old controller');
  }finally{await f.close();}
+});
+test('restoring the selected archived preset refreshes its snapshot and immediately permits local edits',async()=>{
+ const deleted=metadata('source','삭제된 선택','archived',2);
+ let server={plan:deleted,items:[],slots:[],appliedSnapshots:[],members:[],permissions:{canManage:true,canEdit:false,canTransfer:false},
+  capacity:{itemCount:0,slotCount:0,maxItems:500,maxSlots:2000,exceeded:false},asOfDate:'2026-09-23',
+  shadowSlots:[],shadowClasses:[],catalogs:{teachers:[],classrooms:[]},unresolvedOccupancies:[],shadowFingerprint:'fingerprint',
+  datedSessions:[],datedUnresolvedOccupancies:[],datedFingerprint:'dated',datedComplete:true,complete:true};
+ let controller;
+ const f=await harness({initialPlan:deleted,committed:true,onRefresh:async()=>{
+  await controller.refresh();await f.setSnapshot(controller.snapshot().snapshot);
+ }});
+ try{
+  controller=createTimetablePlanController({service:{readPlan:async()=>structuredClone(server)},actorScope:'A:admin',planId:'source',autoSave:false,storage:f.storage});
+  await controller.load();await f.setSnapshot(controller.snapshot().snapshot);
+  const edit={operation:'save',item:{id:'local-item',planId:'source',name:'복구 후 수업',subject:'math',subjectAreaKey:null,grade:'1',capacity:null,tuition:null,
+   defaultTeacherId:null,defaultClassroomId:null,durationMinutes:null,sourceClassId:null},slots:[]};
+  await assert.rejects(controller.dispatch(edit),/timetable_forbidden/);
+  await f.click('복구');await f.submit();assert.equal(f.calls[0].operation,'restore');
+  server={...server,plan:metadata('source','삭제된 선택','draft',3),permissions:{canManage:true,canEdit:true,canTransfer:false}};
+  await f.resolve(0,{plan:server.plan});
+  assert.equal(controller.snapshot().snapshot.plan.state,'draft','same-ID restore must replace the archived controller snapshot');
+  assert.equal(controller.snapshot().draft.permissions.canEdit,true);
+  assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='이름 변경'));
+  await controller.dispatch(edit);
+  assert.equal(controller.snapshot().dirty,true);
+  assert.equal(controller.snapshot().draft.items[0].name,'복구 후 수업');
+  assert.deepEqual(f.changes,['source']);assert.equal(f.calls.length,1,'the edit remains local after the single restore mutation');
+ }finally{controller?.destroy();await f.close();}
 });
 test('stale deletion refreshes metadata and requires a new explicit confirmation',async()=>{
  const f=await harness({plans:[metadata('source','최신 이름','draft',2)]});try{
