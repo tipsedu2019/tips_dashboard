@@ -152,6 +152,165 @@ async function setup(t, options = {}) {
   };
 }
 
+function relationPaginationFixture(fixture, relationKind = "registered_students") {
+  fixture.relationRequests = [];
+  fixture.relationMutations = [];
+  for (const row of fixture.rows) {
+    row.raw[`${relationKind}_relation_page`] = { rows: [], hasMore: true, nextCursor: `${row.id}:first` };
+  }
+  fixture.records.loadRelationPage = input => {
+    const deferred = Promise.withResolvers();
+    fixture.relationRequests.push({ input, ...deferred });
+    return deferred.promise;
+  };
+  for (const name of ["updateClass", "saveClassScheduleDefaults", "replaceClassGroupMemberships", "updateStudent", "addStudentClass", "removeStudentClass"]) {
+    fixture.service[name] = async () => { fixture.relationMutations.push(name); throw new Error("unexpected mutation"); };
+  }
+}
+
+test("relation pagination keeps the new detail cursor after a closed detail resolves", async t => {
+  const ui = await setup(t, { configureFixture: relationPaginationFixture });
+  const relationRequests = ui.relationRequests;
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.click("다음 30건");
+  await ui.click("수업 상세 닫기");
+  await ui.click("B 영어반");
+  await ui.resolve(1, defaultsFor());
+  const blockedNewDetailUntilOldSettled = [...document.querySelectorAll("button")].some(button => button.textContent.trim() === "더 불러오는 중" && button.disabled);
+  await act(async () => relationRequests[0].resolve({ page: { rows: [], hasMore: true, nextCursor: "a:stale-next" } }));
+  await ui.click("다음 30건");
+  const observation = {
+    blockedNewDetailUntilOldSettled,
+    nextDetailId: relationRequests[1].input.id,
+    nextDetailCursor: relationRequests[1].input.cursor,
+    mutations: ui.relationMutations.length,
+  };
+  t.diagnostic(JSON.stringify({ metric: "relation-pagination-closed-detail", ...observation }));
+  assert.deepEqual(observation, { blockedNewDetailUntilOldSettled: false, nextDetailId: "b", nextDetailCursor: "b:first", mutations: 0 });
+  await act(async () => relationRequests[1].resolve({ page: { rows: [], hasMore: false, nextCursor: null } }));
+});
+
+test("relation pagination appends the current page once, preserves edits and finishes at the final page", async t => {
+  const ui = await setup(t, { configureFixture: relationPaginationFixture });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.editField("classes-detail-name", "보존할 페이지 초안");
+  await ui.clickTogether("다음 30건", "다음 30건");
+  assert.equal(ui.relationRequests.length, 1, "same-tick clicks share one read slot");
+  await act(async () => ui.relationRequests[0].resolve({ page: { rows: [{ id: "synthetic-student", name: "합성 다음 학생" }], hasMore: false, nextCursor: null } }));
+  assert.match(document.querySelector('[data-testid="class-enrolled-student-roster"]').textContent, /합성 다음 학생/);
+  assert.equal(document.getElementById("classes-detail-name").value, "보존할 페이지 초안");
+  assert.equal([...document.querySelectorAll("button")].some(button => /다음 30건|더 불러오는 중/.test(button.textContent)), false);
+  assert.equal(ui.relationMutations.length, 0);
+});
+
+test("relation pagination ignores a late final page after reopening the same row", async t => {
+  const ui = await setup(t, { configureFixture: relationPaginationFixture });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.click("다음 30건");
+  await ui.click("수업 상세 닫기");
+  await ui.click("A 영어반");
+  await ui.resolve(1, defaultsFor());
+  await act(async () => ui.relationRequests[0].resolve({ page: { rows: [{ id: "old-student", name: "이전 상세 학생" }], hasMore: false, nextCursor: null } }));
+  assert.doesNotMatch(ui.text(), /이전 상세 학생/);
+  await ui.click("다음 30건");
+  assert.equal(ui.relationRequests[1].input.cursor, "a:first");
+  await act(async () => ui.relationRequests[1].resolve({ page: { rows: [], hasMore: false, nextCursor: null } }));
+  assert.equal(ui.relationMutations.length, 0);
+});
+
+for (const outcome of ["success", "failure"]) {
+  test(`relation pagination old ${outcome} cannot release or overwrite a new detail read`, async t => {
+    const ui = await setup(t, { configureFixture: relationPaginationFixture });
+    await ui.click("A 영어반");
+    await ui.resolve(0, defaultsFor());
+    await ui.click("다음 30건");
+    await ui.click("수업 상세 닫기");
+    await ui.click("B 영어반");
+    await ui.resolve(1, defaultsFor());
+    await ui.click("다음 30건");
+    if (outcome === "success") {
+      await act(async () => ui.relationRequests[0].resolve({ page: { rows: [{ id: "stale-student", name: "늦은 이전 학생" }], hasMore: true, nextCursor: "a:stale" } }));
+    } else {
+      await act(async () => ui.relationRequests[0].reject(new Error("늦은 이전 목록 오류")));
+    }
+    const loading = [...document.querySelectorAll("button")].find(button => button.textContent.trim() === "더 불러오는 중");
+    assert.ok(loading?.disabled, "the current read still owns loading");
+    assert.doesNotMatch(ui.text(), /늦은 이전 학생|늦은 이전 목록 오류/);
+    assert.equal(ui.relationRequests.length, 2);
+    await act(async () => ui.relationRequests[1].resolve({ page: { rows: [{ id: "new-student", name: "현재 상세 학생" }], hasMore: true, nextCursor: "b:second" } }));
+    assert.match(ui.text(), /현재 상세 학생/);
+    await ui.click("다음 30건");
+    assert.equal(ui.relationRequests[2].input.cursor, "b:second");
+    await act(async () => ui.relationRequests[2].resolve({ page: { rows: [], hasMore: false, nextCursor: null } }));
+    assert.equal(ui.relationMutations.length, 0);
+  });
+}
+
+test("relation pagination current failure keeps rows and cursor for an explicit retry", async t => {
+  const ui = await setup(t, { configureFixture: relationPaginationFixture });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.click("다음 30건");
+  await act(async () => ui.relationRequests[0].reject(new Error("합성 목록 오류")));
+  assert.match(ui.text(), /합성 목록 오류/);
+  await ui.click("다음 30건");
+  assert.equal(ui.relationRequests[1].input.cursor, "a:first");
+  assert.doesNotMatch(ui.text(), /합성 목록 오류/);
+  await act(async () => ui.relationRequests[1].resolve({ page: { rows: [], hasMore: false, nextCursor: null } }));
+  assert.equal(ui.relationMutations.length, 0);
+});
+
+test("relation pagination cannot start from the previous detail while a replacement is pending", async t => {
+  const ui = await setup(t, { deferDetail: true, configureFixture: relationPaginationFixture });
+  await ui.click("A 영어반");
+  await ui.resolve(0, ui.rows[0]);
+  await ui.resolve(1, defaultsFor());
+  await ui.navigate("classId=b");
+  assert.match(ui.title(), /A 영어반/);
+  await ui.click("다음 30건");
+  assert.equal(ui.relationRequests.length, 0, "the displayed old row has not been accepted into the replacement lifetime");
+  await ui.resolve(2, ui.rows[1]);
+  assert.match(ui.title(), /B 영어반/);
+  await ui.click("다음 30건");
+  assert.equal(ui.relationRequests[0].input.id, "b", "accepted detail can page while schedule defaults are pending");
+  await act(async () => ui.relationRequests[0].resolve({ page: { rows: [], hasMore: false, nextCursor: null } }));
+  await ui.resolve(3, defaultsFor());
+  assert.equal(ui.relationMutations.length, 0);
+});
+
+test("relation pagination student enrollment pages share the current detail lifetime", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture(fixture) {
+    studentFixture(fixture, []);
+    relationPaginationFixture(fixture, "enrollments");
+  } });
+  await ui.click("김학생");
+  await ui.click("다음 30건");
+  assert.equal(ui.relationRequests[0].input.relationKind, "enrollments");
+  await act(async () => ui.relationRequests[0].resolve({ page: { rows: [{ id: "synthetic-class", name: "합성 다음 수업", status: "enrolled" }], hasMore: false, nextCursor: null } }));
+  assert.match(ui.text(), /합성 다음 수업/);
+  assert.equal(ui.relationMutations.length, 0);
+});
+
+test("relation pagination actor replacement and unmount ignore the old pending response", async t => {
+  const ui = await setup(t, { configureFixture: relationPaginationFixture });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.click("다음 30건");
+  await ui.actor("other-staff");
+  await ui.click("A 영어반");
+  await ui.resolve(1, defaultsFor());
+  await act(async () => ui.relationRequests[0].reject(new Error("이전 직원 상세 오류")));
+  assert.doesNotMatch(ui.text(), /이전 직원 상세 오류/);
+  await ui.click("다음 30건");
+  await ui.unmount();
+  await act(async () => ui.relationRequests[1].resolve({ page: { rows: [{ id: "unmounted", name: "닫힌 페이지 학생" }], hasMore: false, nextCursor: null } }));
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(ui.relationMutations.length, 0);
+});
+
 test("class roster search keeps membership counts and drafts while filtering enrolled and waiting students", async t => {
   const ui = await setup(t, { configureFixture(fixture) {
     Object.assign(fixture.rows[0].raw, {

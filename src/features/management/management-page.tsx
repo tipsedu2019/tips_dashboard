@@ -832,6 +832,11 @@ type ManagementRelationKind =
   | "active_classes"
   | "purchase_history";
 
+type ManagementRelationRequest = Readonly<{
+  detailRequestId: number;
+  kind: ManagementRelationKind;
+}>;
+
 const RELATION_PAGE_FIELDS: Record<ManagementRelationKind, string> = {
   enrollments: "enrollments_relation_page",
   lifecycle_history: "lifecycle_history_relation_page",
@@ -1364,6 +1369,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const scheduleDefaultsSaving = Boolean(selectedRow && scheduleDefaultsPending.has(selectedRow.id));
   const [scheduleDefaultsRequestKey, setScheduleDefaultsRequestKey] = useState("");
   const detailRequestRef = useRef(0);
+  const acceptedDetailRequestRef = useRef<number | null>(null);
+  const relationRequestRef = useRef<ManagementRelationRequest | null>(null);
   const pageActiveRef = useRef(true);
   const managementDialogOpenerRef = useRef<HTMLElement | null>(null);
   const managementDialogRowIdRef = useRef<string | null>(null);
@@ -1426,7 +1433,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [detailRowQuery, setDetailRowQuery] = useState("");
   const [relationQuery, setRelationQuery] = useState("");
   const [classRosterQuery, setClassRosterQuery] = useState("");
-  const [loadingRelationKind, setLoadingRelationKind] = useState<ManagementRelationKind | null>(null);
+  const [relationRequest, setRelationRequest] = useState<ManagementRelationRequest | null>(null);
+  const loadingRelationKind = relationRequest?.detailRequestId === detailRequestRef.current ? relationRequest.kind : null;
   const [relationPageState, setRelationPageState] = useState<Partial<Record<ManagementRelationKind, Record<string, unknown>>>>({});
   const [textbookCandidateQuery, setTextbookCandidateQuery] = useState("");
   const [textbookCandidateFilters, setTextbookCandidateFilters] = useState<ClassTextbookPickerFilters>({
@@ -1841,14 +1849,21 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     requestManagementNavigation(`/admin/classes?${params.toString()}`);
   };
   const handleRelationLoadMore = async (relationKind: ManagementRelationKind) => {
-    if (!selectedRow || loadingRelationKind) return;
+    const detailRequestId = detailRequestRef.current;
+    // The old detail can remain visible while its replacement is still loading.
+    if (!selectedRow || acceptedDetailRequestRef.current !== detailRequestId || relationRequestRef.current?.detailRequestId === detailRequestId) return;
     const currentPage = relationPageState[relationKind] || getRelationPage(selectedRow, relationKind);
     const cursor = text(currentPage.nextCursor);
     if (currentPage.hasMore !== true || !cursor) return;
-    setLoadingRelationKind(relationKind);
+    const request: ManagementRelationRequest = { detailRequestId, kind: relationKind };
+    // Own the slot before React commits loading, including same-tick clicks.
+    relationRequestRef.current = request;
+    const isCurrent = () => detailRequestRef.current === detailRequestId && relationRequestRef.current === request;
+    setRelationRequest(request);
     setOperationError(null);
     try {
       const result = await loadRelationPage({ id: selectedRow.id, relationKind, cursor });
+      if (!isCurrent()) return;
       const page = result?.page && typeof result.page === "object" && !Array.isArray(result.page)
         ? result.page as Record<string, unknown>
         : {};
@@ -1863,9 +1878,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         name: text(record.name || record.className),
       }))));
     } catch (loadError) {
-      setOperationError(loadError instanceof Error ? loadError.message : "관계 목록을 더 불러오지 못했습니다.");
+      if (isCurrent()) setOperationError(loadError instanceof Error ? loadError.message : "관계 목록을 더 불러오지 못했습니다.");
     } finally {
-      setLoadingRelationKind(null);
+      if (isCurrent()) {
+        relationRequestRef.current = null;
+        setRelationRequest(null);
+      }
     }
   };
   const renderRelationList = (
@@ -2618,6 +2636,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       : Promise.resolve(null);
     setPendingClassClose(null);
     setCheckingClassClose(false);
+    acceptedDetailRequestRef.current = detailRequestRef.current;
     setSelectedRow(activeRow);
     setForm(nextForm);
     setValidationAttempted(false);
