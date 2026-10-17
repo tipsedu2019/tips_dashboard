@@ -61,7 +61,7 @@ export function actionFixture(testCase, options = {}) {
     canceled_by: detail.canceledBy, canceled_at: detail.canceledAt, schedule_plan_before: detail.schedulePlanBefore,
     schedule_plan_after: detail.schedulePlanAfter, cancel_academic_event_id: detail.cancelAcademicEventId,
     makeup_academic_event_id: detail.makeupAcademicEventId, makeup_academic_event_ids: detail.makeupAcademicEventIds,
-    created_at: stamp, updated_at: stamp,
+    created_at: detail.createdAt, updated_at: detail.updatedAt,
   };
   const profiles = [[801, '합성 신청자'], [802, '합성 교사'], [804, '합성 결재자'], [805, '합성 관리자']]
     .map(([n, name]) => ({ id: id(n), name, role: 'teacher', email: `fixture-${n}@example.invalid`, login_id: `fixture-${n}`, teacher_catalog_id: '' }));
@@ -95,6 +95,8 @@ export function actionFixture(testCase, options = {}) {
       assert.ok(table in tables, `Unexpected table ${table}`);
       const call = { kind: 'table', table };
       return chain(call, () => {
+        const error = call.single ? options.singleError : options.tableErrors?.[table];
+        if (error) return { data: null, error };
         let data = call.single ? raw : tables[table];
         if (call.select !== '*' && !call.single) data = data.map(row => Object.fromEntries(call.select.split(',').filter(key => key in row).map(key => [key, row[key]])));
         return { data, error: null };
@@ -127,7 +129,7 @@ export function actionFixture(testCase, options = {}) {
     if (options.notificationThrow) throw new Error('synthetic notification unavailable');
     return Response.json(body, { status: options.notificationStatus ?? 200 });
   }
-  return { client, fetch, calls, detail, raw };
+  return { client, fetch, calls, detail, raw, tables };
 }
 
 export { id, stamp };

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { modules, id, row, stamp, transport, servicePath } from './helpers/makeup-numbered-harness.mjs';
 import { actionCases, actionFixture, loadActionService } from './helpers/makeup-action-fixture.mjs';
+import { resubmitFixture } from './helpers/makeup-resubmit-fixture.mjs';
 
 test('approval reads exact detail and preserves labels without loading workspace tables', async t => {
   const calls = [], sends = [], previous = globalThis.fetch;
@@ -393,3 +394,174 @@ for (const testCase of actionCases) {
     }
   });
 }
+
+// Resubmit retains fresh form validation while narrowing its preflight reads.
+test('resubmit reads exact detail and fresh validation catalogs without the full workspace', async () => {
+  const fixture = resubmitFixture();
+  const result = await fixture.run();
+  assert.equal(result.status, 'approval_pending');
+  const reads = fixture.calls.filter(call => call.kind === 'table' || call.name === 'get_makeup_detail_v1');
+  assert.equal(reads.length, 5);
+  assert.deepEqual(fixture.calls.filter(call => call.kind === 'table').map(call => call.table).sort(),
+    ['class_lesson_sessions', 'classes', 'profiles', 'teacher_catalogs']);
+  assert.equal(fixture.calls.filter(call => call.name === 'get_makeup_detail_v1').length, 1);
+  assert.equal(mutations(fixture).length, 1);
+  assert.equal(notifications(fixture).length, 1);
+  const args = mutations(fixture)[0].args;
+  assert.equal(args.p_command, 'resubmit');
+  assert.equal(args.p_expected_status, 'revision_requested');
+  assert.match(args.p_request_id, /^[a-f0-9-]{36}$/);
+  assert.equal('status' in args.p_patch, false);
+  assert.equal('requester_id' in args.p_patch, false);
+  assert.equal(args.p_patch.approver_profile_id, id(804));
+});
+
+for (const status of ['revision_requested', 'makeup_pending']) {
+  test('resubmit preserves the allowed requester transition from ' + status, async () => {
+    const fixture = resubmitFixture({ detail: { status } });
+    await fixture.run();
+    assert.equal(mutations(fixture).length, 1);
+    assert.equal(mutations(fixture)[0].args.p_expected_status, status);
+    assert.equal(notifications(fixture).length, 1);
+  });
+}
+
+for (const options of [
+  { actorId: id(805) },
+  ...['approval_pending', 'completed', 'rejected', 'canceled'].map(status => ({ detail: { status } })),
+]) test('resubmit rejects unauthorized requester or state before mutation: ' + JSON.stringify(options), async () => {
+  const fixture = resubmitFixture(options);
+  await assert.rejects(fixture.run(), /재상신 권한/);
+  assert.equal(mutations(fixture).length, 0);
+  assert.equal(notifications(fixture).length, 0);
+});
+
+for (const table of ['profiles', 'teacher_catalogs', 'classes', 'class_lesson_sessions']) {
+  test('resubmit stops on a failed fresh ' + table + ' read', async () => {
+    const fixture = resubmitFixture({ tableErrors: { [table]: { code: '57014', message: 'synthetic read unavailable' } } });
+    await assert.rejects(fixture.run(), /서버 응답이 지연되었습니다/);
+    assert.equal(mutations(fixture).length, 0);
+    assert.equal(notifications(fixture).length, 0);
+  });
+}
+
+test('resubmit stops on failed or missing target detail', async () => {
+  for (const options of [
+    { detailError: { code: '57014', message: 'synthetic detail unavailable' }, singleError: { code: '57014', message: 'synthetic detail unavailable' } },
+    { missing: true, singleError: { code: 'PGRST116', message: 'synthetic target missing' } },
+  ]) {
+    const fixture = resubmitFixture(options);
+    await assert.rejects(fixture.run());
+    assert.equal(mutations(fixture).length, 0);
+    assert.equal(notifications(fixture).length, 0);
+  }
+});
+
+test('resubmit validates the request creation year and the fresh actor role', async () => {
+  const future = { detail: { createdAt: '2027-07-11T00:00:00.000Z' } };
+  const teacher = resubmitFixture(future);
+  await assert.rejects(teacher.run(), /선택할 수 없는 결재자/);
+  assert.equal(mutations(teacher).length, 0);
+  const manager = resubmitFixture({ ...future, actorRole: 'admin' });
+  await manager.run();
+  assert.equal(mutations(manager).length, 1);
+  const originalYear = resubmitFixture({ detail: { createdAt: '2026-07-11T00:00:00.000Z' } });
+  await originalYear.run();
+  assert.equal(mutations(originalYear).length, 1);
+});
+
+for (const kind of ['teacherLink', 'approverLink', 'class', 'lessonSession']) {
+  test('resubmit keeps fresh form validation before mutation: ' + kind, async () => {
+    const fixture = resubmitFixture();
+    if (kind === 'teacherLink') fixture.tables.teacher_catalogs[0].profile_id = '';
+    if (kind === 'approverLink') fixture.tables.teacher_catalogs[1].profile_id = '';
+    if (kind === 'class') fixture.input.classId = id(9999);
+    if (kind === 'lessonSession') {
+      fixture.tables.classes[0].schedule_storage_mode = 'normalized';
+      fixture.input.originalLessonSessionId = id(9999);
+    }
+    await assert.rejects(fixture.run(), /계정 연결|수업을 선택|실제 수업 회차/);
+    assert.equal(mutations(fixture).length, 0);
+    assert.equal(notifications(fixture).length, 0);
+  });
+}
+
+test('resubmit accepts the selected actual lesson session from fresh catalogs', async () => {
+  const fixture = resubmitFixture();
+  fixture.tables.classes[0].schedule_storage_mode = 'normalized';
+  fixture.input.originalLessonSessionId = id(1000);
+  await fixture.run();
+  assert.equal(mutations(fixture)[0].args.p_patch.original_lesson_session_id, id(1000));
+});
+
+test('resubmit maps the committed receipt using fresh changed participant labels', async () => {
+  const fixture = resubmitFixture({
+    actorRole: 'admin', input: { classId: id(601), approverTeacherCatalogId: id(905) },
+    committed: {
+      class_id: id(601), class_name: '서버 확정 수업', teacher_catalog_id: id(902),
+      teacher_profile_id: id(806), approver_teacher_catalog_id: id(905),
+      approver_profile_id: id(807), updated_at: '2026-10-17T01:02:03Z',
+    },
+  });
+  fixture.tables.profiles.push(
+    { id: id(806), name: '변경 교사', role: 'teacher' },
+    { id: id(807), name: '변경 결재자', role: 'teacher' },
+  );
+  fixture.tables.teacher_catalogs.push(
+    { id: id(902), name: '변경 교사', profile_id: id(806) },
+    { id: id(905), name: '변경 결재자', profile_id: id(807) },
+  );
+  fixture.tables.classes[1].teacher = '변경 교사';
+  const result = await fixture.run();
+  assert.equal(result.className, '서버 확정 수업');
+  assert.equal(result.teacherProfileId, id(806));
+  assert.equal(result.teacherLabel, '변경 교사');
+  assert.equal(result.approverProfileId, id(807));
+  assert.equal(result.approverLabel, '변경 결재자');
+  assert.equal(result.updatedAt, '2026-10-17T01:02:03Z');
+  assert.equal(mutations(fixture).length, 1);
+  assert.equal(notifications(fixture).length, 1);
+});
+
+test('resubmit waits for notification completion without repeating the mutation', async () => {
+  const gate = Promise.withResolvers();
+  const fixture = resubmitFixture({ notificationGate: gate.promise });
+  let settled = false;
+  const pending = fixture.run().then(result => { settled = true; return result; });
+  try {
+    for (let tick = 0; tick < 20 && notifications(fixture).length === 0; tick++) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(notifications(fixture).length, 1);
+    assert.equal(mutations(fixture).length, 1);
+    assert.equal(settled, false);
+  } finally {
+    gate.resolve();
+  }
+  await pending;
+  assert.equal(settled, true);
+});
+
+test('resubmit keeps the committed result and warning when notification fails', async () => {
+  const fixture = resubmitFixture({ notificationStatus: 503 });
+  const previous = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const result = await fixture.run();
+    assert.equal(result.status, 'approval_pending');
+    assert.match(result.notificationWarning, /저장은 완료/);
+    assert.equal(warnings.length, 1);
+    assert.equal(mutations(fixture).length, 1);
+    assert.equal(notifications(fixture).length, 1);
+  } finally {
+    console.warn = previous;
+  }
+});
+
+test('resubmit propagates a mutation conflict without notification or retry', async () => {
+  const fixture = resubmitFixture({ mutationError: { code: 'P0001', message: 'makeup_request_stale_status' } });
+  await assert.rejects(fixture.run(), error => error.code === 'P0001');
+  assert.equal(mutations(fixture).length, 1);
+  assert.equal(notifications(fixture).length, 0);
+});
