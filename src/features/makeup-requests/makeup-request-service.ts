@@ -804,7 +804,7 @@ function buildCreatePayload(
   }
 }
 
-/** Fresh create-only context; never substitute this for completion collision guards. */
+/** Fresh form validation context; never substitute this for completion collision guards. */
 async function loadMakeupCreateContext(): Promise<MakeupRequestWorkspaceData> {
   try {
     const rows = await Promise.all([
@@ -996,8 +996,10 @@ export async function completeMakeupRefund(requestId: string, actorId: string, n
 
 export async function resubmitMakeupRequest(requestId: string, input: MakeupRequestInput, actorId: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const data = await loadMakeupRequestWorkspaceData()
-  const { request } = await loadSingleMakeupRequest(requestId, data)
+  const data = await loadMakeupCreateContext()
+  if (!data.schemaReady) throw new Error(data.error || "휴보강 신청서 DB를 사용할 수 없습니다.")
+  const request = await readMakeupDetail({ id: requestId })
+  if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
   if (!canTransitionMakeupRequest(request.status, "approval_pending", { isRequester: request.requesterId === actorId })) {
     throw new Error("재상신 권한이 없습니다.")
   }
