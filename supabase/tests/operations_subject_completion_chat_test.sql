@@ -54,7 +54,7 @@ select is((select count(*)::integer from dashboard_private.notification_rules wh
   'No follow-up due schedule is introduced');
 
 set local role authenticated;
-insert into subject_results values('case',public.create_registration_case('과목팀 등록 학생','중1','검증중','01099880001',null,'본관',now(),array['영어'],'완료 알림 검증','normal','subject-create'));
+insert into subject_results values('case',public.create_registration_case('과목팀 등록 학생','중1','검증중','fixture-contact-j-01070100006',null,'본관',now(),array['영어'],'완료 알림 검증','normal','subject-create'));
 insert into subject_results select 'checklist',public.set_registration_admission_checklist_item_v1((v->>'taskId')::uuid,'registrationCompleted',true,'subject-checklist') from subject_results where k='case';
 reset role;
 select is((select count(*)::integer from dashboard_private.notification_events where event_key='registration.subject_registration_completed'),0,
@@ -88,8 +88,8 @@ select is((public.get_ops_task_legacy_dispatch_plan_v1((select (v->'sourceEventI
 -- existing roster validation and notification trigger chain.
 select set_config('request.jwt.claim.role','authenticated',true);
 insert into public.students(id,name,status,parent_contact,class_ids,waitlist_class_ids) values
-('99880000-0000-4000-8000-000000000010','전반 학생','재원','01099880010','["99880000-0000-4000-8000-000000000020"]','[]'),
-('99880000-0000-4000-8000-000000000011','퇴원 학생','재원','01099880011','["99880000-0000-4000-8000-000000000022"]','[]');
+('99880000-0000-4000-8000-000000000010','전반 학생','재원','fixture-contact-k-01070110007','["99880000-0000-4000-8000-000000000020"]','[]'),
+('99880000-0000-4000-8000-000000000011','퇴원 학생','재원','fixture-contact-l-01070120008','["99880000-0000-4000-8000-000000000022"]','[]');
 insert into public.academic_subject_settings(subject,is_active,registration_create_enabled,grade_levels,sort_order)
 values('과학',true,true,array['고1'],30) on conflict(subject) do nothing;
 insert into public.academic_subject_areas(subject,area_key,label,is_active,sort_order)

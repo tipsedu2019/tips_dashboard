@@ -559,7 +559,7 @@ select
     'studentName', '기존 재시도',
     'schoolGrade', '초6',
     'schoolName', '기존학교',
-    'parentPhone', '010-1111-2222',
+    'parentPhone', 'fixture-contact-v-010-7022-0017',
     'studentPhone', null,
     'campus', '본관',
     'inquiryAt', '2026-09-01 09:00:00+09'::timestamptz,
@@ -597,7 +597,7 @@ select pg_temp.registration_flat_case_set_actor(
 
 select is(
   dashboard_private.create_registration_case_impl(
-    '기존 재시도', '초6', '기존학교', '010-1111-2222', null,
+    '기존 재시도', '초6', '기존학교', 'fixture-contact-v-010-7022-0017', null,
     '본관', '2026-09-01 09:00:00+09'::timestamptz,
     array['영어', '수학']::text[], '기존 메모', 'normal',
     'flat-case-seeded-legacy-replay'
@@ -612,7 +612,7 @@ select is(
 
 select is(
   public.create_registration_case_with_initial_workflow_v1(
-    '기존 재시도', '초6', '기존학교', '010-1111-2222', null,
+    '기존 재시도', '초6', '기존학교', 'fixture-contact-v-010-7022-0017', null,
     '본관', '2026-09-01 09:00:00+09'::timestamptz,
     array['영어', '수학']::text[], '기존 메모', 'normal',
     '{"ignored":"new-plan"}'::jsonb,

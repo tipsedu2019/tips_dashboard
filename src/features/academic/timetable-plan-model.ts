@@ -33,17 +33,17 @@ export function moveSlot(slot: PlanSlot, target: DropTarget): PlanSlot {
 }
 
 import type {
-  DeletePlanItemCommand, PlanItemDraft, PlanMutationResult, PlanSnapshot,
+  BatchPlanItemsCommand, BatchSaveResult, DeletePlanItemCommand, PlanItemDraft, PlanMutationResult, PlanSnapshot,
   SavePlanItemCommand, TimetableConflict, TransferResult,
 } from './timetable-plan-contract.ts';
-import { requireTimetableTransferResult, type TimetablePlanService } from './timetable-plan-service.ts';
+import { requireTimetableBatchResult, requireTimetableTransferResult, type TimetablePlanService } from './timetable-plan-service.ts';
 import { findConflicts, findOperatingConflicts, operatingReferenceComplete } from './timetable-conflicts.ts';
 import { availableTimetableSessionStorage, timetableDraftStorageKey, type TimetableDraftStorage } from './timetable-plan-recovery.ts';
 
 export type TimetableItemEdit =
   | { operation: 'save'; item: PlanItemDraft; slots: PlanSlot[] }
   | { operation: 'delete'; itemId: string };
-export type TimetableSaveState = 'idle' | 'saving' | 'saved' | 'error' | 'stale';
+export type TimetableSaveState = 'idle' | 'draft' | 'saving' | 'saved' | 'error' | 'stale';
 export type TimetableControllerState = {
   snapshot: PlanSnapshot | null;
   draft: PlanSnapshot | null;
@@ -53,7 +53,10 @@ export type TimetableControllerState = {
   referenceStatus: 'unknown' | 'verified' | 'unverifiable';
   recoveryAvailable: boolean;
   dirty: boolean;
-  pendingOperations: { itemId: string; operation: 'save' | 'delete'; name: string; failure: 'rejected' | 'uncertain' | 'stale' | null }[];
+  pendingOperations: { itemId: string; operation: 'save' | 'delete'; name: string; failure: 'rejected' | 'uncertain' | 'stale' | null; discardable?: boolean }[];
+  saving?: boolean;
+  canDiscardDraft?: boolean;
+  canUndo?: boolean;
 };
 type StorageLike = TimetableDraftStorage;
 type Pending = {
@@ -61,6 +64,7 @@ type Pending = {
   submitted: SavePlanItemCommand | DeletePlanItemCommand | null;
   status: 'queued' | 'sending' | 'error';
   expectedItemRevision?: number | null;
+  baseEdit?: TimetableItemEdit;
   confirmedRejection?: boolean;
   confirmedStale?: boolean;
   itemName?: string;
@@ -152,9 +156,9 @@ function mergeReceipt(base: PlanSnapshot, result: PlanMutationResult): PlanSnaps
 
 /** Pure state owner for one actor and one plan. UI subscribes; it never edits React internals for a retry. */
 export function createTimetablePlanController({ service, actorScope, planId, storage = availableTimetableSessionStorage(),
-  requestKey = () => crypto.randomUUID() }: {
-  service: Pick<TimetablePlanService, 'readPlan' | 'readRevision' | 'saveItem'>;
-  actorScope: string; planId: string; storage?: StorageLike | null; requestKey?: () => string;
+  requestKey = () => crypto.randomUUID(), autoSave = true }: {
+  service: Pick<TimetablePlanService, 'readPlan' | 'readRevision' | 'saveItem'> & Partial<Pick<TimetablePlanService, 'saveBatch'>>;
+  actorScope: string; planId: string; storage?: StorageLike | null; requestKey?: () => string; autoSave?: boolean;
 }) {
   if (!actorScope || !planId) throw new Error('timetable_plan_scope_missing');
   const key = timetableDraftStorageKey(actorScope, planId);
@@ -173,18 +177,31 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   let disposed = false;
   let paused = false;
   let lastUndo: { edit: TimetableItemEdit; expectedItemRevision: number | null } | null = null;
+  const localUndo: Array<{ itemId: string; previous: Pending | null; stale: boolean }> = [];
+  let saveFlight: Promise<void> | null = null;
+  let batchRecovery: { command: BatchPlanItemsCommand; failure?: 'uncertain' | 'rejected' | 'stale' } | null = null;
+  let rejectBatch: ((error: unknown) => void) | null = null;
+  const batchFrozen = () => batchRecovery !== null && (!batchRecovery.failure || batchRecovery.failure === 'uncertain');
+  const discardable = (entry: Pending) => !entry.submitted && !batchFrozen();
+  let refreshFlight: Promise<void> | null = null;
+  let refreshStarted = false;
+  let refreshAgain = false;
+  let revisionFlight: Promise<void> | null = null;
+  let deferredRefresh = false;
   let state: TimetableControllerState = { snapshot: null, draft: null, saveState: 'idle', conflicts: [], error: null,
     referenceStatus: 'unknown', recoveryAvailable: true, dirty: false, pendingOperations: [] };
   const publish = (patch: Partial<TimetableControllerState> = {}) => {
-    state = { ...state, ...patch };
+    state = { ...state, ...patch, saving: !autoSave && saveFlight !== null,
+      canDiscardDraft: !autoSave && !saveFlight && pending().some(discardable),
+      canUndo: !saveFlight && !batchFrozen() && (localUndo.length > 0 || lastUndo !== null) };
     for (const listener of listeners) listener();
   };
   const pending = () => [...queues.values()].flat();
   const persist = () => {
     if (!storage) { publish({ recoveryAvailable: false }); return; }
     try {
-      const entries = pending().map(({ edit, submitted, status, expectedItemRevision, itemName }) => ({ edit, submitted, status, expectedItemRevision, itemName }));
-      if (entries.length) storage.setItem(key, JSON.stringify({ version: 1, entries }));
+      const entries = pending().map(({ edit, submitted, status, expectedItemRevision, itemName, baseEdit }) => ({ edit, submitted, status, expectedItemRevision, itemName, baseEdit }));
+      if (entries.length || batchRecovery) storage.setItem(key, JSON.stringify({ version: 1, entries, ...(!autoSave && batchRecovery ? { batch: batchRecovery } : {}) }));
       else storage.removeItem(key);
     } catch { publish({ recoveryAvailable: false }); }
   };
@@ -200,14 +217,20 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     const complete = operatingReferenceComplete(state.snapshot, period);
     publish({ draft, conflicts, dirty: pending().length > 0,
       pendingOperations: [...queues].map(([itemId, queue]) => ({ itemId, operation: queue[0].edit.operation,
-        name: queue[0].itemName || state.snapshot?.items.find(item => item.id === itemId)?.name || '삭제한 수업', failure: failureKind(itemId) })),
-      saveState: saveState ?? (!complete || state.referenceStatus !== 'verified' || staleItems.size > 0 ? 'stale'
+        name: queue[0].itemName || state.snapshot?.items.find(item => item.id === itemId)?.name || '삭제한 수업', failure: failureKind(itemId),
+        ...(!autoSave ? { discardable: !saveFlight && queue.some(discardable) } : {}) })),
+      saveState: saveState ?? (!autoSave && saveFlight ? 'saving'
+        : !complete || state.referenceStatus !== 'verified' || staleItems.size > 0 ? 'stale'
         : pending().some((entry) => entry.status === 'error') ? 'error'
-          : pending().length ? 'saving' : state.saveState === 'idle' ? 'idle' : 'saved'),
+          : pending().length ? autoSave ? 'saving' : 'draft' : state.saveState === 'idle' ? 'idle' : 'saved'),
       error: error === undefined ? state.error : error });
   };
   const clearSensitive = () => {
     epoch += 1;
+    if (!autoSave) for (const entry of pending()) entry.reject?.(Error('timetable_plan_inactive'));
+    rejectBatch?.(Error('timetable_plan_inactive')); rejectBatch = null; batchRecovery = null;
+    saveFlight = null; refreshFlight = null; revisionFlight = null; deferredRefresh = false;
+    refreshStarted = false; refreshAgain = false; localUndo.length = 0;
     for (const controller of controllers) controller.abort();
     controllers.clear(); queues.clear(); running.clear(); staleItems.clear(); retrying.clear(); itemEpoch.clear();
     itemReceiptSequence.clear(); authoritativeReadSequence = -1; lastUndo = null;
@@ -231,11 +254,40 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
         const submitted = isObject(entry.submitted) && entry.submitted.planId === planId && typeof entry.submitted.requestKey === 'string'
           ? entry.submitted as SavePlanItemCommand | DeletePlanItemCommand : null;
         queue.push({ edit, submitted, status: submitted ? 'error' : 'queued', itemName: typeof entry.itemName === 'string' ? entry.itemName : undefined,
+          baseEdit: !autoSave && isObject(entry.baseEdit) && ['save', 'delete'].includes(String(entry.baseEdit.operation))
+            ? entry.baseEdit as TimetableItemEdit : undefined,
           expectedItemRevision: typeof entry.expectedItemRevision === 'number' || entry.expectedItemRevision === null
             ? entry.expectedItemRevision : undefined });
         queues.set(itemId, queue);
       }
-    } catch { queues.clear(); try { storage.removeItem(key); } catch { /* No recovery. */ } }
+      if (!autoSave && saved.batch !== undefined) {
+        if (!isObject(saved.batch) || !isObject(saved.batch.command)) throw Error('invalid recovery');
+        const command = saved.batch.command as unknown as BatchPlanItemsCommand;
+        const ids = new Set<string>();
+        if (command.operation !== 'save_batch' || command.planId !== planId || typeof command.requestKey !== 'string'
+          || !command.requestKey.trim() || !Number.isInteger(command.expectedMetaRevision) || command.expectedMetaRevision < 0
+          || !Number.isInteger(command.expectedChangeSequence) || command.expectedChangeSequence < 0
+          || typeof command.expectedShadowFingerprint !== 'string' || !Array.isArray(command.edits)
+          || !command.edits.length || command.edits.length > 500) throw Error('invalid recovery');
+        for (const edit of command.edits) {
+          const id = edit.operation === 'save' ? edit.item?.id : edit.operation === 'delete' ? edit.itemId : null;
+          if (!id || ids.has(id) || !(edit.expectedItemRevision === null && edit.operation === 'save'
+            || Number.isInteger(edit.expectedItemRevision) && edit.expectedItemRevision! >= 1)
+            || edit.operation === 'save' && (edit.item.planId !== planId || !Array.isArray(edit.slots)
+              || edit.slots.some(slot => slot.planId !== planId || slot.itemId !== id))) throw Error('invalid recovery');
+          ids.add(id);
+          if (!queues.has(id)) queues.set(id, [{ edit: structuredClone(edit), submitted: null, status: 'error',
+            expectedItemRevision: edit.expectedItemRevision }]);
+        }
+        batchRecovery = { command, failure: ['rejected', 'stale'].includes(String(saved.batch.failure))
+          ? saved.batch.failure as 'rejected' | 'stale' : 'uncertain' };
+        for (const id of ids) for (const entry of queues.get(id)!) {
+          entry.status = 'error'; entry.confirmedRejection = batchRecovery.failure === 'rejected';
+          entry.confirmedStale = batchRecovery.failure === 'stale';
+          if (entry.confirmedStale) staleItems.add(id);
+        }
+      }
+    } catch { batchRecovery = null; queues.clear(); try { storage.removeItem(key); } catch { /* No recovery. */ } }
   };
   const scoped = async <T>(run: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> => {
     const token = epoch;
@@ -243,7 +295,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     try { const result = await run(abort.signal); return !disposed && token === epoch ? result : undefined; }
     finally { controllers.delete(abort); }
   };
-  const refresh = async () => {
+  const performRefresh = async () => {
     if (paused || disposed) return;
     const token = epoch;
     const generation = ++readGeneration;
@@ -260,8 +312,10 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       for (const [id, queue] of queues) {
         if (!queue.length) continue;
         const currentRevision = next.items.find((item) => item.id === id)?.revision ?? null;
-        const expected = queue[0].submitted?.expectedItemRevision
-          ?? queue[0].expectedItemRevision ?? old?.items.find((item) => item.id === id)?.revision ?? null;
+        const first = queue[0];
+        const expected = !autoSave && first.expectedItemRevision !== undefined && !first.submitted
+          ? first.expectedItemRevision : first.submitted?.expectedItemRevision
+            ?? first.expectedItemRevision ?? old?.items.find((item) => item.id === id)?.revision ?? null;
         if (currentRevision !== expected) staleItems.add(id);
       }
       const externallyChanged = staleItems.size > 0;
@@ -273,13 +327,43 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       else { publish({ referenceStatus: 'unverifiable', error }); rebuild('stale', error); }
     }
   };
+  const startRefresh = (): Promise<void> => {
+    if (refreshFlight) return refreshFlight;
+    const flight = Promise.resolve().then(() => { refreshStarted = true; return performRefresh(); });
+    refreshFlight = flight;
+    refreshStarted = false;
+    const release = () => {
+      if (refreshFlight !== flight) return;
+      refreshFlight = null; refreshStarted = false;
+      if (refreshAgain) { refreshAgain = false; void refresh(); }
+    };
+    void flight.then(release, release);
+    return flight;
+  };
+  const refresh = (): Promise<void> => {
+    if (autoSave) return performRefresh();
+    if (paused || disposed) return Promise.resolve();
+    if (saveFlight) { deferredRefresh = true; return Promise.resolve(); }
+    if (refreshFlight) {
+      // A later invalidation may postdate the in-flight database snapshot.
+      // Same-tick duplicate requests share it; later signals require one reread.
+      if (refreshStarted) refreshAgain = true;
+      return refreshFlight;
+    }
+    if (revisionFlight) {
+      const generation = readGeneration;
+      return revisionFlight.then(() => generation === readGeneration ? refresh() : undefined);
+    }
+    return startRefresh();
+  };
   const load = async () => {
     if (paused || disposed) return;
     if (!state.snapshot && pending().length === 0) restore();
     await refresh();
-    if (state.snapshot && pending().length) rebuild('stale');
+    if (state.snapshot && pending().length) rebuild(autoSave ? 'stale' : undefined);
   };
   const runQueue = (itemId: string) => {
+    if (!autoSave && !saveFlight) return;
     if (running.has(itemId) || (staleItems.has(itemId) && !retrying.has(itemId)) || paused || disposed || !state.snapshot || state.referenceStatus !== 'verified') return;
     const queue = queues.get(itemId);
     if (!queue?.length || queue[0].status === 'error') return;
@@ -312,6 +396,9 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
               expectedShadowFingerprint: base.shadowFingerprint, expectedItemRevision: entry.expectedItemRevision ?? revision!, requestKey: requestKey() });
           entry.submitted = structuredClone(submitted);
           entry.status = 'sending'; persist(); rebuild('saving');
+          if (disposed || paused || token !== epoch || generation !== (itemEpoch.get(itemId) ?? 0)) {
+            entry.reject?.(Error('timetable_plan_inactive')); break;
+          }
           try {
             const response = await scoped((signal) => service.saveItem(submitted, { signal }));
             if (!response || token !== epoch || generation !== (itemEpoch.get(itemId) ?? 0)) break;
@@ -334,6 +421,10 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
             publish({ snapshot: updated, error: null }); persist(); rebuild();
             entry.resolve?.();
             if (staleItems.has(itemId)) { retrying.delete(itemId); rebuild('stale'); break; }
+            if (!autoSave) {
+              if (shadowChanged) { deferredRefresh = true; publish({ referenceStatus: 'unverifiable' }); rebuild('stale'); }
+              break;
+            }
             if (shadowChanged) {
               await refresh();
               if (state.referenceStatus !== 'verified') break;
@@ -349,14 +440,56 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       } finally { if (generation === (itemEpoch.get(itemId) ?? 0)) { running.delete(itemId); retrying.delete(itemId); } }
     })();
   };
+  const baseEditFor = (itemId: string): TimetableItemEdit => {
+    const item = state.snapshot?.items.find(row => row.id === itemId);
+    return item ? { operation: 'save', item: toItemDraft(item),
+      slots: structuredClone(state.snapshot!.slots.filter(slot => slot.itemId === itemId)) }
+      : { operation: 'delete', itemId };
+  };
+  const sameEdit = (left: TimetableItemEdit, right: TimetableItemEdit): boolean => {
+    if (left.operation !== right.operation) return false;
+    if (left.operation === 'delete') return right.operation === 'delete' && left.itemId === right.itemId;
+    if (right.operation !== 'save') return false;
+    const slots = (values: PlanSlot[]) => values.map(slot => JSON.stringify([slot.id, slot.planId, slot.itemId,
+      slot.weekday, slot.startMinute, slot.endMinute, slot.teacherId, slot.classroomId, slot.sourceSlotId ?? null])).sort();
+    return JSON.stringify(toItemDraft(left.item)) === JSON.stringify(toItemDraft(right.item))
+      && JSON.stringify(slots(left.slots)) === JSON.stringify(slots(right.slots));
+  };
+  const stageManual = (edit: TimetableItemEdit, expectedItemRevision?: number | null) => {
+    const itemId = edit.operation === 'save' ? edit.item.id : edit.itemId;
+    const queue = queues.get(itemId);
+    const first = queue?.[0];
+    const previous = queue?.length ? structuredClone(queue[queue.length - 1]) : null;
+    localUndo.push({ itemId, previous, stale: staleItems.has(itemId) });
+    if (localUndo.length > 50) localUndo.shift();
+    const baseEdit = first?.baseEdit ?? baseEditFor(itemId);
+    const originalRevision = queue?.find(entry => entry.expectedItemRevision !== undefined)?.expectedItemRevision;
+    const revision = originalRevision !== undefined ? originalRevision
+      : expectedItemRevision !== undefined ? expectedItemRevision
+        : state.snapshot?.items.find(row => row.id === itemId)?.revision ?? null;
+    const currentRevision = state.snapshot?.items.find(row => row.id === itemId)?.revision ?? null;
+    if (currentRevision !== revision) staleItems.add(itemId);
+    if (currentRevision === revision && sameEdit(edit, baseEdit)) { queues.delete(itemId); staleItems.delete(itemId); }
+    else queues.set(itemId, [{ edit: structuredClone(edit), submitted: null, status: 'queued', baseEdit,
+      expectedItemRevision: revision, itemName: edit.operation === 'save' ? edit.item.name
+        : first?.itemName ?? state.snapshot?.items.find(row => row.id === itemId)?.name }]);
+    persist(); rebuild(undefined, null);
+  };
   const dispatch = (edit: TimetableItemEdit, expectedItemRevision?: number | null): Promise<void> => {
     if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
+    if (!autoSave && saveFlight) return Promise.reject(Error('timetable_save_in_progress'));
+    if (!autoSave && batchFrozen()) return Promise.reject(Error('timetable_failed_edit_pending'));
     if (!state.snapshot || state.snapshot.plan.id !== planId || !state.snapshot.permissions.canEdit
       || state.snapshot.plan.state !== 'draft') return Promise.reject(Error('timetable_forbidden'));
     const itemId = edit.operation === 'save' ? edit.item.id : edit.itemId;
     if (!itemId || (edit.operation === 'save' && (edit.item.planId !== planId
       || edit.slots.some((slot) => slot.planId !== planId || slot.itemId !== itemId)))) return Promise.reject(Error('timetable_invalid'));
     if (queues.get(itemId)?.[0]?.status === 'error') return Promise.reject(Error('timetable_failed_edit_pending'));
+    if (!autoSave) {
+      if (queues.get(itemId)?.some(entry => entry.submitted)) return Promise.reject(Error('timetable_failed_edit_pending'));
+      stageManual(edit, expectedItemRevision);
+      return Promise.resolve();
+    }
     let rejectSave!: (error: unknown) => void;
     const promise = new Promise<void>((resolve, reject) => {
       rejectSave = reject;
@@ -375,7 +508,174 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     } else { persist(); rebuild(); runQueue(itemId); }
     return promise;
   };
+  // A conclusive batch rejection committed none of its targets. Retain every
+  // local intent while allowing explicit correction, reapply or cancellation.
+  const abandonRejectedBatch = () => {
+    if (!batchRecovery || batchFrozen()) return;
+    batchRecovery = null;
+    for (const [id, queue] of queues) for (const entry of queue) {
+      if (entry.submitted) continue;
+      entry.status = 'queued'; entry.confirmedRejection = false; entry.confirmedStale = false;
+      const revision = state.snapshot?.items.find(item => item.id === id)?.revision ?? null;
+      if (entry.expectedItemRevision === undefined || entry.expectedItemRevision === revision) staleItems.delete(id);
+    }
+  };
+  const coalesceUnsent = () => {
+    for (const [id, queue] of queues) {
+      if (queue.some(entry => entry.submitted)) throw Error('timetable_submitted_request_pending');
+      const first = queue[0], latest = queue[queue.length - 1];
+      if (!first) continue;
+      const originalRevision = queue.find(entry => entry.expectedItemRevision !== undefined)?.expectedItemRevision;
+      const expectedItemRevision = originalRevision !== undefined ? originalRevision
+        : state.snapshot?.items.find(item => item.id === id)?.revision ?? null;
+      const baseEdit = first.baseEdit ?? latest.baseEdit ?? baseEditFor(id);
+      const currentRevision = state.snapshot?.items.find(item => item.id === id)?.revision ?? null;
+      if (currentRevision === expectedItemRevision && sameEdit(latest.edit, baseEdit)) {
+        queues.delete(id); staleItems.delete(id);
+      } else queues.set(id, [{ ...latest, expectedItemRevision, baseEdit }]);
+    }
+    persist(); rebuild();
+  };
+  const sendBatch = async (token: number) => {
+    if (!batchRecovery && !queues.size) return;
+    if (!service.saveBatch) throw Error('timetable_batch_rpc_unavailable');
+    if (!batchRecovery) {
+      coalesceUnsent();
+      if (!queues.size) return;
+      const base = state.snapshot;
+      if (!base || state.referenceStatus !== 'verified' || !operatingReferenceComplete(base, periodOf(base))) throw Error('timetable_reference_unverifiable');
+      const edits: BatchPlanItemsCommand['edits'] = [];
+      for (const [id, queue] of queues) {
+        const entry = queue[0], revision = base.items.find(item => item.id === id)?.revision ?? null;
+        if (staleItems.has(id) || entry.confirmedStale || entry.expectedItemRevision !== revision) {
+          entry.status = 'error'; entry.confirmedStale = true; staleItems.add(id);
+          persist(); rebuild('stale', Error('timetable_stale')); throw Error('timetable_stale');
+        }
+        if (entry.confirmedRejection) throw Error('timetable_rejection_required');
+        if (entry.edit.operation === 'save') edits.push({ operation: 'save', item: toItemDraft(entry.edit.item),
+          expectedItemRevision: entry.expectedItemRevision!, slots: structuredClone(entry.edit.slots) });
+        else {
+          if (entry.expectedItemRevision === null) throw Error('timetable_stale');
+          edits.push({ operation: 'delete', itemId: id, expectedItemRevision: entry.expectedItemRevision! });
+        }
+      }
+      batchRecovery = { command: { operation: 'save_batch', planId, expectedMetaRevision: base.plan.metaRevision,
+        expectedChangeSequence: base.plan.changeSequence, expectedShadowFingerprint: base.shadowFingerprint,
+        requestKey: requestKey(), edits } };
+    } else if (batchRecovery.failure === 'stale') throw Error('timetable_stale');
+    else if (batchRecovery.failure === 'rejected') throw Error('timetable_rejection_required');
+    const command = structuredClone(batchRecovery.command);
+    batchRecovery.failure = undefined;
+    for (const entry of pending()) entry.status = 'sending';
+    localUndo.length = 0;
+    persist(); rebuild('saving');
+    // A subscriber can revoke access synchronously when the submitted state is published.
+    if (paused || disposed || token !== epoch) throw Error('timetable_plan_inactive');
+    try {
+      const response = await new Promise<BatchSaveResult | undefined>((resolve, reject) => {
+        rejectBatch = reject;
+        void scoped(signal => service.saveBatch!(command, { signal })).then(resolve, reject);
+      });
+      if (!response || paused || disposed || token !== epoch) throw Error('timetable_plan_inactive');
+      const receipt = requireTimetableBatchResult(response, command);
+      const base = state.snapshot;
+      if (!base) throw Error('timetable_plan_inactive');
+      const inverse = command.edits.length === 1 ? queues.get(command.edits[0].operation === 'save'
+        ? command.edits[0].item.id : command.edits[0].itemId)?.[0]?.baseEdit : undefined;
+      for (const ack of receipt.acknowledgements) {
+        queues.delete(ack.itemId); staleItems.delete(ack.itemId); retrying.delete(ack.itemId);
+        itemReceiptSequence.set(ack.itemId, Math.max(itemReceiptSequence.get(ack.itemId) ?? -1, receipt.committedChangeSequence));
+      }
+      lastUndo = inverse ? { edit: structuredClone(inverse), expectedItemRevision: receipt.acknowledgements[0].itemRevision } : null;
+      batchRecovery = null;
+      // A retry returns the immutable commit snapshot. A later authorized read
+      // already owns the canonical state; the receipt only resolves our intent.
+      const newer = base.plan.changeSequence > receipt.snapshot.plan.changeSequence
+        || base.plan.changeSequence === receipt.snapshot.plan.changeSequence && base.plan.metaRevision >= receipt.snapshot.plan.metaRevision;
+      if (!newer) authoritativeReadSequence = receipt.snapshot.plan.changeSequence;
+      publish({ snapshot: newer ? base : receipt.snapshot, referenceStatus: 'verified', error: null });
+      persist(); rebuild();
+    } catch (error) {
+      if (paused || disposed || token !== epoch) throw Error('timetable_plan_inactive');
+      if (isAccessError(error)) { clearSensitive(); publish({ error, referenceStatus: 'unverifiable' }); throw error; }
+      const missingFunction = ['PGRST202', '42883'].includes(String((error as { code?: string } | null)?.code));
+      if (batchRecovery) batchRecovery.failure = isStaleError(error) ? 'stale'
+        : isConfirmedRejection(error) || missingFunction ? 'rejected' : 'uncertain';
+      for (const [id, queue] of queues) for (const entry of queue) {
+        entry.status = 'error'; entry.confirmedStale = batchRecovery?.failure === 'stale';
+        entry.confirmedRejection = batchRecovery?.failure === 'rejected';
+        if (entry.confirmedStale) staleItems.add(id);
+      }
+      persist(); rebuild(isStaleError(error) ? 'stale' : 'error', error);
+      throw error;
+    } finally { if (token === epoch) rejectBatch = null; }
+  };
+  const saveManual = (targets: string[], drainDrafts = false): Promise<void> => {
+    if (saveFlight) return saveFlight;
+    if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
+    const token = epoch;
+    const run = async () => {
+      if (paused || disposed || token !== epoch) throw Error('timetable_plan_inactive');
+      if (!batchRecovery && (!state.snapshot?.permissions.canEdit || state.snapshot.plan.state !== 'draft')) throw Error('timetable_forbidden');
+      if (refreshFlight || revisionFlight) deferredRefresh = true;
+      refreshFlight = null; revisionFlight = null; refreshStarted = false; refreshAgain = false; readGeneration++;
+      if (batchRecovery) { await sendBatch(token); return; }
+      if (!state.snapshot) throw Error('timetable_forbidden');
+      // Old autosave recovery receipts remain exact single-item requests. Never
+      // include their unchanged acknowledged heads in the new batch.
+      for (const id of targets) {
+        while (queues.get(id)?.[0]?.submitted) {
+          if (paused || disposed || token !== epoch) throw Error('timetable_plan_inactive');
+          const entry = queues.get(id)![0];
+          if (state.referenceStatus !== 'verified' || !operatingReferenceComplete(state.snapshot, periodOf(state.snapshot))) throw Error('timetable_reference_unverifiable');
+          if (entry.confirmedStale) throw Error('timetable_stale');
+          if (entry.confirmedRejection) throw Error('timetable_rejection_required');
+          if (staleItems.has(id)) retrying.add(id);
+          entry.status = 'queued'; localUndo.length = 0;
+          await new Promise<void>((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; runQueue(id); });
+          if (!drainDrafts) break;
+        }
+      }
+      if (drainDrafts) {
+        if (paused || disposed || token !== epoch) throw Error('timetable_plan_inactive');
+        await sendBatch(token);
+      }
+    };
+    const flight = Promise.resolve().then(run);
+    saveFlight = flight;
+    rebuild();
+    const finish = () => {
+      if (saveFlight !== flight) return;
+      saveFlight = null;
+      if (!paused && !disposed && token === epoch) {
+        persist(); rebuild();
+        if (deferredRefresh) { deferredRefresh = false; void refresh(); }
+      }
+    };
+    void flight.then(finish, finish);
+    return flight;
+  };
+  const saveDraft = (): Promise<void> => autoSave ? retry() : saveManual([...queues.keys()], true);
+  const discardDraft = async (): Promise<void> => {
+    if (paused || disposed) throw Error('timetable_plan_inactive');
+    if (saveFlight) throw Error('timetable_save_in_progress');
+    if (batchFrozen()) throw Error('timetable_submitted_request_pending');
+    abandonRejectedBatch();
+    if (!pending().some(discardable)) {
+      if (pending().length) throw Error('timetable_submitted_request_pending');
+      return;
+    }
+    for (const [id, queue] of queues) {
+      const submitted = queue.filter(entry => entry.submitted);
+      if (submitted.length) queues.set(id, submitted);
+      else { queues.delete(id); staleItems.delete(id); }
+    }
+    localUndo.length = 0;
+    persist(); rebuild(undefined, pending().length ? undefined : null);
+  };
   function failureKind(itemId: string): 'rejected' | 'uncertain' | 'stale' | null {
+    if (batchRecovery?.command.edits.some(edit => (edit.operation === 'save' ? edit.item.id : edit.itemId) === itemId))
+      return batchRecovery.failure ?? null;
     const head = queues.get(itemId)?.[0];
     // A newer snapshot cannot tell whether our submitted command committed.
     // Only its server response (or a superseded receipt) authorizes abandonment.
@@ -387,12 +687,21 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   // Replace only a conclusively rejected head. Newer queued intents and other items stay intact.
   const replaceRejected = (edit: TimetableItemEdit): Promise<void> => {
     if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
+    if (!autoSave && saveFlight) return Promise.reject(Error('timetable_save_in_progress'));
     const itemId = edit.operation === 'save' ? edit.item.id : edit.itemId;
     if (failureKind(itemId) !== 'rejected') return Promise.reject(Error('timetable_rejection_required'));
     if (!state.snapshot?.permissions.canEdit || state.snapshot.plan.state !== 'draft') return Promise.reject(Error('timetable_forbidden'));
     if (edit.operation === 'save' && (edit.item.planId !== planId || edit.slots.some(slot => slot.planId !== planId || slot.itemId !== itemId))) return Promise.reject(Error('timetable_invalid'));
     if (state.referenceStatus !== 'verified' || !operatingReferenceComplete(state.snapshot, periodOf(state.snapshot))) return Promise.reject(Error('timetable_reference_unverifiable'));
     const queue = queues.get(itemId)!;
+    if (!autoSave) {
+      const rejected = queue[0];
+      abandonRejectedBatch();
+      queues.delete(itemId);
+      const revision = rejected.expectedItemRevision !== undefined ? rejected.expectedItemRevision : rejected.submitted?.expectedItemRevision;
+      stageManual(edit, revision);
+      return Promise.resolve();
+    }
     queue.shift();
     const promise = new Promise<void>((resolve, reject) => {
       queue.unshift({ edit: structuredClone(edit), submitted: null, status: 'queued', resolve, reject });
@@ -402,40 +711,65 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   };
   const discardRejected = async (itemId: string): Promise<void> => {
     if (paused || disposed) throw Error('timetable_plan_inactive');
+    if (!autoSave && saveFlight) throw Error('timetable_save_in_progress');
     if (failureKind(itemId) !== 'rejected') throw Error('timetable_rejection_required');
+    abandonRejectedBatch();
     const queue = queues.get(itemId)!;
     queue.shift(); if (!queue.length) queues.delete(itemId);
-    persist(); rebuild(undefined, null); runQueue(itemId);
+    persist(); rebuild(undefined, null); if (autoSave) runQueue(itemId);
   };
   const undo = (): Promise<void> => {
     if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
+    if (!autoSave && saveFlight) return Promise.reject(Error('timetable_save_in_progress'));
+    if (!autoSave && batchFrozen()) return Promise.reject(Error('timetable_submitted_request_pending'));
+    if (!autoSave && localUndo.length) {
+      const inverse = localUndo[localUndo.length - 1];
+      if (queues.get(inverse.itemId)?.some(entry => entry.submitted)) return Promise.reject(Error('timetable_submitted_request_pending'));
+      localUndo.pop();
+      if (inverse.previous) queues.set(inverse.itemId, [inverse.previous]); else queues.delete(inverse.itemId);
+      const currentRevision = state.snapshot?.items.find(row => row.id === inverse.itemId)?.revision ?? null;
+      if (inverse.previous && (inverse.stale || (inverse.previous.expectedItemRevision !== undefined
+        && inverse.previous.expectedItemRevision !== currentRevision))) staleItems.add(inverse.itemId);
+      else staleItems.delete(inverse.itemId);
+      persist(); rebuild(undefined, null);
+      return Promise.resolve();
+    }
     if (!lastUndo) return Promise.reject(Error('timetable_undo_unavailable'));
     const inverse = structuredClone(lastUndo);
     lastUndo = null;
     return dispatch(inverse.edit, inverse.expectedItemRevision);
   };
-  const retry = async (itemId?: string): Promise<void> => {
-    if (paused || disposed) throw Error('timetable_plan_inactive');
-    if (!state.snapshot || state.referenceStatus !== 'verified') throw Error('timetable_reference_unverifiable');
-    const targets = itemId ? [itemId] : [...queues.keys()];
-    // Explicit retry reuses the submitted body; the server rechecks revisions and access.
-    const promises: Promise<void>[] = [];
-    for (const id of targets) {
-      const queue = queues.get(id);
-      if (!queue?.length || queue[0].status === 'sending') continue;
-      if (staleItems.has(id) && !queue[0].submitted) throw Error('timetable_stale');
-      const entry = queue[0];
-      if (staleItems.has(id)) retrying.add(id);
-      entry.status = 'queued';
-      promises.push(new Promise<void>((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; }));
-      runQueue(id);
+  const retry = (itemId?: string): Promise<void> => {
+    if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
+    if (!autoSave) {
+      if (saveFlight) return saveFlight;
+      if (batchRecovery) return saveManual([]);
+      return saveManual((itemId ? [itemId] : [...queues.keys()]).filter(id => !!queues.get(id)?.[0]?.submitted));
     }
-    persist(); rebuild();
-    await Promise.all(promises);
+    return (async () => {
+      if (!state.snapshot || state.referenceStatus !== 'verified') throw Error('timetable_reference_unverifiable');
+      const targets = itemId ? [itemId] : [...queues.keys()];
+      // Explicit retry reuses the submitted body; the server rechecks revisions and access.
+      const promises: Promise<void>[] = [];
+      for (const id of targets) {
+        const queue = queues.get(id);
+        if (!queue?.length || queue[0].status === 'sending') continue;
+        if (staleItems.has(id) && !queue[0].submitted) throw Error('timetable_stale');
+        const entry = queue[0];
+        if (staleItems.has(id)) retrying.add(id);
+        entry.status = 'queued';
+        promises.push(new Promise<void>((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; }));
+        runQueue(id);
+      }
+      persist(); rebuild();
+      await Promise.all(promises);
+    })();
   };
   const resolveStale = (itemId: string, choice: 'accept_server' | 'reapply_draft'): Promise<void> => {
     if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
+    if (!autoSave && saveFlight) return Promise.reject(Error('timetable_save_in_progress'));
     if (failureKind(itemId) !== 'stale' || !state.snapshot || !state.draft) return Promise.reject(Error('timetable_stale_resolution_unavailable'));
+    if (!autoSave) abandonRejectedBatch();
     const oldQueue = queues.get(itemId);
     const desired = oldQueue?.[oldQueue.length - 1]?.edit;
     const desiredDraft = state.draft;
@@ -456,22 +790,35 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       : { operation: 'save', item: toItemDraft(draftItem), slots: desiredDraft.slots.filter((slot) => slot.itemId === itemId) };
     return dispatch(edit);
   };
-  const checkRevision = async () => {
+  const performRevisionCheck = async () => {
     if (disposed || paused || !state.snapshot) return;
     const token = epoch;
+    const generation = readGeneration;
     try {
       const revision = await scoped((signal) => service.readRevision(planId, { signal }));
-      if (!revision || !state.snapshot || token !== epoch) return;
+      if (!revision || !state.snapshot || token !== epoch || (!autoSave && generation !== readGeneration)) return;
       if (revision.planId !== planId) throw new Error('timetable_plan_response_invalid');
       if (revision.changeSequence !== state.snapshot.plan.changeSequence
         || revision.metaRevision !== state.snapshot.plan.metaRevision
         || revision.shadowFingerprint !== state.snapshot.shadowFingerprint
-        || revision.complete !== state.snapshot.complete) await refresh();
+        || revision.complete !== state.snapshot.complete) await (autoSave ? refresh() : startRefresh());
     } catch (error) {
-      if (disposed || token !== epoch) return;
+      if (disposed || token !== epoch || (!autoSave && generation !== readGeneration)) return;
       if (isAccessError(error)) { clearSensitive(); publish({ error, referenceStatus: 'unverifiable' }); }
       else { publish({ referenceStatus: 'unverifiable', error }); rebuild('stale', error); }
     }
+  };
+  const checkRevision = (): Promise<void> => {
+    if (autoSave) return performRevisionCheck();
+    if (paused || disposed || !state.snapshot) return Promise.resolve();
+    if (saveFlight) { deferredRefresh = true; return Promise.resolve(); }
+    if (refreshFlight) return refreshFlight;
+    if (revisionFlight) return revisionFlight;
+    const flight = Promise.resolve().then(performRevisionCheck);
+    revisionFlight = flight;
+    const release = () => { if (revisionFlight === flight) revisionFlight = null; };
+    void flight.then(release, release);
+    return flight;
   };
   const applyTransfer = (result: TransferResult) => {
     if (paused || disposed) throw Error('timetable_plan_inactive');
@@ -520,10 +867,14 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     publish({ snapshot: next, referenceStatus: 'unverifiable', error: null }); rebuild();
   };
   return { snapshot: () => state, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    load, refresh, checkRevision, dispatch, undo, retry, resolveStale, failureKind, replaceRejected, discardRejected, applyTransfer, clearSensitive,
+    load, refresh, checkRevision, dispatch, saveDraft, discardDraft, undo, retry, resolveStale, failureKind, replaceRejected, discardRejected, applyTransfer, clearSensitive,
     pause: () => {
       if (disposed || paused) return;
       paused = true; epoch += 1;
+      if (!autoSave) for (const entry of pending()) entry.reject?.(Error('timetable_plan_inactive'));
+      rejectBatch?.(Error('timetable_plan_inactive')); rejectBatch = null;
+      if (batchRecovery && !batchRecovery.failure) batchRecovery.failure = 'uncertain';
+      saveFlight = null; refreshFlight = null; revisionFlight = null; deferredRefresh = false; refreshStarted = false; refreshAgain = false;
       for (const controller of controllers) controller.abort();
       controllers.clear();
       for (const [id, queue] of queues) {
@@ -535,5 +886,12 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       running.clear(); retrying.clear(); rebuild(pending().length ? 'stale' : undefined);
     },
     resume: () => { if (disposed) throw Error('timetable_plan_inactive'); paused = false; },
-    destroy: () => { disposed = true; paused = true; epoch += 1; for (const controller of controllers) controller.abort(); controllers.clear(); listeners.clear(); } };
+    destroy: () => {
+      disposed = true; paused = true; epoch += 1;
+      if (!autoSave) for (const entry of pending()) entry.reject?.(Error('timetable_plan_inactive'));
+      rejectBatch?.(Error('timetable_plan_inactive')); rejectBatch = null;
+      if (batchRecovery && !batchRecovery.failure) batchRecovery.failure = 'uncertain';
+      saveFlight = null; refreshFlight = null; revisionFlight = null; deferredRefresh = false; refreshStarted = false; refreshAgain = false;
+      for (const controller of controllers) controller.abort(); controllers.clear(); listeners.clear();
+    } };
 }

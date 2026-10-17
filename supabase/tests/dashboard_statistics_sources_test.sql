@@ -144,12 +144,12 @@ insert into public.students(
 values
   (
     '86200000-0000-4000-8000-000000000041', '추론 고등학생',
-    'statistics-inferred-high', '통계검증고', '고1', '01080000041', '01090000041', '재원',
+    'statistics-inferred-high', '통계검증고', '고1', 'fixture-contact-b-01070020002', 'fixture-contact-c-01070030002', '재원',
     pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000306'), '[]'::jsonb
   ),
   (
     '86200000-0000-4000-8000-000000000042', '추론 중학생',
-    'statistics-inferred-middle', '통계검증중', '중3', '01080000042', '01090000042', '재원',
+    'statistics-inferred-middle', '통계검증중', '중3', 'fixture-contact-d-01070040003', 'fixture-contact-e-01070050003', '재원',
     pg_catalog.jsonb_build_array(
       '86200000-0000-4000-8000-000000000306',
       '86200000-0000-4000-8000-000000000307'
@@ -158,12 +158,12 @@ values
   ),
   (
     '86200000-0000-4000-8000-000000000043', '다른 학년 학생',
-    'statistics-other-grade', '통계검증고', '고2', '01080000043', '01090000043', '재원',
+    'statistics-other-grade', '통계검증고', '고2', 'fixture-contact-f-01070060004', 'fixture-contact-g-01070070004', '재원',
     pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000305'), '[]'::jsonb
   ),
   (
     '86200000-0000-4000-8000-000000000044', '학년 미정 학생',
-    'statistics-missing-grade', '통계검증고', '', '01080000044', '01090000044', '재원',
+    'statistics-missing-grade', '통계검증고', '', 'fixture-contact-h-01070080005', 'fixture-contact-i-01070090005', '재원',
     pg_catalog.jsonb_build_array('86200000-0000-4000-8000-000000000305'), '[]'::jsonb
   );
 

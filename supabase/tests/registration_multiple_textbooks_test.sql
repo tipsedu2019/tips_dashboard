@@ -37,7 +37,7 @@ create temp table multi_saved(response jsonb);
 grant select,insert,update,delete on multi_case,multi_saved to authenticated;
 set local role authenticated;
 select pg_temp.actor(1);
-insert into multi_case select public.create_registration_case('다중교재학생','중2','테스트중','01000009991',null,'본관',now(),array['영어'],'','normal','multi-book-case');
+insert into multi_case select public.create_registration_case('다중교재학생','중2','테스트중','fixture-contact-ae-01070310026',null,'본관',now(),array['영어'],'','normal','multi-book-case');
 create function pg_temp.track_id() returns uuid language sql as $$ select (response->'tracks'->0->>'id')::uuid from multi_case $$;
 create function pg_temp.book_rows(books jsonb) returns jsonb language sql as $$
  select jsonb_build_array(jsonb_build_object('classId',pg_temp.sid(21),'textbookIds',books,

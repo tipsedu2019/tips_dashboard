@@ -26,7 +26,7 @@ insert into public.ops_tasks(id, title, type, status, requested_by, student_name
 values ('99600000-0000-4000-8000-000000000101', '등록: 과목 동시 수정', 'registration', 'in_progress',
   '99600000-0000-4000-8000-000000000001', '과목 동시 수정', '영어', '본관', 'normal');
 insert into public.ops_registration_details(task_id, inquiry_at, school_grade, parent_phone, common_revision)
-values ('99600000-0000-4000-8000-000000000101', '2026-09-07 18:00+09', '중2', '01000000000', 1);
+values ('99600000-0000-4000-8000-000000000101', '2026-09-07 18:00+09', '중2', 'fixture-contact-a-01070010001', 1);
 insert into public.ops_registration_subject_tracks(id, task_id, subject, pipeline_status, workflow_status, workflow_revision, migration_review_required)
 values ('99600000-0000-4000-8000-000000000201', '99600000-0000-4000-8000-000000000101', '영어', 'inquiry', 'inquiry', 1, false);
 
