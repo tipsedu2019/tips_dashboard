@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setup, button, id, inventoryHistoryRow, masterRow, masterSummary, purchaseRow, purchaseSummary, saleHistorySummary, saleRow, saleSummary } from './helpers/textbook-numbered-harness.mjs';
+import { createElement } from 'react';
+import { setup, setupReferenceHook, button, id, inventoryHistoryRow, masterRow, masterSummary, purchaseRow, purchaseSummary, saleHistorySummary, saleRow, saleSummary } from './helpers/textbook-numbered-harness.mjs';
 
 const isLifecycleWrite = request => Boolean(request.table || [
   'update_textbook_purchase_lifecycle_v1', 'delete_textbook_purchase_line_v1',
@@ -552,3 +553,225 @@ test('sale status reads the actual sale member and its exact balance before the 
   assert.equal(h.requests.some(isLifecycleWrite), false, 'stock movement and line status are committed together by the database');
   assert.equal(h.requests.filter(request => request.name === 'list_textbook_sale_page_v1').length, 2, 'the completed transition refreshes the sale page');
 });
+
+// Bounded picker-search regressions run in the existing textbook CI entrypoint.
+const pickerSearchActor = { viewerId: id(804), viewerRole: "admin", authReady: true, managementEnabled: true }
+const pickerSearchFacetGroups = (count) => [
+  { key: "subject", label: "과목", optionOrder: ["영어", "수학", "과학", "기타"], options: [{ value: "english", label: "영어", count }] },
+  { key: "grade", label: "학년", options: [{ value: "m2", label: "중2", count }] },
+  { key: "subSubject", label: "세부과목", options: [{ value: "grammar", label: "문법", count }] },
+]
+const pickerSearchBookOption = (n) => ({
+  value: id(n), label: `서버 교재 ${n}`, description: "출판사", searchText: `서버 교재 ${n} 출판사`,
+  metaRows: [{ label: "과목", value: "영어" }],
+  filterValues: {
+    subject: [{ value: "english", label: "영어" }],
+    grade: [{ value: "m2", label: "중2" }],
+    subSubject: [{ value: "grammar", label: "문법" }],
+  },
+})
+
+test("picker search hides old location metadata without clearing the accepted selection", async t => {
+  const h = await setupReferenceHook(t, { ...pickerSearchActor, locationOptions: { enabled: true }, selectedLocationId: id(900) });
+  const option = { value: id(900), label: '본관', searchText: 'main' };
+  await h.resolve(h.requests.find(r => r.name === 'list_textbook_location_reference_page_v1'), {
+    rows: [option], page: 1, pageSize: 20, totalCount: 1, defaultLocation: { id: id(900), code: 'main', name: '본관' },
+  });
+  await h.resolve(h.requests.find(r => r.name === 'get_textbook_location_reference_v1'), {
+    row: { id: id(900), code: 'main', name: '본관', option },
+  });
+  const selected = h.current.selectedLocation.value;
+  const staleRetry = h.current.locationOptions.retry;
+  await h.act(() => h.current.locationOptions.setSearch('new location'));
+  await h.act(() => staleRetry());
+  assert.equal(h.current.locationOptions.defaultLocation, null);
+  assert.equal(h.current.locationOptions.totalCount, null);
+  assert.equal(h.current.locationOptions.acceptedInput, null);
+  assert.equal(h.current.locationOptions.error, null);
+  assert.equal(h.current.selectedLocation.value, selected);
+  assert.equal(h.requests.length, 2, 'old retry cannot issue an unrelated query while typing');
+});
+
+test("picker search explicit page size uses the current draft once and preserves error retry", async t => {
+  const h = await setupReferenceHook(t, { ...pickerSearchActor, bookOptions: { enabled: true } });
+  await h.act(() => h.current.bookOptions.setSearch('explicit size'));
+  await h.act(() => h.current.bookOptions.setPageSize(10));
+  assert.equal(h.requests.length, 2);
+  const request = h.requests.at(-1);
+  assert.equal(request.args.p_filters.search, 'explicit size');
+  assert.equal(request.args.p_page_size, 10);
+  await h.reject(request, { code: 'PGRST202', message: 'synthetic missing RPC' });
+  assert.equal(h.current.bookOptions.search, 'explicit size');
+  assert.ok(h.current.bookOptions.error);
+  await h.act(() => { void h.current.bookOptions.retry(); });
+  assert.equal(h.requests.length, 3);
+  assert.deepEqual(h.requests.at(-1).args, request.args);
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)));
+  assert.equal(h.requests.length, 3);
+});
+
+test("picker search actual CommandInput bridges IME and keeps normal Enter selection", async t => {
+  const h = await setup(t);
+  await h.unmount();
+  const SearchCombobox = h.load('src/features/textbooks/textbook-operations-workspace.tsx').__testOnlySearchCombobox;
+  const { useTextbookReferenceData } = h.load('src/features/textbooks/use-textbook-reference-data.ts');
+  const selections = [];
+  function Probe() {
+    const { bookOptions } = useTextbookReferenceData({ ...pickerSearchActor, bookOptions: { enabled: true } });
+    return createElement(SearchCombobox, {
+      options: bookOptions.rows, value: '', onValueChange: value => selections.push(value), serverState: bookOptions,
+      placeholder: '교재 선택', searchPlaceholder: '합성 검색', emptyLabel: '없음', ariaLabel: '합성 교재 선택',
+    });
+  }
+  const mounted = await h.mountTestComponent(Probe, {});
+  const page = n => ({ rows: [pickerSearchBookOption(n)], page: 1, pageSize: 20, totalCount: 1,
+    baseFilterGroups: pickerSearchFacetGroups(1), visibleFilterGroups: pickerSearchFacetGroups(1), activeFilterCount: 0 });
+  await h.resolve(h.requests.find(r => r.name === 'list_textbook_reference_page_v1'), page(101));
+  await h.act(() => document.querySelector('[aria-label="합성 교재 선택"]').click());
+  const input = document.querySelector('input[placeholder="합성 검색"]');
+  assert.ok(input);
+  const props = () => input[Object.keys(input).find(key => key.startsWith('__reactProps$'))];
+  assert.equal(typeof props().onCompositionStart, 'function');
+  assert.equal(typeof props().onCompositionEnd, 'function');
+  // Invoke the handlers attached to the real cmdk input; no hook/service is replaced.
+  await h.act(() => props().onCompositionStart({ currentTarget: input }));
+  await h.act(() => { input.value = 'ㅎ'; props().onChange({ target: input, currentTarget: input }); });
+  await h.act(() => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229, bubbles: true })));
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)));
+  assert.deepEqual(selections, []);
+  assert.equal(h.requests.filter(r => r.name === 'list_textbook_reference_page_v1').length, 1);
+  assert.equal(document.querySelector('[role="option"]'), null, 'old query option is not selectable');
+  await h.act(() => { input.value = '한글'; props().onCompositionEnd({ currentTarget: input }); });
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)));
+  const final = h.requests.findLast(r => r.name === 'list_textbook_reference_page_v1');
+  assert.equal(final.args.p_filters.search, '한글');
+  await h.resolve(final, page(202));
+  await h.act(() => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+  await h.act(() => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  assert.deepEqual(selections, [id(202)]);
+  assert.equal(h.requests.some(r => r.table), false);
+  await mounted.cleanup();
+});
+
+test("picker search burst starts one final server request and hides the previous query rows", async (t) => {
+  const h = await setupReferenceHook(t, { ...pickerSearchActor, bookOptions: { enabled: true } })
+  const initial = h.requests.find(request => request.name === "list_textbook_reference_page_v1")
+  const page = { rows: [pickerSearchBookOption(101)], page: 1, pageSize: 20, totalCount: 1,
+    baseFilterGroups: pickerSearchFacetGroups(1), visibleFilterGroups: pickerSearchFacetGroups(1), activeFilterCount: 0 }
+  await h.resolve(initial, page)
+  const values = ["s", "sy", "syn", "synt", "synth", "synthetic"]
+  for (const value of values) {
+    await h.act(() => h.current.bookOptions.setSearch(value))
+    assert.equal(h.current.bookOptions.search, value, "typing remains immediate")
+    assert.deepEqual(h.current.bookOptions.rows, [], "rows accepted for a different query cannot be selected")
+    assert.equal(h.current.bookOptions.loading, true)
+    await h.act(() => new Promise(resolve => setTimeout(resolve, 20)))
+  }
+  const startedDuringTyping = h.requests.length - 1
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
+  const searched = h.requests.filter(request => request.name === "list_textbook_reference_page_v1").slice(1)
+  t.diagnostic(JSON.stringify({ metric: "textbook-picker-search-burst", kind: "book", inputs: values.length,
+    startedDuringTyping, totalSearchRequests: searched.length, abortedSearchRequests: searched.filter(request => request.signal.aborted).length,
+    queries: searched.map(request => request.args.p_filters.search), initialRequestExcluded: true }))
+  assert.equal(searched.length, 1)
+  assert.equal(searched[0].args.p_filters.search, "synthetic")
+  assert.equal(searched[0].args.p_page, 1)
+  await h.resolve(searched[0], page)
+  assert.deepEqual(h.current.bookOptions.rows.map(row => row.value), [id(101)])
+  assert.equal(h.current.bookOptions.loading, false)
+  assert.equal(h.requests.some(request => request.table || !request.name.startsWith("list_")), false)
+})
+
+test("picker search aborts a former page without starting the old query at page one", async (t) => {
+  const h = await setupReferenceHook(t, { ...pickerSearchActor, bookOptions: { enabled: true } })
+  const initial = h.requests[0]
+  await h.resolve(initial, { rows: Array.from({ length: 20 }, (_, i) => pickerSearchBookOption(100 + i)), page: 1, pageSize: 20, totalCount: 21,
+    baseFilterGroups: pickerSearchFacetGroups(21), visibleFilterGroups: pickerSearchFacetGroups(21), activeFilterCount: 0 })
+  await h.act(() => h.current.bookOptions.goToPage(2))
+  const oldPage = h.requests.at(-1)
+  await h.act(() => h.current.bookOptions.setSearch("new query"))
+  assert.equal(oldPage.signal.aborted, true)
+  assert.equal(h.requests.length, 2, "no empty-search page one request during the wait")
+  assert.equal(h.current.bookOptions.totalCount, null)
+  assert.deepEqual(h.current.bookOptions.baseFilterGroups, [])
+  assert.deepEqual(h.current.bookOptions.visibleFilterGroups, [])
+  assert.equal(h.current.bookOptions.acceptedInput, null)
+  await h.resolve(oldPage, { rows: [pickerSearchBookOption(120)], page: 2, pageSize: 20, totalCount: 21,
+    baseFilterGroups: pickerSearchFacetGroups(21), visibleFilterGroups: pickerSearchFacetGroups(21), activeFilterCount: 0 })
+  assert.deepEqual(h.current.bookOptions.rows, [], "late old page cannot republish while typing")
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
+  assert.equal(h.requests.length, 3)
+  assert.equal(h.requests.at(-1).args.p_filters.search, "new query")
+  assert.equal(h.requests.at(-1).args.p_page, 1)
+})
+
+test("picker search suppresses Korean composition reads until the final value", async (t) => {
+  const h = await setupReferenceHook(t, { ...pickerSearchActor, bookOptions: { enabled: true } })
+  await h.act(() => h.current.bookOptions.onCompositionStart())
+  await h.act(() => h.current.bookOptions.setSearch("ㅎ"))
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
+  assert.equal(h.requests.length, 1)
+  assert.equal(h.current.bookOptions.search, "ㅎ")
+  assert.equal(h.current.bookOptions.loading, true)
+  await h.act(() => h.current.bookOptions.onCompositionEnd("한글"))
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
+  assert.equal(h.requests.length, 2)
+  assert.equal(h.requests.at(-1).args.p_filters.search, "한글")
+})
+
+test("picker search clear and explicit filters commit immediately without a later duplicate", async (t) => {
+  const h = await setupReferenceHook(t, { ...pickerSearchActor, bookOptions: { enabled: true } })
+  await h.act(() => h.current.bookOptions.setSearch("pending clear"))
+  await h.act(() => h.current.bookOptions.setSearch(""))
+  assert.equal(h.requests.length, 2)
+  assert.equal(h.requests.at(-1).args.p_filters.search, "")
+  await h.act(() => h.current.bookOptions.setSearch("explicit query"))
+  await h.act(() => h.current.bookOptions.setSelectedFilters({ subject: ["english"] }))
+  assert.equal(h.requests.length, 3)
+  assert.deepEqual(h.requests.at(-1).args.p_filters, { search: "explicit query", selectedFilters: { subject: ["english"] } })
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
+  assert.equal(h.requests.length, 3)
+})
+
+test("picker search actor transition settles the draft and cancels the old timer", async (t) => {
+  const h = await setupReferenceHook(t, { ...pickerSearchActor, bookOptions: { enabled: true } }, { strictMode: true })
+  await h.act(() => h.current.bookOptions.setSearch("retained draft"))
+  await h.rerender({ ...pickerSearchActor, viewerId: id(805), bookOptions: { enabled: true } })
+  const count = h.requests.length
+  assert.equal(h.current.bookOptions.search, "retained draft")
+  assert.equal(h.requests.at(-1).args.p_filters.search, "retained draft")
+  assert.ok(h.requests.slice(0, -1).every(request => request.signal.aborted))
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
+  assert.equal(h.requests.length, count, "old actor timer cannot launch another request")
+})
+
+test("picker search disabled and unmounted lifetimes cancel pending timers", async (t) => {
+  const h = await setupReferenceHook(t, { ...pickerSearchActor, bookOptions: { enabled: true } })
+  await h.act(() => h.current.bookOptions.setSearch("retained query"))
+  await h.rerender({ ...pickerSearchActor, bookOptions: { enabled: false } })
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
+  assert.equal(h.requests.length, 1)
+  assert.equal(h.current.bookOptions.search, "retained query")
+  assert.equal(h.current.bookOptions.loading, false)
+  await h.rerender({ ...pickerSearchActor, bookOptions: { enabled: true } })
+  assert.equal(h.requests.length, 2)
+  assert.equal(h.requests.at(-1).args.p_filters.search, "retained query")
+  await h.act(() => h.current.bookOptions.setSearch("unmounted draft"))
+  await h.unmount()
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.equal(h.requests.length, 2)
+})
+
+for (const [key, name] of [["classOptions", "list_textbook_class_reference_page_v1"],
+  ["teacherOptions", "list_textbook_teacher_reference_page_v1"], ["locationOptions", "list_textbook_location_reference_page_v1"]]) {
+  test("picker search coalesces " + key + " without legacy reads", async (t) => {
+    const h = await setupReferenceHook(t, { ...pickerSearchActor, [key]: { enabled: true } })
+    for (const value of ["a", "ab", "abc"]) await h.act(() => h.current[key].setSearch(value))
+    assert.equal(h.requests.length, 1)
+    await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
+    assert.equal(h.requests.length, 2)
+    assert.equal(h.requests[1].name, name)
+    assert.equal(h.requests[1].args.p_filters.search, "abc")
+    assert.equal(h.requests.some(request => request.table), false)
+  })
+}

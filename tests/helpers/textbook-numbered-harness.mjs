@@ -99,7 +99,7 @@ function modules(supabase, overrides) {
       return load(target);
     }
     const exposePrivateTestComponents = file.endsWith('textbook-operations-workspace.tsx')
-      ? '\nmodule.exports.__testOnlyTeacherSelect = TeacherSelect; module.exports.__testOnlyHandoffDialog = TextbookHandoffDialog;'
+      ? '\nmodule.exports.__testOnlyTeacherSelect = TeacherSelect; module.exports.__testOnlyHandoffDialog = TextbookHandoffDialog; module.exports.__testOnlySearchCombobox = SearchCombobox;'
       : '';
     vm.runInThisContext(`(function(require,module,exports){${source}${exposePrivateTestComponents}\n})`, { filename: file })(resolve, evaluated, evaluated.exports);
     return evaluated.exports;

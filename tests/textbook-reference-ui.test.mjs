@@ -190,6 +190,7 @@ test("book picker keeps authoritative facets and server order across bounded pag
   assert.equal(h.current.bookOptions.totalCount, 21)
 
   await h.act(() => h.current.bookOptions.setSearch("typed server search"))
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 300)))
   const searched = h.requests.find((request) => request.name === "list_textbook_reference_page_v1" && request.args.p_filters.search === "typed server search")
   assert.ok(searched)
   assert.equal(searched.args.p_page, 1)

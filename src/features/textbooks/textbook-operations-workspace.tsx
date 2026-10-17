@@ -5763,6 +5763,8 @@ function SearchCombobox({
             placeholder={searchPlaceholder}
             value={serverState?.search}
             onValueChange={serverState ? serverState.setSearch : undefined}
+            onCompositionStart={serverState?.onCompositionStart}
+            onCompositionEnd={serverState ? (event) => serverState.onCompositionEnd(event.currentTarget.value) : undefined}
           />
           {visibleFilterGroups.length > 0 ? (
             <div className="grid gap-2 border-b px-2 py-2">

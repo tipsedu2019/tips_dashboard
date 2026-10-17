@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCommittedSearch } from "@/hooks/use-committed-search"
 
 import {
   getTextbookClassReference,
@@ -103,6 +104,8 @@ export type TextbookReferencePickerState = {
   goToPage: (page: number) => Promise<void>
   setPageSize: (pageSize: PickerPageSize) => void
   setSearch: (search: string) => void
+  onCompositionStart: () => void
+  onCompositionEnd: (search: string) => void
   setSelectedFilters: (filters: Record<string, string[]>) => void
 }
 
@@ -194,11 +197,20 @@ function usePicker(
 ): TextbookReferencePickerState {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSizeState] = useState<PickerPageSize>(20)
-  const [search, setSearchState] = useState("")
+  const searchState = useCommittedSearch("")
+  const { value: search, committed, onChange, onSubmit, onCompositionStart } = searchState
+  const searchControls = useRef(searchState)
+  useLayoutEffect(() => { searchControls.current = searchState })
+  useLayoutEffect(() => {
+    // A new actor or picker lifetime keeps the draft, but never its old timer or composition.
+    const current = searchControls.current
+    current.reset(current.value)
+  }, [actorKey, enabled])
   const [selectedFilters, setSelectedFiltersState] = useState<Record<string, string[]>>({})
-  const filters = kind === "book" || kind === "class" ? { search, selectedFilters } : { search }
+  const pendingSearch = search !== committed
+  const filters = kind === "book" || kind === "class" ? { search: committed, selectedFilters } : { search: committed }
   const sort = kind === "book" ? "match-title" : kind === "location" ? "match-order" : "match-name"
-  const request = enabled ? { filters, page, pageSize, sort } : null
+  const request = enabled && !pendingSearch ? { filters, page, pageSize, sort } : null
   const reader = useCallback(async (next: PageRequest<unknown, string>, options: { signal: AbortSignal }) => {
     if (kind === "book") return listTextbookReferencePage(next as PageRequest<TextbookReferenceFilters, "match-title">, options)
     if (kind === "class") return listTextbookClassReferencePage(next as PageRequest<TextbookClassReferenceFilters, "match-name">, options)
@@ -207,13 +219,15 @@ function usePicker(
   }, [kind])
   const resource = useIndependentResource<PageRequest<unknown, string>, PickerResult>(actorKey, request as PageRequest<unknown, string> | null, reader)
   const result = resource.value
-  const setSearch = useCallback((value: string) => { setSearchState(value); setPage(1) }, [])
-  const setSelectedFilters = useCallback((value: Record<string, string[]>) => { setSelectedFiltersState(clone(value)); setPage(1) }, [])
-  const setPageSize = useCallback((value: PickerPageSize) => { setPageSizeState(value); setPage(1) }, [])
+  const setSearch = useCallback((value: string) => { onChange(value); setPage(1) }, [onChange])
+  const onCompositionEnd = (value: string) => { searchState.onCompositionEnd(value); setPage(1) }
+  const setSelectedFilters = useCallback((value: Record<string, string[]>) => { onSubmit(); setSelectedFiltersState(clone(value)); setPage(1) }, [onSubmit])
+  const setPageSize = useCallback((value: PickerPageSize) => { onSubmit(); setPageSizeState(value); setPage(1) }, [onSubmit])
   const goToPage = useCallback(async (value: number) => {
     if (!Number.isInteger(value) || value < 1) return
+    onSubmit()
     setPage(value)
-  }, [])
+  }, [onSubmit])
   return {
     rows: result?.rows || [], page, pageSize,
     totalCount: result?.totalCount ?? null, search, selectedFilters,
@@ -221,8 +235,9 @@ function usePicker(
     visibleFilterGroups: result && "visibleFilterGroups" in result ? result.visibleFilterGroups : [],
     activeFilterCount: result && "activeFilterCount" in result ? result.activeFilterCount : 0,
     defaultLocation: result && "defaultLocation" in result ? result.defaultLocation : null,
-    loading: resource.loading, error: resource.error, acceptedInput: resource.acceptedInput,
-    retry: resource.retry, goToPage, setPageSize, setSearch, setSelectedFilters,
+    loading: Boolean(actorKey && enabled && pendingSearch) || resource.loading,
+    error: pendingSearch ? null : resource.error, acceptedInput: pendingSearch ? null : resource.acceptedInput,
+    retry: resource.retry, goToPage, setPageSize, setSearch, onCompositionStart, onCompositionEnd, setSelectedFilters,
   }
 }
 
