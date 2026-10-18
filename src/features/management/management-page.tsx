@@ -1436,6 +1436,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [relationRequest, setRelationRequest] = useState<ManagementRelationRequest | null>(null);
   const loadingRelationKind = relationRequest?.detailRequestId === detailRequestRef.current ? relationRequest.kind : null;
   const [relationPageState, setRelationPageState] = useState<Partial<Record<ManagementRelationKind, Record<string, unknown>>>>({});
+  const acceptDetailRow = useCallback((row: ManagementRow) => {
+    // A fresh detail starts a new relation snapshot within the same editing lifetime.
+    relationRequestRef.current = null;
+    setRelationRequest(null);
+    setRelationPageState({});
+    setSelectedRow(row);
+  }, []);
   const [textbookCandidateQuery, setTextbookCandidateQuery] = useState("");
   const [textbookCandidateFilters, setTextbookCandidateFilters] = useState<ClassTextbookPickerFilters>({
     subject: "", schoolLevel: "", gradeLevel: "", subSubject: "",
@@ -2637,7 +2644,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     setPendingClassClose(null);
     setCheckingClassClose(false);
     acceptedDetailRequestRef.current = detailRequestRef.current;
-    setSelectedRow(activeRow);
+    acceptDetailRow(activeRow);
     setForm(nextForm);
     setValidationAttempted(false);
     setSavedForm(nextForm);
@@ -2658,7 +2665,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     setRelationQuery("");
     setTextbookCandidateQuery("");
     setTextbookCandidateFilters(getDefaultClassTextbookFilters(activeRow.raw || {}));
-    setRelationPageState({});
     setOperationError(null);
     setSaveNotice("");
     setDialogMode("detail");
@@ -2684,7 +2690,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setNormalizedScheduleDefaults(normalizedDefaults);
       }
     }
-  }, [beginDetailRequest, kind, loadDetail, writeClassDetailRoute, writeStudentDetailRoute]);
+  }, [acceptDetailRow, beginDetailRequest, kind, loadDetail, writeClassDetailRoute, writeStudentDetailRoute]);
 
   useEffect(() => {
     if (kind !== "classes" || loading || !requestedClassId) {
@@ -3113,7 +3119,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       try {
         const refreshed = await reconcileManagementPage(selectedRow.id);
         if (!isCurrent()) return;
-        if (refreshed) setSelectedRow(refreshed);
+        if (refreshed) acceptDetailRow(refreshed);
       } catch (refreshError) {
         if (kind !== "classes") throw refreshError;
         // A failed display refresh cannot undo a receipt or a confirmed read.
@@ -3158,7 +3164,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       }
       const refreshed = await reconcileManagementPage(selectedRow.id);
       if (!isCurrent()) return;
-      if (refreshed) setSelectedRow(refreshed);
+      if (refreshed) acceptDetailRow(refreshed);
       setSaveNotice(mode === "enrolled" ? "등록 학생 추가 완료" : "대기 학생 추가 완료");
     } catch (relationError) {
       if (isCurrent()) setOperationError(relationError instanceof Error ? relationError.message : "수강/대기 등록 중 오류가 발생했습니다.");
@@ -3197,7 +3203,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       if (isCurrent()) setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, id, mode) : current);
       const refreshed = await reconcileManagementPage(selectedRow.id);
       if (!isCurrent()) return;
-      if (refreshed) setSelectedRow(refreshed);
+      if (refreshed) acceptDetailRow(refreshed);
       setSaveNotice(mode === "enrolled" ? "등록 전환 완료" : "대기 전환 완료");
     } catch (relationError) {
       if (isCurrent()) setOperationError(relationError instanceof Error ? relationError.message : "등록 상태 변경 중 오류가 발생했습니다.");
@@ -3222,7 +3228,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       if (selectedRow) {
         const refreshed = await reconcileManagementPage(selectedRow.id);
         if (!isCurrent()) return;
-        if (refreshed) setSelectedRow(refreshed);
+        if (refreshed) acceptDetailRow(refreshed);
       }
       if (isCurrent()) setSaveNotice("연결 해제 완료");
     } catch (relationError) {

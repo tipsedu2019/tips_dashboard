@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { JSDOM } from "jsdom";
 import { act, createElement } from "react";
 import ts from "typescript";
+import { configureSnapshotFixture, snapshotStudentId } from "./helpers/management-relation-snapshot-fixture.mjs";
 import { classRow, createManagementDetailFixture, defaultsFor } from "./helpers/management-detail-fixture.mjs";
 import { requestAppNavigation } from "../src/lib/guarded-navigation.ts";
 import { extractManagementReconcile } from "../scripts/measure-management-refresh.mjs";
@@ -63,7 +64,9 @@ function loadPage(fixture, navigation, componentOverrides = []) {
     vm.runInThisContext(`(function(require,module,exports){${code}\n})`, { filename: url.pathname })(resolve, runtime, runtime.exports);
     return runtime.exports;
   }
-  return load(new URL("src/features/management/management-page.tsx", repo));
+  const page = load(new URL("src/features/management/management-page.tsx", repo));
+  fixture.bindProduction?.(load);
+  return page;
 }
 
 async function setup(t, options = {}) {
@@ -166,6 +169,107 @@ function relationPaginationFixture(fixture, relationKind = "registered_students"
   for (const name of ["updateClass", "saveClassScheduleDefaults", "replaceClassGroupMemberships", "updateStudent", "addStudentClass", "removeStudentClass"]) {
     fixture.service[name] = async () => { fixture.relationMutations.push(name); throw new Error("unexpected mutation"); };
   }
+}
+
+function snapshotRoster() {
+  const roster = document.querySelector('[data-testid="class-enrolled-student-roster"]');
+  assert.ok(roster);
+  const buttons = [...roster.querySelectorAll("button")];
+  return {
+    ids: [...roster.querySelectorAll('[data-class-roster-student-id]')].map(node => node.getAttribute('data-class-roster-student-id')),
+    next: buttons.find(button => button.textContent.trim() === "다음 30건"),
+    loading: buttons.find(button => button.textContent.trim() === "더 불러오는 중"),
+  };
+}
+
+async function removeSnapshotStudent() {
+  const trigger = document.querySelector('[aria-label="합성 학생 001 학생 관리"]');
+  assert.ok(trigger);
+  assert.equal(trigger.disabled, false, "a pending relation read does not disable the existing mutation");
+  await act(async () => {
+    trigger.focus();
+    trigger.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  });
+  const item = document.querySelector('[role="menuitem"][aria-label="합성 학생 001 수강 해제"]');
+  assert.ok(item);
+  assert.notEqual(item.getAttribute("data-disabled"), "");
+  await act(async () => item.click());
+}
+
+async function openSnapshotWithPendingLastPage(t) {
+  const ui = await setup(t, { configureFixture: configureSnapshotFixture });
+  await ui.click("합성 경합 수업");
+  await ui.resolve(0, defaultsFor());
+  await ui.editField("classes-detail-name", "보존할 상세 초안");
+  assert.equal(snapshotRoster().ids.length, 30);
+  await ui.click("다음 30건");
+  await act(async () => ui.snapshotState.finishPage(0));
+  assert.equal(snapshotRoster().ids.length, 60);
+  await ui.click("다음 30건");
+  assert.equal(ui.snapshotState.relationReads.length, 2);
+  assert.equal(ui.snapshotState.relationReads[1].frozenPage.rows[0].id, snapshotStudentId(61));
+  assert.ok(snapshotRoster().loading?.disabled);
+  return ui;
+}
+
+for (const mutation of ["none", "rejected"]) {
+  test(`relation snapshot keeps the current page after ${mutation} mutation`, async t => {
+    const ui = await openSnapshotWithPendingLastPage(t);
+    const state = ui.snapshotState;
+    if (mutation === "rejected") {
+      await removeSnapshotStudent();
+      await act(async () => state.finishWrite(false));
+      assert.match(ui.text(), /합성 수강 해제 실패/);
+    }
+    await act(async () => state.finishPage(1));
+    const roster = snapshotRoster();
+    assert.deepEqual(roster.ids, state.roster().map(row => row.id));
+    assert.equal(roster.ids.length, 90);
+    assert.equal(roster.next, undefined);
+    assert.equal(roster.loading, undefined);
+    assert.equal(state.writes.length, mutation === "none" ? 0 : 1);
+    assert.equal(document.getElementById("classes-detail-name").value, "보존할 상세 초안");
+  });
+}
+
+for (const oldOutcome of ["success", "failure"]) {
+  test(`relation snapshot replacement rejects old ${oldOutcome} and pages from the fresh cursor`, async t => {
+    const ui = await openSnapshotWithPendingLastPage(t);
+    const state = ui.snapshotState;
+    await removeSnapshotStudent();
+    await act(async () => state.finishWrite(true));
+    assert.match(ui.text(), /연결 해제 완료/);
+    assert.equal(state.writes.length, 1);
+    assert.equal(state.detailReads.length, 2);
+    assert.equal(state.detailReads[1].registeredCount, 89);
+    assert.equal(snapshotRoster().ids.length, 30);
+    assert.equal(snapshotRoster().loading, undefined, "new snapshot releases the obsolete read slot");
+    assert.ok(snapshotRoster().next);
+    await ui.click("다음 30건");
+    assert.equal(state.relationReads.length, 3);
+    assert.equal(state.relationReads[2].args.p_cursor_id, snapshotStudentId(31), "discard the old cursor at 060");
+    if (oldOutcome === "success") {
+      await act(async () => state.finishPage(1));
+    } else {
+      await act(async () => state.relationReads[1].reject(new Error("변경 전 페이지 실패")));
+    }
+    assert.equal(snapshotRoster().ids.length, 30, "old result cannot append to the new snapshot");
+    assert.ok(snapshotRoster().loading?.disabled, "old finally cannot clear the new request's loading");
+    assert.doesNotMatch(ui.text(), /변경 전 페이지 실패/);
+    await act(async () => state.finishPage(2));
+    assert.equal(snapshotRoster().ids.length, 60);
+    await ui.click("다음 30건");
+    assert.equal(state.relationReads[3].args.p_cursor_id, snapshotStudentId(61));
+    await act(async () => state.finishPage(3));
+    const roster = snapshotRoster();
+    assert.deepEqual(roster.ids, state.roster().map(row => row.id));
+    assert.equal(roster.ids.length, 89);
+    assert.equal(roster.next, undefined);
+    assert.equal(roster.loading, undefined);
+    assert.equal(document.getElementById("classes-detail-name").value, "보존할 상세 초안");
+    assert.equal(state.writes.length, 1);
+    t.diagnostic(JSON.stringify({ metric: "same-detail-fresh-relation-snapshot", oldOutcome, visible: roster.ids.length, expected: state.roster().length, syntheticWrites: state.writes.length }));
+  });
 }
 
 test("relation pagination keeps the new detail cursor after a closed detail resolves", async t => {
