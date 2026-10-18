@@ -244,6 +244,7 @@ import type { RegistrationCustomerMessageClient } from "./registration-customer-
 import {
   createRegistrationCase,
   createRegistrationMutationRequestKey,
+  loadRegistrationCompletedClassOptions,
   probeRegistrationObservationRuntime,
   setRegistrationWorkflowStatus,
   toObservationAwareCaseDetail,
@@ -7856,6 +7857,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const registrationFixtureTransitioning = registrationFixtureRequested !== registrationFixtureRuntimeReady
   const [registrationOptionsLoading, setRegistrationOptionsLoading] = useState(false)
   const [registrationOptionsError, setRegistrationOptionsError] = useState("")
+  const [registrationCompletedClasses, setRegistrationCompletedClasses] = useState<OpsClassOption[]>([])
+  const [registrationCompletedClassesLoading, setRegistrationCompletedClassesLoading] = useState(false)
+  const [registrationCompletedClassesError, setRegistrationCompletedClassesError] = useState(false)
+  const registrationCompletedClassesGenerationRef = useRef(0)
+  const registrationCompletedClassesRefreshRef = useRef(0)
   const [registrationSubjectCapabilities, setRegistrationSubjectCapabilities] = useState<readonly RegistrationSubjectCapability[]>(
     () => getRegistrationSubjectCompatibilityCapabilities(),
   )
@@ -8488,9 +8494,38 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       !isRegistrationWorkspace
       || registrationMode !== "list"
       || !REGISTRATION_VIEWS_REQUIRING_LINKED_LABELS.has(registrationView)
+      || (registrationView === "completed" && !registrationFixtureRequested)
     ) return
     void ensureRegistrationOptions()
-  }, [ensureRegistrationOptions, isRegistrationWorkspace, registrationMode, registrationView])
+  }, [ensureRegistrationOptions, isRegistrationWorkspace, registrationFixtureRequested, registrationMode, registrationView])
+
+  const useCompletedClassLabels = isRegistrationWorkspace && !registrationFixtureRequested
+    && registrationMode === "list" && registrationView === "completed"
+    && !formOpen && !detailOpen && registrationApplicationHost.kind === "closed"
+  const readCompletedClassLabels = useCallback(async (force = false) => {
+    const generation = ++registrationCompletedClassesGenerationRef.current
+    const current = () => workspaceMountedRef.current
+      && latestWorkspaceViewerIdRef.current === currentUserId
+      && registrationCompletedClassesGenerationRef.current === generation
+    setRegistrationCompletedClassesLoading(true)
+    setRegistrationCompletedClassesError(false)
+    try {
+      const result = await loadRegistrationCompletedClassOptions({ viewerId: currentUserId, force })
+      if (current()) setRegistrationCompletedClasses(result)
+    } catch {
+      if (current()) setRegistrationCompletedClassesError(true)
+    } finally {
+      if (current()) setRegistrationCompletedClassesLoading(false)
+    }
+  }, [currentUserId])
+
+  useEffect(() => {
+    const refresh = registrationCompletedClassesRefreshRef.current !== supplementRevision
+    registrationCompletedClassesRefreshRef.current = supplementRevision
+    if (!useCompletedClassLabels) return
+    void readCompletedClassLabels(refresh)
+    return () => { registrationCompletedClassesGenerationRef.current += 1 }
+  }, [readCompletedClassLabels, supplementRevision, useCompletedClassLabels])
 
   useEffect(() => {
     const nextView = searchParams.get("view")
@@ -9130,6 +9165,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       ? { view: filters.view, consultationOwnerId: filters.consultationOwnerId ?? undefined }
       : current
   }, [consultationOwnerId, numberedPage.scope, numberedServerPage, registrationView])
+  const displayCompletedClassLabels = isRegistrationWorkspace && !registrationFixtureRequested
+    && displayedRegistrationFilters.view === "completed"
   const visibleRegistrationCaseItems = useMemo(
     () => numberedServerPage
       ? registrationCaseItems.flatMap((item) => filterRegistrationCaseListItems(
@@ -12797,6 +12834,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         ) : null}
 
+        {useCompletedClassLabels && registrationCompletedClassesError ? (
+          <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+            수업명을 불러오지 못했습니다.
+            <Button variant="outline" size="form" disabled={registrationCompletedClassesLoading} onClick={() => {
+              workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
+              void readCompletedClassLabels(true)
+            }}>수업명 다시 불러오기</Button>
+          </div>
+        ) : null}
+
         {numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           목록을 불러오지 못했습니다.{numberedPage.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}
           <Button variant="outline" size="sm" disabled={numberedPage.loading} onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void numberedPage.retry() }}>다시 시도</Button>
@@ -12833,7 +12880,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              items={displayedRegistrationCaseItems}
 	              viewerId={registrationViewerId}
 	              viewerRole={registrationViewerRole}
-	              classes={classes}
+	              classes={displayCompletedClassLabels ? registrationCompletedClasses : classes}
 	              textbooks={textbooks}
 	              loading={loading}
 	              disabled={saving}

@@ -1685,3 +1685,151 @@ test('registration first-read permission failure remains an error despite comple
   assert.equal(document.body.textContent.includes('private denied'), false);
   assert.equal(registrationReads(page).length, 1);
 });
+
+
+const completedLabelRows = {
+  classes: [{ id: id(800), name: '합성 완료 수업 A', subject: '영어', grade: '중1', teacher: '합성 교사', room: '101', textbook_ids: [id(901)], status: 'active' }],
+  profiles: [{ id: id(900), name: '합성 교사', role: 'teacher', email: 'teacher@synthetic.invalid', login_id: 'synthetic' }],
+  textbooks: [{ id: id(901), title: '합성 교재', status: 'active' }],
+  teacher_catalogs: [{ id: id(902), name: '합성 교사', subjects: ['영어'], is_visible: true, sort_order: 1, profile_id: id(900), account_email: 'teacher@synthetic.invalid' }],
+  academic_schools: [{ id: id(903), name: '합성 학교', category: 'middle', sort_order: 1 }],
+};
+async function completedLabelPage(t, options = {}) {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=completed', deferTables: true, pendingRpcNames: ['registration_subject_tracks_runtime_version'], ...options });
+  supportRegistrationRetryFocus();
+  const patch = registrationPatch(1, '합성 완료 학생');
+  patch.registrationTracks = [{ ...patch.registrationTracks[0], status: 'registered', workflowStatus: 'registered', directorName: '기록된 책임자', enrollmentDetailRows: [{
+    id: null, classId: id(800), sortOrder: 0, textbookId: id(901), textbookIds: [id(901)], classStartDate: null, classStartSessionKey: null, classStartLessonSessionId: null, classStartSession: null, classStartSourceObservationId: null,
+  }] }];
+  await act(async () => {
+    page.finish(page.requests.findIndex(r => r.name === 'list_ops_task_numbered_page_v1'), options.pageTotal ?? 1, [patch]);
+    for (const r of page.requests) {
+      if (r.name === 'get_ops_task_list_stats_v1') r.resolve({ error: null, data: { total: options.statsTotal ?? 1, byView: { completed: options.statsTotal ?? 1 }, metrics: {}, facets: {} } });
+      if (r.name === 'registration_subject_tracks_runtime_version' || r.name === 'registration_observation_runtime_version') r.resolve({ error: null, data: 1 });
+    }
+  });
+  return { ...page, completedPatch: patch };
+}
+function assertCompletedClassLabel(label) {
+  for (const mode of ['desktop', 'mobile']) {
+    const list = document.querySelector(`[data-testid="registration-case-${mode}-list"]`);
+    assert.ok(list);
+    assert.ok(list.textContent.includes(label), list.textContent);
+    assert.ok(list.textContent.includes('기록된 책임자'));
+  }
+}
+for (const textbookOutcome of ['pending', 'failure']) test(`008 completed class label survives unrelated textbooks ${textbookOutcome}`, async t => {
+  const page = await completedLabelPage(t);
+  await act(async () => {
+    for (const request of page.tableRequests) {
+      if (request.table !== 'textbooks') request.resolve({ data: completedLabelRows[request.table], error: null });
+      else if (textbookOutcome === 'failure') request.resolve({ data: null, error: { code: 'XX000', message: 'synthetic textbook unavailable' } });
+    }
+  });
+  assertCompletedClassLabel('합성 완료 수업 A');
+  assert.deepEqual(page.tableRequests.map(r => r.table), ['classes']);
+  assert.equal(document.body.textContent.includes('수업 정보 확인 필요'), false);
+});
+
+
+test('008 classes failure is explicit and retry reads only classes with focus retained', async t => {
+  const page = await completedLabelPage(t);
+  await act(async () => page.tableRequests[0].resolve({ data: null, error: new Error('synthetic classes unavailable') }));
+  assertCompletedClassLabel('수업 정보 확인 필요');
+  const retry = [...document.querySelectorAll('button')].find(b => b.textContent === '수업명 다시 불러오기');
+  assert.ok(retry);
+  await act(async () => { retry.focus(); retry.click(); });
+  assert.equal(document.activeElement?.getAttribute('type'), 'search');
+  assert.deepEqual(page.tableRequests.map(r => r.table), ['classes', 'classes']);
+  await act(async () => page.tableRequests[1].resolve({ data: completedLabelRows.classes, error: null }));
+  assertCompletedClassLabel('합성 완료 수업 A');
+  assert.equal(document.body.textContent.includes('수업명을 불러오지 못했습니다.'), false);
+  assert.equal(document.activeElement?.getAttribute('type'), 'search');
+});
+
+for (const outcome of ['success', 'failure']) test(`008 late completed classes ${outcome} cannot replace enrollment options`, async t => {
+  const page = await completedLabelPage(t);
+  const oldClasses = page.tableRequests[0];
+  await act(async () => clickTab(document.querySelector('[data-registration-view-tab="enrollment"]')));
+  const full = page.tableRequests.slice(1);
+  assert.deepEqual(full.map(r => r.table).sort(), Object.keys(completedLabelRows).sort());
+  await act(async () => { for (const r of full) r.resolve({ data: r.table === 'classes' ? [{ ...completedLabelRows.classes[0], name: '현재 수강 수업' }] : completedLabelRows[r.table], error: null }); });
+  await act(async () => page.finish(page.requests.findLastIndex(r => r.name === 'list_ops_task_numbered_page_v1'), 0));
+  const before = currentComponentProps('RegistrationCaseList');
+  assert.equal(before.classes[0].label, '현재 수강 수업');
+  assert.equal(before.textbooks[0].label, '합성 교재');
+  await act(async () => oldClasses.resolve(outcome === 'success' ? { data: [{ ...completedLabelRows.classes[0], name: '오래된 완료 수업' }], error: null } : { data: null, error: new Error('old classes failure') }));
+  assert.equal(currentComponentProps('RegistrationCaseList').classes[0].label, '현재 수강 수업');
+  assert.equal(currentComponentProps('RegistrationCaseList').textbooks[0].label, '합성 교재');
+  assert.equal(document.body.textContent.includes('수업명을 불러오지 못했습니다.'), false);
+  await act(async () => clickTab(document.querySelector('[data-registration-view-tab="completed"]')));
+  const fresh = page.tableRequests.at(-1);
+  assert.notEqual(fresh, oldClasses);
+  assert.equal(fresh.table, 'classes');
+  await act(async () => {
+    page.finish(page.requests.findLastIndex(r => r.name === 'list_ops_task_numbered_page_v1'), 1, [page.completedPatch]);
+    fresh.resolve({ data: completedLabelRows.classes, error: null });
+  });
+  assert.equal(currentComponentProps('RegistrationCaseList').classes[0].label, '합성 완료 수업 A');
+});
+
+for (const outcome of ['success', 'failure']) for (const actorChange of [{ viewerId: 'actor-b' }, { viewerRole: 'teacher' }]) test('008 actor or role replacement ignores old class ' + outcome + ': ' + JSON.stringify(actorChange), async t => {
+  const page = await completedLabelPage(t);
+  const old = page.tableRequests[0];
+  await page.render(actorChange);
+  const fresh = page.tableRequests.at(-1);
+  assert.notEqual(fresh, old);
+  await act(async () => page.finish(page.requests.findLastIndex(r => r.name === 'list_ops_task_numbered_page_v1'), 1, [page.completedPatch]));
+  await act(async () => fresh.resolve({ data: [{ ...completedLabelRows.classes[0], name: '새 사용자 수업' }], error: null }));
+  assert.equal(currentComponentProps('RegistrationCaseList').classes[0].label, '새 사용자 수업');
+  await act(async () => old.resolve(outcome === 'success' ? { data: [{ ...completedLabelRows.classes[0], name: '이전 사용자 수업' }], error: null } : { data: null, error: new Error('old actor failure') }));
+  assert.equal(currentComponentProps('RegistrationCaseList').classes[0].label, '새 사용자 수업');
+});
+
+
+for (const outcome of ['pending', 'failure']) test(`008 accepted completed labels survive a requested enrollment page ${outcome}`, async t => {
+  const page = await completedLabelPage(t);
+  await act(async () => page.tableRequests[0].resolve({ data: completedLabelRows.classes, error: null }));
+  assertCompletedClassLabel('합성 완료 수업 A');
+  await act(async () => clickTab(document.querySelector('[data-registration-view-tab="enrollment"]')));
+  if (outcome === 'failure') await act(async () => page.requests.findLast(r => r.name === 'list_ops_task_numbered_page_v1').resolve({ data: null, error: new Error('next page unavailable') }));
+  assertCompletedClassLabel('합성 완료 수업 A');
+});
+
+test('008 same-view refresh retains loaded class catalog through failure then retries', async t => {
+  const page = await completedLabelPage(t, { statsTotal: 1, pageTotal: 0 });
+  await act(async () => page.tableRequests[0].resolve({ data: completedLabelRows.classes, error: null }));
+  const reload = [...document.querySelectorAll('button')].find(b => b.textContent === '다시 조회');
+  assert.ok(reload);
+  await act(async () => reload.click());
+  await act(async () => page.finish(page.requests.findLastIndex(r => r.name === 'list_ops_task_numbered_page_v1'), 1, [page.completedPatch]));
+  assert.equal(currentComponentProps('RegistrationCaseList').classes[0].label, '합성 완료 수업 A');
+  assert.deepEqual(page.tableRequests.map(r => r.table), ['classes', 'classes']);
+  await act(async () => page.tableRequests[1].resolve({ data: null, error: new Error('refresh unavailable') }));
+  assert.equal(currentComponentProps('RegistrationCaseList').classes[0].label, '합성 완료 수업 A');
+  const retry = [...document.querySelectorAll('button')].find(b => b.textContent === '수업명 다시 불러오기');
+  assert.ok(retry);
+  await act(async () => retry.click());
+  await act(async () => page.tableRequests[2].resolve({ data: [{ ...completedLabelRows.classes[0], name: '갱신된 합성 수업' }], error: null }));
+  assert.equal(currentComponentProps('RegistrationCaseList').classes[0].label, '갱신된 합성 수업');
+});
+
+
+test('008 opening registration create still requests the full catalog and ignores late list-only classes', async t => {
+  const page = await completedLabelPage(t);
+  const oldClasses = page.tableRequests[0];
+  const create = [...document.querySelectorAll('button')].find(b => b.textContent === '등록 추가');
+  assert.ok(create, [...document.querySelectorAll('button')].map(b => b.textContent).join('|'));
+  await act(async () => create.click());
+  const full = page.tableRequests.slice(1);
+  assert.equal(currentComponentProps('RegistrationApplicationCreate').catalogStatus, 'loading');
+  assert.deepEqual(full.map(r => r.table).sort(), Object.keys(completedLabelRows).sort());
+  await act(async () => { for (const r of full) r.resolve({ data: r.table === 'classes' ? [{ ...completedLabelRows.classes[0], name: '등록 화면 수업' }] : completedLabelRows[r.table], error: null }); });
+  const form = currentComponentProps('RegistrationApplicationCreate');
+  assert.equal(form.catalogStatus, 'ready');
+  assert.equal(form.schools[0].name, '합성 학교');
+  await act(async () => oldClasses.resolve({ data: [{ ...completedLabelRows.classes[0], name: '늦은 목록 수업' }], error: null }));
+  assert.equal(currentComponentProps('RegistrationApplicationCreate').catalogStatus, 'ready');
+  assert.equal(currentComponentProps('RegistrationApplicationCreate').schools[0].name, '합성 학교');
+  assert.equal(page.requests.some(r => /^(create|save|set|update|delete)_/.test(r.name)), false);
+});
