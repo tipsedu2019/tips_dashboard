@@ -884,6 +884,7 @@ type QueryBuilder = PromiseLike<QueryResult> & {
   in: (column: string, values: unknown[]) => QueryBuilder
   or: (filters: string) => QueryBuilder
   order: (column: string, options?: Record<string, unknown>) => QueryBuilder
+  range: (from: number, to: number) => QueryBuilder
   limit: (count: number, options?: Record<string, unknown>) => QueryBuilder
   single: () => QueryBuilder
 }
@@ -2052,6 +2053,30 @@ function isClearlyInactiveStatus(input: unknown) {
   return ["inactive", "archived", "disabled", "미사용", "비활성", "폐강", "종료", "종강"].includes(normalized)
 }
 
+const REGISTRATION_CLASS_OPTION_COLUMNS = [
+  "id,name,subject,grade,teacher,room,textbook_ids,status",
+  "id,name,subject,grade,teacher,room,textbook_ids",
+  "id,name,subject,grade,teacher,room",
+]
+
+function mapRegistrationClassOptions(classRows: Row[]): OpsClassOption[] {
+  return classRows
+    .filter((row) => !isClearlyInactiveStatus(value(row, "status")))
+    .map((row) => ({
+      id: text(value(row, "id")),
+      label: text(value(row, "name")) || text(value(row, "id")),
+      meta: [text(value(row, "grade")), text(value(row, "teacher"))].filter(Boolean).join(" · "),
+      subject: text(value(row, "subject")),
+      grade: text(value(row, "grade")),
+      teacher: text(value(row, "teacher")),
+      room: text(value(row, "room")),
+      schedule: "",
+      studentIds: [],
+      waitlistIds: [],
+      textbookIds: stringList(value(row, "textbook_ids", "textbookIds")),
+    } satisfies OpsClassOption))
+}
+
 const SCIENCE_CONSULTATION_CLASS_OPTION_CACHE_TTL_MS = 60_000
 const REGISTRATION_CASE_DETAIL_REQUEST_TIMEOUT_MS = 15_000
 
@@ -2112,6 +2137,9 @@ export function createRegistrationTrackService(
   const optionCache = new Map<string, OpsRegistrationWorkspaceOptionData>()
   const optionInFlight = new Map<string, Promise<OpsRegistrationWorkspaceOptionData>>()
   const optionEpochs = new Map<string, number>()
+  const completedClassCache = new Map<string, OpsClassOption[]>()
+  const completedClassInFlight = new Map<string, Promise<OpsClassOption[]>>()
+  const completedClassEpochs = new Map<string, number>()
   const scienceConsultationClassOptionCache = new Map<string, {
     data: OpsClassOption[]
     expiresAt: number
@@ -2135,6 +2163,9 @@ export function createRegistrationTrackService(
     optionCache.clear()
     optionInFlight.clear()
     optionEpochs.clear()
+    completedClassCache.clear()
+    completedClassInFlight.clear()
+    completedClassEpochs.clear()
     scienceConsultationClassOptionCache.clear()
     scienceConsultationClassOptionInFlight.clear()
     scienceConsultationClassOptionEpochs.clear()
@@ -3013,6 +3044,78 @@ export function createRegistrationTrackService(
     return { rows: [], fallback: true, error: null }
   }
 
+  async function readCompletedClassRows(metrics: QueryMetrics, signal: AbortSignal): Promise<Row[]> {
+    let offset = 0
+    const loadPages = [
+      () => client.from("classes")
+        .select("id,name,subject,grade,teacher,room,textbook_ids,status")
+        .order("id", { ascending: true }).range(offset, offset + 29).limit(30)
+        .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)])).retry(false),
+      () => client.from("classes")
+        .select("id,name,subject,grade,teacher,room,textbook_ids")
+        .order("id", { ascending: true }).range(offset, offset + 29).limit(30)
+        .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)])).retry(false),
+      () => client.from("classes")
+        .select("id,name,subject,grade,teacher,room")
+        .order("id", { ascending: true }).range(offset, offset + 29).limit(30)
+        .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)])).retry(false),
+    ]
+    for (let projection = 0; projection < loadPages.length; projection += 1) {
+      const classRows: Row[] = []
+      offset = 0
+      try {
+        while (true) {
+          signal.throwIfAborted()
+          const page = await queryRows(loadPages[projection](), metrics)
+          classRows.push(...page)
+          if (page.length < 30) return classRows
+          offset += 30
+        }
+      } catch (error) {
+        if (!signal.aborted && projection < loadPages.length - 1 && missingColumnError(error)) continue
+        throw error
+      }
+    }
+    return []
+  }
+
+  // List labels never mark the detail's full option catalog as ready.
+  function loadCompletedClassOptions(
+    loadOptions: { viewerId: string; force?: boolean },
+  ): Promise<OpsClassOption[]> {
+    const cacheKey = requireViewerId(loadOptions.viewerId)
+    if (loadOptions.force) {
+      advanceEpoch(completedClassEpochs, cacheKey)
+      completedClassCache.delete(cacheKey)
+      completedClassInFlight.delete(cacheKey)
+    }
+    const cached = completedClassCache.get(cacheKey)
+    if (cached) return Promise.resolve(cached)
+    const pending = completedClassInFlight.get(cacheKey)
+    if (pending) return pending
+    const generation = cacheGeneration
+    const requestEpoch = completedClassEpochs.get(cacheKey) || 0
+    const controller = new AbortController()
+    const request = measure("registration:completed-class-labels", false, async (metrics) => {
+      const classes = await withRegistrationRequestTimeout(
+        readCompletedClassRows(metrics, controller.signal),
+        requestTimeoutMs,
+        "registration_class_labels_timeout",
+        () => controller.abort(),
+      )
+      return mapRegistrationClassOptions(classes)
+    }).then((result) => {
+      if (generation === cacheGeneration && requestEpoch === (completedClassEpochs.get(cacheKey) || 0)) {
+        completedClassCache.set(cacheKey, result)
+      }
+      return result
+    }).finally(() => {
+      if (completedClassInFlight.get(cacheKey) === request) completedClassInFlight.delete(cacheKey)
+    })
+    completedClassInFlight.set(cacheKey, request)
+    return request
+  }
+
   function loadWorkspaceOptionData(
     loadOptions: { viewerId: string; force?: boolean },
   ): Promise<OpsRegistrationWorkspaceOptionData> {
@@ -3026,6 +3129,10 @@ export function createRegistrationTrackService(
     if (cached) return measure("registration:option-summary", true, async () => cached)
     const pending = optionInFlight.get(cacheKey)
     if (pending) return pending
+    // A fresh detail catalog supersedes older list-label reads for this viewer.
+    advanceEpoch(completedClassEpochs, cacheKey)
+    completedClassCache.delete(cacheKey)
+    completedClassInFlight.delete(cacheKey)
     const generation = cacheGeneration
     const requestEpoch = optionEpochs.get(cacheKey) || 0
 
@@ -3038,11 +3145,7 @@ export function createRegistrationTrackService(
           "id,name,role",
           "id,name",
         ], metrics),
-        readWithFallback("classes", [
-          "id,name,subject,grade,teacher,room,textbook_ids,status",
-          "id,name,subject,grade,teacher,room,textbook_ids",
-          "id,name,subject,grade,teacher,room",
-        ], metrics),
+        readWithFallback("classes", REGISTRATION_CLASS_OPTION_COLUMNS, metrics),
         readWithFallback("textbooks", [
           "id,title,name,publisher,subject,status",
           "id,title,name,publisher,subject",
@@ -3086,21 +3189,7 @@ export function createRegistrationTrackService(
         loginId: text(value(row, "login_id", "loginId")),
         role: text(value(row, "role")),
       } satisfies OpsProfileOption))
-      const classOptions = classes.rows
-        .filter((row) => !isClearlyInactiveStatus(value(row, "status")))
-        .map((row) => ({
-          id: text(value(row, "id")),
-          label: text(value(row, "name")) || text(value(row, "id")),
-          meta: [text(value(row, "grade")), text(value(row, "teacher"))].filter(Boolean).join(" · "),
-          subject: text(value(row, "subject")),
-          grade: text(value(row, "grade")),
-          teacher: text(value(row, "teacher")),
-          room: text(value(row, "room")),
-          schedule: "",
-          studentIds: [],
-          waitlistIds: [],
-          textbookIds: stringList(value(row, "textbook_ids", "textbookIds")),
-        } satisfies OpsClassOption))
+      const classOptions = mapRegistrationClassOptions(classes.rows)
       const textbookOptions = textbooks.rows
         .filter((row) => !isClearlyInactiveStatus(value(row, "status")))
         .map((row) => ({
@@ -4178,6 +4267,7 @@ export function createRegistrationTrackService(
     loadLegacyCompatibleWorkspaceTrackSummaries,
     loadCaseDetail,
     loadWorkspaceOptionData,
+    loadCompletedClassOptions,
     loadAssignedScienceConsultationClassOptions,
     createRegistrationCase,
     createRegistrationCaseWithInitialWorkflow,
@@ -4415,6 +4505,12 @@ export async function loadRegistrationAppointmentCalendar(
     ...(input.statuses === undefined ? {} : { statuses: input.statuses }),
   }
   return buildRegistrationAppointmentCalendarItems(calendarRows, buildOptions)
+}
+
+export function loadRegistrationCompletedClassOptions(
+  options: { viewerId: string; force?: boolean },
+): Promise<OpsClassOption[]> {
+  return defaultRegistrationTrackService.loadCompletedClassOptions(options)
 }
 
 export function loadOpsRegistrationWorkspaceOptionData(

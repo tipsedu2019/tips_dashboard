@@ -564,6 +564,7 @@ function createClient({ queryHandler, rpcHandler } = {}) {
       order: [],
       limit: null,
       limits: [],
+      range: null,
       signal: null,
       retryEnabled: null,
       single: false,
@@ -626,6 +627,10 @@ function createClient({ queryHandler, rpcHandler } = {}) {
       limit(value, options) {
         query.limits.push([value, options]);
         if (!options?.referencedTable && !options?.foreignTable) query.limit = value;
+        return fluent;
+      },
+      range(from, to) {
+        query.range = [from, to];
         return fluent;
       },
       single() {
@@ -5386,4 +5391,136 @@ test("enabling detail observations preserves query order, filters, counts, resul
     assert.deepEqual(outputs, []);
   }
   assert.deepEqual(variants[1], variants[0]);
+});
+
+
+test('008 completed class loader preserves full-catalog mapping and column fallback without other tables', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const classRows = [
+    { id: 'active', name: '합성 수업', subject: '영어', grade: '중1', teacher: '합성 교사', room: '101', textbook_ids: ['book'], status: 'active' },
+    { id: 'inactive', name: '폐강', status: '폐강' },
+    { id: 'no-name', name: '', status: null },
+  ];
+  const harness = createClient({ queryHandler(query) {
+    if (query.table !== 'classes') return { data: [], error: null };
+    if (query.columns.includes('status')) return { data: null, error: { code: '42703', message: 'column status does not exist' } };
+    return { data: classRows, error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  assert.throws(() => service.loadCompletedClassOptions({ viewerId: '' }), /사용자|viewer|auth/i);
+  const classes = await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.deepEqual(harness.queries.map(q => q.table), ['classes', 'classes']);
+  assert.deepEqual(Array.from(classes, row => row.id), ['active', 'no-name']);
+  assert.equal(classes[1].label, 'no-name');
+  const full = await service.loadWorkspaceOptionData({ viewerId: 'actor-a' });
+  assert.deepEqual(JSON.parse(JSON.stringify(classes)), JSON.parse(JSON.stringify(full.classes)));
+  assert.equal(full.schemaReady, true);
+  assert.deepEqual(harness.rpcCalls, []);
+});
+
+test('008 completed class cache deduplicates per viewer and force ignores older completions', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const gates = [];
+  const harness = createClient({ queryHandler() { const gate = deferred(); gates.push(gate); return gate.promise; } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const old = service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.strictEqual(service.loadCompletedClassOptions({ viewerId: 'actor-a' }), old);
+  await new Promise(setImmediate);
+  const fresh = service.loadCompletedClassOptions({ viewerId: 'actor-a', force: true });
+  const other = service.loadCompletedClassOptions({ viewerId: 'actor-b' });
+  await new Promise(setImmediate);
+  gates[1].resolve({ data: [{ id: 'fresh', name: '현재' }], error: null });
+  gates[2].resolve({ data: [{ id: 'other', name: '다른 사용자' }], error: null });
+  const current = await fresh;
+  assert.equal((await other)[0].id, 'other');
+  gates[0].resolve({ data: [{ id: 'old', name: '과거' }], error: null });
+  await old;
+  assert.strictEqual(await service.loadCompletedClassOptions({ viewerId: 'actor-a' }), current);
+  assert.equal(harness.queries.length, 3);
+});
+
+test('008 classes failures are uncached and clear prevents stale completion from repopulating cache', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let fail = true;
+  const gate = deferred();
+  const harness = createClient({ queryHandler() { return fail ? { data: null, error: new Error('classes unavailable') } : gate.promise; } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.loadCompletedClassOptions({ viewerId: 'actor-a' }), /classes unavailable/);
+  fail = false;
+  const pending = service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  await new Promise(setImmediate);
+  service.clearCaches();
+  gate.resolve({ data: [{ id: 'class-a' }], error: null });
+  await pending;
+  await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.equal(harness.queries.length, 3);
+});
+
+test('008 classes deadline allows retry and cannot cache a late success', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const old = deferred();
+  let first = true;
+  const harness = createClient({ queryHandler() { if (first) { first = false; return old.promise; } return { data: [{ id: 'fresh' }], error: null }; } });
+  const service = createRegistrationTrackService(harness.client, readyOptions({ requestTimeoutMs: 10 }));
+  await assert.rejects(service.loadCompletedClassOptions({ viewerId: 'actor-a' }), /registration_class_labels_timeout/);
+  assert.equal(harness.queries[0].signal.aborted, true);
+  const fresh = await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  old.resolve({ data: [{ id: 'stale' }], error: null });
+  await new Promise(setImmediate);
+  assert.strictEqual(await service.loadCompletedClassOptions({ viewerId: 'actor-a' }), fresh);
+  assert.equal(fresh[0].id, 'fresh');
+  assert.equal(harness.queries.length, 2);
+});
+
+test('008 completed class pages preserve labels beyond thirty with explicit request bounds', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const data = Array.from({ length: 65 }, (_, index) => ({ id: `class-${index}`, name: `수업 ${index}`, status: 'active' }));
+  const harness = createClient({ queryHandler(query) {
+    return { data: data.slice(query.range[0], query.range[1] + 1), error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const result = await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.deepEqual(Array.from(result, row => row.id), data.map(row => row.id));
+  assert.deepEqual(harness.queries.map(query => query.range), [[0, 29], [30, 59], [60, 89]]);
+  for (const query of harness.queries) {
+    assert.equal(query.table, 'classes');
+    assert.equal(query.limit, 30);
+    assert.deepEqual(JSON.parse(JSON.stringify(query.order)), [['id', { ascending: true }]]);
+    assert.equal(query.retryEnabled, false);
+    assert.ok(query.signal instanceof AbortSignal);
+  }
+});
+
+test('008 later class page failure cannot cache a partial catalog and retry starts from zero', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const data = Array.from({ length: 31 }, (_, index) => ({ id: `class-${index}`, name: `수업 ${index}` }));
+  let fail = true;
+  const harness = createClient({ queryHandler(query) {
+    if (fail && query.range[0] === 30) return { data: null, error: new Error('second page unavailable') };
+    return { data: data.slice(query.range[0], query.range[1] + 1), error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.loadCompletedClassOptions({ viewerId: 'actor-a' }), /second page unavailable/);
+  fail = false;
+  const result = await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.equal(result.length, 31);
+  assert.deepEqual(harness.queries.map(query => query.range[0]), [0, 30, 0, 30]);
+  assert.strictEqual(await service.loadCompletedClassOptions({ viewerId: 'actor-a' }), result);
+  assert.equal(harness.queries.length, 4);
+});
+
+test('008 column fallback restarts class pagination without retaining an earlier partial projection', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const data = Array.from({ length: 31 }, (_, index) => ({ id: `class-${index}`, name: `현재 ${index}` }));
+  const harness = createClient({ queryHandler(query) {
+    if (query.columns.endsWith(',status')) return query.range[0] === 0
+      ? { data: data.slice(0, 30).map(row => ({ ...row, name: '이전 projection' })), error: null }
+      : { data: null, error: { code: '42703', message: 'column status does not exist' } };
+    return { data: data.slice(query.range[0], query.range[1] + 1), error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const result = await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.deepEqual(Array.from(result, row => row.label), data.map(row => row.name));
+  assert.deepEqual(harness.queries.map(query => query.range[0]), [0, 30, 0, 30]);
+  assert.equal(new Set(Array.from(result, row => row.id)).size, 31);
 });
