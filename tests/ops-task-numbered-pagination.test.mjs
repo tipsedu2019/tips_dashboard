@@ -645,6 +645,76 @@ test('general detail read recovery retries a comment read failure once without r
   assert.equal(page.tableRequests.some(request => request.filters.some(([method]) => ['insert', 'update', 'upsert', 'delete'].includes(method))), false);
 });
 
+function exposeSyntheticDetailLayout() {
+  // JSDOM has no layout; the real shared Dialog excludes invisible openers.
+  window.HTMLElement.prototype.getClientRects = function () {
+    return this.hidden || this.style.display === 'none' ? [] : [{ width: 32, height: 32 }];
+  };
+}
+const settleDetailFocus = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
+async function closeGeneralDetailForFocus(method) {
+  await act(async () => {
+    if (method === 'Escape') document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    else document.querySelector('[role="dialog"] button[aria-label="닫기"]').click();
+  });
+  await settleDetailFocus();
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+}
+
+for (const method of ['Escape', 'close button']) test(`general detail focus returns to the opener after failed-read retry and ${method}`, async t => {
+  const page = await workspace(t);
+  exposeSyntheticDetailLayout();
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'FOCUS RETRY SUMMARY' }]));
+  const opener = document.querySelector('button[aria-label="FOCUS RETRY SUMMARY 상세 보기"]');
+  await act(async () => { opener.focus(); opener.click(); });
+  await settleDetailFocus();
+  assert.ok(document.querySelector('[role="dialog"]').contains(document.activeElement));
+  const first = page.tableRequests.find(request => request.table === 'ops_tasks');
+  await act(async () => first.resolve({ data: null, error: { code: 'SYNTHETIC_OFFLINE' } }));
+  assert.ok(document.querySelector('[role="dialog"] [role="alert"]'));
+  const retry = [...document.querySelectorAll('[role="dialog"] button')].find(button => button.textContent.trim() === '다시 불러오기');
+  await act(async () => { retry.focus(); retry.click(); });
+  const second = page.tableRequests.filter(request => request.table === 'ops_tasks').at(-1);
+  assert.notEqual(first, second);
+  await act(async () => second.resolve({ data: { id: id(1), title: 'FOCUS RECOVERED FULL DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  assert.ok(document.querySelector('[role="dialog"]').textContent.includes('FOCUS RECOVERED FULL DETAIL'));
+  await closeGeneralDetailForFocus(method);
+  assert.ok(document.activeElement === opener, 'recovered general detail restores its actual list opener');
+  assert.equal(new URLSearchParams(window.location.search).has('taskId'), false);
+  assert.equal(page.tableRequests.filter(request => request.table === 'ops_tasks').length, 2);
+});
+
+test('general detail focus returns to the opener when closing a pending exact read', async t => {
+  const page = await workspace(t);
+  exposeSyntheticDetailLayout();
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'PENDING FOCUS SUMMARY' }]));
+  const opener = document.querySelector('button[aria-label="PENDING FOCUS SUMMARY 상세 보기"]');
+  await act(async () => { opener.focus(); opener.click(); });
+  await settleDetailFocus();
+  assert.ok(document.querySelector('[role="dialog"] [role="status"]'));
+  await closeGeneralDetailForFocus('close button');
+  assert.ok(document.activeElement === opener, 'pending read does not lose the opener on close');
+});
+
+for (const directLink of [false, true]) test(`general detail focus uses search when ${directLink ? 'opened by a direct link' : 'its opener becomes unavailable'}`, async t => {
+  const page = await workspace(t, { search: directLink ? `?taskId=${id(1)}` : '' });
+  exposeSyntheticDetailLayout();
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'FALLBACK FOCUS SUMMARY' }]));
+  if (!directLink) {
+    const opener = document.querySelector('button[aria-label="FALLBACK FOCUS SUMMARY 상세 보기"]');
+    await act(async () => { opener.focus(); opener.click(); });
+    await settleDetailFocus();
+    opener.hidden = true;
+  } else await settleDetailFocus();
+  const search = document.querySelector('input[placeholder*="검색"]');
+  assert.ok(search);
+  await closeGeneralDetailForFocus('Escape');
+  assert.ok(document.activeElement === search, 'same-route general detail falls back to the existing search input');
+});
+
 test('general detail read recovery routes an on-page URL summary through one exact read and reports missing detail', async (t) => {
   const page = await workspace(t, { search: `?taskId=${id(1)}` });
   const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');

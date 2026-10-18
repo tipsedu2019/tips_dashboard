@@ -13521,6 +13521,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       {registrationApplicationHost.kind === "closed" ? (
       <Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent
+          restoreFocusToOpener={isTodoWorkspace}
+          restoreFocusFallbackRef={taskSearchInputRef}
           showCloseButton={!canonicalRegistrationApplicationRendered}
           closeButtonLabel="닫기"
           className={[
