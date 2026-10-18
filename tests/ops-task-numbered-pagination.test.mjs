@@ -102,7 +102,11 @@ async function setup(t, url = 'https://test.invalid/admin/tasks') {
   window.HTMLElement.prototype.scrollIntoView = () => {};
   window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify({ 'ops-task:general': { mode: 'manual', pageSize: 10 } }));
   const root = createRoot(document.getElementById('root'));
-  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  t.after(async () => {
+    // Radix schedules close autofocus after unmount; keep this window alive.
+    await act(async () => { root.unmount(); await new Promise(resolve => setTimeout(resolve, 25)); });
+    dom.window.close();
+  });
   return { root };
 }
 async function hook(t, initial = {}) {
@@ -645,11 +649,18 @@ test('general detail read recovery retries a comment read failure once without r
   assert.equal(page.tableRequests.some(request => request.filters.some(([method]) => ['insert', 'update', 'upsert', 'delete'].includes(method))), false);
 });
 
-function exposeSyntheticDetailLayout() {
+function exposeSyntheticDetailLayout(t) {
   // JSDOM has no layout; the real shared Dialog excludes invisible openers.
   window.HTMLElement.prototype.getClientRects = function () {
     return this.hidden || this.style.display === 'none' ? [] : [{ width: 32, height: 32 }];
   };
+  // ReactDOM is imported before JSDOM exists in this file and selects its legacy
+  // input listener path. Preserve those listeners through standard DOM APIs.
+  window.HTMLElement.prototype.attachEvent = function (name, listener) { this.addEventListener(name.replace(/^on/, ''), listener); };
+  window.HTMLElement.prototype.detachEvent = function (name, listener) { this.removeEventListener(name.replace(/^on/, ''), listener); };
+  const errors = [];
+  window.addEventListener('error', event => errors.push(event.error));
+  t.after(() => assert.deepEqual(errors, [], 'focus lifecycle has no unhandled DOM exceptions'));
 }
 const settleDetailFocus = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
 async function closeGeneralDetailForFocus(method) {
@@ -663,7 +674,7 @@ async function closeGeneralDetailForFocus(method) {
 
 for (const method of ['Escape', 'close button']) test(`general detail focus returns to the opener after failed-read retry and ${method}`, async t => {
   const page = await workspace(t);
-  exposeSyntheticDetailLayout();
+  exposeSyntheticDetailLayout(t);
   const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
   await act(async () => page.finish(list, 1, [{ title: 'FOCUS RETRY SUMMARY' }]));
   const opener = document.querySelector('button[aria-label="FOCUS RETRY SUMMARY 상세 보기"]');
@@ -687,7 +698,7 @@ for (const method of ['Escape', 'close button']) test(`general detail focus retu
 
 test('general detail focus returns to the opener when closing a pending exact read', async t => {
   const page = await workspace(t);
-  exposeSyntheticDetailLayout();
+  exposeSyntheticDetailLayout(t);
   const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
   await act(async () => page.finish(list, 1, [{ title: 'PENDING FOCUS SUMMARY' }]));
   const opener = document.querySelector('button[aria-label="PENDING FOCUS SUMMARY 상세 보기"]');
@@ -700,7 +711,7 @@ test('general detail focus returns to the opener when closing a pending exact re
 
 for (const directLink of [false, true]) test(`general detail focus uses search when ${directLink ? 'opened by a direct link' : 'its opener becomes unavailable'}`, async t => {
   const page = await workspace(t, { search: directLink ? `?taskId=${id(1)}` : '' });
-  exposeSyntheticDetailLayout();
+  exposeSyntheticDetailLayout(t);
   const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
   await act(async () => page.finish(list, 1, [{ title: 'FALLBACK FOCUS SUMMARY' }]));
   if (!directLink) {
