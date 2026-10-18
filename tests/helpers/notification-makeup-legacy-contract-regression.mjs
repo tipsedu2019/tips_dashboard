@@ -198,7 +198,7 @@ function serviceHarness(options = {}) {
       return { data: { request: { ...raw, ...args.p_input, ...args.p_patch }, sourceEventId: id(901) }, error: null }
     },
   }
-  const service = modules(supabase, { "./makeup-numbered-service": { async readMakeupDetail() { return row(900, { requestKind: "cancel_only", makeupSlots: [], makeupStartAt: "", makeupEndAt: "", classId: id(600) }) } } })("src/features/makeup-requests/makeup-request-service.ts")
+  const service = modules(supabase, { "./makeup-numbered-service": { async readMakeupDetail() { return row(900, { status: raw.status, requestKind: "cancel_only", makeupSlots: [], makeupStartAt: "", makeupEndAt: "", classId: id(600) }) } } })("src/features/makeup-requests/makeup-request-service.ts")
   return { service, rpcCalls, fromCalls }
 }
 
@@ -316,6 +316,7 @@ test("mounted transition closes completed action and shows saved result plus not
 
 test("mounted resubmit closes the committed revision and exposes notification warning without a second mutation", async (t) => {
   const p = await setup(t, { search: "?view=mine", clock: "2026-08-31T00:00:00Z", auth: { user: { id: id(801), name: "담당" } } }), requests = []
+  const detail = row(900, { status: "revision_requested", classId: id(600), requestKind: "cancel_only", cancelDate: "2026-09-01", makeupSlots: [], makeupStartAt: "", makeupEndAt: "", makeupClassroom: "" })
   t.mock.method(console, "warn", () => {})
   t.mock.method(p.supabase.auth, "getSession", async () => ({ data: { session: { access_token: "test-only-session" } }, error: null }))
   t.mock.method(globalThis, "fetch", async (url, init) => {
@@ -323,10 +324,10 @@ test("mounted resubmit closes the committed revision and exposes notification wa
     requests.push(JSON.parse(init.body))
     return new Response(JSON.stringify({ ok: true, sent: 0, deduped: 0, failed: 1 }))
   })
-  await act(async () => p.finish(p.numbered()[0], 1, { rows: [row(900, { status: "revision_requested", classId: id(600), requestKind: "cancel_only", cancelDate: "2026-09-01", makeupSlots: [], makeupStartAt: "", makeupEndAt: "", makeupClassroom: "" })] }))
+  await act(async () => p.finish(p.numbered()[0], 1, { rows: [detail] }))
   await p.catalogs()
   await act(async () => button("보완").click())
-  await act(async () => p.finish(p.numbered().at(-1), 1, { rows: [row(900, { status: "revision_requested", classId: id(600), requestKind: "cancel_only", cancelDate: "2026-09-01", makeupSlots: [], makeupStartAt: "", makeupEndAt: "", makeupClassroom: "" })] }))
+  await act(async () => p.finish(p.numbered().at(-1), 1, { rows: [detail] }))
   const rows = catalogRows()
   await act(async () => { for (const request of p.requests.filter((request) => request.table).slice(3)) request.resolve({ data: rows[request.table] || [], error: null }) })
   await act(async () => p.observed.patch(() => ({ ...createInput })))
@@ -335,10 +336,12 @@ test("mounted resubmit closes the committed revision and exposes notification wa
   await act(async () => button("재상신").click())
   const raw = { id: id(900), status: "revision_requested", request_kind: "cancel_only", requester_id: id(801), approver_profile_id: id(804), created_at: stamp, class_id: id(600) }
   await act(async () => { for (const request of p.requests.slice(before).filter((request) => request.table)) request.resolve({ data: request.table === "makeup_requests" ? [raw] : rows[request.table] || [], error: null }) })
-  await act(async () => (await p.waitFor("makeup_request_events")).resolve({ data: [], error: null }))
-  await act(async () => (await p.waitFor("makeup_requests", 2)).resolve({ data: raw, error: null }))
+  const detailRead = await p.waitFor("get_makeup_detail_v1")
+  assert.equal(detailRead.args.p_id, id(900))
+  await act(async () => detailRead.resolve({ data: detail, error: null }))
   const mutation = await p.waitFor("transition_makeup_request_v2")
   assert.equal(mutation.args.p_command, "resubmit")
+  assert.equal(mutation.args.p_expected_status, "revision_requested")
   await act(async () => mutation.resolve({ data: { request: { ...raw, ...mutation.args.p_patch, status: "approval_pending" }, sourceEventId: id(901) }, error: null }))
   const feedback = [...document.querySelectorAll('[role="alert"]')].find((element) => element.textContent.includes(WARNING))
   assert.ok(feedback)

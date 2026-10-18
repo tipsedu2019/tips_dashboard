@@ -359,6 +359,7 @@ export function SchoolMasterWorkspace() {
     try {
       if (deletedIds.length > 0) {
         await managementService.deleteAcademicSchools(deletedIds);
+        setDeletedIds((current) => current.filter((id) => !deletedIds.includes(id)));
       }
       if (nextRows.length > 0) {
         await managementService.upsertAcademicSchools(

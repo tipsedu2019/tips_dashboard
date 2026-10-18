@@ -31,6 +31,7 @@ function rowId(row: DrilldownRow) {
 
 type StatisticsDrilldownProps = {
   input: StatisticsDrilldownInput
+  snapshotRevision?: number
   label: string
   trigger?: React.ReactNode
   renderRow?: (row: DrilldownRow) => React.ReactNode
@@ -38,8 +39,8 @@ type StatisticsDrilldownProps = {
 
 export function StatisticsDrilldown(props: StatisticsDrilldownProps) {
   const { session, user, role } = useAuth()
-  // A changed query or viewer must never inherit an already expanded roster.
-  const scope = JSON.stringify([props.input, user?.id ?? session?.user?.id ?? "", role, Boolean(session?.access_token)])
+  // A new accepted aggregate, query or viewer cannot reuse an older roster.
+  const scope = JSON.stringify([props.input, user?.id ?? session?.user?.id ?? "", role, Boolean(session?.access_token), props.snapshotRevision ?? 0])
   return <StatisticsDrilldownContent key={scope} {...props} accessToken={session?.access_token ?? ""} />
 }
 

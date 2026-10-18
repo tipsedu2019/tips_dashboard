@@ -430,6 +430,10 @@ type WordRetestTableSort = {
 } | null
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type WordRetestRetryReason = "failed" | "absent"
+type GeneralTaskDetailReadState =
+  | Readonly<{ kind: "closed" }>
+  | Readonly<{ kind: "loading" | "failed" | "ready"; taskId: string; requestId: number }>
+
 type FormCompletionIntent = {
   kind?: "word_retest_retry"
   label?: "재재시험 추가"
@@ -7914,6 +7918,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [registrationApplicationHost, setRegistrationApplicationHost] = useState<RegistrationApplicationHostState>({ kind: "closed" })
   const [editingTask, setEditingTask] = useState<OpsTask | null>(null)
   const [selectedTask, setSelectedTask] = useState<OpsTask | null>(null)
+  const [generalTaskDetailRead, setGeneralTaskDetailRead] = useState<GeneralTaskDetailReadState>({ kind: "closed" })
+  const generalTaskDetailReadRef = useRef<GeneralTaskDetailReadState>({ kind: "closed" })
   const [selectedRegistrationTrackId, setSelectedRegistrationTrackId] = useState<string | null>(null)
   const [selectedRegistrationAppointmentId, setSelectedRegistrationAppointmentId] = useState<string | null>(null)
   const [registrationDeepLinkedAttempt, setRegistrationDeepLinkedAttempt] = useState<RegistrationObservationAttempt | null>(null)
@@ -9788,6 +9794,44 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }, [form, loadRegistrationCaseForWorkspace, refreshFirstTaskPageAfterMutation, syncTaskDeepLink])
 
+  const invalidateGeneralTaskDetailRead = useCallback(() => {
+    const current = generalTaskDetailReadRef.current
+    if (current.kind === "closed") return
+    if (current.requestId === selectedDetailLoadRef.current) selectedDetailLoadRef.current += 1
+    generalTaskDetailReadRef.current = { kind: "closed" }
+    setGeneralTaskDetailRead(generalTaskDetailReadRef.current)
+  }, [])
+
+  const readGeneralTaskDetail = useCallback(async (taskId: string) => {
+    const previous = generalTaskDetailReadRef.current
+    if (previous.kind === "loading" && previous.taskId === taskId && previous.requestId === selectedDetailLoadRef.current) return
+    const request = { kind: "loading", taskId, requestId: ++selectedDetailLoadRef.current } as const
+    generalTaskDetailReadRef.current = request
+    setGeneralTaskDetailRead(request)
+    const isCurrent = () => workspaceMountedRef.current
+      && generalTaskDetailReadRef.current === request
+      && selectedDetailLoadRef.current === request.requestId
+      && new URLSearchParams(window.location.search).get("taskId") === taskId
+    try {
+      const exactTask = await loadOpsTaskById(taskId)
+      if (!isCurrent()) return
+      if (!exactTask || exactTask.id !== taskId || exactTask.type !== "general") throw new Error("general_detail_unavailable")
+      setSelectedTask(exactTask)
+      setData((current) => current ? {
+        ...current,
+        tasks: current.tasks.map((task) => task.id === taskId ? exactTask : task),
+      } : current)
+      const ready = { ...request, kind: "ready" } as const
+      generalTaskDetailReadRef.current = ready
+      setGeneralTaskDetailRead(ready)
+    } catch {
+      if (!isCurrent()) return
+      const failed = { ...request, kind: "failed" } as const
+      generalTaskDetailReadRef.current = failed
+      setGeneralTaskDetailRead(failed)
+    }
+  }, [])
+
   const openDetail = useCallback((task: OpsTask, trackId: string | null = null) => {
     const nextTrackId = task.type === "registration" ? trackId : null
     registrationTrackSelectionRef.current = nextTrackId ? `${task.id}:${nextTrackId}` : ""
@@ -9807,6 +9851,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setCommentBody("")
     setAttachmentName("")
     setAttachmentLink("")
+    if (task.type === "general") {
+      void readGeneralTaskDetail(task.id)
+      return
+    }
     const detailLoad = ++selectedDetailLoadRef.current
     void loadOpsTaskById(task.id).then((exactTask) => {
       if (!exactTask || selectedDetailLoadRef.current !== detailLoad) return
@@ -9819,7 +9867,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         }
       })
     }).catch(() => undefined)
-  }, [syncTaskDeepLink])
+  }, [readGeneralTaskDetail, syncTaskDeepLink])
 
   const openWordRetestEditor = useCallback((
     task: OpsTask,
@@ -10660,6 +10708,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
     const deepLinkedTrackId = currentSearchParams.get("trackId") || ""
     const deepLinkedAppointmentId = currentSearchParams.get("appointmentId") || ""
+    const generalRead = generalTaskDetailReadRef.current
+    if (generalRead.kind !== "closed" && generalRead.taskId !== deepLinkedTaskId) invalidateGeneralTaskDetailRead()
     const directRegistrationTarget = isRegistrationWorkspace ? getRegistrationDirectDeepLinkTarget({
       viewerId: registrationViewerId,
       searchParams: currentSearchParams,
@@ -10751,6 +10801,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           void openRegistrationCase(exactTask.id, { allowDirectLoad: true })
           return
         }
+        if (exactTask.type === "general") {
+          if (new URLSearchParams(window.location.search).get("taskId") !== deepLinkedTaskId) return
+          const ready = { kind: "ready", taskId: exactTask.id, requestId: ++selectedDetailLoadRef.current } as const
+          generalTaskDetailReadRef.current = ready
+          setGeneralTaskDetailRead(ready)
+        }
         setSelectedTask(exactTask)
         if (exactTask.type === "word_retest") openWordRetestEditor(exactTask)
         else setDetailOpen(true)
@@ -10803,6 +10859,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         return
       }
     }
+    if (deepLinkedTask.type === "general" && selectedTask?.id === deepLinkedTaskId && detailOpen) return
     setSelectedRegistrationTrackId(null)
     setSelectedRegistrationAppointmentId(null)
     setRegistrationCaseDetail(null)
@@ -10810,11 +10867,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, isRegistrationWorkspace, detailOpen, closeRegistrationApplicationHost, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+    if (deepLinkedTask.type === "general") void readGeneralTaskDetail(deepLinkedTask.id)
+  }, [data, deleteTarget, isRegistrationWorkspace, detailOpen, closeRegistrationApplicationHost, invalidateGeneralTaskDetailRead, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, readGeneralTaskDetail, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
     if (!nextOpen) {
+      if (selectedTask?.type === "general") {
+        invalidateGeneralTaskDetailRead()
+      }
       setSelectedRegistrationTrackId(null)
       setSelectedRegistrationAppointmentId(null)
       setRegistrationDeepLinkedAttempt(null)
@@ -12192,6 +12253,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       ? selectedTask
       : taskById.get(selectedTask.id) || selectedTask
     : null
+  const selectedGeneralTaskRead = generalTaskDetailRead.kind !== "closed"
+    && generalTaskDetailRead.taskId === selectedTaskFresh?.id
+    && generalTaskDetailRead.requestId === selectedDetailLoadRef.current
+    ? generalTaskDetailRead : null
+  const generalTaskDetailReady = selectedGeneralTaskRead?.kind === "ready"
   const isRegistrationDetail = selectedTaskFresh?.type === "registration"
   const isCanonicalRegistrationTrackDetail = Boolean(
     isRegistrationDetail
@@ -13455,6 +13521,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       {registrationApplicationHost.kind === "closed" ? (
       <Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent
+          restoreFocusToOpener={isTodoWorkspace}
+          restoreFocusFallbackRef={taskSearchInputRef}
           showCloseButton={!canonicalRegistrationApplicationRendered}
           closeButtonLabel="닫기"
           className={[
@@ -13493,7 +13561,17 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               {message}
             </div>
           )}
-          {selectedTaskFresh && (
+          {selectedTaskFresh?.type === "general" && !generalTaskDetailReady && (
+            selectedGeneralTaskRead?.kind === "failed" ? (
+              <div role="alert" className="grid gap-2 rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive">
+                <p>업무 상세를 불러오지 못했습니다.</p>
+                <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto sm:justify-self-start" onClick={() => void readGeneralTaskDetail(selectedTaskFresh.id)}>
+                  다시 불러오기
+                </Button>
+              </div>
+            ) : <p role="status" className="text-sm text-muted-foreground">업무 상세를 불러오는 중…</p>
+          )}
+          {selectedTaskFresh && (selectedTaskFresh.type !== "general" || generalTaskDetailReady) && (
             <div
               data-registration-application-dirty={registrationApplicationDirty ? "true" : "false"}
               className={selectedTaskFresh.type === "registration" || selectedTaskFresh.type === "withdrawal" || selectedTaskFresh.type === "transfer" ? "grid gap-4" : selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}

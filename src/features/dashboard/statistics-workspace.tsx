@@ -111,7 +111,7 @@ function DistributionBar({ label, value, maximum, unit }: { label: string; value
   </span>
 }
 
-function StudentBreakdowns({ data, subject, division }: { data: Data; subject: Subject; division: Division }) {
+function StudentBreakdowns({ data, subject, division, snapshotRevision }: { data: Data; subject: Subject; division: Division; snapshotRevision: number }) {
   const [showAllSchools, setShowAllSchools] = useState(false)
   const breakdowns = object(data.studentBreakdowns)
   const groups: Array<{ axis: "grade" | "school"; title: string; rows: Data[] }> = [
@@ -123,18 +123,18 @@ function StudentBreakdowns({ data, subject, division }: { data: Data; subject: S
     const key = text(row.key)
     const children = sortStatisticsDistribution(list(row.children), group.axis === "school" ? "grade" : "school")
     return <div key={key} className="grid min-w-0 gap-2 border-b pb-3 last:border-0">
-      <StatisticsDrilldown label={`${text(row.label)} ${format(row.studentCount)}명 · 학생 명단 보기`} trigger={<DistributionBar label={text(row.label)} value={number(row.studentCount)} maximum={maximum} unit="명" />} input={{ kind: "student-roster", subject, division, axis: group.axis, key, parentKey: "" }} />
+      <StatisticsDrilldown snapshotRevision={snapshotRevision} label={`${text(row.label)} ${format(row.studentCount)}명 · 학생 명단 보기`} trigger={<DistributionBar label={text(row.label)} value={number(row.studentCount)} maximum={maximum} unit="명" />} input={{ kind: "student-roster", subject, division, axis: group.axis, key, parentKey: "" }} />
       <span className="text-xs text-muted-foreground">수강 등록 {format(row.enrollmentCount)}건</span>
       {children.length ? <details className="text-sm"><summary className="cursor-pointer py-1 text-muted-foreground">{group.axis === "grade" ? "학교별" : "학년별"} 보기</summary><div className="mt-2 grid gap-2 border-l pl-3">{children.map((child) => {
         const childKey = text(child.key)
         const nestedAxis = group.axis === "grade" ? "grade_school" : "school_grade"
-        return <div key={childKey} className="flex min-w-0 flex-wrap items-center justify-between gap-2"><span className="break-words">{text(child.label)} · {format(child.studentCount)}명</span><StatisticsDrilldown label="학생 명단 보기" input={{ kind: "student-roster", subject, division, axis: nestedAxis, key: childKey, parentKey: key }} /></div>
+        return <div key={childKey} className="flex min-w-0 flex-wrap items-center justify-between gap-2"><span className="break-words">{text(child.label)} · {format(child.studentCount)}명</span><StatisticsDrilldown snapshotRevision={snapshotRevision} label="학생 명단 보기" input={{ kind: "student-roster", subject, division, axis: nestedAxis, key: childKey, parentKey: key }} /></div>
       })}</div></details> : null}
     </div>
   }) : <p className="text-sm text-muted-foreground">학생 데이터 없음</p>}{group.axis === "school" && group.rows.length > 8 ? <Button type="button" variant="outline" aria-expanded={showAllSchools} onClick={() => setShowAllSchools(!showAllSchools)}>{showAllSchools ? "상위 8개 보기" : `모두 보기 (${group.rows.length}개 학교)`}</Button> : null}</CardContent></Card>)}</div>
 }
 
-function ClassGroups({ data, subject, division }: { data: Data; subject: Subject; division: Division }) {
+function ClassGroups({ data, subject, division, snapshotRevision }: { data: Data; subject: Subject; division: Division; snapshotRevision: number }) {
   const classGroups = object(data.classGroups)
   const [axis, setAxis] = useState<"grade" | "teacher" | "classroom">("grade")
   const rows = sortStatisticsDistribution(list(axis === "grade" ? classGroups.byGrade : axis === "teacher" ? classGroups.byTeacher : classGroups.byClassroom), axis, "classCount")
@@ -142,7 +142,7 @@ function ClassGroups({ data, subject, division }: { data: Data; subject: Subject
   return <Card><CardHeader className="flex-row flex-wrap items-center justify-between gap-3"><CardTitle className="text-base">수업 운영</CardTitle><FilterButtons label="그룹" active={axis} onChange={setAxis} values={[{ key: "grade", label: "학년" }, { key: "teacher", label: "선생님" }, { key: "classroom", label: "강의실" }]} /></CardHeader><CardContent className="grid gap-2">{rows.length ? rows.map((row) => {
     const key = text(row.key)
     return <div key={key} className="rounded-lg border p-3"><p className="text-sm text-muted-foreground tabular-nums">주간 {text(row.weeklyHoursLabel)} · 학생 {format(row.studentCount)}명</p>
-      <StatisticsDrilldown label={`${text(row.label)} ${format(row.classCount)}개 · 수업 목록 보기`} trigger={<DistributionBar label={text(row.label)} value={number(row.classCount)} maximum={maximum} unit="개" />} input={{ kind: "class-group", subject, division, axis, key }} renderRow={(classRow) => <div className="flex flex-wrap items-center justify-between gap-2"><span>{text(classRow.title)}</span><StatisticsDrilldown label="학생 명단 보기" input={{ kind: "class-roster", classId: text(classRow.id) }} /></div>} />
+      <StatisticsDrilldown snapshotRevision={snapshotRevision} label={`${text(row.label)} ${format(row.classCount)}개 · 수업 목록 보기`} trigger={<DistributionBar label={text(row.label)} value={number(row.classCount)} maximum={maximum} unit="개" />} input={{ kind: "class-group", subject, division, axis, key }} renderRow={(classRow) => <div className="flex flex-wrap items-center justify-between gap-2"><span>{text(classRow.title)}</span><StatisticsDrilldown snapshotRevision={snapshotRevision} label="학생 명단 보기" input={{ kind: "class-roster", classId: text(classRow.id) }} /></div>} />
     </div>
   }) : <p className="text-sm text-muted-foreground">수업 데이터 없음</p>}</CardContent></Card>
 }
@@ -155,7 +155,7 @@ function StudentsClassesPanel({ route, onFilter }: RoutePanelProps) {
   const data = object(state.data)
   const controls = <div className="flex flex-wrap gap-4"><FilterButtons label="과목" values={subjects} active={subject} onChange={subject => onFilter({ subject })} /><FilterButtons label="부서" values={divisions} active={division} onChange={division => onFilter({ division })} /></div>
   return <PanelState {...state} onRefresh={state.refresh} controls={controls}>
-    <SummaryCards summary={object(data.summary)} /><StudentBreakdowns key={`students:${subject}:${division}`} data={data} subject={subject} division={division} /><ClassGroups key={`classes:${subject}:${division}`} data={data} subject={subject} division={division} />
+    <SummaryCards summary={object(data.summary)} /><StudentBreakdowns key={`students:${subject}:${division}`} data={data} subject={subject} division={division} snapshotRevision={state.acceptedRevision} /><ClassGroups key={`classes:${subject}:${division}`} data={data} subject={subject} division={division} snapshotRevision={state.acceptedRevision} />
   </PanelState>
 }
 

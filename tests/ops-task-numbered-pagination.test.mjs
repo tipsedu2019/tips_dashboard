@@ -102,7 +102,11 @@ async function setup(t, url = 'https://test.invalid/admin/tasks') {
   window.HTMLElement.prototype.scrollIntoView = () => {};
   window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify({ 'ops-task:general': { mode: 'manual', pageSize: 10 } }));
   const root = createRoot(document.getElementById('root'));
-  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  t.after(async () => {
+    // Radix schedules close autofocus after unmount; keep this window alive.
+    await act(async () => { root.unmount(); await new Promise(resolve => setTimeout(resolve, 25)); });
+    dom.window.close();
+  });
   return { root };
 }
 async function hook(t, initial = {}) {
@@ -280,7 +284,7 @@ async function workspace(t, initial = {}) {
       if (key === 'then') return pending.promise.then.bind(pending.promise);
       return (...args) => { request.filters.push([key, ...args]); return query; };
     } });
-    if (!initial.deferTables && table !== 'ops_tasks') pending.resolve({ data: initial.tableData?.[table] || [], error: null });
+    if (!initial.deferTables && table !== 'ops_tasks') pending.resolve(initial.tableResponse?.(table) ?? { data: initial.tableData?.[table] || [], error: null });
     queries.push(table); return query;
   };
   let props = { workspace: 'todo', viewerId: 'actor-a', viewerRole: 'staff', loading: false, ...initial };
@@ -582,6 +586,247 @@ test('initial unresolved login preserves an incoming nonregistration deep link a
   assert.equal(document.querySelector('[data-testid="todo-table-task-list"]')?.textContent.includes('독립 상세'), false);
   assert.ok(document.body.textContent.includes('1건 · 1–1번째'));
 });
+test('general detail read recovery reports a failed exact read without exposing an empty composer', async (t) => {
+  const page = await workspace(t, { tableData: {
+    ops_task_comments: [{ id: id(801), task_id: id(1), author_id: null, body: 'EXISTING SYNTHETIC COMMENT', created_at: '2026-08-31T00:00:00Z' }],
+  } });
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'SUMMARY WITH UNREAD COMMENTS' }]));
+  const rpcStarts = page.requests.length;
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent.includes('SUMMARY WITH UNREAD COMMENTS')).click());
+  const detail = page.tableRequests.find(request => request.table === 'ops_tasks');
+  assert.ok(detail);
+  await act(async () => detail.resolve({ data: null, error: { code: 'SYNTHETIC_OFFLINE', message: 'SYNTHETIC INTERNAL ERROR' } }));
+  const dialog = document.querySelector('[role="dialog"]');
+  const observation = {
+    summaryRetained: dialog.textContent.includes('SUMMARY WITH UNREAD COMMENTS'),
+    errorPresented: Boolean(dialog.querySelector('[role="alert"]')),
+    retryAvailable: [...dialog.querySelectorAll('button')].some(button => button.textContent.trim() === '다시 불러오기'),
+    incompleteComposerPresented: Boolean(dialog.querySelector('textarea[placeholder="댓글"]')),
+    newRpcStarts: page.requests.length - rpcStarts,
+  };
+  t.diagnostic(JSON.stringify({ metric: 'general-detail-failed-exact-read', ...observation }));
+  assert.deepEqual(observation, { summaryRetained: true, errorPresented: true, retryAvailable: true, incompleteComposerPresented: false, newRpcStarts: 0 });
+  assert.equal(dialog.textContent.includes('SYNTHETIC INTERNAL ERROR'), false);
+});
+
+test('general detail read recovery retries a comment read failure once without rewriting history or the list', async (t) => {
+  let commentReads = 0;
+  const page = await workspace(t, { tableResponse: table => table === 'ops_task_comments'
+    ? ++commentReads === 1
+      ? { data: null, error: { message: 'SYNTHETIC PRIVATE COMMENT ERROR' } }
+      : { data: [{ id: id(801), task_id: id(1), author_id: null, body: 'RECOVERED EXISTING COMMENT', created_at: '2026-08-31T00:00:00Z' }], error: null }
+    : undefined });
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'RETRY SUMMARY' }]));
+  const rpcStarts = page.requests.length;
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent.includes('RETRY SUMMARY')).click());
+  const dialog = () => document.querySelector('[role="dialog"]');
+  assert.ok(dialog().querySelector('[role="status"]'));
+  assert.equal(dialog().querySelector('textarea[placeholder="댓글"]'), null);
+  const exact = { id: id(1), title: 'FULL RETRY DETAIL', type: 'general', status: 'requested', priority: 'normal' };
+  await act(async () => page.tableRequests.find(request => request.table === 'ops_tasks').resolve({ data: exact, error: null }));
+  assert.ok(dialog().querySelector('[role="alert"]'));
+  assert.equal(dialog().textContent.includes('FULL RETRY DETAIL'), false, 'partial reads never become accepted detail');
+  assert.equal(dialog().textContent.includes('SYNTHETIC PRIVATE COMMENT ERROR'), false);
+  const url = window.location.href, historyLength = window.history.length;
+  const retry = [...dialog().querySelectorAll('button')].find(button => button.textContent.trim() === '다시 불러오기');
+  await act(async () => { retry.click(); retry.click(); });
+  const attempts = page.tableRequests.filter(request => request.table === 'ops_tasks');
+  assert.equal(attempts.length, 2, 'same-tick retry clicks start only one new read');
+  assert.ok(attempts[1].filters.some(filter => filter[0] === 'eq' && filter[1] === 'id' && filter[2] === id(1)));
+  assert.ok(dialog().querySelector('[role="status"]'));
+  await act(async () => attempts[1].resolve({ data: exact, error: null }));
+  assert.ok(dialog().textContent.includes('FULL RETRY DETAIL'));
+  assert.ok(dialog().textContent.includes('RECOVERED EXISTING COMMENT'));
+  assert.ok(dialog().querySelector('textarea[placeholder="댓글"]'));
+  assert.equal(dialog().querySelector('[role="alert"]'), null);
+  assert.equal(window.location.href, url);
+  assert.equal(window.history.length, historyLength);
+  assert.equal(page.requests.length, rpcStarts);
+  assert.ok(document.getElementById('root').textContent.includes('RETRY SUMMARY'));
+  assert.equal(document.getElementById('root').textContent.includes('FULL RETRY DETAIL'), false);
+  assert.equal(page.tableRequests.some(request => request.filters.some(([method]) => ['insert', 'update', 'upsert', 'delete'].includes(method))), false);
+});
+
+function exposeSyntheticDetailLayout(t) {
+  // JSDOM has no layout; the real shared Dialog excludes invisible openers.
+  window.HTMLElement.prototype.getClientRects = function () {
+    return this.hidden || this.style.display === 'none' ? [] : [{ width: 32, height: 32 }];
+  };
+  // ReactDOM is imported before JSDOM exists in this file and selects its legacy
+  // input listener path. Preserve those listeners through standard DOM APIs.
+  window.HTMLElement.prototype.attachEvent = function (name, listener) { this.addEventListener(name.replace(/^on/, ''), listener); };
+  window.HTMLElement.prototype.detachEvent = function (name, listener) { this.removeEventListener(name.replace(/^on/, ''), listener); };
+  const errors = [];
+  window.addEventListener('error', event => errors.push(event.error));
+  t.after(() => assert.deepEqual(errors, [], 'focus lifecycle has no unhandled DOM exceptions'));
+}
+const settleDetailFocus = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
+async function closeGeneralDetailForFocus(method) {
+  await act(async () => {
+    if (method === 'Escape') document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    else document.querySelector('[role="dialog"] button[aria-label="닫기"]').click();
+  });
+  await settleDetailFocus();
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+}
+
+for (const method of ['Escape', 'close button']) test(`general detail focus returns to the opener after failed-read retry and ${method}`, async t => {
+  const page = await workspace(t);
+  exposeSyntheticDetailLayout(t);
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'FOCUS RETRY SUMMARY' }]));
+  const opener = document.querySelector('button[aria-label="FOCUS RETRY SUMMARY 상세 보기"]');
+  await act(async () => { opener.focus(); opener.click(); });
+  await settleDetailFocus();
+  assert.ok(document.querySelector('[role="dialog"]').contains(document.activeElement));
+  const first = page.tableRequests.find(request => request.table === 'ops_tasks');
+  await act(async () => first.resolve({ data: null, error: { code: 'SYNTHETIC_OFFLINE' } }));
+  assert.ok(document.querySelector('[role="dialog"] [role="alert"]'));
+  const retry = [...document.querySelectorAll('[role="dialog"] button')].find(button => button.textContent.trim() === '다시 불러오기');
+  await act(async () => { retry.focus(); retry.click(); });
+  const second = page.tableRequests.filter(request => request.table === 'ops_tasks').at(-1);
+  assert.notEqual(first, second);
+  await act(async () => second.resolve({ data: { id: id(1), title: 'FOCUS RECOVERED FULL DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  assert.ok(document.querySelector('[role="dialog"]').textContent.includes('FOCUS RECOVERED FULL DETAIL'));
+  await closeGeneralDetailForFocus(method);
+  assert.ok(document.activeElement === opener, 'recovered general detail restores its actual list opener');
+  assert.equal(new URLSearchParams(window.location.search).has('taskId'), false);
+  assert.equal(page.tableRequests.filter(request => request.table === 'ops_tasks').length, 2);
+});
+
+test('general detail focus returns to the opener when closing a pending exact read', async t => {
+  const page = await workspace(t);
+  exposeSyntheticDetailLayout(t);
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'PENDING FOCUS SUMMARY' }]));
+  const opener = document.querySelector('button[aria-label="PENDING FOCUS SUMMARY 상세 보기"]');
+  await act(async () => { opener.focus(); opener.click(); });
+  await settleDetailFocus();
+  assert.ok(document.querySelector('[role="dialog"] [role="status"]'));
+  await closeGeneralDetailForFocus('close button');
+  assert.ok(document.activeElement === opener, 'pending read does not lose the opener on close');
+});
+
+for (const directLink of [false, true]) test(`general detail focus uses search when ${directLink ? 'opened by a direct link' : 'its opener becomes unavailable'}`, async t => {
+  const page = await workspace(t, { search: directLink ? `?taskId=${id(1)}` : '' });
+  exposeSyntheticDetailLayout(t);
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'FALLBACK FOCUS SUMMARY' }]));
+  if (!directLink) {
+    const opener = document.querySelector('button[aria-label="FALLBACK FOCUS SUMMARY 상세 보기"]');
+    await act(async () => { opener.focus(); opener.click(); });
+    await settleDetailFocus();
+    opener.hidden = true;
+  } else await settleDetailFocus();
+  const search = document.querySelector('input[placeholder*="검색"]');
+  assert.ok(search);
+  await closeGeneralDetailForFocus('Escape');
+  assert.ok(document.activeElement === search, 'same-route general detail falls back to the existing search input');
+});
+
+test('general detail read recovery routes an on-page URL summary through one exact read and reports missing detail', async (t) => {
+  const page = await workspace(t, { search: `?taskId=${id(1)}` });
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'URL SUMMARY' }]));
+  const attempts = page.tableRequests.filter(request => request.table === 'ops_tasks');
+  assert.equal(attempts.length, 1);
+  const dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog.querySelector('[role="status"]'));
+  assert.equal(dialog.querySelector('textarea[placeholder="댓글"]'), null);
+  await act(async () => attempts[0].resolve({ data: null, error: { code: 'PGRST116' } }));
+  assert.ok(dialog.querySelector('[role="alert"]'));
+  assert.ok([...dialog.querySelectorAll('button')].some(button => button.textContent.trim() === '다시 불러오기'));
+  assert.equal(new URLSearchParams(window.location.search).get('taskId'), id(1));
+  assert.equal(page.tableRequests.filter(request => request.table === 'ops_tasks').length, 1, 'failed reads do not automatically retry');
+});
+
+for (const [target, outcome] of [['same', 'success'], ['other', 'failure']]) {
+  test(`general detail read recovery ignores an old ${outcome} after reopening ${target} detail`, async (t) => {
+    const page = await workspace(t);
+    const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+    await act(async () => page.finish(list, 2, [{ title: 'OWNER A' }, { title: 'OWNER B' }]));
+    const open = title => act(async () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === title).click());
+    await open('OWNER A');
+    const old = page.tableRequests.find(request => request.table === 'ops_tasks');
+    const close = document.querySelector('[role="dialog"] button[aria-label="닫기"]');
+    assert.ok(close);
+    await act(async () => close.click());
+    await open(target === 'same' ? 'OWNER A' : 'OWNER B');
+    const current = page.tableRequests.filter(request => request.table === 'ops_tasks').at(-1);
+    assert.notEqual(current, old);
+    if (outcome === 'success') await act(async () => old.resolve({ data: { id: id(1), title: 'STALE FULL DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+    else await act(async () => old.reject(new Error('STALE PRIVATE ERROR')));
+    const dialog = document.querySelector('[role="dialog"]');
+    assert.ok(dialog.querySelector('[role="status"]'));
+    assert.equal(dialog.querySelector('[role="alert"]'), null);
+    assert.equal(dialog.querySelector('textarea[placeholder="댓글"]'), null);
+    assert.equal(/STALE FULL DETAIL|STALE PRIVATE ERROR/.test(dialog.textContent), false);
+    const targetId = target === 'same' ? id(1) : id(2);
+    await act(async () => current.resolve({ data: { id: targetId, title: 'CURRENT FULL DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+    assert.ok(dialog.textContent.includes('CURRENT FULL DETAIL'));
+    assert.ok(dialog.querySelector('textarea[placeholder="댓글"]'));
+    assert.equal(new URLSearchParams(window.location.search).get('taskId'), targetId);
+  });
+}
+
+test('general detail read recovery does not restore a removed detail URL after its read finishes', async (t) => {
+  const page = await workspace(t);
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'LEAVING DETAIL' }]));
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'LEAVING DETAIL').click());
+  const detail = page.tableRequests.find(request => request.table === 'ops_tasks');
+  await act(async () => window.history.replaceState(null, '', '/admin/tasks'));
+  await page.render();
+  await act(async () => detail.resolve({ data: { id: id(1), title: 'LATE LEFT DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(new URLSearchParams(window.location.search).has('taskId'), false);
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'LEAVING DETAIL').click());
+  const attempts = page.tableRequests.filter(request => request.table === 'ops_tasks');
+  assert.equal(attempts.length, 2, 'reopening after Back owns a new read instead of a settled stale lock');
+  await act(async () => attempts[1].resolve({ data: { id: id(1), title: 'REOPENED FULL DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  assert.ok(document.querySelector('[role="dialog"]').textContent.includes('REOPENED FULL DETAIL'));
+});
+
+test('general detail read recovery starts a new read after an unresolved off-page detour', async (t) => {
+  const page = await workspace(t);
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'DETOUR SUMMARY' }]));
+  const open = () => act(async () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'DETOUR SUMMARY').click());
+  await open();
+  const abandoned = page.tableRequests.find(request => request.table === 'ops_tasks');
+  await act(async () => window.history.replaceState(null, '', `/admin/tasks?taskId=${id(999)}`));
+  await page.render();
+  const offPage = page.tableRequests.filter(request => request.table === 'ops_tasks').at(-1);
+  assert.notEqual(offPage, abandoned);
+  await act(async () => abandoned.resolve({ data: { id: id(1), title: 'ABANDONED FULL DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  await open();
+  const attempts = page.tableRequests.filter(request => request.table === 'ops_tasks');
+  assert.equal(attempts.length, 3, 'an unresolved detour cannot retain the abandoned same-ID lock');
+  await act(async () => offPage.resolve({ data: { id: id(999), title: 'STALE DETOUR DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  await act(async () => attempts[2].resolve({ data: { id: id(1), title: 'RESTORED CURRENT DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  assert.ok(document.querySelector('[role="dialog"]').textContent.includes('RESTORED CURRENT DETAIL'));
+});
+
+test('general detail read recovery ignores a prior off-page general result while another read is pending', async (t) => {
+  const page = await workspace(t, { search: `?taskId=${id(999)}` });
+  const list = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(list, 1, [{ title: 'CURRENT SUMMARY TARGET' }]));
+  const previous = page.tableRequests.find(request => request.table === 'ops_tasks');
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'CURRENT SUMMARY TARGET').click());
+  const current = page.tableRequests.filter(request => request.table === 'ops_tasks').at(-1);
+  assert.notEqual(current, previous);
+  await act(async () => previous.resolve({ data: { id: id(999), title: 'STALE OFF-PAGE FULL DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  const dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog.textContent.includes('CURRENT SUMMARY TARGET'));
+  assert.equal(dialog.textContent.includes('STALE OFF-PAGE FULL DETAIL'), false);
+  assert.ok(dialog.querySelector('[role="status"]'));
+  await act(async () => current.resolve({ data: { id: id(1), title: 'ACCEPTED CURRENT DETAIL', type: 'general', status: 'requested', priority: 'normal' }, error: null }));
+  assert.ok(dialog.textContent.includes('ACCEPTED CURRENT DETAIL'));
+  assert.ok(dialog.querySelector('textarea[placeholder="댓글"]'));
+});
+
 for (const taskType of ['general', 'textbook']) test(`on-page exact ${taskType} detail owns its full payload while numbered summary rows stay unchanged`, async (t) => {
   const page = await workspace(t, { tableData: {
     ops_task_comments: [{ id: id(801), task_id: id(1), author_id: 'actor-a', body: 'DETAIL ONLY COMMENT', created_at: '2026-08-31T00:00:00Z' }],
