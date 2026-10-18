@@ -33,6 +33,7 @@ type StatisticsSnapshotInput = Readonly<{
 
 type StatisticsSnapshotState = Readonly<{
   snapshot: DashboardStatisticsSnapshot | null
+  acceptedRevision: number
   data: unknown
   loading: boolean
   error: string | null
@@ -61,7 +62,7 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
       ? rangeOverride.value
       : normalizeDashboardStatisticsRange(selectedRangeTab, input.rangeQuery)
     : 90
-  const [snapshotResult, setSnapshotResult] = useState<DashboardStatisticsKeyedSnapshot | null>(null)
+  const [snapshotResult, setSnapshotResult] = useState<(DashboardStatisticsKeyedSnapshot & { revision: number }) | null>(null)
   const [loading, setLoading] = useState(Boolean(input.active ?? true))
   const [error, setError] = useState<string | null>(null)
   const [forceRevision, setForceRevision] = useState(0)
@@ -136,7 +137,11 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
           }),
         })
         if (controller.signal.aborted || !nextSnapshot) return
-        setSnapshotResult({ key: cacheKey, snapshot: nextSnapshot })
+        // A new accepted result expires child reads, even with the same timestamp.
+        // Reusing the identical cached result keeps those reads and their state.
+        setSnapshotResult(current => current?.key === cacheKey && current.snapshot === nextSnapshot
+          ? current
+          : { key: cacheKey, snapshot: nextSnapshot, revision: (current?.revision ?? 0) + 1 })
         forceIntentRef.current = settleDashboardStatisticsForce(forceIntentRef.current, {
           revision: requestForceRevision,
           completed: force,
@@ -161,6 +166,7 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
 
   return {
     snapshot,
+    acceptedRevision: snapshot ? snapshotResult?.revision ?? 0 : 0,
     data: snapshot?.data ?? null,
     loading,
     error,
