@@ -884,6 +884,7 @@ type QueryBuilder = PromiseLike<QueryResult> & {
   in: (column: string, values: unknown[]) => QueryBuilder
   or: (filters: string) => QueryBuilder
   order: (column: string, options?: Record<string, unknown>) => QueryBuilder
+  range: (from: number, to: number) => QueryBuilder
   limit: (count: number, options?: Record<string, unknown>) => QueryBuilder
   single: () => QueryBuilder
 }
@@ -3027,21 +3028,55 @@ export function createRegistrationTrackService(
     table: string,
     candidates: string[],
     metrics: { queryCount: number },
-    signal?: AbortSignal,
   ): Promise<{ rows: Row[]; fallback: boolean; error: unknown }> {
     for (let index = 0; index < candidates.length; index += 1) {
       try {
         return {
-          rows: await queryRows(client.from(table).select(candidates[index]), metrics, signal),
+          rows: await queryRows(client.from(table).select(candidates[index]), metrics),
           fallback: index > 0,
           error: null,
         }
       } catch (error) {
-        if (!signal?.aborted && index < candidates.length - 1 && missingColumnError(error)) continue
+        if (index < candidates.length - 1 && missingColumnError(error)) continue
         return { rows: [], fallback: index > 0, error }
       }
     }
     return { rows: [], fallback: true, error: null }
+  }
+
+  async function readCompletedClassRows(metrics: QueryMetrics, signal: AbortSignal): Promise<Row[]> {
+    let offset = 0
+    const loadPages = [
+      () => client.from("classes")
+        .select("id,name,subject,grade,teacher,room,textbook_ids,status")
+        .order("id", { ascending: true }).range(offset, offset + 29).limit(30)
+        .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)])).retry(false),
+      () => client.from("classes")
+        .select("id,name,subject,grade,teacher,room,textbook_ids")
+        .order("id", { ascending: true }).range(offset, offset + 29).limit(30)
+        .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)])).retry(false),
+      () => client.from("classes")
+        .select("id,name,subject,grade,teacher,room")
+        .order("id", { ascending: true }).range(offset, offset + 29).limit(30)
+        .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)])).retry(false),
+    ]
+    for (let projection = 0; projection < loadPages.length; projection += 1) {
+      const classRows: Row[] = []
+      offset = 0
+      try {
+        while (true) {
+          signal.throwIfAborted()
+          const page = await queryRows(loadPages[projection](), metrics)
+          classRows.push(...page)
+          if (page.length < 30) return classRows
+          offset += 30
+        }
+      } catch (error) {
+        if (!signal.aborted && projection < loadPages.length - 1 && missingColumnError(error)) continue
+        throw error
+      }
+    }
+    return []
   }
 
   // List labels never mark the detail's full option catalog as ready.
@@ -3063,13 +3098,12 @@ export function createRegistrationTrackService(
     const controller = new AbortController()
     const request = measure("registration:completed-class-labels", false, async (metrics) => {
       const classes = await withRegistrationRequestTimeout(
-        readWithFallback("classes", REGISTRATION_CLASS_OPTION_COLUMNS, metrics, controller.signal),
+        readCompletedClassRows(metrics, controller.signal),
         requestTimeoutMs,
         "registration_class_labels_timeout",
         () => controller.abort(),
       )
-      if (classes.error) throw classes.error
-      return mapRegistrationClassOptions(classes.rows)
+      return mapRegistrationClassOptions(classes)
     }).then((result) => {
       if (generation === cacheGeneration && requestEpoch === (completedClassEpochs.get(cacheKey) || 0)) {
         completedClassCache.set(cacheKey, result)

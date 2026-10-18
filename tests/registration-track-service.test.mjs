@@ -564,6 +564,7 @@ function createClient({ queryHandler, rpcHandler } = {}) {
       order: [],
       limit: null,
       limits: [],
+      range: null,
       signal: null,
       retryEnabled: null,
       single: false,
@@ -626,6 +627,10 @@ function createClient({ queryHandler, rpcHandler } = {}) {
       limit(value, options) {
         query.limits.push([value, options]);
         if (!options?.referencedTable && !options?.foreignTable) query.limit = value;
+        return fluent;
+      },
+      range(from, to) {
+        query.range = [from, to];
         return fluent;
       },
       single() {
@@ -5465,4 +5470,57 @@ test('008 classes deadline allows retry and cannot cache a late success', async 
   assert.strictEqual(await service.loadCompletedClassOptions({ viewerId: 'actor-a' }), fresh);
   assert.equal(fresh[0].id, 'fresh');
   assert.equal(harness.queries.length, 2);
+});
+
+test('008 completed class pages preserve labels beyond thirty with explicit request bounds', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const data = Array.from({ length: 65 }, (_, index) => ({ id: `class-${index}`, name: `수업 ${index}`, status: 'active' }));
+  const harness = createClient({ queryHandler(query) {
+    return { data: data.slice(query.range[0], query.range[1] + 1), error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const result = await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.deepEqual(Array.from(result, row => row.id), data.map(row => row.id));
+  assert.deepEqual(harness.queries.map(query => query.range), [[0, 29], [30, 59], [60, 89]]);
+  for (const query of harness.queries) {
+    assert.equal(query.table, 'classes');
+    assert.equal(query.limit, 30);
+    assert.deepEqual(JSON.parse(JSON.stringify(query.order)), [['id', { ascending: true }]]);
+    assert.equal(query.retryEnabled, false);
+    assert.ok(query.signal instanceof AbortSignal);
+  }
+});
+
+test('008 later class page failure cannot cache a partial catalog and retry starts from zero', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const data = Array.from({ length: 31 }, (_, index) => ({ id: `class-${index}`, name: `수업 ${index}` }));
+  let fail = true;
+  const harness = createClient({ queryHandler(query) {
+    if (fail && query.range[0] === 30) return { data: null, error: new Error('second page unavailable') };
+    return { data: data.slice(query.range[0], query.range[1] + 1), error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.loadCompletedClassOptions({ viewerId: 'actor-a' }), /second page unavailable/);
+  fail = false;
+  const result = await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.equal(result.length, 31);
+  assert.deepEqual(harness.queries.map(query => query.range[0]), [0, 30, 0, 30]);
+  assert.strictEqual(await service.loadCompletedClassOptions({ viewerId: 'actor-a' }), result);
+  assert.equal(harness.queries.length, 4);
+});
+
+test('008 column fallback restarts class pagination without retaining an earlier partial projection', async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const data = Array.from({ length: 31 }, (_, index) => ({ id: `class-${index}`, name: `현재 ${index}` }));
+  const harness = createClient({ queryHandler(query) {
+    if (query.columns.endsWith(',status')) return query.range[0] === 0
+      ? { data: data.slice(0, 30).map(row => ({ ...row, name: '이전 projection' })), error: null }
+      : { data: null, error: { code: '42703', message: 'column status does not exist' } };
+    return { data: data.slice(query.range[0], query.range[1] + 1), error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const result = await service.loadCompletedClassOptions({ viewerId: 'actor-a' });
+  assert.deepEqual(Array.from(result, row => row.label), data.map(row => row.name));
+  assert.deepEqual(harness.queries.map(query => query.range[0]), [0, 30, 0, 30]);
+  assert.equal(new Set(Array.from(result, row => row.id)).size, 31);
 });
