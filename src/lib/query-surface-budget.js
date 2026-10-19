@@ -22,6 +22,9 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_operations_calendar_range_v1",
   "get_operations_annual_board_v1",
   "get_academic_event_detail_v1",
+  // One selected-event atomic move returns one JSONB receipt, not a page.
+  // The standard 8s deadline and retry(false) remain mandatory.
+  "move_academic_event_dates_v1",
   "get_class_schedule_v1",
   "get_class_schedule_defaults_v1",
   "get_operations_class_lesson_design_detail_v1",

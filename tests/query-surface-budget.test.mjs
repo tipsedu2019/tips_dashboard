@@ -597,6 +597,45 @@ test("query budget allows the exact atomic class-close scalar RPC with bounded r
   assert.deepEqual(result, { ok: true, violations: [] })
 })
 
+const academicMoveRpcFile = "src/features/operations/academic-calendar-move-rpc.js"
+const academicMoveRpcSource = () => readFile(new URL(`../${academicMoveRpcFile}`, import.meta.url), "utf8")
+const inspectAcademicMoveRpc = (source) => inspectQuerySurfaceSource({
+  surface: "operations", file: academicMoveRpcFile, source,
+}).map((violation) => violation.reason).sort()
+
+test("query budget accepts the actual atomic calendar move helper as a single receipt RPC", async () => {
+  const source = await academicMoveRpcSource()
+  assert.match(source, /\.rpc\(['"]move_academic_event_dates_v1['"], params\)/)
+  assert.deepEqual(inspectAcademicMoveRpc(source), [])
+})
+
+test("atomic calendar move scalar recognition still requires the standard timeout", async () => {
+  const source = await academicMoveRpcSource()
+  for (const replacement of ["", ".abortSignal(AbortSignal.timeout(20_000))", ".abortSignal(signal)"]) {
+    const candidate = source.replace(".abortSignal(AbortSignal.timeout(8_000))", replacement)
+    assert.notEqual(candidate, source, "the negative fixture must alter the actual helper")
+    assert.deepEqual(inspectAcademicMoveRpc(candidate), ["list_abort_signal_missing"])
+  }
+})
+
+test("atomic calendar move scalar recognition still requires explicit retry false", async () => {
+  const source = await academicMoveRpcSource()
+  for (const replacement of ["", ".retry(true)", ".retry(shouldRetry)"]) {
+    const candidate = source.replace(".retry(false)", replacement)
+    assert.notEqual(candidate, source, "the negative fixture must alter the actual helper")
+    assert.deepEqual(inspectAcademicMoveRpc(candidate), ["list_retry_false_missing"])
+  }
+})
+
+test("calendar move receipt classification does not exempt similar RPC names", async () => {
+  const source = await academicMoveRpcSource()
+  for (const name of ["move_academic_event_dates_v2", "move_academic_event_dates_v1_page", "list_move_academic_event_dates_v1"]) {
+    const candidate = source.replace("move_academic_event_dates_v1", name)
+    assert.notEqual(candidate, source, "the negative fixture must change the exact RPC name")
+    assert.deepEqual(inspectAcademicMoveRpc(candidate), ["rpc_page_limit_missing"])
+  }
+})
+
 test("query budget allows exact operations scalar and internally bounded catalog RPCs", async () => {
   const result = await verifyFixture({
     surface: "operations",
