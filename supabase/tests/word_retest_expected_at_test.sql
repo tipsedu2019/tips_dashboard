@@ -65,6 +65,35 @@ select ok(
   '인증 사용자는 전용 변경 marker를 직접 만들 수 없다'
 );
 
+-- Reserve the fixed catalogs before signup creates its profile/catalog links.
+insert into public.teacher_catalogs(id, name, account_email)
+values
+  ('82000000-0000-4000-8000-000000000011'::uuid, 'Expected At 연결 교사',
+    '82000000-0000-4000-8000-000000000004@word-retest-expected-at.example.invalid'),
+  ('82000000-0000-4000-8000-000000000012'::uuid, 'Expected At 조교 연결',
+    '82000000-0000-4000-8000-000000000006@word-retest-expected-at.example.invalid'),
+  ('82000000-0000-4000-8000-000000000013'::uuid, 'Expected At 이름만 같은 교사',
+    '82000000-0000-4000-8000-000000000007@word-retest-expected-at.example.invalid')
+on conflict (id) do update set account_email = excluded.account_email;
+
+insert into auth.users(
+  id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data
+)
+select
+  fixture.id, 'authenticated', 'authenticated',
+  fixture.id::text || '@word-retest-expected-at.example.invalid', pg_catalog.now(), '{}'::jsonb, '{}'::jsonb
+from (values
+  ('82000000-0000-4000-8000-000000000001'::uuid),
+  ('82000000-0000-4000-8000-000000000002'::uuid),
+  ('82000000-0000-4000-8000-000000000003'::uuid),
+  ('82000000-0000-4000-8000-000000000004'::uuid),
+  ('82000000-0000-4000-8000-000000000005'::uuid),
+  ('82000000-0000-4000-8000-000000000006'::uuid),
+  ('82000000-0000-4000-8000-000000000007'::uuid)
+) fixture(id)
+where true
+on conflict (id) do nothing;
+
 insert into public.profiles(id, role)
 values
   ('82000000-0000-4000-8000-000000000001'::uuid, 'admin'),
@@ -76,26 +105,31 @@ values
   ('82000000-0000-4000-8000-000000000007'::uuid, 'teacher')
 on conflict (id) do update set role = excluded.role;
 
-insert into public.teacher_catalogs(id, name, profile_id)
+-- Restore the original fixture roles after confirmed signup defaults to viewer.
+insert into public.teacher_catalogs(id, name, profile_id, dashboard_role)
 values
   (
     '82000000-0000-4000-8000-000000000011'::uuid,
     'Expected At 연결 교사',
-    '82000000-0000-4000-8000-000000000004'::uuid
+    '82000000-0000-4000-8000-000000000004'::uuid,
+    'teacher'
   ),
   (
     '82000000-0000-4000-8000-000000000012'::uuid,
     'Expected At 조교 연결',
-    '82000000-0000-4000-8000-000000000006'::uuid
+    '82000000-0000-4000-8000-000000000006'::uuid,
+    'teacher'
   ),
   (
     '82000000-0000-4000-8000-000000000013'::uuid,
     'Expected At 이름만 같은 교사',
-    '82000000-0000-4000-8000-000000000007'::uuid
+    '82000000-0000-4000-8000-000000000007'::uuid,
+    'teacher'
   )
 on conflict (id) do update set
   name = excluded.name,
-  profile_id = excluded.profile_id;
+  profile_id = excluded.profile_id,
+  dashboard_role = excluded.dashboard_role;
 
 create temporary table expected_at_fixtures (
   fixture_key text primary key,
@@ -105,6 +139,7 @@ create temporary table expected_at_fixtures (
   teacher_name text not null,
   fixture_group text not null
 ) on commit drop;
+grant select on expected_at_fixtures to authenticated;
 
 insert into expected_at_fixtures(
   fixture_key, status, teacher_catalog_id, teacher_name, fixture_group
@@ -560,7 +595,7 @@ select throws_ok($$
     (select task_id from expected_at_fixtures where fixture_key = 'matrix_requested'),
     '82000000-0000-4000-8000-000000000106'::uuid
   )
-$$, '42501', 'word_retest_expected_only_required',
+$$, '42501', 'ops_task_delete_forbidden',
   '연결 teacher는 조교 단계의 단어 재시험을 삭제할 수 없다');
 
 select lives_ok($$
@@ -636,6 +671,7 @@ select
 from public.ops_tasks task
 join public.ops_word_retests detail on detail.task_id = task.id
 where task.id = (select task_id from expected_at_fixtures where fixture_key = 'semantic');
+grant select on expected_semantic_snapshot to authenticated;
 
 select pg_catalog.set_config(
   'request.jwt.claims',

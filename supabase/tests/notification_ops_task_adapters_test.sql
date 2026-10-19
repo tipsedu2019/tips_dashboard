@@ -28,6 +28,30 @@ select is_empty($$
     and rule.enabled
 $$, '일반 업무와 단어 재시험 규칙은 모두 꺼져 있다');
 
+-- Reserve the fixed catalogs before signup creates its profile/catalog links.
+insert into public.teacher_catalogs(id, name, account_email)
+values
+  ('71000000-0000-4000-8000-000000000005'::uuid, 'Task 15 연결 선생님',
+    '71000000-0000-4000-8000-000000000004@ops-task-adapters.example.invalid'),
+  ('71000000-0000-4000-8000-000000000006'::uuid, 'Task 15 다른 선생님',
+    '71000000-0000-4000-8000-000000000002@ops-task-adapters.example.invalid')
+on conflict (id) do update set account_email = excluded.account_email;
+
+insert into auth.users(
+  id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data
+)
+select
+  fixture.id, 'authenticated', 'authenticated',
+  fixture.id::text || '@ops-task-adapters.example.invalid', pg_catalog.now(), '{}'::jsonb, '{}'::jsonb
+from (values
+  ('71000000-0000-4000-8000-000000000001'::uuid),
+  ('71000000-0000-4000-8000-000000000002'::uuid),
+  ('71000000-0000-4000-8000-000000000003'::uuid),
+  ('71000000-0000-4000-8000-000000000004'::uuid)
+) fixture(id)
+where true
+on conflict (id) do nothing;
+
 insert into public.profiles(id, role)
 values
   ('71000000-0000-4000-8000-000000000001'::uuid, 'admin'),
@@ -36,21 +60,25 @@ values
   ('71000000-0000-4000-8000-000000000004'::uuid, 'teacher')
 on conflict (id) do update set role = excluded.role;
 
-insert into public.teacher_catalogs(id, name, profile_id)
+-- Restore the original fixture roles after confirmed signup defaults to viewer.
+insert into public.teacher_catalogs(id, name, profile_id, dashboard_role)
 values
   (
     '71000000-0000-4000-8000-000000000005'::uuid,
     'Task 15 연결 선생님',
-    '71000000-0000-4000-8000-000000000004'::uuid
+    '71000000-0000-4000-8000-000000000004'::uuid,
+    'teacher'
   ),
   (
     '71000000-0000-4000-8000-000000000006'::uuid,
     'Task 15 다른 선생님',
-    '71000000-0000-4000-8000-000000000002'::uuid
+    '71000000-0000-4000-8000-000000000002'::uuid,
+    'teacher'
   )
 on conflict (id) do update set
   name = excluded.name,
-  profile_id = excluded.profile_id;
+  profile_id = excluded.profile_id,
+  dashboard_role = excluded.dashboard_role;
 
 select ok(
   has_function_privilege('authenticated', 'public.create_ops_task_v2(jsonb,uuid)', 'EXECUTE'),
@@ -87,9 +115,16 @@ select pg_catalog.set_config(
 );
 set local role authenticated;
 
+select lives_ok($$
+  select public.create_ops_task_v2(
+    '{"type":"general","title":"원장 확인","status":"requested"}'::jsonb,
+    '71000000-0000-4000-8000-000000000011'::uuid
+  )
+$$, '일반 업무와 원본·canonical 이벤트를 한 트랜잭션에서 만든다');
+
 select throws_ok($$
   select public.record_ops_task_activity_event_v1(
-    '71000000-0000-4000-8000-000000000099'::uuid,
+    (select task.id from public.ops_tasks task where task.title = '원장 확인'),
     'status_changed',
     'status',
     'requested',
@@ -98,13 +133,6 @@ select throws_ok($$
   )
 $$, '22023', 'ops_task_activity_event_invalid',
   '인증 사용자도 공개 activity RPC로 파생 상태 이벤트를 만들 수 없다');
-
-select lives_ok($$
-  select public.create_ops_task_v2(
-    '{"type":"general","title":"원장 확인","status":"requested"}'::jsonb,
-    '71000000-0000-4000-8000-000000000011'::uuid
-  )
-$$, '일반 업무와 원본·canonical 이벤트를 한 트랜잭션에서 만든다');
 
 select is(
   (
@@ -482,7 +510,7 @@ select throws_ok($$
     (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
     '71000000-0000-4000-8000-000000000035'::uuid
   )
-$$, '42501', 'word_retest_expected_only_required',
+$$, '42501', 'ops_task_delete_forbidden',
   '연결 교사는 조교 담당 단계의 단어 재시험을 삭제할 수 없다');
 
 select pg_catalog.set_config(
@@ -969,7 +997,7 @@ select throws_ok($$
     ),
     '72000000-0000-4000-8000-000000000211'::uuid
   )
-$$, '40001', 'word_retest_retry_conflict',
+$$, '23514', 'word_retest_retry_conflict',
   '완료 미응시 원본의 다른 요청 ID 후속 생성은 충돌로 거부된다');
 
 insert into word_retest_reretry_results(attempt_key, response)
@@ -1041,7 +1069,7 @@ select throws_ok($$
     ),
     '72000000-0000-4000-8000-000000000202'::uuid
   )
-$$, '40001', 'word_retest_retry_conflict',
+$$, '23514', 'word_retest_retry_conflict',
   '같은 원본의 다른 요청 ID 후속 생성은 충돌로 거부된다');
 
 insert into word_retest_reretry_results(attempt_key, response)
@@ -1282,13 +1310,25 @@ select results_eq(
 );
 set local role authenticated;
 
+-- Starting and reporting absence are assistant-stage actions.
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000003","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000003',
+  true
+);
+
 select lives_ok($$
   select public.report_word_retest_absent_v1(
     '72000000-0000-4000-8000-000000000109'::uuid,
     'deadline',
     '72000000-0000-4000-8000-000000000221'::uuid
   )
-$$, '연결되지 않은 기본 재시험의 기존 자동 미응시 처리는 유지된다');
+$$, '실제 조교의 기본 재시험 자동 미응시 처리는 유지된다');
 
 select results_eq(
   $$
@@ -1311,7 +1351,7 @@ select lives_ok($$
     ),
     '72000000-0000-4000-8000-000000000206'::uuid
   )
-$$, '연결 자식도 일반 시험 시작 전이를 사용할 수 있다');
+$$, '실제 조교는 연결 자식도 일반 시험 시작 전이를 사용할 수 있다');
 
 select lives_ok($$
   select public.report_word_retest_absent_v1(
@@ -1319,7 +1359,19 @@ select lives_ok($$
     'manual',
     '72000000-0000-4000-8000-000000000207'::uuid
   )
-$$, '시작한 연결 자식의 수동 미응시 처리는 유지된다');
+$$, '실제 조교의 시작한 연결 자식 수동 미응시 처리는 유지된다');
+
+-- Return to the linked teacher for the follow-up retry action.
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000004","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000004',
+  true
+);
 
 insert into word_retest_reretry_results(attempt_key, response)
 select 'middle-outgoing', public.retry_word_retest_v1(
