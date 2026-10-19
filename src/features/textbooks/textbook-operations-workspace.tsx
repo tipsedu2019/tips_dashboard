@@ -96,6 +96,7 @@ import {
   normalizeBarcodeValue,
 } from "./textbook-ledger.js";
 import { textbookService } from "./textbook-service";
+import { createPurchaseAttempt, discardUnwrittenPurchaseAttempt, finishPurchaseAttempt, readPurchaseAttempt, resumePurchaseAttempt, savePurchaseAttempt, type PurchaseAttempt } from "./textbook-purchase-retry";
 import { getTextbookInventoryBalance, getTextbookPurchaseDetail, getTextbookSaleDetail } from "./textbook-read-service";
 import { getTextbookInactiveCleanupContext } from "./textbook-reference-service";
 import { getClassTextbookSaleContext, getTextbookBillingHandoff, getTextbookPurchaseHandoff } from "./textbook-work-context-service";
@@ -922,9 +923,11 @@ function TextbookOperationsWorkspaceContent() {
   const confirmationPendingRef = useRef(false);
   const [purchaseForm, setPurchaseForm, replacePurchaseForm, applyPurchaseDefaults, purchaseFormDirty] = useTextbookFormDraft(emptyPurchaseForm);
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
+  const [purchaseAttempt, setPurchaseAttempt] = useState<PurchaseAttempt | null>(null);
   const [purchaseRequestInputMode, setPurchaseRequestInputMode] = useState<"catalog" | "manual">("catalog");
   const purchaseAutoDefaultsRef = useRef({ title: "", supplierId: "", unitCost: "", requestBy: "", locationId: "" });
   const [selectedPurchaseLineId, setSelectedPurchaseLineId] = useState("");
+  const purchaseRetryActive = Boolean(purchaseAttempt && !selectedPurchaseLineId && purchaseForm.requestStage !== "request");
   const [selectedPurchaseScopeLineIds, setSelectedPurchaseScopeLineIds] = useState<Record<TextbookCopyScope, string>>({ student: "", teacher: "" });
   const [selectedPurchaseLineIds, setSelectedPurchaseLineIds] = useState<string[]>([]);
   const [bulkOrderDialogOpen, setBulkOrderDialogOpen] = useState(false);
@@ -1165,7 +1168,7 @@ function TextbookOperationsWorkspaceContent() {
   };
   useEffect(() => {
     const resolved = acceptedSelectedBook;
-    if (!purchaseDialogOpen || !resolved) return;
+    if (!purchaseDialogOpen || !resolved || purchaseRetryActive) return;
     const supplierId = resolved.configuredSupplierId;
     const supplierRows = resolved.supplier ? [resolved.supplier] : [];
     applyPurchaseDefaults((current) => {
@@ -1188,11 +1191,11 @@ function TextbookOperationsWorkspaceContent() {
         unitCost: canSetUnitCost ? nextUnitCost : current.unitCost,
       };
     });
-  }, [acceptedSelectedBook, applyPurchaseDefaults, purchaseDialogOpen, purchaseRequestInputMode]);
+  }, [acceptedSelectedBook, applyPurchaseDefaults, purchaseDialogOpen, purchaseRequestInputMode, purchaseRetryActive]);
   useEffect(() => {
     const resolved = acceptedSelectedClass;
     if (!resolved) return;
-    if (purchaseDialogOpen && purchaseForm.classId === resolved.id) {
+    if (purchaseDialogOpen && !purchaseRetryActive && purchaseForm.classId === resolved.id) {
       const nextTeacher = resolved.defaultTeacherName;
       const nextLocation = resolved.inferredLocation?.id || "";
       applyPurchaseDefaults((current) => {
@@ -1215,7 +1218,7 @@ function TextbookOperationsWorkspaceContent() {
         return canSetLocation ? { ...current, locationId: resolved.inferredLocation?.id || current.locationId } : current;
       });
     }
-  }, [acceptedSelectedClass, applyPurchaseDefaults, applySaleDefaults, purchaseDialogOpen, purchaseForm.classId, saleDialogOpen, saleForm.classId]);
+  }, [acceptedSelectedClass, applyPurchaseDefaults, applySaleDefaults, purchaseDialogOpen, purchaseForm.classId, purchaseRetryActive, saleDialogOpen, saleForm.classId]);
   useEffect(() => {
     const row = acceptedMasterDetail?.row;
     if (!row) return;
@@ -1232,7 +1235,7 @@ function TextbookOperationsWorkspaceContent() {
   }, [acceptedPurchaseDetail, selectedPurchaseDetail]);
   useEffect(() => {
     if (activeTab === "inventory" && inventoryDefaultLocationId) setInventoryCountLocationId((current) => current || inventoryDefaultLocationId);
-    if (purchaseDialogOpen && inventoryDefaultLocationId) applyPurchaseDefaults((current) => {
+    if (purchaseDialogOpen && !purchaseRetryActive && inventoryDefaultLocationId) applyPurchaseDefaults((current) => {
       if (current.locationId) return current;
       purchaseAutoDefaultsRef.current.locationId = inventoryDefaultLocationId;
       return { ...current, locationId: inventoryDefaultLocationId };
@@ -1242,7 +1245,7 @@ function TextbookOperationsWorkspaceContent() {
       saleAutoDefaultsRef.current.locationId = inventoryDefaultLocationId;
       return { ...current, locationId: inventoryDefaultLocationId };
     });
-  }, [activeTab, applyPurchaseDefaults, applySaleDefaults, inventoryDefaultLocationId, purchaseDialogOpen, saleDialogOpen]);
+  }, [activeTab, applyPurchaseDefaults, applySaleDefaults, inventoryDefaultLocationId, purchaseDialogOpen, purchaseRetryActive, saleDialogOpen]);
   const preparedInventoryLocationId = inventoryCountLocationId || inventoryLocationReference.defaultLocationId;
   const selectInventoryCountLocation = useCallback((locationId: string) => {
     setInventoryCountLocationId(locationId);
@@ -1766,6 +1769,7 @@ function TextbookOperationsWorkspaceContent() {
     : purchaseForm.requestStage === "receive" && !purchaseReceivedTotalQuantity ? "입고 수량을 입력하세요."
     : "";
   function setPurchaseField(name: string, value: string) {
+    if (purchaseRetryActive || saving === "purchase") return;
     setPurchaseForm((current) => {
       if (name === "textbookId") {
         return {
@@ -1852,6 +1856,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function settlePurchaseTextField(name: "requestedTextbookTitle" | "statementNumber") {
+    if (purchaseRetryActive || saving === "purchase") return;
     setPurchaseForm((current) => ({ ...current, [name]: normalizeStoredTextInput(current[name]) }));
   }
 
@@ -2027,7 +2032,16 @@ function TextbookOperationsWorkspaceContent() {
       clearTransientTextbookFeedback();
       setSelectedPurchaseLineId("");
       setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
-      replacePurchaseForm({ ...emptyPurchaseForm, requestStage: "order" });
+      try {
+        const pending = readPurchaseAttempt(currentUserId, window.sessionStorage);
+        if (purchaseAttempt && (!pending || pending.id !== purchaseAttempt.id)) throw new Error("textbook_purchase_retry_storage");
+        setPurchaseAttempt(pending);
+        replacePurchaseForm(pending ? pending.draft as typeof emptyPurchaseForm : { ...emptyPurchaseForm, requestStage: "order" });
+      } catch (error) {
+        setActionErrorOwner("purchase");
+        setActionErrorMessage(getTextbookActionErrorMessage(error));
+        return;
+      }
       setPurchaseRequestInputMode("catalog");
       setMessage("");
       setPurchaseDialogOpen(true);
@@ -2073,7 +2087,7 @@ function TextbookOperationsWorkspaceContent() {
       resetPurchaseForm();
       closeTextbookDetail("purchase");
       window.setTimeout(() => setPurchaseDialogOpen(false), 0);
-    }, { skipConfirmation: !(purchaseDraftDirty) });
+    }, { skipConfirmation: purchaseRetryActive || !(purchaseDraftDirty) });
   }
 
   function closeSaleDialog() {
@@ -3019,6 +3033,7 @@ function TextbookOperationsWorkspaceContent() {
       scopeLineIds: { ...selectedPurchaseScopeLineIds },
     } : null;
     const expectedPurchaseDirect = purchaseDirectIdentity;
+    let completedNewPurchaseAttemptId = "";
     const isCurrentPurchaseAction = () => liveActionInputsRef.current.purchase === expectedPurchaseForm
       && liveActionInputsRef.current.purchaseDirect === expectedPurchaseDirect;
     void runAction(
@@ -3050,7 +3065,33 @@ function TextbookOperationsWorkspaceContent() {
               createdBy: currentUserId,
             }];
           });
-          for (const purchasePayload of newPurchasePayloads) await textbookService.createPurchaseReceipt(purchasePayload);
+          const expectedActorKey = actorKey;
+          const assertCurrent = () => {
+            assertLivePreparedSchemaReady();
+            if (!isCurrentActionActor(expectedActorKey)) throw new Error("textbook_purchase_retry_invalid");
+          };
+          assertCurrent();
+          const storedAttempt = readPurchaseAttempt(currentUserId, window.sessionStorage);
+          if (purchaseAttempt && (!storedAttempt || storedAttempt.id !== purchaseAttempt.id)) {
+            throw new Error("textbook_purchase_retry_storage");
+          }
+          const attempt = storedAttempt || createPurchaseAttempt(newPurchasePayloads, currentUserId, purchaseForm);
+          completedNewPurchaseAttemptId = attempt.id;
+          const checkpoint = (next: PurchaseAttempt) => {
+            savePurchaseAttempt(next, window.sessionStorage);
+            if (isCurrentActionActor(expectedActorKey)) setPurchaseAttempt(next);
+          };
+          checkpoint(attempt);
+          try {
+            await resumePurchaseAttempt(attempt, { actorId: currentUserId, checkpoint, assertCurrent });
+          } catch (error) {
+            // Only an entirely unsent/rolled-back form may become editable again.
+            if (attempt.steps.every(step => step.state === "ready")) {
+              discardUnwrittenPurchaseAttempt(attempt, window.sessionStorage);
+              if (isCurrentActionActor(expectedActorKey)) setPurchaseAttempt(null);
+            }
+            throw error;
+          }
           return;
         }
         if (!directSnapshot) throw new Error("구매 작업 대상을 찾을 수 없습니다.");
@@ -3102,6 +3143,17 @@ function TextbookOperationsWorkspaceContent() {
       isCurrentPurchaseAction,
     ).then((ok) => {
       if (ok) {
+        if (!selectedPurchaseLineId) {
+          try {
+            const completed = readPurchaseAttempt(currentUserId, window.sessionStorage);
+            if (!completed || completed.id !== completedNewPurchaseAttemptId) throw new Error("textbook_purchase_retry_storage");
+            finishPurchaseAttempt(completed, window.sessionStorage);
+            setPurchaseAttempt(null);
+          } catch (error) {
+            setActionErrorMessage(getTextbookActionErrorMessage(error));
+            return;
+          }
+        }
         showSavedPurchaseFlow(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook);
         setPurchaseDialogOpen(false);
         setSelectedPurchaseLineId("");
@@ -4183,11 +4235,11 @@ function TextbookOperationsWorkspaceContent() {
           onSubmit={submitPurchase}
           onCancel={closePurchaseDialog}
           cancelLabel="교재 요청·주문 창 닫기"
-          submitLabel={selectedPurchaseLineId ? "변경 저장" : purchaseActionLabel(purchaseForm.requestStage)}
+          submitLabel={purchaseRetryActive ? "이어서 저장" : selectedPurchaseLineId ? "변경 저장" : purchaseActionLabel(purchaseForm.requestStage)}
           submitDisabled={purchaseSubmitDisabled}
           busy={saving === "purchase"}
           error={actionErrorOwner === "purchase" ? actionErrorMessage : ""}
-          hint={purchaseSubmitHint}
+          hint={purchaseRetryActive ? "입력과 저장된 내역을 보존했습니다. 이 탭에서 이어서 저장하세요." : purchaseSubmitHint}
         >
             {purchaseReferenceError ? (
               <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3">
@@ -4204,6 +4256,7 @@ function TextbookOperationsWorkspaceContent() {
                   <Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.selectedBook.retry(); }}>다시 시도</Button>
                 </AlertDescription></Alert>
               ) : null}
+          <fieldset disabled={purchaseRetryActive || saving === "purchase"} className="grid min-w-0 gap-4 [&>*]:min-w-0 [&>*]:max-w-full">
             {purchaseForm.requestStage === "request" ? (
               <div className="grid gap-3">
                 <section className="grid gap-2 rounded-lg border bg-muted/20 p-3">
@@ -4478,6 +4531,7 @@ function TextbookOperationsWorkspaceContent() {
                 aria-label="요청 메모"
               />
             </Field>
+          </fieldset>
         </FormDialogContent>
       </Dialog>
       ) : null}
