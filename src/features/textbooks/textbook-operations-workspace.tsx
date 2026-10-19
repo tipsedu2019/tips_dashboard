@@ -3,7 +3,7 @@ import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, d
 import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
 
-import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type SetStateAction } from "react";
+import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type SetStateAction } from "react";
 import { useSearchParams } from "next/navigation";
 import { useDraftNavigation } from "@/hooks/use-draft-navigation";
 import { pushLocalHistoryState } from "@/lib/unsaved-history-fallback";
@@ -434,6 +434,10 @@ function getPurchaseScopeQuantity(draft: PurchaseKanbanDraft | typeof emptyPurch
   const prefix = scope === "teacher" ? "teacher" : "student";
   const fieldName = `${prefix}${kind[0].toUpperCase()}${kind.slice(1)}Quantity` as keyof typeof emptyPurchaseForm;
   return text((draft as Record<string, unknown>)[fieldName]);
+}
+
+function purchaseOrderQuantityError(scope: TextbookCopyScope) {
+  return `기존 ${scope === "student" ? "학생용" : "교사용"} 주문 수량은 1권 이상 입력하세요.`;
 }
 
 function normalizeInlineTextInput(value: unknown) {
@@ -929,6 +933,7 @@ function TextbookOperationsWorkspaceContent() {
   const [selectedPurchaseLineId, setSelectedPurchaseLineId] = useState("");
   const purchaseRetryActive = Boolean(purchaseAttempt && !selectedPurchaseLineId && purchaseForm.requestStage !== "request");
   const [selectedPurchaseScopeLineIds, setSelectedPurchaseScopeLineIds] = useState<Record<TextbookCopyScope, string>>({ student: "", teacher: "" });
+  const purchaseQuantityErrorId = useId();
   const [selectedPurchaseLineIds, setSelectedPurchaseLineIds] = useState<string[]>([]);
   const [bulkOrderDialogOpen, setBulkOrderDialogOpen] = useState(false);
   const [bulkOrderQuantities, setBulkOrderQuantities, replaceBulkOrderQuantities, , bulkOrderFormDirty] = useTextbookFormDraft<Record<string, string>>({});
@@ -1751,13 +1756,22 @@ function TextbookOperationsWorkspaceContent() {
   const purchaseClassAccepted = !purchaseForm.classId || acceptedSelectedClass?.id === purchaseForm.classId;
   const purchaseLocationAccepted = Boolean(purchaseForm.locationId && acceptedSelectedLocation?.id === purchaseForm.locationId);
   const purchaseBalanceAccepted = purchaseForm.requestStage === "request" || Boolean(acceptedPurchaseBalance);
+  const purchaseOrderQuantityErrors = (["student", "teacher"] as TextbookCopyScope[]).reduce<Record<TextbookCopyScope, string>>((errors, scope) => {
+    if (selectedPurchaseLineId && purchaseForm.requestStage === "order" && selectedPurchaseScopeLineIds[scope]) {
+      const orderedQuantity = normalizePurchaseQuantityField(`${scope}OrderedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "ordered"))
+        || normalizePurchaseQuantityField(`${scope}RequestedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "requested"));
+      if (numberValue(orderedQuantity) <= 0) errors[scope] = purchaseOrderQuantityError(scope);
+    }
+    return errors;
+  }, { student: "", teacher: "" });
+  const hasPurchaseOrderQuantityError = Boolean(purchaseOrderQuantityErrors.student || purchaseOrderQuantityErrors.teacher);
   const purchaseSubmitDisabled = schemaDisabled ||
     saving === "purchase" ||
     !purchaseBookAccepted || !purchaseClassAccepted || !purchaseLocationAccepted || !purchaseBalanceAccepted ||
     (purchaseForm.requestStage === "request" && !purchaseRequestTitle) ||
     (purchaseForm.requestStage !== "request" && !selectedPurchaseTextbookId) ||
     (purchaseForm.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId) ||
-    (purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity) ||
+    (purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity && !hasPurchaseOrderQuantityError) ||
     (purchaseForm.requestStage === "receive" && !purchaseReceivedTotalQuantity);
   const purchaseSubmitHint = schemaDisabled ? "교재 정보를 다시 불러온 뒤 저장하세요."
     : !purchaseRequestTitle ? (purchaseForm.requestStage === "request" ? "교재를 선택하거나 교재명을 입력하세요." : "교재를 선택하세요.")
@@ -1765,7 +1779,7 @@ function TextbookOperationsWorkspaceContent() {
     : purchaseReferenceError ? "조회 오류를 해결한 뒤 저장하세요."
     : !purchaseBookAccepted || !purchaseClassAccepted || !purchaseLocationAccepted || !purchaseBalanceAccepted ? "선택한 교재와 위치를 확인하고 있습니다."
     : purchaseForm.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId ? "요청 수량을 입력하세요."
-    : purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity ? "주문 수량을 입력하세요."
+    : purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity && !hasPurchaseOrderQuantityError ? "주문 수량을 입력하세요."
     : purchaseForm.requestStage === "receive" && !purchaseReceivedTotalQuantity ? "입고 수량을 입력하세요."
     : "";
   function setPurchaseField(name: string, value: string) {
@@ -2988,6 +3002,12 @@ function TextbookOperationsWorkspaceContent() {
   function submitPurchase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (purchaseSubmitDisabled) return;
+    if (hasPurchaseOrderQuantityError) {
+      setActionErrorMessage("");
+      const scope = purchaseOrderQuantityErrors.student ? "student" : "teacher";
+      event.currentTarget.querySelector<HTMLInputElement>(`[name="${scope}OrderedQuantity"]`)?.focus();
+      return;
+    }
     setActionErrorOwner("purchase");
     const completedPurchaseStage = purchaseForm.requestStage;
     const completedPurchaseTitle = purchaseRequestTitle;
@@ -3113,6 +3133,8 @@ function TextbookOperationsWorkspaceContent() {
             ? normalizePurchaseQuantityField(`${scope}ReceivedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "received")) || orderedQuantity : "";
           const stageQuantity = purchaseForm.requestStage === "receive" ? numberValue(receivedQuantity)
             : purchaseForm.requestStage === "order" ? numberValue(orderedQuantity) : numberValue(requestedQuantity);
+          // Validate every existing scope before the write loop; zero is not a delete operation.
+          if (stageQuantity <= 0 && purchaseForm.requestStage === "order") throw new Error(purchaseOrderQuantityError(scope));
           if (stageQuantity <= 0 && purchaseForm.requestStage !== "request") return [];
           return [{
             ...purchaseForm,
@@ -4473,10 +4495,12 @@ function TextbookOperationsWorkspaceContent() {
                 {purchaseFieldVisibility.orderedQuantity ? (
                   <>
                     <Field label="학생용 주문">
-                      <Input value={purchaseForm.studentOrderedQuantity} onChange={(event) => setPurchaseField("studentOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 주문 수량" />
+                      <Input name="studentOrderedQuantity" value={purchaseForm.studentOrderedQuantity} onChange={(event) => setPurchaseField("studentOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 주문 수량" aria-invalid={Boolean(purchaseOrderQuantityErrors.student)} aria-describedby={purchaseOrderQuantityErrors.student ? `${purchaseQuantityErrorId}-student` : undefined} />
+                      {purchaseOrderQuantityErrors.student ? <p id={`${purchaseQuantityErrorId}-student`} role="alert" className="text-sm text-destructive">{purchaseOrderQuantityErrors.student}</p> : null}
                     </Field>
                     <Field label="교사용 주문">
-                      <Input value={purchaseForm.teacherOrderedQuantity} onChange={(event) => setPurchaseField("teacherOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 주문 수량" />
+                      <Input name="teacherOrderedQuantity" value={purchaseForm.teacherOrderedQuantity} onChange={(event) => setPurchaseField("teacherOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 주문 수량" aria-invalid={Boolean(purchaseOrderQuantityErrors.teacher)} aria-describedby={purchaseOrderQuantityErrors.teacher ? `${purchaseQuantityErrorId}-teacher` : undefined} />
+                      {purchaseOrderQuantityErrors.teacher ? <p id={`${purchaseQuantityErrorId}-teacher`} role="alert" className="text-sm text-destructive">{purchaseOrderQuantityErrors.teacher}</p> : null}
                     </Field>
                   </>
                 ) : null}
