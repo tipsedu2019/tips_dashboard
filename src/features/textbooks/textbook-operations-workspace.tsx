@@ -3005,7 +3005,9 @@ function TextbookOperationsWorkspaceContent() {
     if (hasPurchaseOrderQuantityError) {
       setActionErrorMessage("");
       const scope = purchaseOrderQuantityErrors.student ? "student" : "teacher";
-      event.currentTarget.querySelector<HTMLInputElement>(`[name="${scope}OrderedQuantity"]`)?.focus();
+      const invalidInput = event.currentTarget.querySelector<HTMLInputElement>(`[name="${scope}OrderedQuantity"]`);
+      invalidInput?.focus({ preventScroll: true });
+      invalidInput?.parentElement?.scrollIntoView({ block: "center" });
       return;
     }
     setActionErrorOwner("purchase");
@@ -4495,11 +4497,11 @@ function TextbookOperationsWorkspaceContent() {
                 {purchaseFieldVisibility.orderedQuantity ? (
                   <>
                     <Field label="학생용 주문">
-                      <Input name="studentOrderedQuantity" value={purchaseForm.studentOrderedQuantity} onChange={(event) => setPurchaseField("studentOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 주문 수량" aria-invalid={Boolean(purchaseOrderQuantityErrors.student)} aria-describedby={purchaseOrderQuantityErrors.student ? `${purchaseQuantityErrorId}-student` : undefined} />
+                      <Input value={purchaseForm.studentOrderedQuantity} onChange={(event) => setPurchaseField("studentOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 주문 수량" name="studentOrderedQuantity" aria-invalid={Boolean(purchaseOrderQuantityErrors.student)} aria-describedby={purchaseOrderQuantityErrors.student ? `${purchaseQuantityErrorId}-student` : undefined} />
                       {purchaseOrderQuantityErrors.student ? <p id={`${purchaseQuantityErrorId}-student`} role="alert" className="text-sm text-destructive">{purchaseOrderQuantityErrors.student}</p> : null}
                     </Field>
                     <Field label="교사용 주문">
-                      <Input name="teacherOrderedQuantity" value={purchaseForm.teacherOrderedQuantity} onChange={(event) => setPurchaseField("teacherOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 주문 수량" aria-invalid={Boolean(purchaseOrderQuantityErrors.teacher)} aria-describedby={purchaseOrderQuantityErrors.teacher ? `${purchaseQuantityErrorId}-teacher` : undefined} />
+                      <Input value={purchaseForm.teacherOrderedQuantity} onChange={(event) => setPurchaseField("teacherOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 주문 수량" name="teacherOrderedQuantity" aria-invalid={Boolean(purchaseOrderQuantityErrors.teacher)} aria-describedby={purchaseOrderQuantityErrors.teacher ? `${purchaseQuantityErrorId}-teacher` : undefined} />
                       {purchaseOrderQuantityErrors.teacher ? <p id={`${purchaseQuantityErrorId}-teacher`} role="alert" className="text-sm text-destructive">{purchaseOrderQuantityErrors.teacher}</p> : null}
                     </Field>
                   </>
