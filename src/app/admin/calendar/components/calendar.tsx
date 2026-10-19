@@ -22,6 +22,8 @@ interface SchoolOption {
   category?: string
 }
 
+export type CalendarMoveContext = { originalEvent: CalendarEvent; isCurrent: () => boolean }
+
 interface CalendarProps {
   navigation?: CalendarNavigation
   readState?: "loading" | "error"
@@ -39,7 +41,7 @@ interface CalendarProps {
   initialQuery?: string
   onSaveEvent?: (eventData: Partial<CalendarEvent>) => boolean | Promise<boolean>
   onDeleteEvent?: (eventId: number | string) => boolean | Promise<boolean>
-  onMoveEvent?: (eventData: Partial<CalendarEvent>) => boolean | Promise<boolean>
+  onMoveEvent?: (eventData: CalendarEvent, context: CalendarMoveContext) => boolean | Promise<boolean>
   onVisibleRangeChange?: (range: { start: Date; end: Date }) => void
   onLoadEventDetail?: (eventId: string) => Promise<CalendarEvent | null>
 }
@@ -128,6 +130,13 @@ export function Calendar({
   const [pendingDetailEvent, setPendingDetailEvent] = useState<CalendarEvent | null>(null)
   const [detailLoadError, setDetailLoadError] = useState("")
   const [detailLoading, setDetailLoading] = useState(false)
+  const [moving, setMoving] = useState(false)
+  const pendingMoveRef = useRef<symbol | null>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false; pendingMoveRef.current = null }
+  }, [])
   const pendingDetailOpenerRef = useRef<CalendarFormOpener | null>(null)
   const formOpenerRef = useRef<CalendarFormOpener | null>(null)
   const displayedDate = navigation?.displayedDate
@@ -373,6 +382,7 @@ export function Calendar({
 
   return (
     <>
+      {moving ? <p role="status" className="mb-3 text-sm text-muted-foreground">학사 일정을 이동하는 중…</p> : null}
       {detailLoadError ? (
         <Alert variant="destructive" className="mb-3">
           <AlertDescription className="flex items-center justify-between gap-3">
@@ -432,6 +442,7 @@ export function Calendar({
               events={visibleEvents}
               initialQuery={initialQuery}
               readOnly={readOnly}
+              moving={moving}
               onEventClick={handleEditEvent}
               onEmptySlotClick={handleNewEvent}
               onRangeSelect={handleNewEventRange}
@@ -440,14 +451,28 @@ export function Calendar({
                 invalidateDetailRequest()
                 setSelectedDate(date)
               }}
-              onEventDrop={readOnly ? undefined : async (_, nextEvent) => {
-                const moved = await onMoveEvent?.(nextEvent)
-                if (moved !== false) {
+              onEventDrop={readOnly ? undefined : async (originalEvent, nextEvent) => {
+                if (!onMoveEvent || pendingMoveRef.current) return false
+                const token = Symbol("academic-move")
+                pendingMoveRef.current = token
+                invalidateDetailRequest()
+                const revision = detailRequestRevisionRef.current
+                const isCurrent = () => mountedRef.current && pendingMoveRef.current === token
+                  && detailRequestRevisionRef.current === revision
+                setMoving(true)
+                try {
+                  const moved = await onMoveEvent(nextEvent, { originalEvent, isCurrent })
+                  if (moved === false || !isCurrent()) return false
                   invalidateDetailRequest()
                   setSelectedDate(nextEvent.date)
                   navigation?.onDateChange(nextEvent.date)
+                  return true
+                } finally {
+                  if (pendingMoveRef.current === token) {
+                    pendingMoveRef.current = null
+                    if (mountedRef.current) setMoving(false)
+                  }
                 }
-                return moved
               }}
             />
           </div>

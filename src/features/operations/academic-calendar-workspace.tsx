@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/app/admin/calendar/components/calendar";
+import type { CalendarMoveContext } from "@/app/admin/calendar/components/calendar";
 import type { CalendarEvent } from "@/app/admin/calendar/types";
 
 import {
@@ -27,6 +28,7 @@ import {
 } from "./academic-event-utils.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 import { buildSevenDayRangeKeys } from "./operations-read-service.js";
+import { buildAcademicCalendarMovePatch } from "./academic-calendar-move.js";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -106,8 +108,19 @@ function buildSidebarGroups(events: Array<Record<string, unknown>>) {
 export function AcademicCalendarWorkspace() {
   const workspaceRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
-  const { canManageAll } = useAuth();
+  const { user, role, loading: authLoading, canManageAll } = useAuth();
+  const actorKey = `${user?.id || ""}:${role}:${authLoading}:${canManageAll}`;
+  const actorScopeRef = useRef({ key: actorKey, revision: 0 });
+  if (actorScopeRef.current.key !== actorKey) {
+    actorScopeRef.current = { key: actorKey, revision: actorScopeRef.current.revision + 1 };
+  }
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [moveNeedsReload, setMoveNeedsReload] = useState(false);
   const [activeScienceAreas, setActiveScienceAreas] = useState<ReturnType<typeof parseActiveScienceSubjectAreas>>([]);
   const initialDate = useMemo(() => parseSearchDate(searchParams.get("date")), [searchParams]);
   const initialEventId = useMemo(() => text(searchParams.get("eventId")), [searchParams]);
@@ -131,6 +144,8 @@ export function AcademicCalendarWorkspace() {
   const requestRange = recoveryRange || visibleRange;
   const request = useMemo(() => ({ mode: "calendar" as const, ...requestRange }), [requestRange]);
   const { data, successfulRequest, loading, densityError, error, refresh, loadEventDetail } = useOperationsWorkspaceData(request);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
   const isSeedCalendar = false;
   // The hook retains the last accepted response and rejects stale requests.
   // Keep its data and range together, including when recovering to seven days.
@@ -260,6 +275,7 @@ export function AcademicCalendarWorkspace() {
   );
 
   const handleSaveEvent = async (eventData: Record<string, unknown>) => {
+    setMoveNeedsReload(false);
     if (!canManageAll) {
       const message = "읽기 전용 상태에서는 학사 일정을 수정할 수 없습니다.";
       setMutationError(message);
@@ -358,7 +374,58 @@ export function AcademicCalendarWorkspace() {
     }
   };
 
+  const handleMoveEvent = async (nextEvent: CalendarEvent, context: CalendarMoveContext) => {
+    const expectedActorRevision = actorScopeRef.current.revision;
+    const isOwnerCurrent = () => mountedRef.current && actorScopeRef.current.revision === expectedActorRevision;
+    const isCurrent = () => context.isCurrent() && isOwnerCurrent();
+    if (!canManageAll || authLoading || !user?.id || !supabase || !isCurrent()) return false;
+    const client = supabase;
+    let writeStarted = false;
+    setMutationError(null);
+    setMoveNeedsReload(false);
+    try {
+      const id = getPersistedAcademicEventId(context.originalEvent.sourceId || context.originalEvent.id);
+      if (!id) throw new Error("academic_move_source_invalid");
+      const detail = await loadEventDetail(id);
+      if (!isCurrent()) return false;
+      const move = buildAcademicCalendarMovePatch(detail, context.originalEvent, nextEvent);
+      // Guard both date and raw note against edits made after the detail read.
+      // A zero-row response is not a successful move; never retry without guards.
+      let query = client.from("academic_events").update(move.patch)
+        .eq("id", move.id).eq("date", move.originalDate);
+      query = move.storedNote === null ? query.is("note", null) : query.eq("note", move.storedNote);
+      writeStarted = true;
+      const result = await query.select("id,date,note").maybeSingle().abortSignal(AbortSignal.timeout(8_000));
+      if (!isOwnerCurrent()) return false;
+      const expectedNote = Object.prototype.hasOwnProperty.call(move.patch, "note") ? move.patch.note : move.storedNote;
+      if (result.error || !result.data || result.data.id !== move.id
+        || result.data.date !== move.patch.date || result.data.note !== expectedNote) {
+        throw new Error("academic_move_unconfirmed");
+      }
+      if (!isCurrent()) {
+        // The request was already sent. Reconcile the user's current range,
+        // without navigating or displaying success for an abandoned gesture.
+        await refreshRef.current();
+        return false;
+      }
+      toast.success("학사 일정을 이동했습니다.");
+      await refreshRef.current();
+      return isCurrent();
+    } catch {
+      if (!isOwnerCurrent() || (!writeStarted && !context.isCurrent())) return false;
+      const message = writeStarted
+        ? "일정 이동 결과를 확인하지 못했습니다. 일정을 다시 불러와 날짜를 확인해 주세요."
+        : "일정 원본을 확인할 수 없습니다. 일정을 다시 불러온 뒤 이동해 주세요.";
+      setMutationError(message);
+      setMoveNeedsReload(true);
+      if (isCurrent()) toast.error(message);
+      else if (writeStarted) await refreshRef.current();
+      return false;
+    }
+  };
+
   const handleDeleteEvent = async (eventId: string | number) => {
+    setMoveNeedsReload(false);
     if (!canManageAll) {
       const message = "읽기 전용 상태에서는 학사 일정을 삭제할 수 없습니다.";
       setMutationError(message);
@@ -413,7 +480,7 @@ export function AcademicCalendarWorkspace() {
           <Alert variant="destructive">
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>{error ? `${requestedRangeLabel} 일정을 불러오지 못했습니다.` : mutationError}</span>
-              {error ? <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => { workspaceRef.current?.querySelector<HTMLElement>('[data-calendar-heading]')?.focus(); void refresh(); }}>다시 불러오기</Button> : null}
+              {error || moveNeedsReload ? <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => { workspaceRef.current?.querySelector<HTMLElement>('[data-calendar-heading]')?.focus(); setMutationError(null); setMoveNeedsReload(false); void refresh(); }}>다시 불러오기</Button> : null}
             </AlertDescription>
           </Alert>
         </div>
@@ -467,7 +534,7 @@ export function AcademicCalendarWorkspace() {
           addButtonLabel="새 학사 일정"
           onSaveEvent={handleSaveEvent}
           onDeleteEvent={handleDeleteEvent}
-          onMoveEvent={handleSaveEvent}
+          onMoveEvent={handleMoveEvent}
           navigation={{ displayedDate, requestedDate, onDateChange: handleNavigationDateChange }}
           onLoadEventDetail={handleLoadEventDetail}
         />

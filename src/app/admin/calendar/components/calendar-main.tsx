@@ -73,6 +73,7 @@ interface CalendarMainProps {
   onMenuClick?: () => void
   events?: CalendarEvent[]
   readOnly?: boolean
+  moving?: boolean
   onEventClick?: (event: CalendarEvent) => void
   onEmptySlotClick?: (date: Date) => void
   onRangeSelect?: (range: { start: Date; end: Date }) => void
@@ -281,6 +282,7 @@ export function CalendarMain({
   onMenuClick,
   events = [],
   readOnly = false,
+  moving = false,
   onEventClick,
   onEmptySlotClick,
   onRangeSelect,
@@ -477,7 +479,7 @@ export function CalendarMain({
   }
 
   const handleEventDrop = async (day: Date) => {
-    if (!draggedEvent || readOnly) {
+    if (!draggedEvent || readOnly || moving) {
       return
     }
 
@@ -647,7 +649,7 @@ export function CalendarMain({
                       }}
                       onPointerUp={() => handleSelectionFinish(day)}
                       onDragOver={(event) => {
-                        if (!draggedEvent || readOnly) {
+                        if (!draggedEvent || readOnly || moving) {
                           return
                         }
                         event.preventDefault()
@@ -708,13 +710,13 @@ export function CalendarMain({
                               <button
                                 type="button"
                                 aria-label={`${event.title} 상세 보기`}
-                                draggable={!readOnly}
+                                draggable={!readOnly && !moving}
                                 className="min-w-0 flex-1 cursor-pointer rounded-md bg-transparent px-2 py-1.5 text-left text-[11px]"
                                 onPointerDown={(pointerEvent) => {
                                   pointerEvent.stopPropagation()
                                 }}
                                 onDragStart={(dragEvent) => {
-                                  if (readOnly) {
+                                  if (readOnly || moving) {
                                     dragEvent.preventDefault()
                                     return
                                   }
@@ -798,7 +800,7 @@ export function CalendarMain({
                       >
                         <button
                           type="button"
-                          draggable={!readOnly}
+                          draggable={!readOnly && !moving}
                           aria-label={`${event.title} 상세 보기`}
                           className={cn(
                             "relative flex h-10 w-full items-center gap-2 overflow-hidden rounded-md border bg-muted/40 px-2 pr-7 text-left text-[11px] font-medium text-foreground transition-colors hover:bg-accent",
@@ -811,7 +813,7 @@ export function CalendarMain({
                             pendingDragAnchorDateRef.current = week[segment.startIndex + dayOffset] || week[segment.startIndex]
                           }}
                           onDragStart={(dragEvent) => {
-                            if (readOnly) {
+                            if (readOnly || moving) {
                               dragEvent.preventDefault()
                               return
                             }
