@@ -21,7 +21,7 @@ import {syncBuiltinESMExports} from 'node:module';
 import * as receiptProtocol from '../../scripts/lib/ai-producer-receipt.mjs';
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const registrationPin={fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'final',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'};
-const calendarMovePin={fileName:'20261019082218_academic_calendar_move_atomic.sql',status:'final',sha256:'c14525d01c3c3e8d225b0f59986895815e6d831bfa2c0823dbf2237dd98cc70a'};
+const calendarMovePin={fileName:'20261019082218_academic_calendar_move_atomic.sql',status:'final',sha256:'4fd992887e81cfb23e9e3585ee4a63eda82de8bb6bdbb21b5392501bcb5e83de'};
 const repositoryRoot=fileURLToPath(new URL('../../',import.meta.url));
 const isolatedWorkflows=['supabase-db-push.yml','supabase-sql-review.yml'];
 const legacyOccupancyTest='supabase/tests/makeup_legacy_approval_occupancy_test.sql';

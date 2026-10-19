@@ -127,7 +127,7 @@ export const TIMETABLE_CLOSE_MIGRATIONS=Object.freeze([
 // Runtime producer parity still requires the full final-source run and receipt.
 export const REGISTRATION_ENROLLMENT_MIGRATION=Object.freeze({fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'final',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'});
 export const TIMETABLE_BATCH_SAVE_MIGRATION=Object.freeze({fileName:'20261013051620_timetable_plan_atomic_batch_save.sql',status:'final',sha256:'d84407072b358e36d071d38d7c0818568716a8566683d1059121637e85e2b4a7'});
-export const ACADEMIC_CALENDAR_MOVE_MIGRATION=Object.freeze({fileName:'20261019082218_academic_calendar_move_atomic.sql',status:'final',sha256:'c14525d01c3c3e8d225b0f59986895815e6d831bfa2c0823dbf2237dd98cc70a'});
+export const ACADEMIC_CALENDAR_MOVE_MIGRATION=Object.freeze({fileName:'20261019082218_academic_calendar_move_atomic.sql',status:'final',sha256:'4fd992887e81cfb23e9e3585ee4a63eda82de8bb6bdbb21b5392501bcb5e83de'});
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
  Object.freeze({fileName:'20261009082000_ops_legacy_dispatch_actor_null_guard.sql',status:'final',sha256:'191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3'}),

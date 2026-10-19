@@ -1,6 +1,8 @@
 -- DESIGN ONLY: not a repository migration and not approved for production.
 -- Execute only in the owned disposable synthetic database for this review.
 BEGIN;
+SET LOCAL lock_timeout = '2s';
+SET LOCAL statement_timeout = '30s';
 DO $preflight$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_proc p
