@@ -99,7 +99,15 @@ test("calendar URL context and successful event drops revoke stale exact-detail 
   assert.match(source, /setAppliedInitialDateKey\(nextInitialDateKey\)/);
   assert.match(source, /useEffect\(\(\) => \{\s*invalidateDetailRequest\(\)\s*if \(!initialEventId\) \{\s*setAppliedInitialEventId\(""\)/);
   assert.match(source, /return \(\) => \{\s*cancelled = true\s*invalidateDetailRequest\(\)/);
-  assert.match(source, /if \(moved !== false\) \{\s*invalidateDetailRequest\(\)\s*setSelectedDate\(nextEvent\.date\)/);
+  const eventDrop = source.match(/onEventDrop=\{readOnly \? undefined : async \(originalEvent, nextEvent\) => \{([\s\S]*?)\n\s*\}\}/)?.[1];
+  assert.ok(eventDrop, "the guarded drop callback must remain wired to the actual calendar");
+  assert.match(eventDrop, /const isCurrent = \(\) => mountedRef\.current && pendingMoveRef\.current === token\s*&& detailRequestRevisionRef\.current === revision/);
+  // The real DOM move suite also covers late detail, abandoned filter/month,
+  // and actor/unmount responses. This pins the equivalent source control flow:
+  // false or stale responses return before the successful selection/navigation.
+  assert.match(eventDrop, /try \{\s*const moved = await onMoveEvent\(nextEvent, \{ originalEvent, isCurrent \}\)\s*if \(moved === false \|\| !isCurrent\(\)\) return false\s*invalidateDetailRequest\(\)\s*setSelectedDate\(nextEvent\.date\)\s*navigation\?\.onDateChange\(nextEvent\.date\)\s*return true\s*\} finally \{/);
+  assert.equal([...eventDrop.matchAll(/setSelectedDate\(nextEvent\.date\)/g)].length, 1);
+  assert.equal([...eventDrop.matchAll(/navigation\?\.onDateChange\(nextEvent\.date\)/g)].length, 1);
 });
 
 test("academic calendar month view switches to readable mobile agenda cards", async () => {

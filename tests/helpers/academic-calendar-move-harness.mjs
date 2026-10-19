@@ -141,6 +141,7 @@ export async function setupAcademicMove(t, { records = [academicRow()], initialD
           single() { request.cardinality = 'single'; return query; },
           maybeSingle() { request.cardinality = 'maybeSingle'; return query; },
           abortSignal(signal) { request.signal = signal; return query; },
+          retry(value) { assert.equal(value, false, 'calendar moves must not automatically retry writes'); return query; },
           then(resolve, reject) {
             if (!started) { started = true; attempts.push(request); if (!holdWrites) completeWrite(request); }
             return request.promise.then(resolve, reject);
