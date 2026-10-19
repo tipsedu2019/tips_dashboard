@@ -79,6 +79,7 @@ export function buildAcademicCalendarMovePatch(detail, originalEvent, nextEvent)
   }
 
   const storedNote = detail.storedNote;
+  /** @type {{ date: string, note?: string }} */
   const patch = { date: nextDate };
   const markerIndex = typeof storedNote === 'string' ? storedNote.indexOf(MARKER) : -1;
   let rangeEnd = null;
