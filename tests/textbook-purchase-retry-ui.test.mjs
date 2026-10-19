@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { setup, button, id } from './helpers/textbook-numbered-harness.mjs';
+import { registerExistingPurchaseOrderQuantityTests } from './helpers/textbook-existing-order-quantity-cases.mjs';
 const source = path.resolve(import.meta.dirname,'..');
 const nativeRead = fs.readFileSync.bind(fs);
 async function scenario(t,mode) {
@@ -293,3 +294,4 @@ try {
 } finally { for (const callback of cleanup.reverse()) await callback(); }
 }
 for(const mode of ['rollback','unknown','lost-checkpoint','cleanup','actor']) test(`actual new-order form: ${mode} partial failure / close / navigation / reopen / retry`, async t => scenario(t,mode));
+registerExistingPurchaseOrderQuantityTests();
