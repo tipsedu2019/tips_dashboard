@@ -137,7 +137,8 @@ create temporary table expected_at_fixtures (
   status text not null,
   teacher_catalog_id uuid,
   teacher_name text not null,
-  fixture_group text not null
+  fixture_group text not null,
+  access_check_updated_at timestamptz
 ) on commit drop;
 grant select on expected_at_fixtures to authenticated;
 
@@ -264,7 +265,7 @@ select throws_ok(
     fixture.task_id
   ),
   '42501',
-  'word_retest_expected_only_required',
+  'permission denied for table ops_word_retests',
   'admin도 전용 RPC를 우회해 응시예정일시를 직접 수정할 수 없다'
 )
 from expected_at_fixtures fixture
@@ -300,7 +301,7 @@ select throws_ok(
     fixture.task_id
   ),
   '42501',
-  'word_retest_expected_only_required',
+  'permission denied for table ops_word_retests',
   'staff도 전용 RPC를 우회해 응시예정일시를 직접 수정할 수 없다'
 )
 from expected_at_fixtures fixture
@@ -336,7 +337,7 @@ select throws_ok(
     fixture.task_id
   ),
   '42501',
-  'word_retest_expected_only_required',
+  'permission denied for table ops_word_retests',
   'assistant도 전용 RPC를 우회해 응시예정일시를 직접 수정할 수 없다'
 )
 from expected_at_fixtures fixture
@@ -427,7 +428,7 @@ select throws_ok(
     fixture.task_id
   ),
   '42501',
-  'word_retest_expected_only_required',
+  'permission denied for table ops_word_retests',
   '연결 teacher도 전용 RPC를 우회해 응시예정일시를 직접 수정할 수 없다'
 )
 from expected_at_fixtures fixture
@@ -445,6 +446,16 @@ select lives_ok(
 from expected_at_fixtures fixture
 where fixture.fixture_group = 'matrix';
 
+-- Capture current revisions after the linked teacher's successful updates.
+-- Unrelated actors cannot obtain these revisions through the task SELECT policy.
+reset role;
+update expected_at_fixtures fixture
+set access_check_updated_at = task.updated_at
+from public.ops_tasks task
+where task.id = fixture.task_id
+  and fixture.fixture_key in ('matrix_requested', 'name_only_requested');
+set local role authenticated;
+
 select pg_catalog.set_config(
   'request.jwt.claims',
   '{"sub":"82000000-0000-4000-8000-000000000005","role":"authenticated"}',
@@ -458,10 +469,10 @@ select pg_catalog.set_config(
 
 select throws_ok(
   format(
-    'select public.update_word_retest_expected_at_v1(%L::uuid,%L::timestamptz,(select updated_at from public.ops_tasks where id = %L::uuid),pg_catalog.gen_random_uuid())',
+    'select public.update_word_retest_expected_at_v1(%L::uuid,%L::timestamptz,%L::timestamptz,pg_catalog.gen_random_uuid())',
     fixture.task_id,
     '2026-07-26T06:00:00.000Z',
-    fixture.task_id
+    fixture.access_check_updated_at
   ),
   '42501',
   'word_retest_expected_access_denied',
@@ -483,10 +494,10 @@ select pg_catalog.set_config(
 
 select throws_ok(
   format(
-    'select public.update_word_retest_expected_at_v1(%L::uuid,%L::timestamptz,(select updated_at from public.ops_tasks where id = %L::uuid),pg_catalog.gen_random_uuid())',
+    'select public.update_word_retest_expected_at_v1(%L::uuid,%L::timestamptz,%L::timestamptz,pg_catalog.gen_random_uuid())',
     fixture.task_id,
     '2026-07-26T06:30:00.000Z',
-    fixture.task_id
+    fixture.access_check_updated_at
   ),
   '42501',
   'word_retest_expected_access_denied',
