@@ -566,6 +566,340 @@ function deferReconciliationReads(fixture) {
   };
 }
 
+function relationRefreshFixture(fixture, mode = "enrolled") {
+  studentFixture(fixture, ["removeStudentFromClass", "assignStudentToClass", "updateStudent"], mode === "enrolled" ? ["class-a"] : []);
+  fixture.rows[0].raw.waitlist_class_ids = mode === "waitlist" ? ["class-a"] : [];
+  fixture.rows.push({ ...fixture.rows[0], id: "student-b", title: "이학생", raw: { ...fixture.rows[0].raw, id: "student-b", name: "이학생", class_ids: [], waitlist_class_ids: [] } });
+  deferReconciliationReads(fixture);
+}
+
+const relationRefreshStatus = () => document.querySelector('[data-testid="management-save-status"]')?.textContent ?? "";
+const relationRefreshButton = () => [...document.querySelectorAll("button")].find(button => button.textContent.trim() === "화면 다시 불러오기");
+const removedRelationRow = ui => ({ ...ui.rows[0], raw: { ...ui.rows[0].raw, class_ids: [], waitlist_class_ids: [] } });
+
+function captureButtonHandler(button) {
+  // Deliberately replay the actual Button's earlier React callback. This is a
+  // controlled stale-handler test, not a claim that a detached native click fires.
+  assert.ok(button);
+  const propsKey = Object.keys(button).find(key => key.startsWith("__reactProps$"));
+  const handler = button[propsKey]?.onClick;
+  assert.equal(typeof handler, "function");
+  return handler;
+}
+
+const captureRelationRefreshHandler = () => captureButtonHandler(relationRefreshButton());
+
+async function removeFirstClassRelationStudent() {
+  const trigger = document.querySelector('[data-testid="class-enrolled-student-roster"] button[aria-haspopup="menu"]');
+  assert.ok(trigger);
+  await act(async () => {
+    trigger.focus();
+    trigger.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  });
+  const remove = [...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.trim() === "수강 해제");
+  assert.ok(remove);
+  await act(async () => remove.click());
+}
+
+async function failSavedRelationRefresh(ui) {
+  await ui.click("수강 해제");
+  assert.equal(ui.mutations.length, 1);
+  assert.deepEqual(ui.mutations[0].args[0], { studentId: "student-a", classId: "class-a" });
+  assert.doesNotMatch(relationRefreshStatus(), /연결 해제 완료/);
+  assert.equal(relationRefreshButton(), undefined, "unconfirmed writes never offer a read retry");
+  await act(async () => ui.mutations[0].resolve(undefined));
+  assert.match(relationRefreshStatus(), /연결 해제 완료/);
+  assert.doesNotMatch(relationRefreshStatus(), /저장 실패/);
+  await act(async () => ui.refreshes[0].resolve(undefined));
+  await act(async () => ui.reconciliationDetails[0].reject(new Error("합성 상세 조회 실패")));
+  assert.match(relationRefreshStatus(), /연결 해제 완료.*최신 정보를 불러오지 못했습니다/);
+  assert.doesNotMatch(relationRefreshStatus(), /저장 실패|기존 데이터 유지/);
+  assert.equal(relationRefreshButton()?.disabled, false);
+}
+
+test("relation refresh retries only reads after a confirmed removal, preserves the draft and rejects unusable details", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture: relationRefreshFixture });
+  await ui.click("김학생");
+  await ui.editField("students-detail-name", "아직 저장하지 않은 이름");
+  await failSavedRelationRefresh(ui);
+  for (const outcome of ["failure", "null", "wrong-id", "success"]) {
+    const readIndex = ui.refreshes.length;
+    await ui.clickTogether("화면 다시 불러오기", "화면 다시 불러오기", "저장", "검수 일괄 수정");
+    assert.equal(ui.refreshes.length, readIndex + 1, "same-tick retries own one shared slot");
+    assert.equal(ui.mutations.length, 1, "read retry cannot repeat the committed mutation or interleave a new write");
+    assert.equal(relationRefreshButton()?.disabled, true, "the retry action remains visible while its read is pending");
+    assert.match(relationRefreshStatus(), /연결 해제 완료.*최신 정보 불러오는 중/);
+    assert.doesNotMatch(relationRefreshStatus(), /저장 실패|저장 중/);
+    await ui.clickTogether("화면 다시 불러오기", "불러오는 중", "검수 일괄 수정");
+    assert.equal(ui.refreshes.length, readIndex + 1);
+    assert.equal(ui.mutations.length, 1);
+    await act(async () => ui.refreshes[readIndex].resolve(undefined));
+    const detail = ui.reconciliationDetails[readIndex];
+    assert.equal(detail.id, "student-a");
+    await act(async () => {
+      if (outcome === "failure") detail.reject(new Error("합성 재조회 실패"));
+      else detail.resolve(outcome === "null" ? null : outcome === "wrong-id" ? { ...removedRelationRow(ui), id: "student-b", title: "잘못 온 다른 상세" } : removedRelationRow(ui));
+    });
+    assert.equal(document.getElementById("students-detail-name").value, "아직 저장하지 않은 이름");
+    assert.match(ui.title(), /김학생/);
+    assert.doesNotMatch(ui.text(), /잘못 온 다른 상세/);
+    assert.equal(ui.mutations.length, 1);
+    if (outcome !== "success") {
+      assert.match(relationRefreshStatus(), /연결 해제 완료.*최신 정보를 불러오지 못했습니다/);
+      assert.equal(relationRefreshButton()?.disabled, false);
+    }
+  }
+  assert.equal(relationRefreshStatus(), "연결 해제 완료");
+  assert.equal(relationRefreshButton(), undefined);
+  assert.equal([...document.querySelectorAll("button")].some(button => button.textContent.trim() === "수강 해제"), false);
+  assert.equal(ui.refreshes.length, 5);
+  assert.equal(ui.reconciliationDetails.length, 5);
+});
+
+for (const message of ["합성 저장 거절", "합성 저장 결과를 확인할 수 없습니다"]) {
+  test(`relation refresh keeps an unconfirmed service rejection in the existing error path: ${message}`, async t => {
+    const ui = await setup(t, { kind: "students", configureFixture: relationRefreshFixture });
+    await ui.click("김학생");
+    await ui.click("수강 해제");
+    await act(async () => ui.mutations[0].reject(new Error(message)));
+    assert.ok(relationRefreshStatus().includes(message));
+    assert.match(relationRefreshStatus(), /저장 실패/);
+    assert.doesNotMatch(relationRefreshStatus(), /연결 해제 완료|최신 정보/);
+    assert.equal(relationRefreshButton(), undefined);
+    assert.equal(ui.refreshes.length, 0);
+    assert.equal(ui.reconciliationDetails.length, 0);
+    assert.equal(ui.mutations.length, 1);
+  });
+}
+
+test("relation refresh clears earlier confirmed feedback when a subsequent write fails in the same detail", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture: relationRefreshFixture });
+  await ui.click("김학생");
+  await failSavedRelationRefresh(ui);
+  await ui.editField("students-detail-name", "새 저장 초안");
+  await ui.click("저장");
+  assert.equal(ui.mutations[1].name, "updateStudent");
+  assert.equal(ui.mutations[1].args[0].name, "새 저장 초안");
+  assert.equal(relationRefreshButton(), undefined);
+  await act(async () => ui.mutations[1].reject(new Error("합성 학생 정보 저장 실패")));
+  assert.match(relationRefreshStatus(), /저장 실패.*합성 학생 정보 저장 실패/);
+  assert.doesNotMatch(relationRefreshStatus(), /연결 해제 완료|최신 정보/);
+  assert.equal(relationRefreshButton(), undefined);
+  assert.equal(document.getElementById("students-detail-name").value, "새 저장 초안");
+  assert.equal(ui.refreshes.length, 1, "a failed new write does not start another reconciliation");
+});
+
+test("relation refresh refuses a captured retry handler after a different detail opens", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture: relationRefreshFixture });
+  await ui.click("김학생");
+  await failSavedRelationRefresh(ui);
+  const staleRetry = captureRelationRefreshHandler();
+  await ui.click("학생 정보 닫기");
+  await ui.click("이학생");
+  await ui.editField("students-detail-name", "다른 상세의 초안");
+  await act(async () => staleRetry());
+  assert.equal(ui.refreshes.length, 1, "old callbacks cannot acquire a read slot in the new detail lifetime");
+  assert.equal(ui.reconciliationDetails.length, 1);
+  assert.equal(ui.mutations.length, 1);
+  assert.match(ui.title(), /이학생/);
+  assert.equal(document.getElementById("students-detail-name").value, "다른 상세의 초안");
+  assert.equal(relationRefreshStatus(), "");
+  assert.equal(relationRefreshButton(), undefined);
+});
+
+test("relation refresh refuses a captured retry handler after a newer write fails in the same detail", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture: relationRefreshFixture });
+  await ui.click("김학생");
+  await failSavedRelationRefresh(ui);
+  const staleRetry = captureRelationRefreshHandler();
+  await ui.editField("students-detail-name", "후속 저장 초안");
+  await ui.click("저장");
+  await act(async () => ui.mutations[1].reject(new Error("후속 저장 거절")));
+  await act(async () => staleRetry());
+  assert.equal(ui.refreshes.length, 1, "cleared feedback cannot be revived by its captured callback");
+  assert.equal(ui.reconciliationDetails.length, 1);
+  assert.equal(ui.mutations.length, 2);
+  assert.match(relationRefreshStatus(), /저장 실패.*후속 저장 거절/);
+  assert.doesNotMatch(relationRefreshStatus(), /연결 해제 완료|최신 정보/);
+  assert.equal(relationRefreshButton(), undefined);
+  assert.equal(document.getElementById("students-detail-name").value, "후속 저장 초안");
+});
+
+test("relation refresh refuses a captured retry handler after that refresh has succeeded", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture: relationRefreshFixture });
+  await ui.click("김학생");
+  await failSavedRelationRefresh(ui);
+  const staleRetry = captureRelationRefreshHandler();
+  await ui.click("화면 다시 불러오기");
+  await act(async () => ui.refreshes[1].resolve(undefined));
+  await act(async () => ui.reconciliationDetails[1].resolve(removedRelationRow(ui)));
+  await act(async () => staleRetry());
+  assert.equal(ui.refreshes.length, 2, "a completed refresh cannot be restarted from its obsolete failure callback");
+  assert.equal(ui.reconciliationDetails.length, 2);
+  assert.equal(ui.mutations.length, 1);
+  assert.equal(relationRefreshStatus(), "연결 해제 완료");
+  assert.equal(relationRefreshButton(), undefined);
+});
+
+test("relation refresh in class detail waits for both reads before exposing its read-only retry", async t => {
+  const ui = await setup(t, { configureFixture(fixture) {
+    fixture.rows[0].raw.student_ids = ["student-a"];
+    deferServices(fixture, ["removeStudentFromClass", "updateClass"]);
+    deferReconciliationReads(fixture);
+  } });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await removeFirstClassRelationStudent();
+  assert.deepEqual(ui.mutations[0].args[0], { studentId: "student-a", classId: "a" });
+  await act(async () => ui.mutations[0].resolve(undefined));
+  assert.equal(ui.refreshes.length, 1);
+  assert.equal(ui.reconciliationDetails.length, 1, "class detail and page reads start together");
+  await act(async () => ui.reconciliationDetails[0].reject(new Error("합성 수업 상세 조회 실패")));
+  assert.match(relationRefreshStatus(), /연결 해제 완료.*최신 정보 불러오는 중/);
+  assert.equal(document.querySelector('[data-testid="class-detail-save"]').disabled, true);
+  assert.equal(relationRefreshButton(), undefined, "the sibling page read still owns the slot");
+  await ui.clickTogether("불러오는 중", "검수 일괄 수정");
+  assert.equal(ui.mutations.length, 1);
+  await act(async () => ui.refreshes[0].resolve(undefined));
+  assert.match(relationRefreshStatus(), /연결 해제 완료.*최신 정보를 불러오지 못했습니다/);
+  assert.doesNotMatch(relationRefreshStatus(), /저장 실패/);
+  await ui.clickTogether("화면 다시 불러오기", "화면 다시 불러오기");
+  assert.equal(ui.refreshes.length, 2);
+  assert.equal(ui.reconciliationDetails.length, 2);
+  await act(async () => ui.reconciliationDetails[1].resolve({ ...ui.rows[0], raw: { ...ui.rows[0].raw, student_ids: [] } }));
+  assert.equal(document.querySelector('[data-testid="class-detail-save"]').disabled, true);
+  await act(async () => ui.refreshes[1].resolve(undefined));
+  assert.equal(relationRefreshStatus(), "연결 해제 완료");
+  assert.equal(relationRefreshButton(), undefined);
+  assert.equal(document.querySelector('[data-testid="class-detail-save"]').disabled, false);
+  assert.equal(document.querySelectorAll('[data-class-roster-student-id]').length, 0);
+  assert.equal(ui.mutations.length, 1);
+});
+
+for (const outcome of ["failure", "success"]) {
+  test(`relation refresh ignores an older relation page ${outcome} while recovering the confirmed write`, async t => {
+    const ui = await setup(t, { configureFixture(fixture) {
+      fixture.rows[0].raw.student_ids = ["student-a"];
+      fixture.rows[0].raw.registered_students_relation_page = { rows: [], hasMore: true, nextCursor: "a:before-write" };
+      fixture.relationReads = [];
+      fixture.records.loadRelationPage = input => {
+        const deferred = Promise.withResolvers();
+        fixture.relationReads.push({ input, ...deferred });
+        return deferred.promise;
+      };
+      deferServices(fixture, ["removeStudentFromClass", "updateClass"]);
+      deferReconciliationReads(fixture);
+    } });
+    await ui.click("A 영어반");
+    await ui.resolve(0, defaultsFor());
+    const nextPageButton = () => [...document.querySelectorAll("button")].find(button => button.textContent.trim() === "다음 30건");
+    const stalePageHandler = captureButtonHandler(nextPageButton());
+    await ui.click("다음 30건");
+    assert.equal(ui.relationReads.length, 1);
+    await removeFirstClassRelationStudent();
+    await act(async () => ui.mutations[0].resolve(undefined));
+    await act(async () => ui.reconciliationDetails[0].reject(new Error("합성 저장 후 상세 실패")));
+    await act(async () => ui.refreshes[0].resolve(undefined));
+    assert.match(relationRefreshStatus(), /연결 해제 완료.*최신 정보를 불러오지 못했습니다/);
+    assert.equal(nextPageButton()?.disabled, true, "only a fresh detail can provide the next usable relation cursor");
+    await act(async () => {
+      if (outcome === "failure") ui.relationReads[0].reject(new Error("이전 관계 목록의 늦은 실패"));
+      else ui.relationReads[0].resolve({ page: { rows: [{ id: "obsolete-student", name: "이전 관계 목록 학생" }], hasMore: false, nextCursor: null } });
+    });
+    assert.match(relationRefreshStatus(), /연결 해제 완료.*최신 정보를 불러오지 못했습니다/);
+    assert.doesNotMatch(ui.text(), /이전 관계 목록|저장 실패/);
+    assert.equal(relationRefreshButton()?.disabled, false);
+    assert.equal(nextPageButton()?.disabled, true);
+    await act(async () => { nextPageButton().click(); stalePageHandler(); });
+    assert.equal(ui.relationReads.length, 1, "neither disabled UI nor an earlier callback can page the obsolete relation snapshot");
+    await ui.click("화면 다시 불러오기");
+    await act(async () => ui.reconciliationDetails[1].resolve({ ...ui.rows[0], raw: {
+      ...ui.rows[0].raw, student_ids: [],
+      registered_students_relation_page: { rows: [], hasMore: true, nextCursor: "a:after-write" },
+    } }));
+    await act(async () => ui.refreshes[1].resolve(undefined));
+    assert.equal(relationRefreshStatus(), "연결 해제 완료");
+    assert.equal(relationRefreshButton(), undefined);
+    assert.equal(nextPageButton()?.disabled, false);
+    await ui.click("다음 30건");
+    assert.equal(ui.relationReads.length, 2);
+    assert.equal(ui.relationReads[1].input.cursor, "a:after-write");
+    await act(async () => ui.relationReads[1].resolve({ page: {
+      rows: [{ id: "current-student", name: "최신 관계 목록 학생" }], hasMore: false, nextCursor: null,
+    } }));
+    assert.match(ui.text(), /최신 관계 목록 학생/);
+    assert.doesNotMatch(ui.text(), /이전 관계 목록|저장 실패/);
+    assert.equal(nextPageButton(), undefined);
+    assert.equal(ui.mutations.length, 1);
+  });
+}
+
+for (const change of ["same-row", "other-row", "actor", "unmount"]) {
+  for (const outcome of ["success", "failure"]) {
+    test(`relation refresh ignores a retry's late ${outcome} after ${change}`, async t => {
+      const ui = await setup(t, { kind: "students", configureFixture: relationRefreshFixture });
+      await ui.click("김학생");
+      await failSavedRelationRefresh(ui);
+      await ui.click("화면 다시 불러오기");
+      await act(async () => ui.refreshes[1].resolve(undefined));
+      const lateDetail = ui.reconciliationDetails[1];
+      if (change === "unmount") await ui.unmount();
+      else if (change === "actor") {
+        await ui.actor("other-actor");
+        await ui.click("이학생");
+      } else {
+        await ui.click("학생 정보 닫기");
+        await ui.click(change === "same-row" ? "김학생" : "이학생");
+      }
+      if (change !== "unmount") await ui.editField("students-detail-name", "새 상세의 초안");
+      await act(async () => {
+        if (outcome === "failure") lateDetail.reject(new Error("이전 상세의 재조회 실패"));
+        else lateDetail.resolve({ ...removedRelationRow(ui), title: "이전 상세의 재조회 결과" });
+      });
+      assert.doesNotMatch(ui.text(), /이전 상세의 재조회|연결 해제 완료|최신 정보를 불러오지 못했습니다/);
+      assert.equal(relationRefreshButton(), undefined);
+      assert.equal(ui.mutations.length, 1);
+      if (change === "unmount") assert.equal(document.querySelector('[role="dialog"]'), null);
+      else {
+        assert.match(ui.title(), change === "same-row" ? /김학생/ : /이학생/);
+        assert.equal(document.getElementById("students-detail-name").value, "새 상세의 초안");
+      }
+    });
+  }
+}
+
+for (const action of ["add", "promote-waitlist"]) {
+  test(`relation refresh preserves confirmed ${action} feedback without resubmitting its mutation`, async t => {
+    const ui = await setup(t, {
+      kind: "students",
+      configureFixture: fixture => relationRefreshFixture(fixture, action === "add" ? "none" : "waitlist"),
+      componentOverrides: [["./management-relation-combobox", {
+        ManagementRelationCombobox: ({ onSelect, disabled }) => createElement("button", {
+          type: "button", disabled, onClick: () => onSelect("class-a"),
+        }, "검수 수업 선택"),
+      }]],
+    });
+    await ui.click("김학생");
+    if (action === "add") {
+      await ui.click("검수 수업 선택");
+      await ui.click("수강 추가");
+      await ui.click("수강 추가");
+    } else await ui.click("수강 전환");
+    assert.deepEqual(ui.mutations[0].args[0], { studentId: "student-a", classId: "class-a", mode: "enrolled" });
+    await act(async () => ui.mutations[0].resolve(undefined));
+    await act(async () => ui.refreshes[0].resolve(undefined));
+    await act(async () => ui.reconciliationDetails[0].reject(new Error("합성 관계 조회 실패")));
+    assert.match(relationRefreshStatus(), action === "add" ? /등록 학생 추가 완료/ : /등록 전환 완료/);
+    assert.match(relationRefreshStatus(), /최신 정보를 불러오지 못했습니다/);
+    assert.doesNotMatch(relationRefreshStatus(), /저장 실패/);
+    await ui.click("화면 다시 불러오기");
+    await act(async () => ui.refreshes[1].resolve(undefined));
+    await act(async () => ui.reconciliationDetails[1].resolve({ ...ui.rows[0], raw: { ...ui.rows[0].raw, class_ids: ["class-a"], waitlist_class_ids: [] } }));
+    assert.equal(relationRefreshButton(), undefined);
+    assert.equal(ui.mutations.length, 1);
+  });
+}
+
 async function beginClassReconciliation(t) {
   const ui = await setup(t, { configureFixture(fixture) {
     deferServices(fixture, ["updateClass"]);
