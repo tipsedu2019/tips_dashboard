@@ -140,6 +140,9 @@ const PAGE_CONFIG = {
 
 type FormState = Record<string, string>;
 type PendingManagementDraft = { detailRequestId: number; form?: string; schedule?: string };
+type RelationRefreshFeedback = {
+  rowId: string; detailRequestId: number; successNotice: string; phase: "loading" | "failed" | "retrying";
+};
 type RelatedRecord = Record<string, unknown>;
 type ManagementPageCursor = { sortKey: string; id: string; scopeHash: string };
 type TextbookCandidateScope = {
@@ -1399,6 +1402,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [pendingClassScheduleInitialization, setPendingClassScheduleInitialization] = useState<PendingClassScheduleInitialization | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState("");
+  const [relationRefresh, setRelationRefreshState] = useState<RelationRefreshFeedback | null>(null);
+  const relationRefreshRef = useRef<RelationRefreshFeedback | null>(null);
+  const setRelationRefresh = useCallback((feedback: RelationRefreshFeedback | null) => {
+    relationRefreshRef.current = feedback;
+    setRelationRefreshState(feedback);
+  }, []);
+  const currentRelationRefresh = dialogMode === "detail" && relationRefresh?.rowId === selectedRow?.id
+    && relationRefresh?.detailRequestId === detailRequestRef.current ? relationRefresh : null;
   const [checkingClassClose, setCheckingClassClose] = useState(false);
   const [pendingClassClose, setPendingClassClose] = useState<{
     error: ClassCloseConfirmationError; form: FormState; payload: Record<string, unknown>; detailRequestId: number;
@@ -1408,15 +1419,16 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   // React batches state updates; this lock is shared before any mutation starts.
   const savingRef = useRef(false);
   const savingDraftRef = useRef<PendingManagementDraft | null>(null);
-  const beginSaving = useCallback((draft?: Omit<PendingManagementDraft, "detailRequestId">) => {
+  const beginSaving = useCallback((draft?: Omit<PendingManagementDraft, "detailRequestId">, preserveRelationRefresh = false) => {
     if (savingRef.current) return null;
     savingRef.current = true;
     setSaving(true);
+    if (!preserveRelationRefresh) setRelationRefresh(null);
     // Writes continue after closing; only their original editing lifetime owns UI feedback.
     const detailRequestId = detailRequestRef.current;
     savingDraftRef.current = draft ? { ...draft, detailRequestId } : null;
     return () => detailRequestRef.current === detailRequestId;
-  }, []);
+  }, [setRelationRefresh]);
   const finishSaving = useCallback(() => {
     savingRef.current = false;
     savingDraftRef.current = null;
@@ -1857,6 +1869,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   };
   const handleRelationLoadMore = async (relationKind: ManagementRelationKind) => {
     const detailRequestId = detailRequestRef.current;
+    if (savingRef.current || relationRefreshRef.current?.detailRequestId === detailRequestId) return;
     // The old detail can remain visible while its replacement is still loading.
     if (!selectedRow || acceptedDetailRequestRef.current !== detailRequestId || relationRequestRef.current?.detailRequestId === detailRequestId) return;
     const currentPage = relationPageState[relationKind] || getRelationPage(selectedRow, relationKind);
@@ -2048,7 +2061,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             variant="ghost"
             size="sm"
             onClick={() => void handleRelationLoadMore(relationKind)}
-            disabled={loadingRelationKind !== null}
+            disabled={loadingRelationKind !== null || saving || Boolean(currentRelationRefresh)}
           >
             {loadingRelationKind === relationKind ? "더 불러오는 중" : "다음 30건"}
           </Button>
@@ -3139,6 +3152,46 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     }
   };
 
+  const refreshSavedRelation = async (rowId: string, successNotice: string, isCurrent: () => boolean, retry = false) => {
+    const feedback = { rowId, detailRequestId: detailRequestRef.current, successNotice };
+    if (isCurrent()) {
+      // A confirmed write makes an older relation page obsolete even if detail reload fails.
+      relationRequestRef.current = null;
+      setRelationRequest(null);
+      setOperationError(null);
+      setSaveNotice(successNotice);
+      setRelationRefresh({ ...feedback, phase: retry ? "retrying" : "loading" });
+    }
+    try {
+      const refreshed = await reconcileManagementPage(rowId);
+      if (!isCurrent()) return;
+      if (!refreshed || refreshed.id !== rowId) throw new Error("상세 정보를 확인할 수 없습니다.");
+      // Keep unsaved form fields; only a fresh server detail replaces the relation snapshot.
+      acceptDetailRow(refreshed);
+      setRelationRefresh(null);
+    } catch {
+      // The mutation already succeeded. A read failure must never invite another write.
+      if (isCurrent()) setRelationRefresh({ ...feedback, phase: "failed" });
+    }
+  };
+
+  const retryRelationRefresh = async () => {
+    if (!pageActiveRef.current || !currentRelationRefresh || currentRelationRefresh.phase !== "failed"
+      || currentRelationRefresh.detailRequestId !== detailRequestRef.current
+      || relationRefreshRef.current !== currentRelationRefresh) return;
+    // Keep keyboard focus inside the dialog before its active retry button becomes disabled.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.closest<HTMLElement>('[role="dialog"]')?.focus({ preventScroll: true });
+    }
+    const isCurrent = beginSaving(undefined, true);
+    if (!isCurrent) return;
+    try {
+      await refreshSavedRelation(currentRelationRefresh.rowId, currentRelationRefresh.successNotice, isCurrent, true);
+    } finally {
+      finishSaving();
+    }
+  };
+
   const handleRelationSave = async (mode: "enrolled" | "waitlist") => {
     if (!selectedRow || !targetId) return;
     if (!canMutateRows) {
@@ -3162,10 +3215,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setRelationQuery("");
         setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, mode) : current);
       }
-      const refreshed = await reconcileManagementPage(selectedRow.id);
-      if (!isCurrent()) return;
-      if (refreshed) acceptDetailRow(refreshed);
-      setSaveNotice(mode === "enrolled" ? "등록 학생 추가 완료" : "대기 학생 추가 완료");
+      await refreshSavedRelation(selectedRow.id, mode === "enrolled" ? "등록 학생 추가 완료" : "대기 학생 추가 완료", isCurrent);
     } catch (relationError) {
       if (isCurrent()) setOperationError(relationError instanceof Error ? relationError.message : "수강/대기 등록 중 오류가 발생했습니다.");
     } finally {
@@ -3201,10 +3251,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         await service.assignStudentToClass({ studentId: id, classId: selectedRow.id, mode });
       }
       if (isCurrent()) setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, id, mode) : current);
-      const refreshed = await reconcileManagementPage(selectedRow.id);
-      if (!isCurrent()) return;
-      if (refreshed) acceptDetailRow(refreshed);
-      setSaveNotice(mode === "enrolled" ? "등록 전환 완료" : "대기 전환 완료");
+      await refreshSavedRelation(selectedRow.id, mode === "enrolled" ? "등록 전환 완료" : "대기 전환 완료", isCurrent);
     } catch (relationError) {
       if (isCurrent()) setOperationError(relationError instanceof Error ? relationError.message : "등록 상태 변경 중 오류가 발생했습니다.");
     } finally {
@@ -3226,11 +3273,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       await service.removeStudentFromClass({ studentId, classId });
       if (isCurrent()) setSelectedRow((current) => current && selectedRow && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, "removed") : current);
       if (selectedRow) {
-        const refreshed = await reconcileManagementPage(selectedRow.id);
-        if (!isCurrent()) return;
-        if (refreshed) acceptDetailRow(refreshed);
+        await refreshSavedRelation(selectedRow.id, "연결 해제 완료", isCurrent);
       }
-      if (isCurrent()) setSaveNotice("연결 해제 완료");
     } catch (relationError) {
       if (isCurrent()) setOperationError(relationError instanceof Error ? relationError.message : "수강 연결 해제 중 오류가 발생했습니다.");
     } finally {
@@ -3269,6 +3313,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       return (
         <div data-testid="management-save-status" className="text-xs font-medium text-muted-foreground">
           읽기 전용
+        </div>
+      );
+    }
+    if (currentRelationRefresh && !operationError) {
+      return (
+        <div data-testid="management-save-status" className="flex basis-full flex-wrap items-center gap-2 text-xs font-medium">
+          <span role="status">
+            {currentRelationRefresh.successNotice} · {currentRelationRefresh.phase === "failed" ? "최신 정보를 불러오지 못했습니다." : "최신 정보 불러오는 중"}
+          </span>
+          {currentRelationRefresh.phase !== "loading" ? (
+            <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => void retryRelationRefresh()}>
+              화면 다시 불러오기
+            </Button>
+          ) : null}
         </div>
       );
     }
@@ -3875,10 +3933,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 {currentPendingClassClose && !saving ? <Alert role="status" className="basis-full">
                   <AlertDescription>{currentPendingClassClose.error.message}</AlertDescription>
                 </Alert> : null}
-                <span role="status" className="sr-only">{saving ? (checkingClassClose ? "저장 결과 확인 중" : "수업 정보 저장 중") : saveNotice}</span>
+                <span role="status" className="sr-only">{currentRelationRefresh ? "" : saving ? (checkingClassClose ? "저장 결과 확인 중" : "수업 정보 저장 중") : saveNotice}</span>
                 {renderSaveStatus()}
                 <Button type="button" size="form" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>닫기</Button>
-                <Button type="button" size="form" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || (!currentPendingClassClose && (classFormReferencesBlocked || scienceClassCandidateSelectionBlocked))}>{saving ? (checkingClassClose ? "확인 중" : "저장 중") : currentPendingClassClose ? "저장 결과 확인" : "저장"}</Button>
+                <Button type="button" size="form" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || (!currentPendingClassClose && (classFormReferencesBlocked || scienceClassCandidateSelectionBlocked))}>{saving ? (currentRelationRefresh ? "불러오는 중" : checkingClassClose ? "확인 중" : "저장 중") : currentPendingClassClose ? "저장 결과 확인" : "저장"}</Button>
               </DialogFooter>
             </div>
           ) : isDetail && selectedRow ? (
@@ -3957,12 +4015,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
               <DialogFooter className={cn("items-center gap-3", kind === "students" && "student-sheet-actions", kind === "classes" && "class-sheet-actions")}>
                 {renderSaveStatus()}
-                {kind !== "students" ? <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button> : null}
+                {kind !== "students" ? <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? (currentRelationRefresh ? "불러오는 중" : "저장 중") : "저장"}</Button> : null}
                 <Button type="button" variant={kind === "students" ? "ghost" : "destructive"} className={kind === "students" ? "student-withdraw-action" : undefined} onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving || !canMutateRows}>
                   {kind === "students" ? "퇴원 처리" : deleteActionLabel}
                 </Button>
                 {kind === "students" ? <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>닫기</Button> : null}
-                {kind === "students" ? <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button> : null}
+                {kind === "students" ? <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? (currentRelationRefresh ? "불러오는 중" : "저장 중") : "저장"}</Button> : null}
               </DialogFooter>
             </div>
           ) : (
