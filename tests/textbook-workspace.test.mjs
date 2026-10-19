@@ -1907,7 +1907,7 @@ test("textbook workspace names modal selects and removes duplicate hidden purcha
   assert.doesNotMatch(workspaceSource, /<Metric label="저장" value=\{`\$\{formatQuantity\(closingTargetSubjects\.length\)\}건`\}/);
   assert.match(workspaceSource, /aria-label=\{ariaLabel\}/);
   assert.doesNotMatch(workspaceSource, /<TabsContent value="purchase" className="mt-4 grid min-w-0 gap-4">\s*<form onSubmit=\{submitPurchase\} className="hidden">/);
-  assert.match(workspaceSource, /submitLabel=\{selectedPurchaseLineId \? "변경 저장" : purchaseActionLabel\(purchaseForm\.requestStage\)\}/);
+  assert.match(workspaceSource, /submitLabel=\{purchaseRetryActive \? "이어서 저장" : selectedPurchaseLineId \? "변경 저장" : purchaseActionLabel\(purchaseForm\.requestStage\)\}/);
 });
 
 test("textbook workspace adds searchable process tables and tighter issue ledgers", async () => {
@@ -2516,7 +2516,7 @@ test("textbook workspace locks 54 request ordering safeguards", async () => {
     /<Input value=\{purchaseForm\.studentReceivedQuantity\} onChange=\{\(event\) => setPurchaseField\("studentReceivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
     /<Input value=\{purchaseForm\.teacherReceivedQuantity\} onChange=\{\(event\) => setPurchaseField\("teacherReceivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
     /getTextbookPurchaseDetail/,
-    /hint=\{purchaseSubmitHint\}/,
+    /hint=\{purchaseRetryActive \? "입력과 저장된 내역을 보존했습니다\. 이 탭에서 이어서 저장하세요\." : purchaseSubmitHint\}/,
   ];
 
   assert.equal(safeguards.length, 54);
@@ -2782,7 +2782,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /textbookId: selectedPurchaseTextbookId/,
     /requestedTextbookTitle: normalizeStoredTextInput\(purchaseRequestTitle\)/,
     /const fresh = await getTextbookPurchaseDetail\(directSnapshot\.input\)[\s\S]*await textbookService\.updatePurchaseLifecycle\(applyConfiguredPurchasePricingToPayload/,
-    /textbookService\.createPurchaseReceipt\(purchasePayload\)/,
+    /createPurchaseAttempt\(newPurchasePayloads, currentUserId, purchaseForm\)[\s\S]*resumePurchaseAttempt\(attempt, \{ actorId: currentUserId, checkpoint, assertCurrent \}\)/,
     /purchaseActionLabel\(purchaseForm\.requestStage\)/,
     /requestFilter=\{purchaseRequestFilter\}/,
     /orderFilter=\{purchaseOrderFilter\}/,

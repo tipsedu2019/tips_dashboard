@@ -102,6 +102,13 @@ test("bulk order defaults are clean and explicit discard retains the selected me
 });
 
 test("failed and pending bulk save stay guarded; accepted retry clears only that draft", async t => {
+  // The real master writer also delivers a cache invalidation. Keep that external
+  // boundary synthetic, while retaining the production mutation/refresh code.
+  const cacheRequests = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    cacheRequests.push({ url, options });
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
   const h=await mountMaster(t);await h.act(()=>document.querySelector('[data-prepared-surface="master-desktop"] [role="checkbox"]').click());await h.act(()=>button("속성 변경").click());await input(h,"일괄 출판사","저장할 출판사");
   await h.act(()=>{button("선택 교재 변경 저장").click();button("선택 교재 변경 저장").click();});
   const first=h.requests.find(r=>r.table==="textbooks");assert.ok(first);assert.equal(h.requests.filter(r=>r.table==="textbooks").length,1);assert.equal(unloadBlocked(),true);
@@ -115,4 +122,11 @@ test("failed and pending bulk save stay guarded; accepted retry clears only that
     else if(r.name==="get_textbook_master_options_v1")await h.resolve(r,masterOptions);
   }
   await settle(h);assert.equal(unloadBlocked(),false);await appIntent(h);assert.equal(confirmation(),null);assert.deepEqual(h.routes,["/admin/dashboard"]);
+  assert.equal(cacheRequests.length, 1);
+  assert.equal(cacheRequests[0].url, "/api/public-classes/cache/invalidate");
+  assert.equal(cacheRequests[0].options.method, "POST");
+  assert.deepEqual(cacheRequests[0].options.headers, { "Content-Type": "application/json" });
+  const cacheBody = JSON.parse(cacheRequests[0].options.body);
+  assert.equal(cacheBody.reason, "textbook");
+  assert.match(cacheBody.requestId, /^[0-9a-f-]{36}$/);
 });

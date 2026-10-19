@@ -129,6 +129,11 @@ export function getTextbookActionErrorMessage(error) {
   const details = text(error?.details);
   const hint = text(error?.hint);
   const saleErrors = {
+    textbook_purchase_retry_invalid: "주문 입력과 로그인 정보를 확인하세요.",
+    textbook_purchase_retry_storage: "진행 중인 주문을 이 탭에 보관할 수 없습니다. 창을 유지하고 담당자에게 확인하세요.",
+    textbook_purchase_retry_ready: "일부 주문이 저장되지 않았습니다. 입력과 저장된 내역을 보존했습니다. 이어서 저장하세요.",
+    textbook_purchase_retry_unresolved: "주문 저장 결과를 확인할 수 없습니다. 중복을 막기 위해 새 주문을 중단했습니다. 이 탭을 유지하고 담당자에게 내역 확인을 요청하세요.",
+    textbook_purchase_retry_busy: "같은 주문을 저장하고 있습니다. 잠시 기다려 주세요.",
     textbook_count_balance_changed: "재고 수량이 변경되었습니다. 확인 후 다시 반영하세요.",
     textbook_count_request_conflict: "실사 입력이 이전 요청과 다릅니다. 수량과 메모를 확인하세요.",
     textbook_count_request_deleted: "이미 삭제된 실사입니다. 새 실사 수량을 입력하세요.",

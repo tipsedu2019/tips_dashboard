@@ -22,7 +22,7 @@ jobs:
       - name: Verify safe login returns and authentication guards
         run: node --test --experimental-strip-types tests/auth-login-return.test.mjs tests/auth-login.test.mjs tests/password-recovery.test.mjs tests/auth-guard-loading.test.mjs tests/auth-session-refresh.test.mjs tests/bootstrap-recovery.test.mjs tests/page-recovery.test.mjs
       - name: Verify atomic textbook inventory writes
-        run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-purchase-lifecycle.test.mjs tests/textbook-stock-count.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs tests/textbook-numbered-renderers.test.mjs tests/textbook-numbered-pagination.test.mjs
+        run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-purchase-lifecycle.test.mjs tests/textbook-purchase-retry.test.mjs tests/textbook-purchase-retry-ui.test.mjs tests/textbook-stock-count.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs tests/textbook-numbered-renderers.test.mjs tests/textbook-numbered-pagination.test.mjs
       - name: Verify textbook SQL wire provenance and consumer parity
         run: |
           node --test --experimental-strip-types \

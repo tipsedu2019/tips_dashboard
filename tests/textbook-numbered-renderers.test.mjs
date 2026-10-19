@@ -269,7 +269,28 @@ test("master selection is pruned when the accepted page changes", async (t) => {
   assert.equal(document.querySelector('[aria-label="선택한 교재 일괄 작업"]'), null)
 })
 
+function mockMasterCacheTransport(t) {
+  const calls = []
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ url, options })
+    return { ok: true, json: async () => ({ ok: true }) }
+  })
+  return () => {
+    assert.equal(calls.length, 1)
+    const { url, options } = calls[0]
+    assert.equal(url, "/api/public-classes/cache/invalidate")
+    assert.equal(options.method, "POST")
+    assert.deepEqual(options.headers, { "Content-Type": "application/json" })
+    const body = JSON.parse(options.body)
+    assert.deepEqual(Object.keys(body).sort(), ["reason", "requestId"])
+    assert.equal(body.reason, "textbook")
+    assert.match(body.requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    assert.ok(options.signal instanceof AbortSignal)
+  }
+}
+
 test("master bulk edit preserves a newer selection and patch after its first writer starts", async (t) => {
+  const verifyCacheTransport = mockMasterCacheTransport(t)
   const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
   const rows = [masterRow(21), masterRow(22)]
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_master_page_v1"), { rows, page: 1, pageSize: 10, totalCount: 2 })
@@ -298,9 +319,11 @@ test("master bulk edit preserves a newer selection and patch after its first wri
   assert.equal(document.querySelector('[aria-label="선택한 교재 일괄 작업"]').textContent.includes("2개 선택"), true, "new B selection remains")
   assert.equal(document.querySelector('[aria-label="일괄 출판사"]').value, "새 작업 출판사", "new patch remains")
   assert.equal(document.body.textContent.includes("개 교재를 수정했습니다."), false, "obsolete action publishes no stale success")
+  verifyCacheTransport()
 })
 
 test("master bulk edit preserves a same-book deselect and reselect intent after its writer starts", async (t) => {
+  const verifyCacheTransport = mockMasterCacheTransport(t)
   const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
   const row = masterRow(23)
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_master_page_v1"), { rows: [row], page: 1, pageSize: 10, totalCount: 1 })
@@ -332,6 +355,7 @@ test("master bulk edit preserves a same-book deselect and reselect intent after 
   await h.act(() => button("속성 변경").click())
   assert.equal(document.querySelector('[aria-label="일괄 출판사"]')?.value, "동일 작업 출판사", "the unchanged patch remains owned by the new intent")
   assert.equal(document.body.textContent.includes("개 교재를 수정했습니다."), false, "the obsolete completion publishes no stale success")
+  verifyCacheTransport()
 })
 
 test("external query navigation aborts obsolete page work and restores the requested page", async (t) => {
