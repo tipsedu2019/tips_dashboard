@@ -624,7 +624,9 @@ test("relation refresh retries only reads after a confirmed removal, preserves t
   await failSavedRelationRefresh(ui);
   for (const outcome of ["failure", "null", "wrong-id", "success"]) {
     const readIndex = ui.refreshes.length;
+    relationRefreshButton().focus();
     await ui.clickTogether("화면 다시 불러오기", "화면 다시 불러오기", "저장", "검수 일괄 수정");
+    assert.equal(document.activeElement?.getAttribute("role"), "dialog", "focus leaves the retry button before disabling it");
     assert.equal(ui.refreshes.length, readIndex + 1, "same-tick retries own one shared slot");
     assert.equal(ui.mutations.length, 1, "read retry cannot repeat the committed mutation or interleave a new write");
     assert.equal(relationRefreshButton()?.disabled, true, "the retry action remains visible while its read is pending");

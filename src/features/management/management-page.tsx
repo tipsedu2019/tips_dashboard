@@ -3179,6 +3179,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     if (!pageActiveRef.current || !currentRelationRefresh || currentRelationRefresh.phase !== "failed"
       || currentRelationRefresh.detailRequestId !== detailRequestRef.current
       || relationRefreshRef.current !== currentRelationRefresh) return;
+    // Keep keyboard focus inside the dialog before its active retry button becomes disabled.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.closest<HTMLElement>('[role="dialog"]')?.focus({ preventScroll: true });
+    }
     const isCurrent = beginSaving(undefined, true);
     if (!isCurrent) return;
     try {
