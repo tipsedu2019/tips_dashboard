@@ -1490,7 +1490,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
     },
   });
   assert.equal(result.status, "passed");
-  assert.deepEqual(calls.filter((call) => call.command.endsWith("/supabase")).map((call) => call.args[0]), ["init", "db", "migration", "test", "migration", "test", "status", "stop"]);
+  assert.deepEqual(calls.filter((call) => call.command === "supabase" || call.command.endsWith("/supabase")).map((call) => call.args[0]), ["init", "db", "migration", "test", "migration", "test", "status", "stop"]);
   assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
   assert.equal(calls.find((call) => call.command === process.execPath).env.TASK_LOCAL_DB_URL.includes("127.0.0.1"), true);
   assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);

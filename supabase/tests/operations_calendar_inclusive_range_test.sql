@@ -122,7 +122,6 @@ select is(public.get_operations_calendar_range_v1('2196-10-08','2196-10-08')->'r
 
 -- Atomic calendar move regression: the original inclusive-range checks above remain intact.
 -- Self-contained, rollback-only accounts; no external auth fixture is required.
-SET LOCAL search_path = public, pg_catalog;
 INSERT INTO auth.users(id)
 SELECT ('9812bbbb-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid
 FROM generate_series(1,5) n;
