@@ -395,7 +395,7 @@ export function AcademicCalendarWorkspace() {
         .eq("id", move.id).eq("date", move.originalDate);
       query = move.storedNote === null ? query.is("note", null) : query.eq("note", move.storedNote);
       writeStarted = true;
-      const result = await query.select("id,date,note").maybeSingle().abortSignal(AbortSignal.timeout(8_000));
+      const result = await query.select("id,date,note").abortSignal(AbortSignal.timeout(8_000)).maybeSingle();
       if (!isOwnerCurrent()) return false;
       const expectedNote = Object.prototype.hasOwnProperty.call(move.patch, "note") ? move.patch.note : move.storedNote;
       if (result.error || !result.data || result.data.id !== move.id
