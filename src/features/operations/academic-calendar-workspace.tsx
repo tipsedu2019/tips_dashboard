@@ -28,24 +28,11 @@ import {
 } from "./academic-event-utils.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 import { buildSevenDayRangeKeys } from "./operations-read-service.js";
-import { buildAcademicCalendarMovePatch } from "./academic-calendar-move.js";
-
-async function writeAcademicCalendarMove(
-  client: NonNullable<typeof supabase>,
-  id: string,
-  originalDate: string,
-  storedNote: string | null,
-  patch: { date: string; note?: string },
-) {
-  if (storedNote === null) {
-    return client.from("academic_events").update(patch)
-      .eq("id", id).eq("date", originalDate).is("note", null)
-      .select("id,date,note").abortSignal(AbortSignal.timeout(8_000)).retry(false).maybeSingle();
-  }
-  return client.from("academic_events").update(patch)
-    .eq("id", id).eq("date", originalDate).eq("note", storedNote)
-    .select("id,date,note").abortSignal(AbortSignal.timeout(8_000)).retry(false).maybeSingle();
-}
+import {
+  isConfirmedAcademicCalendarMove,
+  prepareAcademicCalendarMoveRequest,
+  writeAcademicCalendarMove,
+} from "./academic-calendar-move-rpc.js";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -405,15 +392,14 @@ export function AcademicCalendarWorkspace() {
       if (!id) throw new Error("academic_move_source_invalid");
       const detail = await loadEventDetail(id);
       if (!isCurrent()) return false;
-      const move = buildAcademicCalendarMovePatch(detail, context.originalEvent, nextEvent);
-      // Guard both date and raw note against edits made after the detail read.
-      // A zero-row response is not a successful move; never retry without guards.
+      const move = await prepareAcademicCalendarMoveRequest(detail, context.originalEvent, nextEvent);
+      // Both digests await asynchronous work. An abandoned gesture or changed
+      // actor must not send the prepared snapshot after those waits complete.
+      if (!isCurrent()) return false;
       writeStarted = true;
-      const result = await writeAcademicCalendarMove(client, move.id, move.originalDate, move.storedNote, move.patch);
+      const result = await writeAcademicCalendarMove(client, move.params);
       if (!isOwnerCurrent()) return false;
-      const expectedNote = Object.prototype.hasOwnProperty.call(move.patch, "note") ? move.patch.note : move.storedNote;
-      if (result.error || !result.data || result.data.id !== move.id
-        || result.data.date !== move.patch.date || result.data.note !== expectedNote) {
+      if (!isConfirmedAcademicCalendarMove(result, move.expectedReceipt)) {
         throw new Error("academic_move_unconfirmed");
       }
       if (!isCurrent()) {

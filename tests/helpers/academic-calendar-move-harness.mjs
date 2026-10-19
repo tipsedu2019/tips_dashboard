@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import { createHash, webcrypto } from 'node:crypto';
 import { loadNotificationComponent } from './notification-component-loader.mjs';
 import { extractAcademicEventNoteMetadata, stripAcademicEventNoteMetadata } from '../../src/features/operations/academic-event-utils.js';
+import { buildAcademicCalendarMovePatch } from '../../src/features/operations/academic-calendar-move.js';
 
 const require = createRequire(import.meta.url);
 const { JSDOM } = require('jsdom');
@@ -10,7 +12,10 @@ const { act, createElement } = require('react');
 const sourceFixture = JSON.parse(fs.readFileSync(new URL('../fixtures/academic-calendar-inclusive-range-sql-output.json', import.meta.url), 'utf8'));
 const clone = value => structuredClone(value);
 const seed = sourceFixture.details[0];
-const allowedColumns = new Set(['content', 'created_at', 'date', 'grade', 'id', 'note', 'school_id', 'title', 'type']);
+const moveRpc = 'move_academic_event_dates_v1';
+const moveParameters = ['p_event_id', 'p_expected_date', 'p_expected_end_date', 'p_expected_note_sha256', 'p_next_date', 'p_next_end_date'];
+const noteHash = note => note === null ? null : createHash('sha256').update(note, 'utf8').digest('hex');
+const localDay = value => new Date(`${value}T12:00:00`);
 
 export const academicId = index => `93991000-0000-4000-8000-${String(index).padStart(12, '0')}`;
 export function academicRow(patch = {}) {
@@ -20,7 +25,7 @@ export function academicRow(patch = {}) {
 
 // Production Workspace, Calendar, grid, read service and mutation code are loaded
 // unchanged. Only auth/router/toast and the external database transport are synthetic.
-export async function setupAcademicMove(t, { records = [academicRow()], initialDate = records[0].date, holdDetails = false, holdWrites = false } = {}) {
+export async function setupAcademicMove(t, { records = [academicRow()], initialDate = records[0].date, holdDetails = false, holdWrites = false, holdDigests = false } = {}) {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: `https://test.invalid/admin/academic-calendar?date=${initialDate}`, pretendToBeVisual: true,
   });
@@ -48,8 +53,49 @@ export async function setupAcademicMove(t, { records = [academicRow()], initialD
   document.body.append(host);
   const root = createRoot(host);
   let mounted = true;
+  const digests = [];
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
   const unmount = async () => { if (mounted) { await act(async () => root.unmount()); mounted = false; } };
-  t.after(async () => { await unmount(); host.remove(); dom.window.close(); });
+  t.after(async () => {
+    try { await unmount(); }
+    finally {
+      for (const digest of digests) digest.release();
+      if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor);
+      else delete globalThis.crypto;
+      host.remove(); dom.window.close();
+    }
+  });
+  // Always perform the real digest. A gate delays only delivery of its result,
+  // so the workspace's ownership checks are exercised across a real await.
+  const subtle = new Proxy(webcrypto.subtle, {
+    get(target, key) {
+      if (key !== 'digest') {
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return async (algorithm, input) => {
+        const gate = Promise.withResolvers();
+        const ordinal = digests.length + 1;
+        const held = holdDigests === true || holdDigests === ordinal;
+        const request = { ordinal, held, ready: false, settled: false, released: false,
+          release() { request.released = true; gate.resolve(); } };
+        digests.push(request);
+        try {
+          const result = await target.digest(algorithm, input);
+          request.ready = true;
+          if (held) await gate.promise;
+          return result;
+        } finally { request.settled = true; }
+      };
+    },
+  });
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: new Proxy(webcrypto, {
+    get(target, key) {
+      if (key === 'subtle') return subtle;
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) });
 
   const rows = new Map(records.map(row => [row.id, clone(row)]));
   const before = clone(records);
@@ -93,26 +139,50 @@ export async function setupAcademicMove(t, { records = [academicRow()], initialD
     assert.equal(request.settled, false);
     request.settled = true;
     if (error) { request.resolve({ data: null, error }); return; }
-    const matching = [...rows.values()].filter(row => request.filters.every(({ method, key, value }) => {
-      assert.ok(allowedColumns.has(key), `modeled predicate column: ${key}`);
-      return method === 'is' ? row[key] === value : row[key] === value;
-    }));
-    assert.ok(request.filters.some(filter => filter.key === 'id'), 'a mutation must target a specific event');
-    assert.ok(matching.length <= 1);
-    for (const row of matching) {
-      Object.assign(row, clone(request.payload));
-      writes.push({ id: row.id, payload: clone(request.payload), filters: clone(request.filters) });
+    const args = request.args;
+    const row = rows.get(args.p_event_id);
+    if (!row || row.date !== args.p_expected_date || noteHash(row.note) !== args.p_expected_note_sha256) {
+      request.resolve({ data: null, error: { code: 'PT409', message: 'synthetic source conflict' } });
+      return;
     }
-    const selected = matching.map(row => {
-      if (!request.selection || request.selection === '*') return clone(row);
-      const columns = request.selection.split(',').map(column => column.trim());
-      assert.ok(columns.every(column => allowedColumns.has(column)), 'response contains only selected real columns');
-      return Object.fromEntries(columns.map(column => [column, clone(row[column])]));
+    // This is a synthetic UI transport oracle, not execution of the SQL proposal.
+    // Reuse the already-tested raw-token builder only to model the server effect;
+    // the RPC caller's six parameters and expected receipt are checked separately.
+    const { patch } = buildAcademicCalendarMovePatch(projectDetail(row), {
+      id: row.id, sourceId: row.id, date: localDay(args.p_expected_date), endDate: localDay(args.p_expected_end_date),
+    }, {
+      id: row.id, sourceId: row.id, date: localDay(args.p_next_date), endDate: localDay(args.p_next_end_date),
     });
-    request.resolve({ data: responseOverride === undefined ? (request.cardinality ? selected[0] ?? null : selected) : clone(responseOverride), error: null, count: selected.length });
+    Object.assign(row, clone(patch));
+    writes.push({ id: row.id, payload: clone(patch), args: clone(args) });
+    const receipt = { id: row.id, date: row.date, endsAt: endDate(row), noteSha256: noteHash(row.note) };
+    request.resolve({ data: responseOverride === undefined ? receipt : clone(responseOverride), error: null });
   }
   const client = {
-    rpc(name, args = {}) {
+    rpc(name, args = {}, options = {}) {
+      if (name === moveRpc) {
+        assert.deepEqual(Object.keys(args).sort(), [...moveParameters].sort(), 'move RPC accepts exactly six body parameters');
+        assert.notEqual(options.get, true, 'the mutation must use POST, never GET');
+        assert.notEqual(options.head, true, 'the mutation must return its receipt');
+        assert.ok(args.p_expected_note_sha256 === null || /^[0-9a-f]{64}$/.test(args.p_expected_note_sha256), 'body contains only a canonical note fingerprint');
+        const { request } = makeDeferred({ name, args: clone(args), method: 'POST', retry: null, signal: null });
+        let started = false;
+        const query = {
+          abortSignal(signal) { request.signal = signal; return query; },
+          retry(value) { assert.equal(value, false, 'calendar moves must not automatically retry writes'); request.retry = value; return query; },
+          then(resolve, reject) {
+            if (!started) {
+              started = true;
+              assert.equal(request.retry, false, 'RPC write explicitly disables automatic retry');
+              assert.ok(request.signal, 'RPC write has a bounded abort signal');
+              attempts.push(request);
+              if (!holdWrites) completeWrite(request);
+            }
+            return request.promise.then(resolve, reject);
+          },
+        };
+        return query;
+      }
       const { request, q } = makeDeferred({ name, args: clone(args), writesAtRead: writes.length });
       reads.push(request);
       if (name === 'get_operations_calendar_range_v1') request.response = { ...clone(sourceFixture.calendar),
@@ -128,28 +198,7 @@ export async function setupAcademicMove(t, { records = [academicRow()], initialD
       if (name !== 'get_academic_event_detail_v1' || !holdDetails) resolveRead(request);
       return q;
     },
-    from(table) {
-      assert.equal(table, 'academic_events', 'only the synthetic event table may be mutated');
-      return { update(payload) {
-        assert.ok(Object.keys(payload).every(key => allowedColumns.has(key)), 'payload respects the preserved table schema');
-        const { request } = makeDeferred({ payload: clone(payload), filters: [], steps: [], selection: null, cardinality: null });
-        let started = false;
-        const query = {
-          eq(key, value) { request.filters.push({ method: 'eq', key, value }); return query; },
-          is(key, value) { request.filters.push({ method: 'is', key, value }); return query; },
-          select(selection) { request.selection = selection; return query; },
-          single() { request.cardinality = 'single'; return query; },
-          maybeSingle() { request.cardinality = 'maybeSingle'; return query; },
-          abortSignal(signal) { request.signal = signal; return query; },
-          retry(value) { assert.equal(value, false, 'calendar moves must not automatically retry writes'); return query; },
-          then(resolve, reject) {
-            if (!started) { started = true; attempts.push(request); if (!holdWrites) completeWrite(request); }
-            return request.promise.then(resolve, reject);
-          },
-        };
-        return query;
-      } };
-    },
+    from() { assert.fail('calendar moves must use the body RPC, never a raw-note table PATCH'); },
   };
   const { AcademicCalendarWorkspace } = loadNotificationComponent('src/features/operations/academic-calendar-workspace.tsx', new Map([
     ['next/navigation', { useRouter: () => ({ push() {} }), useSearchParams: () => params }],
@@ -197,10 +246,12 @@ export async function setupAcademicMove(t, { records = [academicRow()], initialD
   }
   await render();
   await waitFor(() => host.querySelector(`[aria-label="${records[0].title} 상세 보기"][draggable="true"]`));
-  return { rows, before, reads, attempts, writes, toasts, host, drag, eventButton, clickLabel, clickButtonText, waitFor, flush, unmount,
+  return { rows, before, reads, attempts, writes, toasts, digests, host, drag, eventButton, clickLabel, clickButtonText, waitFor, flush, unmount,
     pendingDetails: () => reads.filter(request => request.name === 'get_academic_event_detail_v1' && !request.settled),
     resolveDetail: (request, options = {}) => act(async () => resolveRead(request, options.error ?? null, options.detail)),
     resolveWrite: (request, error = null, responseOverride) => act(async () => completeWrite(request, error, responseOverride)),
+    pendingDigests: () => digests.filter(request => request.held && request.ready && !request.settled),
+    resolveDigest: request => act(async () => { assert.equal(request.released, false); request.release(); }),
     changeActor: async patch => { auth = { ...auth, ...patch }; await render(); await flush(); },
     externalChange: (id, patch) => Object.assign(rows.get(id), clone(patch)),
   };

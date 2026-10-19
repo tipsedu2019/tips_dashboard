@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { academicId, academicRow, setupAcademicMove } from './helpers/academic-calendar-move-harness.mjs';
+import './academic-calendar-move-rpc.test.mjs';
 
 const longText = `  합성 본문 ${'원문 보존 '.repeat(40)}끝까지 보존\r\n\t `;
 const metadata = {
@@ -15,6 +17,17 @@ async function assertSaved(h, expectedRows) {
   await h.waitFor(() => h.writes.length === 1 && h.toasts.some(toast => toast.kind === 'success'));
   assert.deepEqual([...h.rows.values()], expectedRows, 'only the intended date/range-end bytes changed');
   assert.equal(h.attempts.length, 1, 'one actual drag makes one mutation attempt');
+  const attempt = h.attempts[0];
+  assert.equal(attempt.name, 'move_academic_event_dates_v1');
+  assert.equal(attempt.method, 'POST');
+  const source = h.before.find(row => row.id === expectedRows[0].id);
+  assert.deepEqual(Object.keys(attempt.args).sort(), [
+    'p_event_id', 'p_expected_date', 'p_expected_end_date', 'p_expected_note_sha256', 'p_next_date', 'p_next_end_date',
+  ].sort(), 'no raw note or unrelated payload crosses the RPC boundary');
+  assert.equal(attempt.args.p_event_id, source.id);
+  assert.equal(attempt.args.p_expected_date, source.date);
+  assert.equal(attempt.args.p_expected_note_sha256, source.note === null ? null : createHash('sha256').update(source.note, 'utf8').digest('hex'));
+  assert.equal(attempt.args.p_next_date, expectedRows[0].date);
   assert.ok(Object.keys(h.writes[0].payload).every(key => ['date', 'note'].includes(key)), 'move must not rewrite title, school, grade, content or type');
   assert.ok(h.reads.some(read => read.name === 'get_academic_event_detail_v1' && read.writesAtRead === 0), 'actual full-detail service runs before the write');
   await h.waitFor(() => h.reads.some(read => read.name === 'get_operations_calendar_range_v1' && read.writesAtRead === 1), 'accepted move refreshes the actual range');
@@ -124,7 +137,7 @@ for (const changedField of ['date', 'note']) {
     h.externalChange(row.id, patch);
     await h.resolveWrite(h.attempts[0]);
     await h.waitFor(() => h.toasts.some(toast => toast.kind === 'error'));
-    assert.equal(h.writes.length, 0, 'date and full stored note predicates must reject a changed source');
+    assert.equal(h.writes.length, 0, 'the RPC date and stored-note fingerprint must reject a changed source');
     assert.deepEqual([...h.rows.values()], [{ ...row, ...patch }]);
     assert.equal(h.toasts.some(toast => toast.kind === 'success'), false);
   });
@@ -132,6 +145,46 @@ for (const changedField of ['date', 'note']) {
 
 const typeFilterLabel = '영어 시험일 및 시험범위 · 1';
 const rangeReads = h => h.reads.filter(read => read.name === 'get_operations_calendar_range_v1');
+
+for (const digestOrdinal of [1, 2]) {
+  for (const transition of ['actor', 'navigation', 'filter', 'other detail', 'unmount', 'permission']) {
+    test(`academic move writes nothing after ${transition} changes while real digest ${digestOrdinal} is pending`, async t => {
+      const first = academicRow({ note: markedNote });
+      const second = academicRow({ id: academicId(2), title: '합성 다른 일정', date: '2196-10-10' });
+      const cryptoBefore = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+      const h = await setupAcademicMove(t, { records: [first, second], holdDigests: digestOrdinal });
+      t.after(() => assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, 'crypto'), cryptoBefore,
+        'the temporary Web Crypto wrapper is restored after each harness'));
+      await h.drag(first.id, '2196-10-07');
+      await h.waitFor(() => h.pendingDigests().some(digest => digest.ordinal === digestOrdinal), 'the requested real digest reaches its delivery gate');
+      const digest = h.pendingDigests().find(entry => entry.ordinal === digestOrdinal);
+      assert.equal(h.attempts.length, 0, 'hash preparation cannot start an RPC write');
+      if (transition === 'actor') await h.changeActor({ user: { id: '93993000-0000-4000-8000-000000000006' } });
+      else if (transition === 'navigation') await h.clickLabel('다음 달');
+      else if (transition === 'filter') await h.clickButtonText('영어 시험일 및 시험범위 · 2');
+      else if (transition === 'unmount') await h.unmount();
+      else if (transition === 'permission') await h.changeActor({ canManageAll: false });
+      else {
+        await h.clickLabel(`${second.title} 상세 보기`);
+        await h.waitFor(() => document.querySelector('#title')?.value === second.title);
+      }
+      const heading = h.host.querySelector('[data-calendar-heading]')?.textContent;
+      const readCount = h.reads.length;
+      const toasts = structuredClone(h.toasts);
+      await h.resolveDigest(digest);
+      await h.waitFor(() => h.digests.length === 2 && h.digests.every(entry => entry.settled), 'both real digests finish before checking for an obsolete write');
+      await h.flush();
+      assert.equal(h.attempts.length, 0, 'an abandoned prepared request must never be sent');
+      assert.equal(h.writes.length, 0);
+      assert.deepEqual([...h.rows.values()], [first, second]);
+      assert.deepEqual(h.toasts, toasts, 'late hash delivery cannot report an abandoned result');
+      assert.equal(h.reads.length, readCount, 'a never-sent move does not reconcile or revive an obsolete gesture');
+      assert.equal(h.host.querySelector('[data-calendar-heading]')?.textContent, heading);
+      if (transition === 'other detail') assert.equal(document.querySelector('#title').value, second.title);
+      if (transition === 'unmount') assert.equal(h.host.childElementCount, 0);
+    });
+  }
+}
 
 for (const transition of ['filter', 'navigation']) {
   for (const outcome of ['confirmed', 'error']) {
@@ -198,17 +251,21 @@ for (const transition of ['actor', 'unmount']) {
   });
 }
 
-for (const returned of ['null', 'wrong id', 'wrong date', 'wrong note']) {
+for (const returned of ['null', 'wrong id', 'wrong date', 'wrong end', 'wrong hash', 'extra key', 'missing key', 'array']) {
   test(`academic move treats a ${returned} write receipt as unconfirmed and reads before any retry`, async t => {
     const row = academicRow({ note: markedNote });
     const h = await setupAcademicMove(t, { records: [row], holdWrites: true });
     await h.drag(row.id, '2196-10-07');
     await h.waitFor(() => h.attempts.length === 1);
-    let receipt = { id: row.id, date: '2196-10-07', note: row.note };
+    let receipt = { id: row.id, date: '2196-10-07', endsAt: '2196-10-07', noteSha256: createHash('sha256').update(row.note, 'utf8').digest('hex') };
     if (returned === 'null') receipt = null;
     if (returned === 'wrong id') receipt.id = academicId(2);
     if (returned === 'wrong date') receipt.date = row.date;
-    if (returned === 'wrong note') receipt.note = `${row.note}unexpected`;
+    if (returned === 'wrong end') receipt.endsAt = '2196-10-08';
+    if (returned === 'wrong hash') receipt.noteSha256 = '0'.repeat(64);
+    if (returned === 'extra key') receipt.note = row.note;
+    if (returned === 'missing key') delete receipt.noteSha256;
+    if (returned === 'array') receipt = [receipt];
     const currentRange = structuredClone(rangeReads(h).at(-1).args);
     await h.resolveWrite(h.attempts[0], null, receipt);
     await h.waitFor(() => h.host.querySelector('[role="alert"]')?.textContent.includes('일정 이동 결과를 확인하지 못했습니다.'));

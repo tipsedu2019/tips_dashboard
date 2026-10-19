@@ -874,6 +874,11 @@
       "fileName": "20261014193500_legacy_context_binding_preparation.sql",
       "status": "final",
       "sha256": "70ef7db3791f04a8b9e42986d21e2afa6396f8967084b293c3f1f3c77889b5af"
+    },
+    {
+      "fileName": "20261019082218_academic_calendar_move_atomic.sql",
+      "status": "final",
+      "sha256": "c14525d01c3c3e8d225b0f59986895815e6d831bfa2c0823dbf2237dd98cc70a"
     }
   ]
 }

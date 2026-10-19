@@ -8,7 +8,7 @@ import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
 import * as eventUtils from "../src/features/operations/academic-event-utils.js"
-import * as moveUtils from "../src/features/operations/academic-calendar-move.js"
+import * as moveRpc from "../src/features/operations/academic-calendar-move-rpc.js"
 import { buildSevenDayRangeKeys } from "../src/features/operations/operations-read-service.js"
 
 const require = createRequire(import.meta.url)
@@ -53,7 +53,7 @@ for (const firstDense of [false, true]) test(`accepted calendar range survives f
     ["@/components/ui/badge", { Badge: box("span") }],
     ["@/components/ui/button", { Button: ({ children, type, disabled, onClick }) => createElement("button", { type, disabled, onClick }, children) }],
     ["./academic-event-utils.js", eventUtils],
-    ["./academic-calendar-move.js", moveUtils],
+    ["./academic-calendar-move-rpc.js", moveRpc],
     ["@/app/admin/calendar/components/calendar", { Calendar: (props) => { calendarProps = props; return createElement("div", { "data-testid": "calendar" }, props.events.map(e => e.title).join(",")) } }],
   ])
   const hook = await load("src/features/operations/use-operations-workspace-data.ts", mocks)
