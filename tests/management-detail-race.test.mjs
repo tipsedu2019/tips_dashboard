@@ -1964,7 +1964,10 @@ test("pending catalogs prevent schedule edits from losing normalized resource ID
 });
 
 test("typing before the initial defaults arrive retains the draft and catalog IDs", async t => {
-  const ui = await setup(t);
+  const ui = await setup(t, { configureFixture: fixture => {
+    // This race edits the start before defaults arrive; retain a valid end.
+    for (const row of fixture.rows) row.raw.schedule = "월 16:00-20:00";
+  } });
   await ui.click("A 영어반");
   await ui.editTime("18:30");
   await ui.resolve(0, defaultsFor("09:00", 7));

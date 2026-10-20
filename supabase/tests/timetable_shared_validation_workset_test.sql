@@ -6,8 +6,10 @@ set local track_functions='all';
 select no_plan();
 -- Narrow semantic regression, not a benchmark. Real fixtures and their gateway /
 -- fresh-deferred / role checks below use unmodified production functions.
+-- Pin the 20261020134458 body; its nullable-room diagnostic change retains the
+-- shared workset, collision checks, concurrency guards and comparison oracles.
 select is(md5((select prosrc from pg_proc where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure)),
- '9e4abd6e0a863ceb3f9990c1c0d1e442','final validator body matches the reviewed shared-workset migration');
+ '170a6f87d5d590cc432377d33fc7d485','final validator body matches the optional-room shared-workset migration');
 
 -- Exact operational fe872 validator, frozen before this native-day experiment. Both paths
 -- call the REAL complete reader and REAL effective-date helper. No production
@@ -685,7 +687,7 @@ begin
  end loop;
 end$copy$;
 select is((select source_md5 from native_copy_provenance where label='native_original'),'23930d704f99b99ea763a04e51f871ef','synthetic oracle copied exact fe body');
-select is((select source_md5 from native_copy_provenance where label='native_candidate'),'9e4abd6e0a863ceb3f9990c1c0d1e442','synthetic candidate copied exact fixed prototype');
+select is((select source_md5 from native_copy_provenance where label='native_candidate'),'170a6f87d5d590cc432377d33fc7d485','synthetic candidate copied exact fixed prototype');
 create function pg_temp.native_outcome(original boolean) returns jsonb language plpgsql security definer set search_path='' as $$
 declare r jsonb;c text;m text;det text;
 begin

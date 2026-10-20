@@ -4,6 +4,11 @@ create extension if not exists pgtap with schema extensions;
 
 select plan(32);
 
+-- This release-2 contract exercises the inactive phase. The canonical isolated
+-- schema has no runtime seed, and later activation is covered by its own suites.
+insert into dashboard_private.continuous_class_schedule_runtime(singleton,version)
+values(true,0) on conflict(singleton) do update set version=excluded.version;
+
 select has_column('public'::name, 'dashboard_audit_logs'::name, 'class_id'::name, 'dashboard_audit_logs.class_id exists');
 select has_column('public'::name, 'dashboard_audit_logs'::name, 'request_key'::name, 'dashboard_audit_logs.request_key exists');
 select has_column('public'::name, 'dashboard_audit_logs'::name, 'request_operation'::name, 'dashboard_audit_logs.request_operation exists');
