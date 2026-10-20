@@ -204,7 +204,7 @@ test('registration final is explicitly pinned in the closure without changing th
  assert.equal(current.closure.find(row=>row.path===path)?.sha256,registrationPin.sha256);
  assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS);
  const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
- assert.equal(manifest.orderedNewMigrations.length,176);
+ assert.equal(manifest.orderedNewMigrations.length,177);
  assert.deepEqual(manifest.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName),registrationPin);
 });
 test('registration final rejects missing, duplicate, reordered, hash, status and coordinated source drift',async()=>{
@@ -285,8 +285,8 @@ test('registration final plans and copied candidate refusals launch no external 
   await fixture.assertRealSourcesUnchanged();
 });
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
- assert.equal(AI_SQL_TESTS.length,102);
- assert.equal(AI_PROBES.length,23);
+ assert.equal(AI_SQL_TESTS.length,103);
+ assert.equal(AI_PROBES.length,24);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
  for(const name of isolatedWorkflows){
@@ -294,6 +294,39 @@ test('both isolated workflows retain the exact full parity inventory including l
   assert.deepEqual(parsed.tests,AI_SQL_TESTS,name+' SQL inventory');
   assert.deepEqual(parsed.probes,AI_PROBES,name+' probe inventory');
  }
+});
+test('optional classroom final pin preserves all earlier migrations and rejects manifest or source drift',async()=>{
+ const pin={fileName:'20261020134458_timetable_optional_classroom_occupancy.sql',status:'final',sha256:'31cd689964a52b5f084a8a167cb41a0b61b12403a88d4dff7b20d9106e29a8b6'};
+ assert.deepEqual(receiptProtocol.OPTIONAL_CLASSROOM_MIGRATION,pin);
+ assert.ok(Object.isFrozen(receiptProtocol.OPTIONAL_CLASSROOM_MIGRATION));
+ const source=await snapshotAiSource(),path='supabase/migrations/'+pin.fileName;
+ assert.equal(source.closure.find(row=>row.path===path)?.sha256,pin.sha256);
+ assert.equal(source.closure.filter(row=>row.path==='tests/probe-timetable-nullable-room-concurrency.mjs').length,1);
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-optional-room-drift-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const original=JSON.parse(await readFile(manifestPath));
+  assert.equal(original.orderedNewMigrations.length,177);
+  assert.deepEqual(original.orderedNewMigrations.at(-1),pin);
+  assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,176))),'0e6ea185605f5e3b060459f5c334988d8643b3c42a3b5e59d5a5e067af246b4f');
+  for(const mutate of [
+   rows=>rows.pop(),
+   rows=>rows.push({...pin}),
+   rows=>rows[176].status='candidate',
+   rows=>rows[176].sha256='0'.repeat(64),
+   rows=>[rows[175],rows[176]]=[rows[176],rows[175]],
+  ]){
+   const candidate=structuredClone(original);mutate(candidate.orderedNewMigrations);
+   await writeFile(manifestPath,JSON.stringify(candidate));
+   await assert.rejects(snapshotAiSource(root),/canonical manifest inventory|current migration manifest drift/);
+  }
+  await writeFile(manifestPath,JSON.stringify(original));
+  await writeFile(join(root,path),(await readFile(path,'utf8'))+'\n-- unreviewed drift\n');
+  await assert.rejects(snapshotAiSource(root),/optional classroom migration source drift/);
+ }finally{await rm(root,{recursive:true,force:true});}
 });
 test('timetable validation is exactly pinned without changing earlier migration pins',async()=>{
  const current=await snapshotAiSource();
@@ -426,8 +459,8 @@ test('atomic calendar move adds one exact final source pin without changing the 
  assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
  assert.equal(CURRENT_AI_MIGRATIONS.length,11);
  const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
- assert.equal(manifest.orderedNewMigrations.length,176);
- assert.deepEqual(manifest.orderedNewMigrations.at(-2),calendarMovePin);
+ assert.equal(manifest.orderedNewMigrations.length,177);
+ assert.deepEqual(manifest.orderedNewMigrations[174],calendarMovePin);
 });
 test('atomic calendar move pin rejects missing, duplicate, reordered, unapproved and coordinated source drift',async()=>{
  const current=await snapshotAiSource();
@@ -478,9 +511,9 @@ test('completed failed word-retest retry adds one exact final pin and preserves 
  assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
  assert.equal(CURRENT_AI_MIGRATIONS.length,11);
  const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
- assert.equal(manifest.orderedNewMigrations.length,176);
- assert.deepEqual(manifest.orderedNewMigrations.at(-1),completedFailedRetestPin);
- assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,-1))),'2a20cc18682c7a8c55b9750dee44191adcce33327a64b61d0ebaaecf11fd9cad');
+ assert.equal(manifest.orderedNewMigrations.length,177);
+ assert.deepEqual(manifest.orderedNewMigrations[175],completedFailedRetestPin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,175))),'2a20cc18682c7a8c55b9750dee44191adcce33327a64b61d0ebaaecf11fd9cad');
 });
 test('completed failed word-retest pin rejects missing, duplicate, reordered, unapproved and coordinated source drift',async()=>{
  const current=await snapshotAiSource();
@@ -611,8 +644,8 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,176);
-  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==registrationPin.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName && m.fileName!==calendarMovePin.fileName && m.fileName!==completedFailedRetestPin.fileName);
+  assert.equal(original.orderedNewMigrations.length,177);
+  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==registrationPin.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName && m.fileName!==calendarMovePin.fileName && m.fileName!==completedFailedRetestPin.fileName && m.fileName!==receiptProtocol.OPTIONAL_CLASSROOM_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
   assert.equal(reviewedLegacy.at(-1).fileName,mainFileName);
