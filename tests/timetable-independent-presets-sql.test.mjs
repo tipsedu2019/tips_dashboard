@@ -193,6 +193,9 @@ function definition(tokens, source, file) {
     sql: source.slice(tokens[0].start, tokens.at(-1).end) };
 }
 function resolveFinal(files) {
+  // Resolve literal declarations in migration order. Pair this with the existing
+  // immutable migration manifest/source-closure gate; this is not a SQL engine
+  // and does not infer arbitrary dynamic definitions from earlier DO blocks.
   const final = new Map();
   for (const { file, source } of files) for (const statement of statements(source)) {
     const row = definition(statement, source, file);
@@ -299,11 +302,17 @@ test('batch validates the complete final plan before its first write, with one s
   const candidate = between(validation, 'into candidate_slots', ') q');
   has(candidate, 'where z.plan_id=pid and not z.item_id=any(edit_ids)');
   has(candidate, 'union all', 'untouched and edited slots form one final candidate');
+  has(candidate, "select x from jsonb_array_elements(batch_edits) e cross join lateral jsonb_array_elements(e->'slots') x where e->>'operation'='save'",
+    'submitted save slots are part of the final candidate');
   lacks(candidate, '.state', 'untouched applied items are not filtered out');
-  has(validation, "jsonb_array_elements(batch_edit->'slots')", 'same-item overlap checked');
-  has(validation, 'jsonb_array_elements(candidate_slots)', 'cross-item final occupancy checked');
-  has(validation, "(x->>'weekday')::int=day and (x->>'startMinute')::int<b and (x->>'endMinute')::int>a", 'half-open overlap, not boundary adjacency');
-  has(validation, "(x->>'teacherId')::uuid=tid or (x->>'classroomId')::uuid=rid");
+  const selfConflict = between(validation, "if exists(select 1 from jsonb_array_elements(batch_edit->'slots') x", 'end if;');
+  has(selfConflict, "where (x->>'id')::uuid<>sid and (x->>'weekday')::int=day and (x->>'startMinute')::int<b and (x->>'endMinute')::int>a",
+    'same-item overlap is checked even with distinct resources');
+  const crossConflict = between(validation, 'if exists(select 1 from jsonb_array_elements(candidate_slots) x', 'end if;');
+  has(crossConflict, "where (x->>'itemId')::uuid<>iid and (x->>'weekday')::int=day and (x->>'startMinute')::int<b and (x->>'endMinute')::int>a",
+    'cross-item final occupancy uses a half-open interval');
+  has(crossConflict, "(x->>'teacherId')::uuid=tid or (x->>'classroomId')::uuid=rid");
+  for (const scope of [selfConflict, crossConflict]) has(scope, "then raise exception using errcode='23P01',message='timetable_resource_conflict'");
   has(validation, 'if not changed then continue;end if', 'unchanged resources stay grandfathered');
   has(batch, "'snapshot',public.get_timetable_plan_v1(pid)");
   const sequence = pattern('update public.timetable_plans set change_sequence=change_sequence+1');
