@@ -187,9 +187,9 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "41f43adca1536abbba135fd2e3303624cd8bac295aa7729f677fdf905d253ac3"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "f5d1991db673175494a10559b615d1a21423aa55b5a5172b99543d79af6ba068"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "154e43f6d610517b12502d00dfe1cb033201daf4de76f3d7df4b7c559f96a621"
+  "0f769d56cc070261d460e56039bee77402961886fd239a136d25ea9e2f0e0a35"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -201,7 +201,7 @@ const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-pr
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
   "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "9f3cbe57401854d8d7cebcc8a75d30b882ef5c529e1d2be54d2d9340b48f3972"],
+  ["free-tier-guardrails.yml", "b4645de1d1c546da1bd461cfeff88a3d86314a148767a5e764ff60b352bf488d"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
   [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
