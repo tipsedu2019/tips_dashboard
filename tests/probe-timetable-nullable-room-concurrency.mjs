@@ -69,18 +69,10 @@ commit;`);
     loserSqlstate: '23P01', loserRemainsUnassigned: true, partialReceipts: 0,
     unrelatedHistoryAndNoSendUnchanged: true, providerCalls: 0 };
 } finally {
-  try {
-    await runtime.query(`begin;
-delete from dashboard_private.class_schedule_mutation_receipts where actor_profile_id=${quote(actor)};
-delete from public.classes where id in(${classes.map(quote)});
-delete from public.teacher_catalogs where id in(${teachers.map(quote)});
-delete from public.classroom_catalogs where id=${quote(room)};
-delete from auth.users where id=${quote(actor)};
-commit;`);
-    assert.equal(await runtime.query(`select count(*) from public.classes where id in(${classes.map(quote)});`), '0');
-  } finally {
-    const cleanup = await runtime.finish();
-    if (result) result.runtimeCleanup = { ...cleanup, syntheticClassesRemoved: true };
-  }
+  // These are audited operational rows. Preserve their normal delete guards and
+  // let the canonical runner destroy its entire owned disposable DB afterward.
+  // This also prevents fixture cleanup from masking a failed race assertion.
+  const cleanup = await runtime.finish();
+  if (result) result.runtimeCleanup = { ...cleanup, fixtureCleanup: 'runner_owned_database_destruction' };
 }
 console.log(JSON.stringify(result));
