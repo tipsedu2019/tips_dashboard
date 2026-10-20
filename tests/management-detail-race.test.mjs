@@ -1601,6 +1601,52 @@ test("late relation addition keeps the new detail's relation candidate intact", 
   await act(async () => ui.mutations[1].resolve(undefined));
 });
 
+test("class creation initializes the entered schedule with its selected teacher and optional room", async t => {
+  const previousScroll = window.HTMLElement.prototype.scrollIntoView;
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+  t.after(() => { window.HTMLElement.prototype.scrollIntoView = previousScroll; });
+  const ui = await setup(t, { configureFixture: fixture => {
+    deferServices(fixture, ["createClass", "initializeClassSchedule"]);
+    fixture.service.getClassScheduleDefaults = async () => ({ runtimeVersion: 1, authoritativeSource: "legacy", scheduleRevision: 0, schedulePlanHash: "created-class-plan" });
+  } });
+  const select = async (id, label) => {
+    await act(async () => document.getElementById(id).dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    const option = [...document.querySelectorAll('[role="option"]')].find(node => node.textContent === label);
+    assert.ok(option, `option not found: ${label}`);
+    await act(async () => option.click());
+  };
+  await ui.click("수업 등록");
+  await ui.editField("classes-form-name", "미정 방 신규 수업");
+  await select("classes-form-subject", "영어");
+  await select("classes-form-teacher", "영어교사");
+  await ui.editField("classes-form-schedule", "화목 19:30-21:30");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 1);
+  await act(async () => ui.mutations[0].resolve({ id: "created-class" }));
+  assert.deepEqual(ui.mutations[1].args[0].slots, [2, 4].map((weekday, sortOrder) => ({
+    id: null, weekday, startTime: "19:30", endTime: "21:30",
+    teacherCatalogId: "teacher-1", classroomCatalogId: null, sortOrder,
+  })));
+});
+
+test("class creation validates the actual entered placement before creating a class", async t => {
+  const ui = await setup(t, { configureFixture: fixture => deferServices(fixture, ["createClass"]) });
+  await ui.click("수업 등록");
+  await ui.editField("classes-form-name", "검증할 신규 수업");
+  await ui.editField("classes-form-schedule", "화 19:30-21:30");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /선생님/);
+  await ui.editField("classes-form-schedule", "화 21:30-19:30 (영어교사, )");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /시작·종료 시간/);
+  await ui.editField("classes-form-schedule", "invalid schedule");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /요일|시간/);
+});
+
 for (const retry of [false, true]) {
   test(`late class initialization ${retry ? "retry" : "create"} finishes its write without closing the next detail`, async t => {
     const refreshes = [];
