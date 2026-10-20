@@ -88,7 +88,16 @@ begin
  makeup_slots=coalesce(slots,'[{"startAt":"2050-10-06T10:00:00+09:00","endAt":"2050-10-06T11:00:00+09:00","classroom":"Synthetic binding room"}]'::jsonb)
  where id=pg_temp.cid(5);
  original:=pg_temp.original_context(c);candidate:=dashboard_private.legacy_effective_context_v1(c);
- return next is(candidate::text,original::text,label||': exact context text equals original');
+ -- Every fixture uses the known Synthetic binding room. Add only its explicit
+ -- policy metadata to the expected output; keep the frozen binding oracle intact.
+ original:=jsonb_set(original,'{basicSlots}',(
+  select coalesce(jsonb_agg(slot||jsonb_build_object('classroomUnresolved',false) order by ord),'[]'::jsonb)
+  from jsonb_array_elements(original->'basicSlots') with ordinality e(slot,ord)));
+ original:=jsonb_set(original,'{approvedByIdentity}',(
+  select coalesce(jsonb_object_agg(key,jsonb_set(value,'{approvedOverride}',
+   (value->'approvedOverride')||jsonb_build_object('classroomUnresolved',false))),'{}'::jsonb)
+  from jsonb_each(original->'approvedByIdentity')));
+ return next is(candidate::text,original::text,label||': exact context text equals original with known-room metadata');
  return next is((select count(*)::integer from jsonb_object_keys(candidate->'approvedByIdentity')),expected_sources,label||': exact source count');
 end$$;
 
