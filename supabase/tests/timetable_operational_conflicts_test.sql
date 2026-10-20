@@ -107,17 +107,27 @@ select set_config('app.class_close_mutation','v1',true);
 update public.classes set status='종강' where id='ad240000-0000-4000-8000-000000000302';
 set constraints all immediate;set constraints all deferred;
 select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),pg_temp.fixture_date(0)) x where x->>'classId'='ad240000-0000-4000-8000-000000000302'),1,'closed class retains valid actual makeup occupancy');
--- Target-period plan placement and the server snapshot use the same authority.
+-- Target-period preset placement remains independent from operating occupancy.
 select public.mutate_timetable_plan_v1(pg_temp.fixture_jsonb('{"operation":"create","planId":"ad240000-0000-4000-8000-000000000701","name":"기간 계획","targetStartDate":"@date(0)@","targetEndDate":"@date(0)@","requestKey":"period-plan"}'));
 create function pg_temp.plan_cmd(n int,a int,b int) returns jsonb language sql as $f$
 select jsonb_build_object('operation','save','planId','ad240000-0000-4000-8000-000000000701','expectedMetaRevision',0,'expectedShadowFingerprint',public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'shadowFingerprint','expectedItemRevision',null,'requestKey','period-'||n,'item',jsonb_build_object('id',('ad240000-0000-4000-8000-'||lpad(n::text,12,'0')),'planId','ad240000-0000-4000-8000-000000000701','name','날짜 초안','subject','영어','subjectAreaKey',null,'grade','중2','capacity',12,'tuition',100,'defaultTeacherId','ad240000-0000-4000-8000-000000000101','defaultClassroomId','ad240000-0000-4000-8000-000000000201','durationMinutes',b-a,'pendingSlots','[]'::jsonb),'slots',jsonb_build_array(jsonb_build_object('id',('ad240000-0000-4000-8000-'||lpad((n+100)::text,12,'0')),'itemId',('ad240000-0000-4000-8000-'||lpad(n::text,12,'0')),'planId','ad240000-0000-4000-8000-000000000701','weekday',1,'startMinute',a,'endMinute',b,'teacherId','ad240000-0000-4000-8000-000000000101','classroomId','ad240000-0000-4000-8000-000000000201','sourceSlotId',null)))
 $f$;
+-- Roll back successful preset probes without rolling back the pgTAP counters.
+create function pg_temp.save_preset_rolled_back(p_command jsonb) returns void language plpgsql as $$
+begin
+ begin
+  perform public.mutate_timetable_plan_item_v1(p_command);
+  set constraints all immediate;set constraints all deferred;
+  raise exception using errcode='Z0001',message='rollback_fixture_preset';
+ exception when sqlstate 'Z0001' then null;
+ end;
+end $$;
 set local role authenticated;
-select throws_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.plan_cmd(711,540,560))$q$,'23P01','timetable_resource_conflict','bounded recurring plan still reserves weekly default after dated session moved');
+select lives_ok($q$select pg_temp.save_preset_rolled_back(pg_temp.plan_cmd(711,540,560))$q$,'bounded preset saves independently of an operating weekly default');
 select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.plan_cmd(714,1020,1040))$q$,'period plan saves safe weekly and dated position');
 select throws_ok($q$select public.mutate_timetable_plan_v1(pg_temp.fixture_jsonb('{"operation":"rename","planId":"ad240000-0000-4000-8000-000000000701","expectedMetaRevision":0,"name":"기간","targetStartDate":"@date(0)@","requestKey":"half-period"}'))$q$,'22023','timetable_invalid','half-specified target period is rejected');
-select throws_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.plan_cmd(712,510,530))$q$,'23P01','timetable_resource_conflict','bounded plan detects dated exception outside weekly default');
-select throws_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.plan_cmd(713,570,590))$q$,'23P01','timetable_resource_conflict','bounded plan detects actual makeup under closed class');
+select lives_ok($q$select pg_temp.save_preset_rolled_back(pg_temp.plan_cmd(712,510,530))$q$,'bounded preset saves independently of an operating dated exception');
+select lives_ok($q$select pg_temp.save_preset_rolled_back(pg_temp.plan_cmd(713,570,590))$q$,'bounded preset saves independently of closed-class makeup occupancy');
 reset role;
 -- Future drafts never reserve operating resources.
 select lives_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule":"월 17:00-17:20","teacher":"운영 A","room":"운영 1"}','ad240000-0000-4000-8000-000000000521')$q$,'safe operating update ignores future plan draft occupancy');
@@ -178,8 +188,8 @@ reset role;
 insert into public.classes(id,name,subject,status,schedule_plan) values('ad240000-0000-4000-8000-000000000305','기존 미해결','영어','개강 준비','{"sessions":[{"id":"unresolved","date":"not-a-date","startTime":"09:00"}]}');
 update dashboard_private.timetable_operating_write_baselines set reference=dashboard_private.read_timetable_operating_reference_v1();
 set constraints all immediate;set constraints all deferred;
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','bounded plan never reports complete on unresolved dated data');
-select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','revision poll agrees with bounded snapshot completeness');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','bounded preset completeness excludes unresolved operating dated data');
+select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','revision poll agrees with independent preset completeness');
 select throws_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule":"금 20:00-21:00"}','ad240000-0000-4000-8000-000000000523')$q$,'23P01','timetable_resource_conflict','unscoped legacy dated blocker prevents new weekly placement');
 select lives_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000305','{"name":"미해결 이름 변경"}','ad240000-0000-4000-8000-000000000524')$q$,'existing unresolved data allows metadata-only edit');
 -- Review regression: explicitly seed pre-existing malformed data, without admitting it as a new client write.
@@ -191,52 +201,52 @@ begin
 end $f$;
 select lives_ok($q$select pg_temp.seed_review_sessions('[{"id": "past", "date": "2020-01-06", "startTime": "09:00", "endTime": "10:00", "teacherName": "unknown", "classroomName": "운영 1"}]')$q$,'past unresolved fixture remains readable');
 select is((select value->>'date' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305'),'2020-01-06'::text,'past blocker retains independently known date');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','past get_timetable_plan_v1 scopes completeness to review period');
-select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','past get_timetable_plan_revision_v1 scopes completeness to review period');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','past operating uncertainty does not affect preset completeness');
+select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','revision completeness is independent of past operating uncertainty');
 select lives_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='월 18:00-19:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'past blocker allows unrelated new operating occupancy');
 select lives_ok($q$select pg_temp.seed_review_sessions(pg_temp.fixture_jsonb('[{"id": "inside", "date": "@date(0)@", "startTime": "09:00", "endTime": "10:00", "teacherName": "unknown", "classroomName": "운영 1"}]'))$q$,'inside unresolved fixture remains readable');
 select is((select value->>'date' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305'),pg_temp.fixture_date(0)::text,'inside blocker retains independently known date');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','inside get_timetable_plan_v1 scopes completeness to review period');
-select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','inside get_timetable_plan_revision_v1 scopes completeness to review period');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','in-period operating uncertainty does not affect preset completeness');
+select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','revision completeness is independent of in-period operating uncertainty');
 select lives_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='월 19:00-20:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'inside date with morning uncertainty allows unrelated evening occupancy');
 select throws_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='월 09:00-10:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'23P01','timetable_resource_conflict','inside blocker still rejects its affected interval');
 select lives_ok($q$select pg_temp.seed_review_sessions(pg_temp.fixture_jsonb('[{"id": "outside", "date": "@date(1)@", "startTime": "09:00", "endTime": "10:00", "teacherName": "unknown", "classroomName": "운영 1"}]'))$q$,'outside unresolved fixture remains readable');
 select is((select value->>'date' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305'),pg_temp.fixture_date(1)::text,'outside blocker retains independently known date');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','outside get_timetable_plan_v1 scopes completeness to review period');
-select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','outside get_timetable_plan_revision_v1 scopes completeness to review period');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','out-of-period operating uncertainty does not affect preset completeness');
+select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','revision completeness is independent of out-of-period operating uncertainty');
 select lives_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='월 20:00-21:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'outside blocker allows unrelated new operating occupancy');
 select lives_ok($q$select pg_temp.seed_review_sessions('[{"id": "unknown", "date": "not-a-date", "startTime": "09:00", "endTime": "10:00", "teacherName": "unknown", "classroomName": "운영 1"}]')$q$,'unknown unresolved fixture remains readable');
 select is((select value->>'date' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305'),null::text,'unknown blocker retains independently known date');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','unknown get_timetable_plan_v1 scopes completeness to review period');
-select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','unknown get_timetable_plan_revision_v1 scopes completeness to review period');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','unknown operating date does not affect preset completeness');
+select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','revision completeness is independent of unknown operating dates');
 select lives_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='월 21:00-22:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'unknown date retains known morning bounds and allows evening occupancy');
 select throws_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='목 09:00-10:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'23P01','timetable_resource_conflict','unknown date still blocks the known interval on every weekday');
 select lives_ok($q$select pg_temp.seed_review_sessions(pg_temp.fixture_jsonb('[{"id": "seconds", "date": "@date(0)@", "startTime": "09:00", "endTime": "10:00:30", "teacherName": "운영 A", "classroomName": "운영 1"}]'))$q$,'legacy 10:00:30 remains diagnostic without rewriting source');
 select is((select schedule_plan->'sessions' from public.classes where id='ad240000-0000-4000-8000-000000000305'),pg_temp.fixture_jsonb('[{"id": "seconds", "date": "@date(0)@", "startTime": "09:00", "endTime": "10:00:30", "teacherName": "운영 A", "classroomName": "운영 1"}]')::jsonb,'legacy 10:00:30 source is preserved exactly');
 select is((select value->>'date' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305'),pg_temp.fixture_date(0)::text,'legacy 10:00:30 becomes date-scoped blocker');
 select is((select count(*) from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedSessions') where value->>'classId'='ad240000-0000-4000-8000-000000000305'),0::bigint,'legacy 10:00:30 never becomes truncated canonical minutes');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','legacy 10:00:30 makes affected preset incomplete');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','legacy 10:00:30 does not make the independent preset incomplete');
 select throws_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='월 10:00-11:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'23P01','timetable_resource_conflict','legacy 10:00:30 cannot expose truncated adjacent availability');
 select lives_ok($q$select pg_temp.seed_review_sessions(pg_temp.fixture_jsonb('[{"id": "seconds", "date": "@date(0)@", "startTime": "09:00", "endTime": "10:00:00.125", "teacherName": "운영 A", "classroomName": "운영 1"}]'))$q$,'legacy 10:00:00.125 remains diagnostic without rewriting source');
 select is((select schedule_plan->'sessions' from public.classes where id='ad240000-0000-4000-8000-000000000305'),pg_temp.fixture_jsonb('[{"id": "seconds", "date": "@date(0)@", "startTime": "09:00", "endTime": "10:00:00.125", "teacherName": "운영 A", "classroomName": "운영 1"}]')::jsonb,'legacy 10:00:00.125 source is preserved exactly');
 select is((select value->>'date' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305'),pg_temp.fixture_date(0)::text,'legacy 10:00:00.125 becomes date-scoped blocker');
 select is((select count(*) from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedSessions') where value->>'classId'='ad240000-0000-4000-8000-000000000305'),0::bigint,'legacy 10:00:00.125 never becomes truncated canonical minutes');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','legacy 10:00:00.125 makes affected preset incomplete');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','legacy 10:00:00.125 does not make the independent preset incomplete');
 select throws_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='월 10:00-11:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'23P01','timetable_resource_conflict','legacy 10:00:00.125 cannot expose truncated adjacent availability');
 select lives_ok($q$select pg_temp.seed_review_sessions('[null]')$q$,'legacy null session never crashes reader or baseline');
 select is((select schedule_plan->'sessions' from public.classes where id='ad240000-0000-4000-8000-000000000305'),'[null]'::jsonb,'legacy null element remains intact');
 select ok(exists(select 1 from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305' and value->>'date' is null and value->>'occupancyFingerprint' is not null),'legacy null has stable unknown-date blocker');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','legacy null keeps bounded preset incomplete');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','legacy null does not make the independent preset incomplete');
 select throws_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='금 20:00-21:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'23P01','timetable_resource_conflict','legacy null blocks unsafe new occupancy without crashing');
 select lives_ok($q$select pg_temp.seed_review_sessions('["bad"]')$q$,'legacy string session never crashes reader or baseline');
 select is((select schedule_plan->'sessions' from public.classes where id='ad240000-0000-4000-8000-000000000305'),'["bad"]'::jsonb,'legacy string element remains intact');
 select ok(exists(select 1 from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305' and value->>'date' is null and value->>'occupancyFingerprint' is not null),'legacy string has stable unknown-date blocker');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','legacy string keeps bounded preset incomplete');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','legacy string does not make the independent preset incomplete');
 select throws_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='금 20:00-21:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'23P01','timetable_resource_conflict','legacy string blocks unsafe new occupancy without crashing');
 select lives_ok($q$select pg_temp.seed_review_sessions('[7]')$q$,'legacy number session never crashes reader or baseline');
 select is((select schedule_plan->'sessions' from public.classes where id='ad240000-0000-4000-8000-000000000305'),'[7]'::jsonb,'legacy number element remains intact');
 select ok(exists(select 1 from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedUnresolvedOccupancies') where value->>'classId'='ad240000-0000-4000-8000-000000000305' and value->>'date' is null and value->>'occupancyFingerprint' is not null),'legacy number has stable unknown-date blocker');
-select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','legacy number keeps bounded preset incomplete');
+select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','true','legacy number does not make the independent preset incomplete');
 select throws_ok($q$select pg_temp.direct_write($w$update public.classes set schedule='금 20:00-21:00' where id='ad240000-0000-4000-8000-000000000303'$w$)$q$,'23P01','timetable_resource_conflict','legacy number blocks unsafe new occupancy without crashing');
 select * from finish();
 rollback;

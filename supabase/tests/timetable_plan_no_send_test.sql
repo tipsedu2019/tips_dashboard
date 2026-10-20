@@ -48,7 +48,7 @@ create temp table history_before as select pg_temp.history_snapshot() value;
 select ok((select (value->relation->>'count')::int>0 from history_before),'nonempty fixture: '||relation) from unnest(array['public.students','public.student_class_enrollment_history','public.ops_registration_enrollments','public.ops_registration_observations','public.ops_registration_admission_batches','public.textbooks','public.textbook_sales','public.textbook_sale_lines','public.class_lesson_sessions','dashboard_private.notification_events','dashboard_private.notification_deliveries','public.ops_task_notification_deliveries']) relation;
 create temp table transfer_result(value jsonb);
 create function pg_temp.transfer(target int,mode text) returns jsonb language plpgsql as $$declare r jsonb;begin
- r:=jsonb_build_object('source',jsonb_build_object('kind','plan','planId',pg_temp.hid(30)),'target',case when target=0 then jsonb_build_object('kind','operational') else jsonb_build_object('kind','plan','planId',pg_temp.hid(target)) end,'mode',mode,'onConflict','reject','itemIds',jsonb_build_array(pg_temp.hid(32)));
+ r:=jsonb_build_object('source',jsonb_build_object('kind','plan','planId',pg_temp.hid(30)),'target',case when target=0 then jsonb_build_object('kind','operational','status','개강 준비') else jsonb_build_object('kind','plan','planId',pg_temp.hid(target)) end,'mode',mode,'onConflict','reject','itemIds',jsonb_build_array(pg_temp.hid(32)));
  return public.commit_timetable_plan_transfer_v1(jsonb_build_object('request',r,'previewFingerprint',public.preview_timetable_plan_transfer_v1(r)->>'fingerprint','requestKey',mode||target));
 end $$;
 

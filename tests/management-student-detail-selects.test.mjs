@@ -67,7 +67,7 @@ test("student fields keep natural DOM order across the three, two, and one-colum
     [...studentFieldsSource.matchAll(/\{ name: "([^"]+)"/g)].map((match) => match[1]),
     ["name", "uid", "school_category", "school", "grade", "contact", "parentContact", "enrollDate"],
   );
-  assert.match(source, /kind === "students" \? "student-fields" : kind === "classes" \? "class-fields sm:grid-cols-2" : "sm:grid-cols-2"/);
+  assert.match(source, /kind === "students" \? "student-fields" : "sm:grid-cols-2"/);
   assert.match(styles, /\.student-fields \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(styles, /@container student-edit-sheet \(max-width: 759px\) \{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(styles, /@media \(max-width: 639px\) \{[\s\S]*?\.student-fields \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);

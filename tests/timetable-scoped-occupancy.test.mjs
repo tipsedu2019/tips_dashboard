@@ -45,15 +45,17 @@ test('independently missing bounds pass the producer contract while reserving th
   assert.deepEqual(findOperatingConflicts([{...slot,weekday:1}],loaded),[]);
  }
 });
-test('metadata edits retain existing occupancy; a new affected placement explains the specific class',()=>{
+test('preset metadata and placement edits ignore operating uncertainty',()=>{
  const snapshot={...ref,plan:{targetStartDate:null,targetEndDate:null},items:[{id:'item',name:'draft'}],slots:[slot]};
  assert.doesNotThrow(()=>validatePlacementEdit(snapshot,{operation:'save',item:{id:'item',name:'rename'},slots:[slot]}));
- assert.throws(()=>validatePlacementEdit({...snapshot,slots:[]},{operation:'save',item:{id:'item'},slots:[slot]}),/기존 수업의 시간·선생님·강의실/);
+ assert.doesNotThrow(()=>validatePlacementEdit({...snapshot,slots:[]},{operation:'save',item:{id:'item'},slots:[slot]}));
 });
 
-test('dated or English class conflict keeps its specific explanation through the real error formatter',async()=>{
+test('preset internal English class conflict keeps its explanation through the real error formatter',async()=>{
  const {planErrorLabel}=await import('../src/features/academic/timetable-plan-interaction.ts');
- const snapshot={...ref,unresolvedOccupancies:[],datedUnresolvedOccupancies:[{...blocker,label:'conflict invalid legacy',date:'2026-10-06'}],plan:{targetStartDate:'2026-10-01',targetEndDate:'2026-10-31'},items:[],slots:[]};
- try { validatePlacementEdit(snapshot,{operation:'save',item:{id:'item'},slots:[slot]}); assert.fail('must block'); }
- catch(e) { assert.match(planErrorLabel(e),/^2026-10-06 · conflict invalid legacy의/); }
+ const snapshot={...ref,plan:{},items:[{id:'other',name:'conflict invalid legacy'}],slots:[{...slot,id:'other-slot',itemId:'other'}]};
+ let conflict;
+ try { validatePlacementEdit(snapshot,{operation:'save',item:{id:'item'},slots:[slot]}); } catch(error) { conflict=error; }
+ assert.ok(conflict, 'internal preset overlap must block');
+ assert.match(planErrorLabel(conflict),/conflict invalid legacy/);
 });

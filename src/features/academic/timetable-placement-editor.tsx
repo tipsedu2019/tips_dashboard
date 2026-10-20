@@ -1,21 +1,22 @@
 'use client';
-import { TIMETABLE_SUBJECTS, timetableTeacherMatchesSubject, timetableTeachers } from './timetable-subjects';
+import { TIMETABLE_SUBJECTS, timetableTeacherMatchesSubject } from './timetable-subjects';
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import type { TimetablePlanService } from './timetable-plan-service';
-import type { DropTarget, PlanSnapshot, ResourceOption, ScienceSubjectArea } from './timetable-plan-contract';
+import type { DropTarget, PlanSnapshot, ScienceSubjectArea } from './timetable-plan-contract';
 import type { TimetableItemEdit } from './timetable-plan-model';
 import { suggestPlacements } from './timetable-conflicts';
-import { PLAN_DAYS, PLAN_DAY_ORDER, formatPendingSlot, formatPlanTime, parsePlanTime, planErrorLabel, itemDraft, buildPlacementFormEdit, placementFormDefaults, placementScope, type PlacementEditorDraft, type PlacementFormValues } from './timetable-plan-interaction';
+import { presetSlots } from './timetable-plan-placements';
+import { PLAN_DAYS, PLAN_DAY_ORDER, formatPendingSlot, formatPlanTime, parsePlanTime, planErrorLabel, itemDraft, buildPlacementRowsEdit, placementRowsDefaults, placementScope, type PlacementEditorDraft, type PlacementRowsFormValues } from './timetable-plan-interaction';
 export type { PlacementEditorDraft } from './timetable-plan-interaction';
-type Values = PlacementFormValues;
+import { ClassMetadataFields, ClassScheduleFields } from '@/components/class-form-fields';
+import type { ClassFieldOption } from '@/components/class-form-model';
+import { ACADEMIC_SUBJECTS } from '@/lib/academic-subject-registry';
+type Values = PlacementRowsFormValues;
 export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onDirty, canEdit, failureKind, onRetry, onDiscard, onAcceptServer, serverSummary, loadScienceSubjectAreas, localDraft = false }: {
     localDraft?: boolean;
     loadScienceSubjectAreas?: TimetablePlanService['listScienceSubjectAreas'];
@@ -34,7 +35,7 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
     const slot = draft.slots.find(s => s.id === draft.slotId);
     const scope = placementScope(draft);
     const whole = scope === 'item' && draft.slots.length > 0;
-    const form = useForm<Values>({ defaultValues: placementFormDefaults(draft) });
+    const form = useForm<Values>({ defaultValues: placementRowsDefaults(draft) });
     const submittedValues = useRef<string | null>(null);
     const [error, setError] = useState(''), [busy, setBusy] = useState(false), [suggestions, setSuggestions] = useState<DropTarget[] | null>(null);
     const science = form.watch('subject').trim() === '과학';
@@ -50,12 +51,13 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
     useEffect(() => { onDirty(form.formState.isDirty); }, [form.formState.isDirty, onDirty]);
     const save = async (values: Values, candidate?: DropTarget) => { if (!canEdit || busy)
         return; setBusy(true); setError(''); try {
-        const edit = buildPlacementFormEdit(draft, values, candidate);
+        const submitted = candidate ? { ...values, rows: values.rows.map((row, index) => index === 0 ? { ...row, day: PLAN_DAYS[candidate.weekday], start: formatPlanTime(candidate.startMinute), end: formatPlanTime(candidate.startMinute + Number(values.duration)) } : row) } : values;
+        const edit = buildPlacementRowsEdit(draft, submitted);
         submittedValues.current = JSON.stringify(values);
         await onSave(edit);
-        form.reset(values);
-        onDirty(false);
-        onClose(true);
+        if (JSON.stringify(form.getValues()) === submittedValues.current) {
+            form.reset(values); onDirty(false); onClose(true);
+        }
     }
     catch (e) {
         setError(planErrorLabel(e));
@@ -65,20 +67,30 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
     } };
     const recommend = () => { try {
         const v = form.getValues();
-        const fromMinute = parsePlanTime(v.start), toMinute = parsePlanTime(v.end, true);
-        setSuggestions(suggestPlacements({ slots: snapshot.slots.filter(s => s.id !== draft.slotId), shadows: snapshot.shadowSlots, itemId: draft.item.id, planId: draft.item.planId, teacherId: v.teacher, classroomId: v.room, durationMinutes: Number(v.duration), weekdays: v.weekdays.length ? v.weekdays : [1, 2, 3, 4, 5], fromMinute, toMinute, operatingReference: snapshot, period: snapshot.plan.targetStartDate && snapshot.plan.targetEndDate ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null }));
+        const row = v.rows[0];
+        if (!row) throw Error("추천할 시간표 행을 추가해 주세요.");
+        const fromMinute = parsePlanTime(row.start), toMinute = parsePlanTime(row.end, true);
+        setSuggestions(suggestPlacements({ slots: presetSlots(snapshot).filter(s => s.id !== draft.slotId), shadows: [], itemId: draft.item.id, planId: draft.item.planId, teacherId: row.teacher, classroomId: row.room, durationMinutes: Number(v.duration), weekdays: row.day ? PLAN_DAY_ORDER.filter(day => PLAN_DAYS[day] === row.day) : [1, 2, 3, 4, 5], fromMinute, toMinute }));
         setError('');
     }
     catch (e) {
         setError(planErrorLabel(e));
         setSuggestions(null);
     } };
-    const input = (name: 'name' | 'subject' | 'grade' | 'duration' | 'start' | 'end' | 'capacity' | 'tuition', label: string, required = false) => <FormField control={form.control} name={name} rules={required ? { required: `${label}을 입력해 주세요.` } : undefined} render={({ field }) => <FormItem><FormLabel>{label}</FormLabel><FormControl><Input {...field} disabled={whole && ['start', 'end'].includes(name) && !form.watch('applyTime')} required={required} maxLength={name === 'name' ? 200 : undefined} inputMode={['duration', 'capacity', 'tuition'].includes(name) ? 'numeric' : undefined} placeholder={name === 'start' ? '17:13' : name === 'end' ? '24:00' : undefined}/></FormControl><FormMessage /></FormItem>}/>;
-    const resource = (name: 'teacher' | 'room', label: string, options: ResourceOption[]) => <FormField control={form.control} name={name} render={({ field }) => <FormItem><FormLabel>{label}</FormLabel><Select disabled={whole && !form.watch(name === 'teacher' ? 'applyTeacher' : 'applyRoom')} value={field.value || 'none'} onValueChange={v => field.onChange(v === 'none' ? '' : v)}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="none">미정</SelectItem>{options.map(o => <SelectItem value={o.id} key={o.id} disabled={!o.isVisible || o.isMissing}>{o.name}{!o.isVisible || o.isMissing ? ' (사용 불가)' : ''}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>}/>;
-    const wholeChange = (name: 'applyTeacher' | 'applyRoom' | 'applyTime' | 'applyWeekdays', label: string) =>
-        <FormField control={form.control} name={name} render={({ field }) => <FormItem>
-            <FormLabel className="flex min-h-11 items-center gap-2"><FormControl><Checkbox aria-label={label} checked={field.value} onCheckedChange={value => field.onChange(Boolean(value))} /></FormControl>{label}</FormLabel>
-        </FormItem>} />;
+    const rows = form.watch('rows');
+    const subject = form.watch('subject');
+    const nameField = form.register('name', { required: '수업명을 입력해 주세요.' });
+    const resourceOptions = (kind: 'teacher' | 'room'): ClassFieldOption[] => {
+        const catalog = kind === 'teacher' ? snapshot.catalogs.teachers : snapshot.catalogs.classrooms;
+        const options = catalog.map(option => ({ value: option.id, label: option.name,
+            disabled: !option.isVisible || option.isMissing || (kind === 'teacher' && !timetableTeacherMatchesSubject(option, subject)) }));
+        for (const row of rows) if (row[kind] && !options.some(option => option.value === row[kind])) {
+            const saved = draft.slots.find(slot => slot.id === row.key);
+            options.push({ value: row[kind], label: (kind === 'teacher' ? saved?.teacherName : saved?.classroomName) || '정보 확인 필요', disabled: true });
+        }
+        return options;
+    };
+    const changeRows = (next: Values['rows']) => { form.setValue('rows', next, { shouldDirty: true }); setSuggestions(null); };
     const runRecovery = async (action: () => Promise<void>, after?: () => void) => {
         setBusy(true);
         try { await action(); setError(''); after?.(); }
@@ -96,52 +108,46 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
         : snapshot.items.some(i => i.id === draft.item.id) ? '수업 전체 편집' : '수업 추가';
     const description = scope === 'slot' ? '선택한 배치만 변경합니다. 다른 요일의 배치는 유지됩니다.'
         : scope === 'add' ? '기존 배치를 유지하고 선택한 요일에 추가합니다.'
-        : whole ? '전체 변경을 선택한 항목만 모든 배치에 적용합니다. 나머지 배치 정보는 유지됩니다.'
+        : whole ? '각 시간표 행의 요일·시각·선생님·강의실을 편집합니다.'
         : localDraft ? '요일을 선택하지 않으면 미배치 수업으로 적용합니다.' : '요일을 선택하지 않으면 미배치 수업으로 저장합니다.';
     return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}>
-        <DialogContent restoreFocusToOpener className="sm:max-w-xl max-h-[90dvh] overflow-y-auto">
+        <DialogContent restoreFocusToOpener className="sm:max-w-3xl max-h-[90dvh] overflow-y-auto">
             <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
             <Form {...form}>
                 <form onSubmit={form.handleSubmit(v => save(v))} className="space-y-4">
                     <fieldset disabled={!canEdit || busy} className="space-y-4">
-                        {input('name', '수업명', true)}
-                        {whole ? <div className="grid grid-cols-2 gap-2">
-                            {wholeChange('applyTeacher', '전체 담당 변경')}
-                            {wholeChange('applyRoom', '전체 강의실 변경')}
-                            {wholeChange('applyWeekdays', '전체 요일 변경')}
-                            {wholeChange('applyTime', '전체 시각 변경')}
-                        </div> : null}
-                        <div className="grid grid-cols-2 gap-3">
-                            {<FormField control={form.control} name="subject" render={({ field }) => <FormItem><FormLabel>과목</FormLabel><Select value={field.value} onValueChange={value => {
-                                field.onChange(value);
-                                const selected = snapshot.catalogs.teachers.find(teacher => teacher.id === form.getValues('teacher'));
-                                if (selected && !timetableTeacherMatchesSubject(selected, value)) {
-                                    form.setValue('teacher', '', { shouldDirty: true });
-                                    if (whole) form.setValue('applyTeacher', true, { shouldDirty: true });
+                        <ClassMetadataFields idPrefix="preset-class" autoFocus nameInputRef={nameField.ref} onNameBlur={nameField.onBlur}
+                            values={{ name: form.watch('name'), status: '개강 준비', grade: form.watch('grade'), subject,
+                                capacity: form.watch('capacity'), tuition: form.watch('tuition'), subjectAreaKey: form.watch('subjectAreaKey') }}
+                            statuses={[{ value: '개강 준비', label: '개강 준비' }]} statusDisabled
+                            subjects={TIMETABLE_SUBJECTS.map(value => ({ value, label: value }))}
+                            grades={[...(ACADEMIC_SUBJECTS.find(option => option.value === subject)?.grades || ACADEMIC_SUBJECTS[0].grades)]}
+                            capacities={snapshot.items.flatMap(item => item.capacity === null ? [] : [String(item.capacity)])}
+                            tuitions={snapshot.items.flatMap(item => item.tuition === null ? [] : [String(item.tuition)])}
+                            areas={areas.map(area => ({ value: area.key, label: area.label }))}
+                            errors={{ name: form.formState.errors.name?.message }}
+                            disabled={!canEdit || busy}
+                            onChange={(field, value) => {
+                                if (field === 'status') return;
+                                form.setValue(field, value, { shouldDirty: true, shouldValidate: true });
+                                if (field === 'subject') {
+                                    changeRows(form.getValues('rows').map(row => {
+                                        const teacher = snapshot.catalogs.teachers.find(option => option.id === row.teacher);
+                                        return teacher && !timetableTeacherMatchesSubject(teacher, value) ? { ...row, teacher: '' } : row;
+                                    }));
+                                    if (value !== '과학') form.setValue('subjectAreaKey', '', { shouldDirty: true });
                                 }
-                                setSuggestions(null);
-                            }}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent>{TIMETABLE_SUBJECTS.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>} />}{input('grade', '학년')}
-                            {science ? <FormField control={form.control} name="subjectAreaKey" render={({ field }) => <FormItem><FormLabel>과학 영역</FormLabel><Select value={field.value || 'none'} onValueChange={value => field.onChange(value === 'none' ? '' : value)}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="none">미정</SelectItem>{field.value && !areas.some(area => area.key === field.value) ? <SelectItem value={field.value} disabled>사용 불가</SelectItem> : null}{areas.map(area => <SelectItem key={area.key} value={area.key}>{area.label}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>} /> : null}
-                            {science && areaError ? <p role="alert" className="text-sm text-destructive">{areaError}</p> : null}
-                            {resource('teacher', '선생님', timetableTeachers(snapshot.catalogs.teachers, form.watch('subject')))}
-                            {resource('room', '강의실', snapshot.catalogs.classrooms)}
-                            {input('capacity', '정원')}{input('tuition', '수업료')}
-                        </div>
-                        <FormField control={form.control} name="weekdays" render={({ field }) => <FormItem>
-                            <FormLabel>배치 요일</FormLabel>
-                            <div className="flex flex-wrap gap-3">{PLAN_DAY_ORDER.map(i =>
-                                <Label key={i} className="flex min-h-11 items-center gap-2">
-                                    <Checkbox disabled={whole && !form.watch('applyWeekdays')} checked={field.value.includes(i)}
-                                        onCheckedChange={checked => field.onChange(checked ? [...field.value, i] : field.value.filter(d => d !== i))} />
-                                    {PLAN_DAYS[i]}
-                                </Label>
-                            )}</div>
-                            <FormMessage />
-                        </FormItem>} />
-                        <div className="grid grid-cols-2 gap-3">
-                            {input('start', '시작 시각')}{input('end', '종료 시각')}{input('duration', '추천 수업 길이(분)')}
-                        </div>
-                        {!whole ? <Button type="button" variant="outline" onClick={recommend}>빈 시간 추천</Button> : null}
+                            }} />
+                        {science && areaError ? <p role="alert" className="text-sm text-destructive">{areaError}</p> : null}
+                        <ClassScheduleFields rows={rows} teachers={resourceOptions('teacher')} rooms={resourceOptions('room')}
+                            disabled={!canEdit || busy}
+                            onChange={(index, patch) => changeRows(rows.map((row, position) => position === index ? { ...row, ...patch } : row))}
+                            onRemove={index => changeRows(rows.filter((_, position) => position !== index))}
+                            onAdd={() => changeRows([...rows, { key: crypto.randomUUID(), day: '', start: rows[rows.length - 1]?.start || '09:00', end: rows[rows.length - 1]?.end || '10:00', teacher: rows[rows.length - 1]?.teacher || form.getValues('teacher'), room: rows[rows.length - 1]?.room || form.getValues('room') }])} />
+                        {!whole && rows.length === 1 ? <div className="flex flex-wrap items-end gap-3">
+                            <FormField control={form.control} name="duration" render={({ field }) => <FormItem><FormLabel>추천 수업 길이(분)</FormLabel><FormControl><Input {...field} inputMode="numeric" /></FormControl><FormMessage /></FormItem>} />
+                            <Button type="button" variant="outline" onClick={recommend}>빈 시간 추천</Button>
+                        </div> : null}
                         {suggestions ? <div className="flex flex-wrap gap-2" role="status">
                             {suggestions.length ? suggestions.map((s, i) =>
                                 <Button type="button" variant="outline" key={i} onClick={() => void form.handleSubmit(v => save(v, s))()}>

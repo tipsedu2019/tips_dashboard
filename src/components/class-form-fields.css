@@ -1,0 +1,22 @@
+/* Shared class form composition for registration, details and timetable presets. */
+.class-fields { gap: 20px; }
+.class-fields > div { min-width: 0; }
+.class-fields [data-slot="label"] { font-size: 14px; line-height: 20px; font-weight: 500; }
+:is(.class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) {
+  height: var(--field-height);
+  border-radius: var(--radius-control);
+  font-size: 14px;
+  line-height: 20px;
+}
+.class-fields [aria-haspopup="dialog"],
+.class-schedule-fields [data-slot="button"][aria-haspopup="dialog"] {
+  height: var(--field-height);
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+@media (max-width: 639px) {
+  .class-fields { gap: 16px; }
+  :is(.class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) { height: 44px; font-size: 16px; }
+  .class-fields [aria-haspopup="dialog"],
+  .class-schedule-fields [data-slot="button"][aria-haspopup="dialog"] { min-height: 44px; height: 44px; }
+}

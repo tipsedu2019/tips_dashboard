@@ -171,6 +171,44 @@ function relationPaginationFixture(fixture, relationKind = "registered_students"
   }
 }
 
+test('shared class metadata displays exact won and zero, and saves metadata without schedule ownership', async t => {
+  const ui = await setup(t, { configureFixture(fixture) {
+    fixture.rows[0].raw.fee = 325000; fixture.rows[0].raw.capacity = 0;
+    deferServices(fixture, ['updateClass']);
+  } });
+  await ui.click('A 영어반'); await ui.resolve(0, defaultsFor('17:13'));
+  assert.equal(document.getElementById('classes-detail-fee').value, '325000');
+  assert.equal(document.getElementById('classes-detail-capacity').value, '0');
+  const fields = document.querySelector('[data-testid="class-metadata-fields"]');
+  assert.deepEqual([...fields.querySelectorAll('label')].map(label => label.textContent.replace(/\*|필수 입력/g, '')), ['수업명','수업 상태','학년','과목','정원','수업료 (원)']);
+  await ui.editField('classes-detail-fee', '0'); await ui.click('저장');
+  assert.equal(ui.mutations[0].name, 'updateClass');
+  assert.equal(ui.mutations[0].args[0].fee, '0');
+  assert.equal(ui.mutations[0].args[1].scheduleOwnership, 'normalized');
+  assert.equal(ui.requests.filter(request => request.type === 'save').length, 0);
+  await act(async () => ui.mutations[0].reject(new Error('합성 저장 실패')));
+  assert.equal(document.getElementById('classes-detail-fee').value, '0');
+});
+
+test('shared class schedule deletes the middle row without changing remaining DOM identity, IDs or resource UUIDs', async t => {
+  const ui = await setup(t);
+  await ui.click('A 영어반');
+  const defaults = defaultsFor('17:13', 4);
+  defaults.slots.push({ ...defaults.slots[0], id:'slot-2', weekday:3, startTime:'19:07', endTime:'20:37', teacherCatalogId:'other-teacher', teacherName:'영어교사', classroomCatalogId:'other-room', sortOrder:1 });
+  defaults.slots.push({ ...defaults.slots[0], id:'slot-3', weekday:5, startTime:'23:13', endTime:'24:00', teacherCatalogId:'missing-teacher', classroomCatalogId:'hidden-room', sortOrder:2 });
+  await ui.resolve(0, defaults);
+  const last = document.querySelector('[aria-label="수업시간 3 종료시각"]');
+  assert.equal(last.value, '24:00');
+  await ui.click('시간표 2 행 삭제');
+  assert.equal(document.querySelector('[aria-label="수업시간 2 종료시각"]'), last);
+  await ui.click('기본 시간표 저장');
+  assert.deepEqual(ui.requests[1].input.slots.map(slot => [slot.id,slot.startTime,slot.endTime,slot.teacherCatalogId,slot.classroomCatalogId]), [
+    ['slot-1','17:13','20:00','teacher-1','room-1'],['slot-3','23:13','24:00','missing-teacher','hidden-room'],
+  ]);
+  await ui.reject(1, '합성 저장 실패');
+  assert.equal(document.querySelector('[aria-label="수업시간 2 종료시각"]'), last);
+});
+
 function snapshotRoster() {
   const roster = document.querySelector('[data-testid="class-enrolled-student-roster"]');
   assert.ok(roster);
@@ -1260,7 +1298,7 @@ test("pending save coverage locks student creation fields and restores them afte
 });
 
 for (const [kind, serviceName, fieldIds] of [
-  ["classes", "createClass", ["name", "status", "teacher", "schedule", "classroom", "capacity", "fee"]],
+  ["classes", "createClass", ["name", "status", "grade", "subject", "capacity", "fee"]],
   ["textbooks", "createTextbook", ["title", "price", "tags"]],
 ]) {
   test(`pending save coverage locks ${kind} creation controls while preserving exit`, async t => {
@@ -1269,20 +1307,21 @@ for (const [kind, serviceName, fieldIds] of [
     await ui.editField(`${kind}-form-${fieldIds[0]}`, "신규 등록");
     await ui.submitTogether();
     for (const field of fieldIds) assert.equal(document.getElementById(`${kind}-form-${field}`).disabled, true, `${field} must be locked`);
+    if (kind === "classes") for (const control of document.querySelectorAll('[data-testid="class-schedule-fields"] input, [data-testid="class-schedule-fields"] button')) assert.equal(control.disabled, true, "new schedule rows must be locked during creation");
     await ui.escape();
     assert.equal(document.querySelector('[role="dialog"]'), null);
     assert.equal(ui.mutations.length, 1);
   });
 }
 
-test("class creation protects free-text schedule drafts before their values can be normalized", async t => {
+test("class creation protects incomplete row time drafts before their values can be normalized", async t => {
   const ui = await setup(t);
   await ui.click("수업 등록");
-  await ui.editField("classes-form-schedule", "월요일 시간 입력 중");
+  await ui.editTime("17:");
   await ui.escape();
   assert.ok(document.querySelector('[data-testid="management-discard-confirm-dialog"]'));
   await ui.click("계속 편집");
-  assert.equal(document.getElementById("classes-form-schedule").value, "월요일 시간 입력 중");
+  assert.equal(ui.time(), "17:");
 });
 
 test("pending save coverage never includes a dirty form in a relation mutation", async t => {
@@ -1854,13 +1893,13 @@ test("a closed class response cannot populate a new class form", async t => {
   await ui.click("수업 상세 닫기");
   await ui.click("수업 등록");
   await act(async () => {
-    const input = document.querySelector("#classes-form-schedule");
+    const input = document.querySelector('[aria-label="수업시간 1 시작시각"]');
     assert.ok(input);
-    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "화 18:45-20:00");
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "18:45");
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
   });
   await ui.resolve(0, defaultsFor("09:00"));
-  assert.equal(document.querySelector("#classes-form-schedule").value, "화 18:45-20:00");
+  assert.equal(document.querySelector('[aria-label="수업시간 1 시작시각"]').value, "18:45");
   assert.doesNotMatch(ui.text(), /기본 시간표 저장/);
 });
 

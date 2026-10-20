@@ -54,8 +54,8 @@ export function TimetableTransferDialog({ open, onOpenChange, state, selectedIte
     })().catch(error => { if (!abort.signal.aborted) setListError(planErrorLabel(error)); });
     return () => abort.abort();
   }, [open, service, planId]);
-  const operational = target === 'preparing' || target === 'operational';
-  const request: TransferRequest = { source: { kind: 'plan', planId }, target: operational ? { kind: 'operational', status: target === 'preparing' ? '개강 준비' : '수강' } : { kind: 'plan', planId: target }, mode, itemIds: selectedItemIds, onConflict: keepPending && !operational && mode === 'copy' ? 'keep_pending' : 'reject' };
+  const operational = target === 'preparing';
+  const request: TransferRequest = { source: { kind: 'plan', planId }, target: operational ? { kind: 'operational', status: '개강 준비' } : { kind: 'plan', planId: target }, mode, itemIds: selectedItemIds, onConflict: keepPending && !operational && mode === 'copy' ? 'keep_pending' : 'reject' };
   const signature = JSON.stringify(request);
   useEffect(() => { session?.reset(); }, [signature, session]);
   if (!snapshot || !session || !transfer) return null;
@@ -72,7 +72,7 @@ export function TimetableTransferDialog({ open, onOpenChange, state, selectedIte
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-2"><Label htmlFor="transfer-target">목적지</Label><Select value={locked ? displayedRequest.target.kind === 'operational' ? displayedRequest.target.status === '개강 준비' ? 'preparing' : 'operational' : displayedRequest.target.planId : target} disabled={locked || busy} onValueChange={setTarget}><SelectTrigger id="transfer-target"><SelectValue /></SelectTrigger><SelectContent>
           <SelectItem value="preparing" disabled={!snapshot.permissions.canTransfer}>운영 시간표 · 개강 준비</SelectItem>
-          <SelectItem value="operational" disabled={!snapshot.permissions.canTransfer}>운영 시간표 · 수강</SelectItem>
+          {locked && displayedRequest.target.kind === 'operational' && displayedRequest.target.status !== '개강 준비' ? <SelectItem value="operational" disabled>이전 수강 전송 · 결과 확인</SelectItem> : null}
           {plans.map(plan => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
         </SelectContent></Select></div>
         <div className="space-y-2"><Label htmlFor="transfer-mode">방식</Label><Select value={displayedRequest.mode} disabled={locked || busy} onValueChange={value => setMode(value as 'copy' | 'move')}><SelectTrigger id="transfer-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="copy">복사 · 원안 보관</SelectItem><SelectItem value="move">이동 · 원안 제거</SelectItem></SelectContent></Select></div>
