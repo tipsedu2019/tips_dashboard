@@ -90,6 +90,7 @@ import {
   parseClassScheduleSlots,
   stripSharedScheduleDetails,
   toContinuousClassScheduleSlots,
+  classScheduleSlotsValidationError,
   type ClassScheduleSlot,
 } from "./class-schedule-slots";
 import type { ClassStudentPickerFilters, StudentClassPickerFilters } from "./student-class-picker-model";
@@ -771,7 +772,7 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
   delete payload.textbookIds;
   delete payload.textbookUsage;
   if (payload.parentContact) payload.parent_contact = payload.parentContact;
-  if (payload.classroom) payload.room = payload.classroom;
+  if (Object.prototype.hasOwnProperty.call(payload, "classroom")) payload.room = payload.classroom;
   if (payload.name && kind === "classes") {
     payload.class_name = payload.name;
     payload.className = payload.name;
@@ -2252,6 +2253,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   };
   const handleClassScheduleDefaultsSave = async () => {
     if (!selectedRow || !normalizedScheduleDefaults || !canMutateRows || classFormReferencesBlocked || !classScheduleDefaultsDirty) return;
+    const scheduleError = classScheduleSlotsValidationError(getClassScheduleSlotsFromForm());
+    if (scheduleError) {
+      setOperationError(scheduleError);
+      return;
+    }
     const classId = selectedRow.id;
     if (scheduleDefaultsPendingRef.current.has(classId)) return;
     const requestKey = scheduleDefaultsRequestKey || createContinuousScheduleRequestKey();
@@ -2496,7 +2502,18 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       && (kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject))
       && !text(form[field.name])
     ));
-    if (!missing) return true;
+    if (!missing) {
+      // An unplaced class is valid. Once a placement is entered, creation and
+      // edits use the same timing/teacher contract; its room may stay unassigned.
+      if (kind === "classes" && (scope === "form" || (!normalizedScheduleDefaults && scheduleDraft !== savedScheduleDraft))) {
+        const scheduleError = classScheduleSlotsValidationError(getClassScheduleSlotsFromForm());
+        if (scheduleError) {
+          setOperationError(scheduleError);
+          return false;
+        }
+      }
+      return true;
+    }
     setOperationError(null);
     setSaveNotice("");
     document.getElementById(`${kind}-${scope}-${missing.name}`)?.focus();

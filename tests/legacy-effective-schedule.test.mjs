@@ -46,14 +46,14 @@ test('stored explicit fields survive unrelated edits; reset is an explicit empty
   assert.equal(raw.sessions[0].startTime, '18:00', 'reset does not mutate stored snapshot');
 });
 
-test('explicit clears remain unknown and fail validation while absent parts inherit', () => {
+test('explicit room clears remain unassigned and pass validation while absent parts inherit', () => {
   for (const empty of [null, '']) {
     const raw = ordinary();
     raw.sessionSchedules = { [raw.sessions[0].date]: { classroomCatalogId: empty } };
     const projected = projectLegacyEffectivePlan(raw, context).sessions[0];
     assert.equal(projected.startTime, '15:30');
     assert.equal(projected.classroomCatalogId, null);
-    assert.match(legacyLessonScheduleValidationError(raw, { sessions: [] }, '2026-10-04', context), /선생님·강의실/);
+    assert.equal(legacyLessonScheduleValidationError(raw, { sessions: [] }, '2026-10-04', context), '');
   }
 });
 

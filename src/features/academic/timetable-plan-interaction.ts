@@ -105,6 +105,7 @@ export function buildPlanPanels(snapshot: PlanSnapshot, view: TimetableView, sub
     const panels = (weekly ? options : days).filter(p => !selectedTargets.length || selectedTargets.includes(p.id));
     const columns = weekly ? days : options;
     const all: PlanGridBlock[] = [...snapshot.slots, ...snapshot.shadowSlots].flatMap(slot => {
+        if (!teacher && !slot.classroomId) return [];
         const shadow = 'classId' in slot;
         const item = shadow ? snapshot.shadowClasses.find(i => i.id === slot.classId) : snapshot.items.find(i => i.id === slot.itemId);
         if (!item || (subject && item.subject !== subject))
@@ -193,7 +194,7 @@ export function validatePlacementEdit(snapshot: PlanSnapshot, edit: TimetableIte
         throw new PlacementConflictError(`${conflict.date ? conflict.date + ' · ' : ''}${name || '다른 수업'}과 ${conflict.kind === 'teacher' ? '선생님' : conflict.kind === 'classroom' ? '강의실' : '수업'} 시간이 겹칩니다.`);
     }
 }
-function resourceLabel(options: PlanSnapshot['catalogs']['teachers'], id: string) { const row = options.find(r => r.id === id); return row ? `${row.name}${!row.isVisible || row.isMissing ? ' (사용 불가)' : ''}` : '사용 불가'; }
+function resourceLabel(options: PlanSnapshot['catalogs']['teachers'], id: string | null) { if (id === null) return '미정'; const row = options.find(r => r.id === id); return row ? `${row.name}${!row.isVisible || row.isMissing ? ' (사용 불가)' : ''}` : '사용 불가'; }
 
 
 export type PlacementEditorDraft = {

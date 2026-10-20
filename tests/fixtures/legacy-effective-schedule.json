@@ -1199,7 +1199,7 @@
     "expected": {
       "date": "2026-10-02",
       "state": "active",
-      "kind": "unresolved",
+      "kind": "resolved",
       "values": {
         "startTime": "15:30",
         "endTime": "17:00",
@@ -1212,9 +1212,7 @@
         "teacherCatalogId": "basic_weekday",
         "classroomCatalogId": "session"
       },
-      "missing": [
-        "classroomCatalogId"
-      ],
+      "missing": [],
       "errors": []
     }
   },
@@ -1267,7 +1265,7 @@
     "expected": {
       "date": "2026-10-02",
       "state": "active",
-      "kind": "unresolved",
+      "kind": "resolved",
       "values": {
         "startTime": "15:30",
         "endTime": "17:00",
@@ -1280,9 +1278,7 @@
         "teacherCatalogId": "basic_weekday",
         "classroomCatalogId": "basic_weekday"
       },
-      "missing": [
-        "classroomCatalogId"
-      ],
+      "missing": [],
       "errors": []
     }
   },

@@ -148,7 +148,7 @@ export function legacyLessonScheduleValidationError(
     }
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(row.startTime || '')) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(row.endTime || ''))) return `${date} ${kind}의 시작·종료 시간을 입력해 주세요.`;
     if (String(row.startTime) >= String(row.endTime)) return `${date} 종료 시간을 시작 시간 이후로 입력해 주세요.`;
-    if (!(row.teacherCatalogId || row.teacherName) || !(row.classroomCatalogId || row.classroomName)) return `${date} ${kind}의 선생님·강의실을 선택해 주세요.`;
+    if (!(row.teacherCatalogId || row.teacherName)) return `${date} ${kind}의 선생님을 선택해 주세요.`;
   }
   return '';
 }

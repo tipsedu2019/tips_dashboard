@@ -4,6 +4,8 @@ import { findOperatingConflicts, suggestPlacements, operatingReferenceComplete }
 import { requireTimetableOperatingReference } from '../src/features/academic/timetable-plan-service.ts';
 import { validatePlacementEdit } from '../src/features/academic/timetable-plan-interaction.ts';
 const slot={id:'slot',itemId:'item',planId:'plan',weekday:2,startMinute:1170,endMinute:1290,teacherId:'t',classroomId:'r',sourceSlotId:null};
+// This blocker represents an invalid/unresolvable room label. A valid
+// unassigned room is emitted as a normal shadow slot, tested separately.
 const blocker={classId:'old',label:'기존 수업',scope:'all',resourceId:null,reason:'unresolved_resource',weekday:2,startMinute:1170,endMinute:1290,teacherId:'other',classroomId:null};
 const ref={occupancyValidationVersion:2,asOfDate:'2026-09-27',shadowSlots:[],shadowClasses:[],catalogs:{teachers:[],classrooms:[]},unresolvedOccupancies:[blocker],shadowFingerprint:'f',datedSessions:[],datedUnresolvedOccupancies:[],datedFingerprint:'d',datedComplete:true,complete:false};
 test('unresolved room reserves its interval while unrelated days and adjacent intervals stay editable',()=>{

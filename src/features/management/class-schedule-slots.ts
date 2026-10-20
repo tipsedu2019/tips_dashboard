@@ -106,8 +106,27 @@ export function fromContinuousClassScheduleDefaults(rows: unknown[]): ClassSched
   });
 }
 
+function hasPlacement(slot: ClassScheduleSlot) {
+  return Boolean(slot.id || text(slot.day) || text(slot.startTime) || text(slot.endTime));
+}
+
+export function classScheduleSlotsValidationError(slots: ClassScheduleSlot[]) {
+  const time = /^(?:[01]?\d|2[0-3]):[0-5]\d(?::00)?$/;
+  const minutes = (value: string) => {
+    const [hour, minute] = value.split(':').map(Number);
+    return hour * 60 + minute;
+  };
+  for (const slot of slots.filter(hasPlacement)) {
+    if (!CLASS_SCHEDULE_DAY_SET.has(text(slot.day))) return '수업 요일을 선택해 주세요.';
+    if (!time.test(text(slot.startTime)) || !(time.test(text(slot.endTime)) || /^24:00(?::00)?$/.test(text(slot.endTime)))
+      || minutes(slot.startTime) >= minutes(slot.endTime)) return '수업 시작·종료 시간을 올바르게 입력해 주세요.';
+    if (!text(slot.teacherCatalogId) && !text(slot.teacher)) return '수업 선생님을 선택해 주세요.';
+  }
+  return '';
+}
+
 export function toContinuousClassScheduleSlots(slots: ClassScheduleSlot[]) {
-  return slots.map((slot, index) => ({
+  return slots.filter(hasPlacement).map((slot, index) => ({
     id: slot.id,
     weekday: CLASS_SCHEDULE_DAY_INDEX.get(text(slot.day)) ?? -1,
     startTime: text(slot.startTime),

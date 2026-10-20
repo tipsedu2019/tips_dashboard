@@ -1,7 +1,7 @@
 import type { DropTarget, OccupancyBlocker, PlanSlot, ShadowSlot, TimetableConflict, TimetableOperatingReference } from "./timetable-plan-contract.ts";
 import { assertInterval, assertWeekday } from "./timetable-plan-model.ts";
 
-type OccupiedSlot = Pick<PlanSlot, "id" | "weekday" | "startMinute" | "endMinute" | "teacherId" | "classroomId">;
+type OccupiedSlot = Pick<ShadowSlot, "id" | "weekday" | "startMinute" | "endMinute" | "teacherId" | "classroomId">;
 
 function overlaps(left: OccupiedSlot, right: OccupiedSlot): boolean {
   return left.weekday === right.weekday
@@ -14,7 +14,7 @@ function conflictKinds(left: PlanSlot, right: OccupiedSlot, sameItem: boolean): 
   if (left.teacherId === right.teacherId) {
     kinds.push({ kind: "teacher", slotId: left.id, otherSlotId: right.id });
   }
-  if (left.classroomId === right.classroomId) {
+  if (left.classroomId !== null && right.classroomId !== null && left.classroomId === right.classroomId) {
     kinds.push({ kind: "classroom", slotId: left.id, otherSlotId: right.id });
   }
   if (sameItem) {
@@ -106,7 +106,7 @@ export function effectiveOperatingSlots(reference: TimetableOperatingReference, 
   return [...defaults, ...sessions.flatMap((session) => {
     if (defaults.some(slot => slot.id === session.inheritedWeeklySlotId)) return [];
     if (session.state === "skipped" || session.state === "tbd" || session.startMinute === null
-      || session.endMinute === null || session.teacherId === null || session.classroomId === null) return [];
+      || session.endMinute === null || session.teacherId === null) return [];
     return [{ id: session.id, classId: session.classId, sourceSlotId: session.sourceSlotId,
       weekday: day, startMinute: session.startMinute, endMinute: session.endMinute,
       teacherId: session.teacherId, classroomId: session.classroomId, classRevision: session.revision }];

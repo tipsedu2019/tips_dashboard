@@ -462,7 +462,7 @@ select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave
 select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,102,201,6)),'batch-operating-room'),
  '23P01','timetable_resource_conflict','changed placement conflicts with an operating room');
 select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,1080,1140,102,201,3)),'batch-operating-unknown'),
- '23P01','timetable_resource_conflict','scoped unresolved operating room remains a conservative blocker');
+ '23P01','timetable_resource_conflict','unassigned operating room retains its known teacher collision');
 select * from pg_temp.breject(pg_temp.bcommand(12,jsonb_build_array(pg_temp.bsave(12,1201,null,900,960,101,202,2)),'batch-dated'),
  '23P01','timetable_resource_conflict','target-period dated teacher reservation remains authoritative');
 
