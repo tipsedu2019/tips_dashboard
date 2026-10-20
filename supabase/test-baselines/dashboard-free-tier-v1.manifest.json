@@ -887,7 +887,7 @@
     },
     {
       "fileName": "20261020134458_timetable_optional_classroom_occupancy.sql",
-      "status": "candidate",
+      "status": "final",
       "sha256": "31cd689964a52b5f084a8a167cb41a0b61b12403a88d4dff7b20d9106e29a8b6"
     }
   ]
