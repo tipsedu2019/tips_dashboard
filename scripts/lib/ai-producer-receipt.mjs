@@ -40,7 +40,7 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261014180000_timetable_validation_unchanged_inputs.sql',
  'supabase/migrations/20261014193500_legacy_context_binding_preparation.sql',
  'supabase/migrations/20261019100046_academic_calendar_move_atomic.sql',
- 'supabase/migrations/20261019120610_word_retest_completed_failed_retry.sql',
+ 'supabase/migrations/20261020001626_word_retest_completed_failed_retry.sql',
  'supabase/tests/timetable_reader_explicit_native_resolution_test.sql',
  'supabase/tests/timetable_shared_validation_workset_test.sql',
  'supabase/tests/timetable_close_gateway_validation_reuse_test.sql',
@@ -129,7 +129,7 @@ export const TIMETABLE_CLOSE_MIGRATIONS=Object.freeze([
 export const REGISTRATION_ENROLLMENT_MIGRATION=Object.freeze({fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'final',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'});
 export const TIMETABLE_BATCH_SAVE_MIGRATION=Object.freeze({fileName:'20261013051620_timetable_plan_atomic_batch_save.sql',status:'final',sha256:'d84407072b358e36d071d38d7c0818568716a8566683d1059121637e85e2b4a7'});
 export const ACADEMIC_CALENDAR_MOVE_MIGRATION=Object.freeze({fileName:'20261019100046_academic_calendar_move_atomic.sql',status:'final',sha256:'4fd992887e81cfb23e9e3585ee4a63eda82de8bb6bdbb21b5392501bcb5e83de'});
-export const WORD_RETEST_COMPLETED_FAILED_MIGRATION=Object.freeze({fileName:'20261019120610_word_retest_completed_failed_retry.sql',status:'final',sha256:'7b964368c629ac92e1655513783147a985b9dc659f818c1148e765eb11dfa35b'});
+export const WORD_RETEST_COMPLETED_FAILED_MIGRATION=Object.freeze({fileName:'20261020001626_word_retest_completed_failed_retry.sql',status:'final',sha256:'7b964368c629ac92e1655513783147a985b9dc659f818c1148e765eb11dfa35b'});
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
  Object.freeze({fileName:'20261009082000_ops_legacy_dispatch_actor_null_guard.sql',status:'final',sha256:'191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3'}),
