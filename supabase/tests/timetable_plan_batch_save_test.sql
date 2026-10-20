@@ -189,6 +189,18 @@ begin
  return next is(pg_temp.bstate((c->>'planId')::uuid),before_state,
   description||': items, slots, revisions, members, signals, receipts and transfers unchanged');
 end $$;
+-- Execute a real successful batch, then roll back only its fixture writes.
+create function pg_temp.bexercise(c jsonb) returns jsonb language plpgsql as $$
+declare response jsonb;
+begin
+ begin
+  response:=public.mutate_timetable_plan_item_v1(c);
+  set constraints all immediate;set constraints all deferred;
+  raise exception using errcode='ZX014',message='synthetic_014_rollback';
+ exception when sqlstate 'ZX014' then null;
+ end;
+ return response;
+end $$;
 create function pg_temp.bhistory() returns jsonb
 language plpgsql stable security definer set search_path='' as $$
 declare result jsonb:='{}'; relation text; rows jsonb;
@@ -356,7 +368,7 @@ select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bdele
  'P0001','timetable_stale','delete preserves item revision guard');
 select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,401,1,780,840)),'batch-shadow-stale')
  ||'{"expectedShadowFingerprint":"synthetic-old-fingerprint"}',
- 'P0001','timetable_stale','operating reference fingerprint mismatch');
+ 'P0001','timetable_stale','preset catalog reference fingerprint mismatch');
 
 -- Strict JSON contract and UUID-normalized identities.
 select * from pg_temp.breject(pg_temp.bcommand(4,'[]','batch-empty'),
@@ -456,15 +468,22 @@ select is((select source_slot_id from public.timetable_plan_slots where item_id=
 select * from pg_temp.breject(pg_temp.bcommand(10,jsonb_build_array(pg_temp.bsave(10,1001,2,720,780)),'batch-source-clear'),
  '22023','timetable_invalid','client cannot clear existing source provenance');
 
--- Authoritative weekly, scoped unknown and dated reservations still block.
-select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,101,202,6)),'batch-operating-teacher'),
- '23P01','timetable_resource_conflict','changed placement conflicts with an operating teacher');
-select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,102,201,6)),'batch-operating-room'),
- '23P01','timetable_resource_conflict','changed placement conflicts with an operating room');
-select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,1080,1140,102,201,3)),'batch-operating-unknown'),
- '23P01','timetable_resource_conflict','scoped unresolved operating room remains a conservative blocker');
-select * from pg_temp.breject(pg_temp.bcommand(12,jsonb_build_array(pg_temp.bsave(12,1201,null,900,960,101,202,2)),'batch-dated'),
- '23P01','timetable_resource_conflict','target-period dated teacher reservation remains authoritative');
+-- Operating weekly, unknown and dated reservations are independent of presets.
+-- Each success is isolated so item 410/revisions remain available to later cases.
+select lives_ok($$select pg_temp.bexercise(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,101,202,6)),'batch-operating-teacher'))$$,
+ 'outside operating teacher occupancy does not block a preset batch');
+select lives_ok($$select pg_temp.bexercise(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,102,201,6)),'batch-operating-room'))$$,
+ 'outside operating room occupancy does not block a preset batch');
+select lives_ok($$select pg_temp.bexercise(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,1080,1140,102,201,3)),'batch-operating-unknown'))$$,
+ 'outside unresolved room occupancy does not block a preset batch');
+select lives_ok($$select pg_temp.bexercise(pg_temp.bcommand(12,jsonb_build_array(pg_temp.bsave(12,1201,null,900,960,101,202,2)),'batch-dated'))$$,
+ 'outside target-period dated reservation does not block a preset batch');
+select is(pg_temp.bhistory(),(select value from batch_history_before),
+ 'independent preset batches leave operating classes slots sessions and histories unchanged');
+select * from pg_temp.breject(pg_temp.bcommand(6,jsonb_build_array(pg_temp.bsave(6,602,null,610,650,101,202)),'batch-applied-teacher'),
+ '23P01','timetable_resource_conflict','untouched same-preset applied teacher occupancy still blocks');
+select * from pg_temp.breject(pg_temp.bcommand(6,jsonb_build_array(pg_temp.bsave(6,602,null,610,650,102,201)),'batch-applied-room'),
+ '23P01','timetable_resource_conflict','untouched same-preset applied room occupancy still blocks');
 
 -- Plan and item lifecycle restrictions do not disappear inside the batch.
 select * from pg_temp.breject(pg_temp.bcommand(6,jsonb_build_array(pg_temp.bsave(6,601,1,660,720)),'batch-applied-save'),

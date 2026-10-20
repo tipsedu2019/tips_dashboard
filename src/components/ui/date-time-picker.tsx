@@ -5,6 +5,7 @@ import { CalendarIcon, Clock, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -29,9 +30,10 @@ const FULL_DAY_TIME_OPTIONS = Array.from({
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
 })
 
-function normalizeTimeInput(value: string) {
+function normalizeTimeInput(value: string, allowEndOfDay = false) {
   const raw = value.trim()
   if (!raw) return ""
+  if (allowEndOfDay && /^(24:00|2400)$/.test(raw)) return "24:00"
 
   const colonMatch = raw.match(/^(\d{1,2}):(\d{1,2})$/)
   if (colonMatch) {
@@ -57,9 +59,10 @@ function normalizeTimeInput(value: string) {
   return ""
 }
 
-function getTimePickerOptions(options: string[], value: string, preserveSelectedTimeOption = true) {
-  const normalizedOptions = Array.from(new Set(options.map(normalizeTimeInput).filter(Boolean)))
-  const normalizedValue = normalizeTimeInput(value)
+function getTimePickerOptions(options: string[], value: string, preserveSelectedTimeOption = true, allowEndOfDay = false) {
+  const normalizedOptions = Array.from(new Set(options.map(option => normalizeTimeInput(option, allowEndOfDay)).filter(Boolean)))
+  if (allowEndOfDay && !normalizedOptions.includes("24:00")) normalizedOptions.push("24:00")
+  const normalizedValue = normalizeTimeInput(value, allowEndOfDay)
   if (preserveSelectedTimeOption && normalizedValue && !normalizedOptions.includes(normalizedValue)) normalizedOptions.push(normalizedValue)
   return normalizedOptions.sort()
 }
@@ -120,7 +123,8 @@ function formatDateLabel(value: string) {
   return `${match[1]}. ${match[2]}. ${match[3]}.`
 }
 
-function formatTimeLabel(value: string) {
+function formatTimeLabel(value: string, allowEndOfDay = false) {
+  if (allowEndOfDay && value === "24:00") return "24:00"
   const normalized = normalizeTimeInput(value)
   if (!normalized) return ""
   const [hourText, minuteText] = normalized.split(":")
@@ -254,6 +258,9 @@ export function DatePickerControl({
 
 type TimePickerControlProps = {
   value: string
+  allowEndOfDay?: boolean
+  allowDirectInput?: boolean
+  inputId?: string
   onChange: (value: string) => void
   placeholder?: string
   ariaLabel?: string
@@ -301,10 +308,13 @@ export function TimePickerControl({
   preserveSelectedTimeOption = true,
   disablePortal = false,
   showIcon = true,
+  allowEndOfDay = false,
+  allowDirectInput = false,
+  inputId,
 }: TimePickerControlProps) {
-  const normalizedValue = normalizeTimeInput(value)
-  const selectedTimeLabel = formatTimeLabel(normalizedValue)
-  const timeOptions = getTimePickerOptions(options, normalizedValue, preserveSelectedTimeOption)
+  const normalizedValue = normalizeTimeInput(value, allowEndOfDay)
+  const selectedTimeLabel = formatTimeLabel(normalizedValue, allowEndOfDay)
+  const timeOptions = getTimePickerOptions(options, normalizedValue, preserveSelectedTimeOption, allowEndOfDay)
   const resolvedActiveTime = timeOptions.includes(normalizedValue) ? normalizedValue : timeOptions[0] || ""
   const [open, setOpen] = React.useState(false)
   const [activeTime, setActiveTime] = React.useState(() => resolvedActiveTime)
@@ -338,23 +348,23 @@ export function TimePickerControl({
     return () => window.cancelAnimationFrame(animationFrame)
   }, [open])
 
-  return (
+  const picker = (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
           variant="outline"
           disabled={disabled}
-          aria-label={getPickerAccessibleLabel(ariaLabel, selectedTimeLabel)}
+          aria-label={allowDirectInput ? `${ariaLabel} 선택` : getPickerAccessibleLabel(ariaLabel, selectedTimeLabel)}
           aria-describedby={ariaDescribedBy}
           className={cn(
-            "h-9 w-full justify-between px-3 font-normal",
+            allowDirectInput ? "h-9 w-9 shrink-0 px-2" : "h-9 w-full justify-between px-3 font-normal",
             !normalizedValue && "text-muted-foreground",
             disabled && "cursor-not-allowed bg-muted/30 opacity-75",
             className,
           )}
         >
-          <span className="truncate">{selectedTimeLabel || placeholder}</span>
+          {!allowDirectInput ? <span className="truncate">{selectedTimeLabel || placeholder}</span> : null}
           {showIcon ? <Clock aria-hidden="true" /> : null}
         </Button>
       </PopoverTrigger>
@@ -391,7 +401,7 @@ export function TimePickerControl({
                 onFocus={() => setActiveTime(time)}
                 onKeyDown={(event) => handleTimeOptionKeyDown(event, index)}
               >
-                {formatTimeLabel(time)}
+                {formatTimeLabel(time, allowEndOfDay)}
               </button>
             )
           })}
@@ -399,6 +409,12 @@ export function TimePickerControl({
       </PopoverContent>
     </Popover>
   )
+  if (!allowDirectInput) return picker
+  return <div className="flex min-w-0 items-center gap-1">
+    <Input id={inputId} aria-label={ariaLabel} aria-describedby={ariaDescribedBy} value={value} placeholder="HH:MM" inputMode="text" disabled={disabled} className="min-w-0"
+      onChange={event => onChange(event.target.value)} onBlur={() => { const next = normalizeTimeInput(value, allowEndOfDay); if (next && next !== value) onChange(next); }} />
+    {picker}
+  </div>
 }
 
 type DateTimePickerControlProps = {

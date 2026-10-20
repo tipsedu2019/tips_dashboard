@@ -3,6 +3,7 @@
 @import "../lib/fonts/pretendard.css";
 @import "../features/management/student-workspace.css";
 @import "../features/management/class-workspace.css";
+@import "../components/class-form-fields.css";
 @source "../**/*.{js,jsx,ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));

@@ -1,7 +1,8 @@
 import { timetableTeachers } from './timetable-subjects.ts';
-import type { DropTarget, GridTarget, PendingSlot, PlanItemDraft, PlanSnapshot, PlanSlot, ShadowSlot, TimetableView } from './timetable-plan-contract.ts';
+import type { DropTarget, GridTarget, PendingSlot, PlanItemDraft, PlanSnapshot, PlanSlot, TimetableView } from './timetable-plan-contract.ts';
 import { assertInterval, moveSlot, type TimetableItemEdit } from './timetable-plan-model.ts';
-import { findConflicts, findOperatingConflicts } from './timetable-conflicts.ts';
+import { findConflicts } from './timetable-conflicts.ts';
+import { presetSlots } from './timetable-plan-placements.ts';
 import { projectTimetableSlot, resolveGridTarget, resolveMovedGridTarget } from './timetable-placement-adapter.ts';
 export const PLAN_DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 export const PLAN_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -86,7 +87,7 @@ export function placementEdit(snapshot: PlanSnapshot, intent: PlacementIntent): 
 export type PlanGridBlock = {
     id: string;
     itemId: string;
-    shadow: boolean;
+    readOnly: boolean;
     title: string;
     subject: string;
     teacher: string;
@@ -94,7 +95,7 @@ export type PlanGridBlock = {
     columnKey: string;
     startMinute: number;
     endMinute: number;
-    slot: PlanSlot | ShadowSlot;
+    slot: PlanSlot;
 };
 export function buildPlanPanels(snapshot: PlanSnapshot, view: TimetableView, subject = '', selectedTargets: string[] = []) {
     const weekly = view.endsWith('weekly'), teacher = view.includes('teacher');
@@ -104,13 +105,12 @@ export function buildPlanPanels(snapshot: PlanSnapshot, view: TimetableView, sub
     const days = PLAN_DAY_ORDER.map(i => ({ id: String(i), name: PLAN_DAYS[i] }));
     const panels = (weekly ? options : days).filter(p => !selectedTargets.length || selectedTargets.includes(p.id));
     const columns = weekly ? days : options;
-    const all: PlanGridBlock[] = [...snapshot.slots, ...snapshot.shadowSlots].flatMap(slot => {
-        const shadow = 'classId' in slot;
-        const item = shadow ? snapshot.shadowClasses.find(i => i.id === slot.classId) : snapshot.items.find(i => i.id === slot.itemId);
+    const all: PlanGridBlock[] = presetSlots(snapshot).flatMap(slot => {
+        const item = snapshot.items.find(i => i.id === slot.itemId);
         if (!item || (subject && item.subject !== subject))
             return [];
         const projected = projectTimetableSlot(slot, view);
-        return [{ ...projected, itemId: shadow ? slot.classId : slot.itemId, shadow, title: item.name, subject: item.subject || '', teacher: resourceLabel(snapshot.catalogs.teachers, slot.teacherId), classroom: resourceLabel(snapshot.catalogs.classrooms, slot.classroomId), slot }];
+        return [{ ...projected, itemId: slot.itemId, readOnly: item.state === 'applied', title: item.name, subject: item.subject || '', teacher: resourceLabel(snapshot.catalogs.teachers, slot.teacherId), classroom: resourceLabel(snapshot.catalogs.classrooms, slot.classroomId), slot }];
     });
     return panels.map(panel => ({ ...panel, columns, blocks: all.filter(b => projectTimetableSlot(b.slot, view).panelKey === panel.id) }));
 }
@@ -179,17 +179,13 @@ export function validatePlacementEdit(snapshot: PlanSnapshot, edit: TimetableIte
         return;
     const same = (a: PlanSlot, b: PlanSlot) => a.weekday === b.weekday && a.startMinute === b.startMinute && a.endMinute === b.endMinute && a.teacherId === b.teacherId && a.classroomId === b.classroomId;
     const changed = edit.slots.filter(slot => !snapshot.slots.some(old => old.id === slot.id && same(old, slot)));
-    const all = [...snapshot.slots.filter(s => s.itemId !== edit.item.id), ...edit.slots];
-    const conflicts = [...findConflicts(all, snapshot.shadowSlots, new Set(changed.map(slot => slot.id))), ...findOperatingConflicts(changed, snapshot, snapshot.plan.targetStartDate && snapshot.plan.targetEndDate ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null)].filter(c => changed.some(s => s.id === c.slotId || s.id === c.otherSlotId));
+    const all = [...presetSlots(snapshot).filter(s => s.itemId !== edit.item.id), ...edit.slots];
+    const conflicts = findConflicts(all, [], new Set(changed.map(slot => slot.id))).filter(c => changed.some(s => s.id === c.slotId || s.id === c.otherSlotId));
     if (conflicts.length) {
         const conflict = conflicts[0];
-        if (conflict.kind === 'unresolved') {
-            throw new PlacementConflictError(`${conflict.date ? conflict.date + ' · ' : ''}${conflict.label || '기존 수업'}의 시간·선생님·강의실을 확인해야 이 시간에 배치할 수 있습니다.`);
-        }
-        const otherId = conflict.otherSlotId;
-        const other = snapshot.shadowSlots.find(s => s.id === otherId);
+        const otherId = changed.some(slot => slot.id === conflict.slotId) ? conflict.otherSlotId : conflict.slotId;
         const planSlot = all.find(s => s.id === otherId);
-        const name = other ? snapshot.shadowClasses.find(c => c.id === other.classId)?.name : snapshot.items.find(i => i.id === planSlot?.itemId)?.name;
+        const name = snapshot.items.find(i => i.id === planSlot?.itemId)?.name;
         throw new PlacementConflictError(`${conflict.date ? conflict.date + ' · ' : ''}${name || '다른 수업'}과 ${conflict.kind === 'teacher' ? '선생님' : conflict.kind === 'classroom' ? '강의실' : '수업'} 시간이 겹칩니다.`);
     }
 }
@@ -239,12 +235,12 @@ export function placementFormDefaults(draft: PlacementEditorDraft): PlacementFor
         applyTeacher: false, applyRoom: false, applyTime: false, applyWeekdays: false,
     };
 }
-export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: PlacementFormValues, candidate?: DropTarget): TimetableItemEdit {
+export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: PlacementFormValues, candidate?: DropTarget): Extract<TimetableItemEdit, { operation: 'save' }> {
     if (draft.pendingResolutionId && placementScope(draft) !== 'add') throw Error('미배치는 추가 배치로 편성해 주세요.');
     const duration = Number(values.duration);
     if (!Number.isInteger(duration) || duration <= 0 || duration > 1440) throw Error('수업 길이는 1–1440분으로 입력해 주세요.');
     if (!values.name.trim() || !values.subject.trim()) throw Error('수업명과 과목을 입력해 주세요.');
-    for (const value of [values.capacity, values.tuition]) if (value && (!Number.isFinite(Number(value)) || Number(value) < 0)) throw Error('정원과 수업료는 0 이상의 수로 입력해 주세요.');
+    for (const value of [values.capacity, values.tuition]) if (value && (!/^(-0|\d+)$/.test(value) || !Number.isSafeInteger(Number(value)))) throw Error('정원과 수업료는 0 이상의 정수로 입력해 주세요.');
     const whole = placementScope(draft) === 'item' && draft.slots.length > 0;
     const item = { ...itemDraft(draft.item), name: values.name.trim(), subject: values.subject.trim(), subjectAreaKey: values.subject.trim() === '과학' ? values.subjectAreaKey?.trim() || null : null, grade: values.grade,
         defaultTeacherId: whole && !values.applyTeacher ? draft.item.defaultTeacherId : values.teacher || null,
@@ -288,6 +284,56 @@ export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: Plac
     }
     if (draft.pendingResolutionId) item.pendingSlots = item.pendingSlots.filter(row => row.id !== draft.pendingResolutionId);
     return { operation: 'save', item, slots };
+}
+
+export type PlacementRowValues = {
+    key: string; day: string; start: string; end: string; teacher: string; room: string;
+};
+export type PlacementRowsFormValues = PlacementFormValues & { rows: PlacementRowValues[] };
+
+/** A row carries only editable fields; persisted identity/provenance comes from the draft. */
+export function placementRowsDefaults(draft: PlacementEditorDraft): PlacementRowsFormValues {
+    const values = placementFormDefaults(draft), scope = placementScope(draft);
+    const selected = scope === 'item' ? draft.slots : scope === 'slot' ? draft.slots.filter(slot => slot.id === draft.slotId) : [];
+    const rows = selected.map(slot => ({ key: slot.id, day: PLAN_DAYS[slot.weekday], start: formatPlanTime(slot.startMinute), end: formatPlanTime(slot.endMinute), teacher: slot.teacherId, room: slot.classroomId }));
+    if (!rows.length && (scope === 'add' || !draft.slots.length)) {
+        for (const weekday of values.weekdays.length ? values.weekdays : [-1]) rows.push({ key: crypto.randomUUID(), day: PLAN_DAYS[weekday] || '', start: values.start, end: values.end, teacher: values.teacher, room: values.room });
+    }
+    return { ...values, rows };
+}
+
+export function buildPlacementRowsEdit(draft: PlacementEditorDraft, values: PlacementRowsFormValues): TimetableItemEdit {
+    const scope = placementScope(draft);
+    const edit = buildPlacementFormEdit({ ...draft, pendingResolutionId: undefined }, { ...values, weekdays: [], applyTeacher: false, applyRoom: false, applyTime: false, applyWeekdays: false });
+    const selectedIds = new Set(scope === 'item' ? draft.slots.map(slot => slot.id) : scope === 'slot' && draft.slotId ? [draft.slotId] : []);
+    const seen = new Set<string>();
+    const rows = values.rows.flatMap(row => {
+        // A new item can remain unplaced. An existing row cannot silently disappear because its day is cleared.
+        if (!row.day && !draft.slots.some(slot => slot.id === row.key)) return [];
+        const weekday = PLAN_DAY_ORDER.find(day => PLAN_DAYS[day] === row.day);
+        if (weekday === undefined || !row.teacher || !row.room) throw Error('시간표의 요일·선생님·강의실을 선택해 주세요.');
+        if (seen.has(row.key)) throw Error('중복된 시간표 행을 다시 확인해 주세요.');
+        seen.add(row.key);
+        const existing = draft.slots.find(slot => slot.id === row.key);
+        if (existing && !selectedIds.has(existing.id)) throw Error('다른 배치의 식별자를 사용할 수 없습니다.');
+        const startMinute = parsePlanTime(row.start), endMinute = parsePlanTime(row.end, true);
+        assertInterval(startMinute, endMinute);
+        return [{ ...(existing || {}), id: existing?.id || row.key, itemId: draft.item.id, planId: draft.item.planId,
+            sourceSlotId: existing?.sourceSlotId ?? null, weekday, startMinute, endMinute, teacherId: row.teacher, classroomId: row.room }];
+    });
+    if (draft.pendingResolutionId) {
+        if (scope !== 'add' || !rows.length || !edit.item.pendingSlots.some(row => row.id === draft.pendingResolutionId)) throw Error('해결할 미배치와 배치 요일을 선택해 주세요.');
+        edit.item.pendingSlots = edit.item.pendingSlots.filter(row => row.id !== draft.pendingResolutionId);
+    }
+    // Item defaults are independent of the first placement of an existing class.
+    if (draft.slots.length) {
+        edit.item.defaultTeacherId = draft.item.defaultTeacherId;
+        edit.item.defaultClassroomId = draft.item.defaultClassroomId;
+    } else if (values.rows.length) {
+        edit.item.defaultTeacherId = values.rows[0].teacher || null;
+        edit.item.defaultClassroomId = values.rows[0].room || null;
+    }
+    return { ...edit, slots: [...draft.slots.filter(slot => !selectedIds.has(slot.id)), ...rows] };
 }
 
 /** Historical keys remain identity only; arbitrary term IDs are not semester names. */

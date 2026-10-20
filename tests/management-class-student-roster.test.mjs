@@ -350,7 +350,7 @@ test("class detail shows basic information and student management in one continu
   assert.doesNotMatch(detailSource, /<TabsList/);
   assert.doesNotMatch(detailSource, /<TabsTrigger/);
   assert.doesNotMatch(detailSource, /<TabsContent/);
-  assert.match(detailSource, /renderEditableFields\("detail", \[[\s\S]*"status"[\s\S]*\]\)/);
+  assert.match(detailSource, /renderEditableFields\("detail"\)/);
   assert.doesNotMatch(detailSource, /"classGroupIds"/);
   assert.doesNotMatch(detailSource, /수업 빠른 이동/);
   assert.doesNotMatch(detailSource, />기본 정보<\/div>/);
@@ -594,7 +594,7 @@ test("class official summary removes redundant identity and state badges", async
   assert.match(pageSource, /\{ label: "요일\/시간", value: scheduleSummary \}/);
   assert.match(pageSource, /\{ label: "선생님", value: teacher \}/);
   assert.match(pageSource, /\{ label: "강의실", value: classroom \}/);
-  assert.match(pageSource, /renderEditableFields\("detail", \[[\s\S]*"fee"[\s\S]*"status"[\s\S]*\]\)/);
+  assert.match(pageSource, /renderEditableFields\("detail"\)/);
   assert.match(pageSource, /data-testid="class-official-summary-bar" className="class-detail-header border-b bg-background"/);
   assert.match(pageSource, /registeredCount === null \? "등록 인원 확인 중"/);
   assert.match(pageSource, /waitlistCount === null \? "대기 인원 확인 중"/);
@@ -627,91 +627,52 @@ test("class official summary roster count jumps to the student roster section", 
   assert.match(pageSource, /<div id="class-detail-students-section"[^>]*data-testid="class-detail-students-section" className="space-y-4">/);
 });
 
-test("class detail basic fields use the requested operator order", async () => {
-  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-  const detailStart = pageSource.indexOf('data-testid="class-official-detail"');
-  const detailEnd = pageSource.indexOf("<DialogFooter", detailStart);
-  const detailSource = pageSource.slice(detailStart, detailEnd);
-
-  assert.ok(detailStart >= 0 && detailEnd > detailStart);
-  assert.doesNotMatch(pageSource, /const classGroupField|defaultClassGroupIdsForCreate|replaceClassGroupMemberships/);
-  assert.match(pageSource, /FORM_FIELDS\[kind\]\.find\(\(field\) => field\.name === fieldName\)/);
-  assert.match(pageSource, /fieldsToRender\.map\(\(field\) => \{/);
-  assert.doesNotMatch(pageSource, /FORM_FIELDS\[kind\]\.filter\(\(field\) => !fieldNames \|\| fieldNames\.includes\(field\.name\)\)\.map/);
-  assert.match(pageSource, /const fieldWrapperClassName = cn\([\s\S]*?"space-y-2",[\s\S]*?field\.multiline \|\| \(kind === "classes" && scope === "detail" && field\.name === "name"\)[\s\S]*?\? "sm:col-span-2"[\s\S]*?: "",[\s\S]*?\);/);
-  assert.doesNotMatch(pageSource, /kind === "students" && \(field\.name === "school"/);
-  assert.match(detailSource, /renderEditableFields\("detail", \[[\s\S]*"name"[\s\S]*"grade"[\s\S]*"subject"[\s\S]*"capacity"[\s\S]*"fee"[\s\S]*"status"[\s\S]*\]\)/);
-  assert.doesNotMatch(detailSource, /renderEditableFields\("detail", \[[\s\S]*"name"[\s\S]*"status"[\s\S]*"subject"[\s\S]*"grade"[\s\S]*"capacity"[\s\S]*"fee"[\s\S]*"classGroupIds"[\s\S]*\]\)/);
+test("class registration, details and presets share the requested metadata order", async () => {
+  const fields = await readFile(new URL("src/components/class-form-fields.tsx", root), "utf8");
+  const page = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const preset = await readFile(new URL("src/features/academic/timetable-placement-editor.tsx", root), "utf8");
+  const order = ["input('name'", "select('status'", "input('grade'", "select('subject'", "input('capacity'", "input('tuition'"];
+  const positions = order.map(value => fields.indexOf(value));
+  assert.ok(positions.every((value, index) => value >= 0 && (!index || value > positions[index - 1])));
+  assert.match(page, /if \(kind === "classes"\) return <ClassMetadataFields/);
+  assert.match(preset, /<ClassMetadataFields/);
+  assert.doesNotMatch(page, /defaultClassGroupIdsForCreate|replaceClassGroupMemberships/);
 });
 
-test("class detail basic section uses structured schedule slots instead of free-text teacher time room fields", async () => {
-  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-  const scheduleSource = await readFile(new URL("src/features/management/class-schedule-slots.ts", root), "utf8");
-  const detailStart = pageSource.indexOf('data-testid="class-official-detail"');
-  const detailEnd = pageSource.indexOf("<DialogFooter", detailStart);
-  const detailSource = pageSource.slice(detailStart, detailEnd);
-
-  assert.ok(detailStart >= 0 && detailEnd > detailStart);
-  assert.match(pageSource, /\{ name: "schedule", label: "요일\/시간", placeholder: "월 18:00-20:00" \}/);
-  assert.match(pageSource, /type ClassScheduleSlot,/);
-  assert.match(pageSource, /from "\.\/class-schedule-slots"/);
-  assert.match(scheduleSource, /export type ClassScheduleSlot = \{/);
-  assert.match(scheduleSource, /export function parseClassScheduleSlots/);
-  assert.match(scheduleSource, /export function formatClassScheduleSlots/);
-  assert.match(pageSource, /const renderClassScheduleSlotEditor = \(\) =>/);
-  assert.match(pageSource, /data-testid="class-schedule-slot-editor"/);
-  assert.match(pageSource, /data-testid="class-schedule-slot-row"/);
-  assert.match(pageSource, /const addClassScheduleSlot = \(\) =>/);
-  assert.match(pageSource, /const updateClassScheduleSlot = \(index: number, patch: Partial<ClassScheduleSlot>\) =>/);
-  assert.match(pageSource, /const removeClassScheduleSlot = \(index: number\) =>/);
-  assert.doesNotMatch(detailSource, /renderEditableFields\("detail", \[[\s\S]*"teacher"[\s\S]*"schedule"[\s\S]*"classroom"[\s\S]*\]\)/);
-  assert.match(detailSource, /\{renderClassScheduleSlotEditor\(\)\}/);
-  assert.doesNotMatch(detailSource, /\{renderClassSchedulePanel\(\)\}/);
+test("class registration and details use shared rows with separate save ownership", async () => {
+  const page = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  assert.match(page, /<ClassScheduleFields/);
+  assert.match(page, /\{kind === "classes" \? renderClassScheduleSlotEditor\(\) : null\}/);
+  assert.match(page, /<section id="class-detail-schedule-section"[^>]*>\{renderClassScheduleSlotEditor\(\)\}/);
+  assert.match(page, /updateClassScheduleSlot\(index, next\)/);
+  assert.match(page, /onClick=\{\(\) => void handleClassScheduleDefaultsSave\(\)\}/);
 });
 
-test("class schedule slot editor keeps blank added rows and uses the makeup time picker pattern", async () => {
-  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-  const timePickerSource = await readFile(new URL("src/components/ui/date-time-picker.tsx", root), "utf8");
-
-  assert.match(pageSource, /import \{ TimePickerControl \} from "@\/components\/ui\/date-time-picker"/);
-  assert.match(timePickerSource, /const TIME_OPTION_STEP_MINUTES = 10/);
-  assert.doesNotMatch(timePickerSource, /const TIME_OPTION_STEP_MINUTES = 15/);
-  assert.match(pageSource, /const \[classScheduleSlots, setClassScheduleSlots\] = useState<ClassScheduleSlot\[\]>\(\[\]\)/);
-  assert.match(pageSource, /setClassScheduleSlots\(kind === "classes" \? parseClassScheduleSlots\(nextForm\.schedule, nextForm\.teacher, nextForm\.classroom\) : \[\]\)/);
-  assert.match(pageSource, /setClassScheduleSlots\(nextSlots\)/);
-  assert.match(pageSource, /TimePickerControl[\s\S]*ariaLabel=\{`수업시간 \$\{index \+ 1\} 시작시각`\}/);
-  assert.match(pageSource, /TimePickerControl[\s\S]*ariaLabel=\{`수업시간 \$\{index \+ 1\} 종료시각`\}/);
-  assert.match(pageSource, /aria-label=\{`수업시간 \$\{index \+ 1\} 시작시각 초기화`\}/);
-  assert.match(pageSource, /aria-label=\{`수업시간 \$\{index \+ 1\} 종료시각 초기화`\}/);
-  assert.doesNotMatch(pageSource, /type="time"/);
+test("shared schedule rows preserve stable identity and exact end-of-day input", async () => {
+  const fields = await readFile(new URL("src/components/class-form-fields.tsx", root), "utf8");
+  const picker = await readFile(new URL("src/components/ui/date-time-picker.tsx", root), "utf8");
+  assert.match(fields, /key=\{row.key\}/);
+  assert.match(fields, /value=\{row.start\}[\s\S]*allowDirectInput/);
+  assert.match(fields, /value=\{row.end\}[\s\S]*allowDirectInput allowEndOfDay/);
+  assert.match(picker, /allowEndOfDay = false/);
+  assert.match(picker, /const TIME_OPTION_STEP_MINUTES = 10/);
 });
 
-test("class tuition field edits in ten-thousand won units", async () => {
-  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-
-  assert.match(pageSource, /const CLASS_TUITION_UNIT_WON = 10000/);
-  assert.match(pageSource, /function ClassTuitionManwonInput/);
-  assert.match(pageSource, /data-testid="class-tuition-manwon-input"/);
-  assert.match(pageSource, /aria-label="수업료 1만원 올리기"/);
-  assert.match(pageSource, /aria-label="수업료 1만원 내리기"/);
-  assert.match(pageSource, /onWheel=\{handleWheel\}/);
-  assert.match(pageSource, /onTouchMove=\{handleTouchMove\}/);
-  assert.match(pageSource, /만원<\/span>/);
-  assert.match(pageSource, /commitManwon\(nextManwon\)/);
-  assert.match(pageSource, /String\(nextAmount \* CLASS_TUITION_UNIT_WON\)/);
-  assert.match(pageSource, /kind === "classes" && field\.name === "fee"/);
-  assert.doesNotMatch(pageSource, /id=\{id\}[\s\S]*name=\{field\.name\}[\s\S]*type=\{field\.type \|\| "text"\}[\s\S]*field\.name === "fee"/);
+test("shared tuition uses exact won and existing amounts without rounding", async () => {
+  const fields = await readFile(new URL("src/components/class-form-fields.tsx", root), "utf8");
+  const page = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  assert.match(fields, /input\('tuition', '수업료 \(원\)', tuitions\)/);
+  assert.match(fields, /value=\{values\[field\]\}/);
+  assert.match(page, /tuitions=\{rows.map/);
+  assert.doesNotMatch(page, /ClassTuitionManwonInput|CLASS_TUITION_UNIT_WON/);
 });
 
-test("class capacity uses the same compact stepper pattern as tuition", async () => {
-  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-
-  assert.match(pageSource, /function ClassCapacityInput/);
-  assert.match(pageSource, /data-testid="class-capacity-input"/);
-  assert.match(pageSource, /aria-label="정원 1명 올리기"/);
-  assert.match(pageSource, /aria-label="정원 1명 내리기"/);
-  assert.match(pageSource, /kind === "classes" && field\.name === "capacity"/);
-  assert.doesNotMatch(pageSource, /id="classes-detail-capacity"[\s\S]{0,500}type="number"/);
+test("shared capacity and tuition keep direct entry plus existing-value choices", async () => {
+  const fields = await readFile(new URL("src/components/class-form-fields.tsx", root), "utf8");
+  assert.match(fields, /input\('capacity', '정원', capacities\)/);
+  assert.match(fields, /<datalist/);
+  assert.match(fields, /onChange\(field, event.target.value\)/);
+  assert.doesNotMatch(fields, /onWheel=|onTouchMove=/);
 });
 
 test("class roster uses explicit enrollment labels", async () => {
@@ -735,24 +696,12 @@ test("class schedule add copies the previous row and advances only the day", asy
   assert.doesNotMatch(pageSource, /\.\.\.getClassScheduleSlotsFromForm\(\),[\s\n]*\{ day: "", startTime: "", endTime: "", teacher: "", classroom: "" \}/);
 });
 
-test("class schedule rows keep all five input columns equal to prevent overlap", async () => {
-  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-
-  assert.match(pageSource, /data-testid="class-schedule-slot-header"/);
-  assert.match(pageSource, /const CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME = "grid gap-2 md:grid-cols-\[repeat\(5,minmax\(0,1fr\)\)_2\.5rem\]"/);
-  assert.match(pageSource, /className=\{cn\("hidden px-2 text-\[11px\] font-medium text-muted-foreground md:grid", CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME\)\}/);
-  assert.match(pageSource, />요일<\/div>[\s\S]*>시작시각<\/div>[\s\S]*>종료시각<\/div>[\s\S]*>선생님<\/div>[\s\S]*>강의실<\/div>/);
-  assert.match(pageSource, /className=\{cn\(CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME, "px-2 py-1"\)\}/);
-  assert.doesNotMatch(pageSource, /className=\{cn\(CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME, "rounded-md border bg-muted\/15 p-2"\)\}/);
-  assert.match(pageSource, /<Label htmlFor=\{`\$\{rowId\}-day`\} className="text-\[11px\] font-medium text-muted-foreground md:sr-only">요일<\/Label>/);
-  assert.match(pageSource, /<Label className="text-\[11px\] font-medium text-muted-foreground md:sr-only">시작시각<\/Label>/);
-  assert.match(pageSource, /<Label className="text-\[11px\] font-medium text-muted-foreground md:sr-only">종료시각<\/Label>/);
-  assert.match(pageSource, /<Label htmlFor=\{`\$\{rowId\}-teacher`\} className="text-\[11px\] font-medium text-muted-foreground md:sr-only">선생님<\/Label>/);
-  assert.match(pageSource, /<Label htmlFor=\{`\$\{rowId\}-classroom`\} className="text-\[11px\] font-medium text-muted-foreground md:sr-only">강의실<\/Label>/);
-  assert.match(pageSource, /<SelectTrigger id=\{`\$\{rowId\}-teacher`\} className="w-full min-w-0">/);
-  assert.match(pageSource, /<SelectTrigger id=\{`\$\{rowId\}-classroom`\} className="w-full min-w-0">/);
-  assert.doesNotMatch(pageSource, /minmax\(150px,1fr\)/);
-  assert.doesNotMatch(pageSource, /minmax\(96px,0\.55fr\)/);
+test("shared schedule rows keep resource controls shrinkable and label each input", async () => {
+  const fields = await readFile(new URL("src/components/class-form-fields.tsx", root), "utf8");
+  assert.match(fields, /grid min-w-0 grid-cols-2 gap-2[^"]*sm:grid-cols-3/);
+  assert.match(fields, /className="w-full min-w-0"/);
+  for (const label of ["요일", "시작시각", "종료시각", "선생님", "강의실"]) assert.ok(fields.includes(`>${label}</Label>`));
+  assert.doesNotMatch(fields, /minmax\(150px|md:sr-only/);
 });
 
 test("class schedule parser does not treat classroom aliases as teachers", () => {

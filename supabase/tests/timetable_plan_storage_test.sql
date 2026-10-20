@@ -14,6 +14,28 @@ insert into public.teacher_catalogs(id,name,subjects,profile_id) values(pg_temp.
 update public.profiles set teacher_catalog_id=case id when pg_temp.tid(903) then pg_temp.tid(101) else pg_temp.tid(102) end where id in(pg_temp.tid(903),pg_temp.tid(904));
 insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.tid(201),'동일 이름',array['영어']),(pg_temp.tid(202),'다른 방',array['영어']);
 create function pg_temp.cmd(i int, rev int default null, start_at int default 600, end_at int default 660, k text default 'save') returns jsonb language sql as $$select jsonb_build_object('operation','save','planId',pg_temp.tid(1),'expectedMetaRevision',0,'expectedShadowFingerprint',public.get_timetable_plan_revision_v1(pg_temp.tid(1))->>'shadowFingerprint','expectedItemRevision',rev,'requestKey',k,'item',jsonb_build_object('id',pg_temp.tid(i),'planId',pg_temp.tid(1),'name','초안','subject','영어','subjectAreaKey',null,'grade','중2','capacity',12,'tuition',100000,'defaultTeacherId',pg_temp.tid(101),'defaultClassroomId',pg_temp.tid(201),'durationMinutes',60,'pendingSlots','[]'::jsonb),'slots',jsonb_build_array(jsonb_build_object('id',pg_temp.tid(i+100),'itemId',pg_temp.tid(i),'planId',pg_temp.tid(1),'weekday',1,'startMinute',start_at,'endMinute',end_at,'teacherId',pg_temp.tid(101),'classroomId',pg_temp.tid(201),'sourceSlotId',null)))$$;
+-- A retargeted command must bind the destination's catalog/tombstone fingerprint.
+create function pg_temp.target_fingerprint(c jsonb) returns jsonb language sql as $$
+ select c||jsonb_build_object('expectedShadowFingerprint',
+  public.get_timetable_plan_revision_v1((c->>'planId')::uuid)->>'shadowFingerprint')
+$$;
+-- Roll back only the exercised write; pgTAP itself runs outside this subtransaction.
+create function pg_temp.exercise_item_command(c jsonb) returns jsonb language plpgsql as $$
+declare response jsonb;
+begin
+ begin
+  response:=public.mutate_timetable_plan_item_v1(c);
+  set constraints all immediate;set constraints all deferred;
+  raise exception using errcode='ZX014',message='synthetic_014_rollback';
+ exception when sqlstate 'ZX014' then null;
+ end;
+ return response;
+end $$;
+create function pg_temp.operating_slots(class_no int) returns jsonb language sql as $$
+ select coalesce(jsonb_agg(x order by (x->>'weekday')::int,(x->>'startMinute')::int,x->>'id'),'[]'::jsonb)
+ from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') x
+ where x->>'classId'=pg_temp.tid(class_no)::text
+$$;
 select set_config('request.jwt.claim.sub',pg_temp.tid(901)::text,true);
 set local role authenticated;
 select lives_ok($$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','create','planId',pg_temp.tid(1),'name','첫 계획','requestKey','create'))$$,'admin creates independent empty plan');
@@ -25,7 +47,7 @@ select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(11)||
 select is((public.get_timetable_plan_v1(pg_temp.tid(1))#>>'{plan,metaRevision}')::int,0,'item save does not increment metadata revision');
 select lives_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(12,null,660,720,'second'))$$,'adjacent half-open placement and distinct item save succeed');
 select lives_ok($$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','create','planId',pg_temp.tid(4),'name','동일 자원 대안','requestKey','create4'))$$,'alternative plan created');
-select lives_ok($$select public.mutate_timetable_plan_item_v1(jsonb_set(jsonb_set(jsonb_set(pg_temp.cmd(41,null,600,660,'same-resources-other-plan'),'{planId}',to_jsonb(pg_temp.tid(4))),'{item,planId}',to_jsonb(pg_temp.tid(4))),'{slots}',jsonb_build_array((pg_temp.cmd(41)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(4)))))$$,'identical teacher room and time in another plan is independent');
+select lives_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.target_fingerprint(jsonb_set(jsonb_set(jsonb_set(pg_temp.cmd(41,null,600,660,'same-resources-other-plan'),'{planId}',to_jsonb(pg_temp.tid(4))),'{item,planId}',to_jsonb(pg_temp.tid(4))),'{slots}',jsonb_build_array((pg_temp.cmd(41)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(4))))))$$,'identical teacher room and time in another plan is independent');
 reset role;
 select throws_ok($$insert into public.timetable_plan_slots(id,plan_id,item_id,weekday,start_minute,end_minute,teacher_catalog_id,classroom_catalog_id,teacher_name,classroom_name) values(pg_temp.tid(777),pg_temp.tid(1),pg_temp.tid(41),1,600,660,pg_temp.tid(101),pg_temp.tid(201),'t','r')$$,'23503',null,'composite FK rejects cross-plan item even for privileged insert');
 set local role authenticated;
@@ -36,7 +58,7 @@ select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,nu
 select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,630,690,'room-only')||jsonb_build_object('slots',jsonb_build_array((pg_temp.cmd(13,null,630,690)->'slots'->0)||jsonb_build_object('teacherId',pg_temp.tid(102)))))$$,'23P01','timetable_resource_conflict','same room conflicts even with another teacher');
 select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,630,690,'teacher-only')||jsonb_build_object('slots',jsonb_build_array((pg_temp.cmd(13,null,630,690)->'slots'->0)||jsonb_build_object('classroomId',pg_temp.tid(202)))))$$,'23P01','timetable_resource_conflict','same teacher conflicts even in another room');
 select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,720,780,'same-item')||jsonb_build_object('slots',(pg_temp.cmd(13,null,720,780)->'slots')||jsonb_build_array((pg_temp.cmd(13,null,730,790)->'slots'->0)||jsonb_build_object('id',pg_temp.tid(114),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(202)))))$$,'23P01','timetable_resource_conflict','same item overlaps even when both resources differ');
-select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,720,780,'stale-shadow')||'{"expectedShadowFingerprint":"old"}'::jsonb)$$,'P0001','timetable_stale','stale shadow fingerprint rejected');
+select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,720,780,'stale-shadow')||'{"expectedShadowFingerprint":"old"}'::jsonb)$$,'P0001','timetable_stale','stale catalog fingerprint rejected');
 select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,720,780,'source-tamper')||jsonb_build_object('item',(pg_temp.cmd(13)->'item')||jsonb_build_object('sourceClassId',pg_temp.tid(301))))$$,'22023','timetable_invalid','source provenance is server-owned');
 select is((select change_sequence from public.timetable_invalidation_signals where plan_id=pg_temp.tid(1)),2::bigint,'per plan signal matches item changes');
 reset role;
@@ -44,9 +66,16 @@ insert into public.classes(id,name,subject,grade,status,schedule_storage_mode,sc
 select set_config('app.class_schedule_mutation','release2-rpc',true);
 insert into public.class_schedule_slots(id,class_id,weekday,start_time,end_time,teacher_catalog_id,teacher_name,classroom_catalog_id,classroom_name) values(pg_temp.tid(401),pg_temp.tid(301),1,'10:00','11:00',pg_temp.tid(101),'동일 이름',pg_temp.tid(201),'동일 이름');
 set local role authenticated;
-select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(1))->'shadowSlots'),1,'all subjects contribute authoritative shadows');
+select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(1))->'shadowSlots'),0,'preset does not include current operating shadows');
+select is(jsonb_array_length(pg_temp.operating_slots(301)),1,'current class still reserves its actual operating slot');
 select lives_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(11,1,600,660,'rename')||jsonb_build_object('item',(pg_temp.cmd(11)->'item')||'{"name":"운영 충돌 보존"}'::jsonb))$$,'name-only edit preserves newly conflicting original occupancy');
-select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,610,650,'shadow'))$$,'23P01','timetable_resource_conflict','hidden subject operational shadow blocks new placement');
+select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,610,650,'shadow'))$$,'23P01','timetable_resource_conflict','same-preset draft conflict still blocks the new placement');
+select lives_ok($$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','create','planId',pg_temp.tid(7),'name','운영 독립 격리','requestKey','create7'))$$,'empty preset for operating-only overlap');
+select is((select jsonb_object_agg(k,public.get_timetable_plan_v1(pg_temp.tid(7))->k) from unnest(array['items','slots','appliedSnapshots','shadowSlots','shadowClasses','unresolvedOccupancies','datedSessions','datedUnresolvedOccupancies']) k),
+ (select jsonb_object_agg(k,'[]'::jsonb) from unnest(array['items','slots','appliedSnapshots','shadowSlots','shadowClasses','unresolvedOccupancies','datedSessions','datedUnresolvedOccupancies']) k),'new preset has no draft applied or external occupancy despite existing operating slots');
+select is(public.get_timetable_plan_v1(pg_temp.tid(7))->'capacity','{"itemCount":0,"slotCount":0,"maxItems":500,"maxSlots":2000,"exceeded":false}'::jsonb,'new preset capacity starts at zero');
+select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(7))#>'{catalogs,teachers}'),(select count(*)::int from public.teacher_catalogs),'new preset retains resource choices without operating placements');
+select lives_ok($$select pg_temp.exercise_item_command(pg_temp.target_fingerprint(pg_temp.cmd(42,null,610,650,'operating-only-other-plan')||jsonb_build_object('planId',pg_temp.tid(7),'item',(pg_temp.cmd(42)->'item')||jsonb_build_object('planId',pg_temp.tid(7)),'slots',jsonb_build_array((pg_temp.cmd(42,null,610,650)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(7))))))$$,'outside operating occupancy is independent of a different preset');
 select lives_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(11,2,720,780,'repair'))$$,'safe repair moves out of unchanged live conflict');
 reset role;
 update public.teacher_catalogs set is_visible=false where id=pg_temp.tid(101);
@@ -63,7 +92,7 @@ select is(public.get_timetable_plan_v1(pg_temp.tid(1))#>>'{slots,0,teacherId}',p
 select lives_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(11,4,720,780,'deleted-rename'))$$,'deleted resource snapshot permits non-occupancy edit');
 
 select lives_ok($$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','create','planId',pg_temp.tid(2),'name','독립 계획','requestKey','create2'))$$,'second plan created independently');
-select lives_ok($$select public.mutate_timetable_plan_item_v1(jsonb_set(jsonb_set(jsonb_set(pg_temp.cmd(21,null,660,720,'other-plan'),'{planId}',to_jsonb(pg_temp.tid(2))),'{item,planId}',to_jsonb(pg_temp.tid(2))),'{slots}',jsonb_build_array((pg_temp.cmd(21)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(2),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(202),'startMinute',660,'endMinute',720))))$$,'other plan has independent occupancy');
+select lives_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.target_fingerprint(jsonb_set(jsonb_set(jsonb_set(pg_temp.cmd(21,null,660,720,'other-plan'),'{planId}',to_jsonb(pg_temp.tid(2))),'{item,planId}',to_jsonb(pg_temp.tid(2))),'{slots}',jsonb_build_array((pg_temp.cmd(21)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(2),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(202),'startMinute',660,'endMinute',720)))))$$,'other plan has independent occupancy');
 select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,800,860,'cross-plan')||jsonb_build_object('slots',jsonb_build_array((pg_temp.cmd(13)->'slots'->0)||jsonb_build_object('id',pg_temp.tid(121),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(202),'startMinute',800,'endMinute',860))))$$,'22023','timetable_invalid','another plan slot cannot be stolen');
 select lives_ok($$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','rename','planId',pg_temp.tid(1),'expectedMetaRevision',0,'name','변경한 계획','requestKey','rename-meta'))$$,'metadata rename changes own revision');
 select is((public.get_timetable_plan_v1(pg_temp.tid(1))#>>'{items,0,revision}')::int,5,'metadata rename leaves item revision unchanged');
@@ -78,6 +107,7 @@ set local role authenticated;
 select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(1))->'slots'),1,'applied item whose source was deleted stays out of draft grid');
 select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(1))->'appliedSnapshots'),1,'applied snapshot remains separate after applied class ID becomes null');
 select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(12,1,660,720,'applied-edit')||'{"expectedMetaRevision":3}'::jsonb)$$,'42501','timetable_forbidden','applied item is immutable');
+select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,670,700,'applied-room-conflict')||jsonb_build_object('expectedMetaRevision',3,'slots',jsonb_build_array((pg_temp.cmd(13,null,670,700)->'slots'->0)||jsonb_build_object('teacherId',pg_temp.tid(102)))))$$,'23P01','timetable_resource_conflict','same-preset applied slot reserves its room after applied class FK becomes null');
 select lives_ok($$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','clone','planId',pg_temp.tid(3),'sourcePlanId',pg_temp.tid(1),'expectedMetaRevision',3,'name','복제 계획','requestKey','clone'))$$,'clone preserves unavailable draft resources for repair');
 select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(3))->'slots'),1,'whole clone copies draft slots only');
 select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(3))->'appliedSnapshots'),0,'applied source clones to unplaced draft');
@@ -88,24 +118,32 @@ select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(2))->'slot
 reset role;
 insert into public.classes(id,name,subject,grade,status,schedule_storage_mode,schedule,teacher,room) values(pg_temp.tid(302),'legacy exact','영어','중1','수강','legacy','월 17:13-18:43, 수 18:43-19:43','다른 교사','다른 방');
 set local role authenticated;
-select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(1))->'shadowSlots'),2,'complete comma-separated legacy schedule resolves both tokens');
-select is((public.get_timetable_plan_v1(pg_temp.tid(1))#>>'{shadowSlots,0,startMinute}')::int,1033,'strict legacy reader keeps exact minutes');
-select is(public.get_timetable_plan_v1(pg_temp.tid(1))#>>'{shadowSlots,0,teacherId}',pg_temp.tid(102)::text,'legacy exact name resolves stable catalog UUID');
-select is((public.get_timetable_plan_v1(pg_temp.tid(1))->>'complete')::boolean,true,'valid legacy occupancy complete');
+select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(1))->'shadowSlots'),0,'legacy operating schedule stays outside the preset');
+select is(jsonb_array_length(pg_temp.operating_slots(302)),2,'complete comma-separated legacy schedule resolves both operating tokens');
+select is((pg_temp.operating_slots(302)#>>'{0,startMinute}')::int,1033,'strict legacy reader keeps exact minutes');
+select is(pg_temp.operating_slots(302)#>>'{0,teacherId}',pg_temp.tid(102)::text,'legacy exact name resolves stable catalog UUID');
+select is((public.get_timetable_plan_v1(pg_temp.tid(1))->>'complete')::boolean,true,'preset completeness is independent of valid legacy occupancy');
 reset role;
+set constraints all immediate;set constraints all deferred;
+-- Explicit synthetic pre-existing malformed data. First flush the valid fixture,
+-- then establish this malformed value as the before-state, as the operating suite
+-- does. The preset RPC below still flushes every deferred guard without bypass.
 update public.classes set schedule='일정 확인 필요' where id=pg_temp.tid(302);
+update dashboard_private.timetable_operating_write_baselines set reference=dashboard_private.read_timetable_operating_reference_v1();
+set constraints all immediate;set constraints all deferred;
 set local role authenticated;
-select is((public.get_timetable_plan_v1(pg_temp.tid(1))->>'complete')::boolean,false,'unparseable legacy occupancy fails closed');
-select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(1))->'unresolvedOccupancies'),1,'unresolved class is visible as blocker');
-select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(13,null,900,960,'incomplete')||jsonb_build_object('expectedMetaRevision',3,'slots',jsonb_build_array((pg_temp.cmd(13)->'slots'->0)||jsonb_build_object('teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(202),'startMinute',900,'endMinute',960))))$$,'23P01','timetable_resource_conflict','incomplete occupancy never becomes free time');
+select is((public.get_timetable_plan_v1(pg_temp.tid(1))->>'complete')::boolean,true,'unparseable external occupancy does not make this preset incomplete');
+select is(public.get_timetable_plan_v1(pg_temp.tid(1))->'unresolvedOccupancies','[]'::jsonb,'external unresolved occupancy is not a preset blocker');
+select ok(exists(select 1 from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'unresolvedOccupancies') x where x->>'classId'=pg_temp.tid(302)::text),'the actual operating reference retains unresolved occupancy');
+select lives_ok($$select pg_temp.exercise_item_command(pg_temp.cmd(13,null,900,960,'incomplete')||jsonb_build_object('expectedMetaRevision',3,'slots',jsonb_build_array((pg_temp.cmd(13)->'slots'->0)||jsonb_build_object('teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(202),'startMinute',900,'endMinute',960))))$$,'external incomplete occupancy does not prevent preset editing');
 reset role;
 select set_config('app.class_close_mutation','v1',true);
 update public.classes set status='종강' where id=pg_temp.tid(302);
 insert into public.timetable_plan_items(id,plan_id,name,subject) select pg_temp.tid(1000+n),pg_temp.tid(2),'capacity '||n,'영어' from generate_series(1,500) n;
 set local role authenticated;
 select is((public.get_timetable_plan_v1(pg_temp.tid(2))#>>'{capacity,itemCount}')::int,500,'500 items returned without truncation');
-select throws_ok($$select public.mutate_timetable_plan_item_v1(jsonb_set(jsonb_set(pg_temp.cmd(21,null,660,720,'over-slot-capacity'),'{planId}',to_jsonb(pg_temp.tid(2))),'{item,planId}',to_jsonb(pg_temp.tid(2)))||jsonb_build_object('slots',(select jsonb_agg((pg_temp.cmd(21)->'slots'->0)||jsonb_build_object('id',pg_temp.tid(10000+n),'planId',pg_temp.tid(2))) from generate_series(1,2001) n)))$$,'22023','timetable_capacity','2001-slot request rejected with exact producer pair before item insertion');
-select throws_ok($$select public.mutate_timetable_plan_item_v1(jsonb_set(jsonb_set(pg_temp.cmd(21,null,660,720,'over-capacity'),'{planId}',to_jsonb(pg_temp.tid(2))),'{item,planId}',to_jsonb(pg_temp.tid(2)))||'{"slots":[]}'::jsonb)$$,'22023','timetable_capacity','501st item explicitly rejected');
+select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.target_fingerprint(jsonb_set(jsonb_set(pg_temp.cmd(21,null,660,720,'over-slot-capacity'),'{planId}',to_jsonb(pg_temp.tid(2))),'{item,planId}',to_jsonb(pg_temp.tid(2)))||jsonb_build_object('slots',(select jsonb_agg((pg_temp.cmd(21)->'slots'->0)||jsonb_build_object('id',pg_temp.tid(10000+n),'planId',pg_temp.tid(2))) from generate_series(1,2001) n))))$$,'22023','timetable_capacity','2001-slot request rejected with exact producer pair before item insertion');
+select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.target_fingerprint(jsonb_set(jsonb_set(pg_temp.cmd(21,null,660,720,'over-capacity'),'{planId}',to_jsonb(pg_temp.tid(2))),'{item,planId}',to_jsonb(pg_temp.tid(2)))||'{"slots":[]}'::jsonb))$$,'22023','timetable_capacity','501st item explicitly rejected');
 reset role;
 insert into public.timetable_plan_items(id,plan_id,name,subject) values(pg_temp.tid(1600),pg_temp.tid(2),'capacity exceeded','영어');
 insert into public.timetable_plan_slots(id,plan_id,item_id,weekday,start_minute,end_minute,teacher_catalog_id,classroom_catalog_id,teacher_name,classroom_name) select pg_temp.tid(2000+n),pg_temp.tid(2),pg_temp.tid(1001),1,600,660,pg_temp.tid(102),pg_temp.tid(202),'다른 교사','다른 방' from generate_series(1,2001) n;
@@ -128,11 +166,11 @@ $$;
 set local role authenticated;
 select public.mutate_timetable_plan_v1(jsonb_build_object('operation','create','planId',pg_temp.tid(5),'name','UUID 원자성','requestKey','create5'));
 create temporary table uuid_before as select pg_temp.plan_write_state(pg_temp.tid(5)) as snapshot;
-select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.duplicate_uuid_command(51,'uppercase'))$$,'22023','timetable_invalid','uppercase UUID spelling cannot bypass duplicate slot identity');
+select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.target_fingerprint(pg_temp.duplicate_uuid_command(51,'uppercase')))$$,'22023','timetable_invalid','uppercase UUID spelling cannot bypass duplicate slot identity');
 select is(pg_temp.plan_write_state(pg_temp.tid(5)),(select snapshot from uuid_before),'mixed-case UUID rejection preserves all plan rows revisions signal and receipts');
 truncate uuid_before;
 insert into uuid_before select pg_temp.plan_write_state(pg_temp.tid(5));
-select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.duplicate_uuid_command(52,'compact'))$$,'22023','timetable_invalid','compact UUID spelling cannot bypass duplicate slot identity');
+select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.target_fingerprint(pg_temp.duplicate_uuid_command(52,'compact')))$$,'22023','timetable_invalid','compact UUID spelling cannot bypass duplicate slot identity');
 select is(pg_temp.plan_write_state(pg_temp.tid(5)),(select snapshot from uuid_before),'equivalent compact UUID rejection preserves all plan rows revisions signal and receipts');
 
 -- Existing schedule writers emit per-slot resource details in parentheses.
@@ -144,11 +182,12 @@ set local role authenticated;
 select public.mutate_timetable_plan_v1(jsonb_build_object('operation','create','planId',pg_temp.tid(6),'name','괄호 legacy','requestKey','create6'));
 select is((public.get_timetable_plan_v1(pg_temp.tid(6))->>'complete')::boolean,true,'valid parenthesized legacy schedule has complete snapshot');
 select is(public.get_timetable_plan_v1(pg_temp.tid(6))->'unresolvedOccupancies','[]'::jsonb,'per-slot parenthesized labels do not become global blockers');
-select is(jsonb_array_length(public.get_timetable_plan_v1(pg_temp.tid(6))->'shadowSlots'),2,'both parenthesized legacy slots are materialized');
-select is((public.get_timetable_plan_v1(pg_temp.tid(6))#>'{shadowSlots,0}') - 'id' - 'classRevision',jsonb_build_object('sourceSlotId',null,'classId',pg_temp.tid(303),'weekday',1,'startMinute',1033,'endMinute',1123,'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(202)),'first legacy slot resolves its exact teacher room and minutes');
-select is((public.get_timetable_plan_v1(pg_temp.tid(6))#>'{shadowSlots,1}') - 'id' - 'classRevision',jsonb_build_object('sourceSlotId',null,'classId',pg_temp.tid(303),'weekday',3,'startMinute',550,'endMinute',640,'teacherId',pg_temp.tid(103),'classroomId',pg_temp.tid(203)),'second legacy slot resolves a different teacher room and minutes');
-select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(61,null,1050,1080,'parenthesized-teacher')||jsonb_build_object('planId',pg_temp.tid(6),'item',(pg_temp.cmd(61)->'item')||jsonb_build_object('planId',pg_temp.tid(6)),'slots',jsonb_build_array((pg_temp.cmd(61,null,1050,1080)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(6),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(203),'weekday',1))))$$,'23P01','timetable_resource_conflict','first per-slot teacher shadow blocks even in another room');
-select throws_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(62,null,570,600,'parenthesized-room')||jsonb_build_object('planId',pg_temp.tid(6),'item',(pg_temp.cmd(62)->'item')||jsonb_build_object('planId',pg_temp.tid(6)),'slots',jsonb_build_array((pg_temp.cmd(62,null,570,600)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(6),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(203),'weekday',3))))$$,'23P01','timetable_resource_conflict','second per-slot room shadow blocks even with another teacher');
-select lives_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.cmd(63,null,600,660,'parenthesized-safe')||jsonb_build_object('planId',pg_temp.tid(6),'item',(pg_temp.cmd(63)->'item')||jsonb_build_object('planId',pg_temp.tid(6)),'slots',jsonb_build_array((pg_temp.cmd(63,null,600,660)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(6),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(203),'weekday',5))))$$,'parenthesized legacy shadows permit unrelated safe placement');
+select is(public.get_timetable_plan_v1(pg_temp.tid(6))->'shadowSlots','[]'::jsonb,'parenthesized operating slots stay outside this preset');
+select is(jsonb_array_length(pg_temp.operating_slots(303)),2,'both parenthesized legacy slots remain in the operating reference');
+select is((pg_temp.operating_slots(303)#>'{0}') - 'id' - 'classRevision',jsonb_build_object('sourceSlotId',null,'classId',pg_temp.tid(303),'weekday',1,'startMinute',1033,'endMinute',1123,'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(202)),'first legacy slot resolves its exact teacher room and minutes');
+select is((pg_temp.operating_slots(303)#>'{1}') - 'id' - 'classRevision',jsonb_build_object('sourceSlotId',null,'classId',pg_temp.tid(303),'weekday',3,'startMinute',550,'endMinute',640,'teacherId',pg_temp.tid(103),'classroomId',pg_temp.tid(203)),'second legacy slot resolves a different teacher room and minutes');
+select lives_ok($$select pg_temp.exercise_item_command(pg_temp.target_fingerprint(pg_temp.cmd(61,null,1050,1080,'parenthesized-teacher')||jsonb_build_object('planId',pg_temp.tid(6),'item',(pg_temp.cmd(61)->'item')||jsonb_build_object('planId',pg_temp.tid(6)),'slots',jsonb_build_array((pg_temp.cmd(61,null,1050,1080)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(6),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(203),'weekday',1)))))$$,'outside per-slot teacher occupancy does not block this preset');
+select lives_ok($$select pg_temp.exercise_item_command(pg_temp.target_fingerprint(pg_temp.cmd(62,null,570,600,'parenthesized-room')||jsonb_build_object('planId',pg_temp.tid(6),'item',(pg_temp.cmd(62)->'item')||jsonb_build_object('planId',pg_temp.tid(6)),'slots',jsonb_build_array((pg_temp.cmd(62,null,570,600)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(6),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(203),'weekday',3)))))$$,'outside per-slot room occupancy does not block this preset');
+select lives_ok($$select public.mutate_timetable_plan_item_v1(pg_temp.target_fingerprint(pg_temp.cmd(63,null,600,660,'parenthesized-safe')||jsonb_build_object('planId',pg_temp.tid(6),'item',(pg_temp.cmd(63)->'item')||jsonb_build_object('planId',pg_temp.tid(6)),'slots',jsonb_build_array((pg_temp.cmd(63,null,600,660)->'slots'->0)||jsonb_build_object('planId',pg_temp.tid(6),'teacherId',pg_temp.tid(102),'classroomId',pg_temp.tid(203),'weekday',5)))))$$,'parenthesized legacy shadows permit unrelated safe placement');
 select * from finish();
 rollback;

@@ -1,5 +1,6 @@
 export type ClassScheduleSlot = {
   id: string | null;
+  uiKey?: string;
   day: string;
   startTime: string;
   endTime: string;
@@ -66,6 +67,7 @@ function getFallbackValue(values: string[], slotIndex: number) {
 function createEmptyClassScheduleSlot(): ClassScheduleSlot {
   return {
     id: null,
+    uiKey: "legacy-empty",
     day: "",
     startTime: "",
     endTime: "",
@@ -143,6 +145,7 @@ export function parseClassScheduleSlots(
       const slotIndex = slots.length;
       slots.push({
         id: null,
+        uiKey: `legacy-${slotIndex}`,
         day,
         startTime,
         endTime,
@@ -163,6 +166,7 @@ export function parseClassScheduleSlots(
   const timeMatch = schedule.match(/(\d{1,2}:\d{2})\s*[-~–]\s*(\d{1,2}:\d{2})/);
   const fallbackSlot = {
     id: null,
+    uiKey: "legacy-fallback",
     day,
     startTime: text(timeMatch?.[1]),
     endTime: text(timeMatch?.[2]),

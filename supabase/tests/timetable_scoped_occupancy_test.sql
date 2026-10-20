@@ -34,15 +34,25 @@ select is((select s->>'teacherId' from jsonb_array_elements(public.get_timetable
 reset role;
 select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),pg_temp.next_day(3)) s where s->>'classId'=pg_temp.sid(303)::text),2,'legacy default provenance is not double counted as a second reservation');
 create function pg_temp.command(i int,d int,a int,b int) returns jsonb language sql as $$select jsonb_build_object('operation','save','planId',pg_temp.sid(1),'expectedMetaRevision',(public.get_timetable_plan_revision_v1(pg_temp.sid(1))->>'metaRevision')::int,'expectedShadowFingerprint',public.get_timetable_plan_revision_v1(pg_temp.sid(1))->>'shadowFingerprint','expectedItemRevision',null,'requestKey','scoped-'||i::text||'-'||d::text||'-'||a::text,'item',jsonb_build_object('id',pg_temp.sid(i),'planId',pg_temp.sid(1),'name','새 수업','subject','영어','subjectAreaKey',null,'grade','중2','capacity',12,'tuition',100000,'defaultTeacherId',pg_temp.sid(101),'defaultClassroomId',pg_temp.sid(201),'durationMinutes',60,'pendingSlots','[]'::jsonb),'slots',jsonb_build_array(jsonb_build_object('id',pg_temp.sid(i+100),'itemId',pg_temp.sid(i),'planId',pg_temp.sid(1),'weekday',d,'startMinute',a,'endMinute',b,'teacherId',pg_temp.sid(101),'classroomId',pg_temp.sid(201),'sourceSlotId',null)))$$;
+-- Roll back successful preset probes without rolling back the pgTAP counters.
+create function pg_temp.save_preset_rolled_back(p_command jsonb) returns void language plpgsql as $$
+begin
+ begin
+  perform public.mutate_timetable_plan_item_v1(p_command);
+  set constraints all immediate;set constraints all deferred;
+  raise exception using errcode='Z0001',message='rollback_fixture_preset';
+ exception when sqlstate 'Z0001' then null;
+ end;
+end $$;
 set local role authenticated;
 select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(11,1,600,660))$q$,'unrelated Monday saves despite unresolved Tuesday');
-select throws_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(12,1,1200,1230))$q$,'23P01','timetable_resource_conflict','resolved normalized shadow still prevents teacher and room overlap');
-select throws_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(12,2,1170,1230))$q$,'23P01','timetable_resource_conflict','only the undecided room interval blocks new placement');
+select lives_ok($q$select pg_temp.save_preset_rolled_back(pg_temp.command(12,1,1200,1230))$q$,'resolved operating shadow does not block an independent preset placement');
+select lives_ok($q$select pg_temp.save_preset_rolled_back(pg_temp.command(12,2,1170,1230))$q$,'unresolved operating room does not block an independent preset placement');
 select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(12,2,1290,1350))$q$,'half-open interval immediately after uncertainty saves');
 select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(13,4,600,660)||jsonb_build_object('slots','[]'::jsonb))$q$,'unplaced draft saves regardless of uncertainty');
 select lives_ok($q$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','rename','planId',pg_temp.sid(1),'expectedMetaRevision',0,'name','dated review','targetStartDate',pg_temp.next_day(0),'targetEndDate',pg_temp.next_day(0)+14,'requestKey','scope-period'))$q$,'dated period can be selected without locking unrelated draft editing');
 select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(14,4,600,660))$q$,'unrelated placement saves with dated review period');
-create temp table promotion_request as select jsonb_build_object('source',jsonb_build_object('kind','plan','planId',pg_temp.sid(1)),'target',jsonb_build_object('kind','operational'),'mode','copy','itemIds',jsonb_build_array(pg_temp.sid(14)),'onConflict','reject') r;
+create temp table promotion_request as select jsonb_build_object('source',jsonb_build_object('kind','plan','planId',pg_temp.sid(1)),'target',jsonb_build_object('kind','operational','status','개강 준비'),'mode','copy','itemIds',jsonb_build_array(pg_temp.sid(14)),'onConflict','reject') r;
 select is((select public.preview_timetable_plan_transfer_v1(r)->'blockers' from promotion_request),'[]'::jsonb,'promotion preview checks selected placements only');
 select lives_ok($q$select public.commit_timetable_plan_transfer_v1(jsonb_build_object('request',r,'previewFingerprint',public.preview_timetable_plan_transfer_v1(r)->>'fingerprint','requestKey','scope-promotion')) from promotion_request$q$,'actual isolated promotion succeeds despite unrelated incomplete room');
 reset role;

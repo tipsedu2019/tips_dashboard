@@ -39,6 +39,17 @@ function loadPickerHelpers(source, helperNames = [
   return sandboxModule.exports;
 }
 
+test('end-of-day is opt-in and does not alter datetime validity or exact minute choices', async () => {
+  const { normalizeTimeInput, getTimePickerOptions, mergeLocalDateTime } = loadPickerHelpers(await readPickerSource());
+  assert.equal(normalizeTimeInput('24:00'), '');
+  assert.equal(normalizeTimeInput('24:00', true), '24:00');
+  assert.equal(normalizeTimeInput('2400', true), '24:00');
+  assert.equal(normalizeTimeInput('24:01', true), '');
+  assert.equal(mergeLocalDateTime('2026-10-20', '24:00'), '');
+  assert.deepEqual(Array.from(getTimePickerOptions(['17:10'], '17:13', true, true)), ['17:10', '17:13', '24:00']);
+  assert.deepEqual(Array.from(getTimePickerOptions(['17:10', '24:00'], '17:13')), ['17:10', '17:13']);
+});
+
 test("date-time drafts preserve the complete counterpart and never synthesize a missing half", async () => {
   const source = await readPickerSource();
   const {
@@ -183,7 +194,7 @@ test("date and time controls keep selected-time scrolling inside the listbox", a
   assert.match(timePickerSource, /options\?: string\[\]/);
   assert.match(timePickerSource, /preserveSelectedTimeOption\?: boolean/);
   assert.match(timePickerSource, /disablePortal\?: boolean/);
-  assert.match(timePickerSource, /getTimePickerOptions\(options, normalizedValue, preserveSelectedTimeOption\)/);
+  assert.match(timePickerSource, /getTimePickerOptions\(options, normalizedValue, preserveSelectedTimeOption, allowEndOfDay\)/);
   assert.match(timePickerSource, /selectedOptionRef/);
   assert.match(timePickerSource, /timeListRef/);
   assert.match(timePickerSource, /scrollTimeOptionWithinList\(timeListRef\.current, selectedOptionRef\.current, "center"\)/);
@@ -261,7 +272,7 @@ test("picker triggers announce current values and time options use one keyboard 
   assert.equal(getNextTimeOptionIndex("Enter", 1, 3), -1);
 
   assert.match(datePickerSource, /aria-label=\{getPickerAccessibleLabel\(ariaLabel, selectedDateLabel\)\}/);
-  assert.match(timePickerSource, /aria-label=\{getPickerAccessibleLabel\(ariaLabel, selectedTimeLabel\)\}/);
+  assert.match(timePickerSource, /aria-label=\{allowDirectInput \? `\$\{ariaLabel\} 선택` : getPickerAccessibleLabel\(ariaLabel, selectedTimeLabel\)\}/);
   assert.match(timePickerSource, /role="listbox"/);
   assert.match(timePickerSource, /role="option"/);
   assert.match(timePickerSource, /aria-selected=\{selected\}/);

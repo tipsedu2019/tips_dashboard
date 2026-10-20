@@ -11,7 +11,7 @@
 .student-workspace > .\@container\/main { margin-top: 0; }
 .student-filter-status:empty { display: none; }
 
-:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) {
+.student-fields :is([data-slot="input"], [data-slot="select-trigger"]) {
   height: var(--student-control-height);
   border-radius: var(--student-control-radius);
   font-size: 14px;
@@ -142,7 +142,7 @@ body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-conte
   .student-edit-sheet [data-slot="dialog-title"] { font-size: 20px; }
   .student-edit-sheet .student-sheet-close { top: 20px; right: 16px; }
   .student-fields { grid-template-columns: minmax(0, 1fr); gap: 20px; }
-  :is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) { height: 44px; font-size: 16px; }
+  .student-fields :is([data-slot="input"], [data-slot="select-trigger"]) { height: 44px; font-size: 16px; }
   .student-class-actions [data-slot="button"] { min-height: 44px; }
   .student-sheet-actions { margin-inline: -20px; padding: 16px 20px max(16px, env(safe-area-inset-bottom)); gap: 8px; }
   .student-sheet-actions > [data-slot="button"] { height: 44px; }

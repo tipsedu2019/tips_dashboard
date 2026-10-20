@@ -17,11 +17,6 @@
 .class-edit-sheet > [data-slot="dialog-header"]:not(.sr-only) { margin-bottom: 28px; text-align: left; }
 .class-edit-sheet > [data-slot="dialog-header"] [data-slot="dialog-title"] { font-size: 20px; line-height: 28px; }
 .class-edit-sheet > [data-slot="alert"] { margin-bottom: 24px; }
-.class-fields { gap: 20px; }
-.class-fields > div { min-width: 0; }
-.class-fields [data-slot="label"] { font-size: 14px; line-height: 20px; font-weight: 500; }
-.class-fields [aria-haspopup="dialog"] { min-height: var(--field-height); border-radius: var(--radius-control); box-shadow: none; }
-.class-schedule-fields [data-slot="button"][aria-haspopup="dialog"] { height: var(--field-height); border-radius: var(--radius-control); box-shadow: none; }
 .class-detail-body > section + section,
 .class-detail-body > #class-detail-students-section { margin-top: 28px; }
 .class-detail-header {
@@ -61,12 +56,6 @@
 .class-detail-navigation::before { content: ""; position: absolute; inset: -28px 0 auto; height: 28px; background: var(--background); }
 
 @media (max-width: 1023px) {
-  .class-edit-sheet [data-testid="class-schedule-slot-header"] { display: none; }
-  .class-edit-sheet [data-testid="class-schedule-slot-row"] { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; padding: 12px 0; }
-  .class-edit-sheet [data-testid="class-schedule-slot-row"] + [data-testid="class-schedule-slot-row"] { border-top: 1px solid var(--border); }
-  .class-edit-sheet [data-testid="class-schedule-slot-row"] > div:first-child { grid-column: 1 / -1; }
-  .class-edit-sheet [data-testid="class-schedule-slot-row"] > div:last-child { grid-column: 2; }
-  .class-edit-sheet [data-testid="class-schedule-slot-row"] [data-slot="label"] { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; }
   .class-edit-sheet [data-testid="class-roster-student-row"] { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px; }
   .class-edit-sheet [data-testid="class-roster-student-row"] > div:first-child,
   .class-edit-sheet [data-testid="class-roster-student-row"] > div:last-child { grid-column: 1 / -1; }
@@ -74,13 +63,10 @@
 
 @media (max-width: 639px) {
   .class-edit-sheet { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); padding: 20px 16px 0; border-radius: 12px; }
-  .class-fields { gap: 16px; }
   .class-detail-header { margin: -4px -16px 20px; padding: 0 16px 16px; }
   .class-detail-header-title { font-size: 18px; line-height: 26px; }
   .class-sheet-actions { margin: 24px -16px 0; padding: 16px; gap: 8px; }
   .class-sheet-actions [data-testid="management-save-status"] { flex-basis: 100%; }
-  .class-schedule-fields [data-slot="button"][aria-haspopup="dialog"],
-  .class-fields [aria-haspopup="dialog"] { min-height: 44px; height: 44px; }
   .class-edit-sheet [data-testid="class-schedule-slot-editor"] { padding: 12px; }
   .class-detail-navigation { margin-inline: -16px; padding: 4px 8px; }
   .class-detail-navigation::before { top: -20px; height: 20px; }
