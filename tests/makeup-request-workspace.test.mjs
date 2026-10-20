@@ -999,7 +999,14 @@ test("makeup datetime and room controls stay within operational candidates", () 
   assert.match(dateTimePickerSource, /TIME_OPTION_END_MINUTES - TIME_OPTION_START_MINUTES/);
   assert.doesNotMatch(dateTimePickerSource, /6 \* 60/);
   assert.doesNotMatch(dateTimePickerSource, /오전 06:00/);
-  assert.doesNotMatch(dateTimePickerSource, /placeholder="HH:MM"/);
+  // Other consumers may explicitly enable exact-minute entry. Makeup controls
+  // must keep the operational picker; the default/opt-in DOM is tested in
+  // date-time-picker-input-mode.test.mjs.
+  const makeupTimePickers = workspaceSource.match(/<TimePickerControl\b[\s\S]*?\/>/g) || [];
+  assert.ok(makeupTimePickers.length >= 2, "makeup start and end controls must be checked");
+  for (const picker of makeupTimePickers) {
+    assert.doesNotMatch(picker, /\ballowDirectInput\b|\ballowEndOfDay\b/);
+  }
   assert.doesNotMatch(dateTimePickerSource, />\s*적용\s*</);
   assert.match(dateTimePickerSource, /onWheelCapture=\{\(event\) => event\.stopPropagation\(\)\}/);
   assert.match(dateTimePickerSource, /onTouchMoveCapture=\{\(event\) => event\.stopPropagation\(\)\}/);
