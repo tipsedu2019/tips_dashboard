@@ -189,7 +189,6 @@ jobs:
             --test supabase/tests/timetable_makeup_domain_sqlstate_test.sql \
             --test supabase/tests/timetable_normalized_time_matching_test.sql \
             --test supabase/tests/timetable_nullable_classroom_test.sql \
-            --probe tests/probe-timetable-nullable-room-concurrency.mjs \
             --test supabase/tests/timetable_operational_conflicts_test.sql \
             --test supabase/tests/timetable_repeatable_read_guard_test.sql \
             --test supabase/tests/timetable_serializable_guard_test.sql \
@@ -291,7 +290,8 @@ jobs:
             --probe tests/probe-ai-agent-chat-runtime-concurrency.mjs \
             --probe tests/probe-ai-agent-http-producer.mjs \
             --probe tests/probe-ai-agent-personal-integration.mjs \
-            --probe tests/probe-ai-agent-thread-replies-concurrency.mjs
+            --probe tests/probe-ai-agent-thread-replies-concurrency.mjs \
+            --probe tests/probe-timetable-nullable-room-concurrency.mjs
 
       - name: Test cached PostgreSQL fixture contracts
         run: node scripts/run-isolated-postgres-fixture-tests.mjs

@@ -1601,7 +1601,8 @@ test("late relation addition keeps the new detail's relation candidate intact", 
   await act(async () => ui.mutations[1].resolve(undefined));
 });
 
-test("class creation initializes the entered schedule with its selected teacher and optional room", async t => {
+for (const schedule of ["화목 19:30-21:30", "화/목 19:30-21:30", "화, 목 19:30-21:30"]) {
+test(`class creation initializes the entire entered schedule ${schedule} with optional room`, async t => {
   const previousScroll = window.HTMLElement.prototype.scrollIntoView;
   window.HTMLElement.prototype.scrollIntoView = () => {};
   t.after(() => { window.HTMLElement.prototype.scrollIntoView = previousScroll; });
@@ -1619,7 +1620,7 @@ test("class creation initializes the entered schedule with its selected teacher 
   await ui.editField("classes-form-name", "미정 방 신규 수업");
   await select("classes-form-subject", "영어");
   await select("classes-form-teacher", "영어교사");
-  await ui.editField("classes-form-schedule", "화목 19:30-21:30");
+  await ui.editField("classes-form-schedule", schedule);
   await ui.submitTogether();
   assert.equal(ui.mutations.length, 1);
   await act(async () => ui.mutations[0].resolve({ id: "created-class" }));
@@ -1628,6 +1629,7 @@ test("class creation initializes the entered schedule with its selected teacher 
     teacherCatalogId: "teacher-1", classroomCatalogId: null, sortOrder,
   })));
 });
+}
 
 test("class creation validates the actual entered placement before creating a class", async t => {
   const ui = await setup(t, { configureFixture: fixture => deferServices(fixture, ["createClass"]) });
@@ -1642,6 +1644,10 @@ test("class creation validates the actual entered placement before creating a cl
   assert.equal(ui.mutations.length, 0);
   assert.match(ui.text(), /시작·종료 시간/);
   await ui.editField("classes-form-schedule", "invalid schedule");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /요일|시간/);
+  await ui.editField("classes-form-schedule", "화 19:30-21:30 (영어교사, ); invalid tail");
   await ui.submitTogether();
   assert.equal(ui.mutations.length, 0);
   assert.match(ui.text(), /요일|시간/);

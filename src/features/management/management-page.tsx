@@ -91,6 +91,7 @@ import {
   stripSharedScheduleDetails,
   toContinuousClassScheduleSlots,
   classScheduleSlotsValidationError,
+  classScheduleTextValidationError,
   type ClassScheduleSlot,
 } from "./class-schedule-slots";
 import type { ClassStudentPickerFilters, StudentClassPickerFilters } from "./student-class-picker-model";
@@ -2518,9 +2519,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       // edits use the same timing/teacher contract; its room may stay unassigned.
       if (kind === "classes" && (scope === "form" || (!normalizedScheduleDefaults && scheduleDraft !== savedScheduleDraft))) {
         const slots = getClassScheduleSlotsFromForm();
-        const scheduleError = scope === "form" && text(form.schedule) && toContinuousClassScheduleSlots(slots).length === 0
-          ? "수업 요일과 시간을 올바르게 입력해 주세요."
-          : classScheduleSlotsValidationError(slots);
+        const scheduleError = (scope === "form" ? classScheduleTextValidationError(form.schedule) : '')
+          || classScheduleSlotsValidationError(slots);
         if (scheduleError) {
           setOperationError(scheduleError);
           return false;

@@ -27,3 +27,15 @@ test('explicit room clear wins over the old raw alias while omitted classroom pr
   assert.equal(buildClassPayload({ name: 'Synthetic', subject: '영어', room: 'Room A', classroom: '' }).room, '');
   assert.equal(buildClassPayload({ name: 'Synthetic', subject: '영어', room: 'Room A' }).room, 'Room A');
 });
+
+test('creation parses every grouped weekday and rejects partially understood schedule text', () => {
+  for (const schedule of ['화목 19:30-21:30', '화/목 19:30-21:30', '화, 목 19:30-21:30', '화 목 19:30-21:30']) {
+    assert.equal(slots.classScheduleTextValidationError(schedule), '');
+    assert.deepEqual(slots.parseClassScheduleSlots(schedule, 'Teacher A', '').map(slot => slot.day), ['화', '목']);
+  }
+  assert.equal(slots.classScheduleTextValidationError(''), '');
+  assert.equal(slots.classScheduleTextValidationError('화 19:30-21:30\n토 16:30-18:00'), '');
+  for (const schedule of ['not a schedule', 'bad prefix 화 19:30-21:30', '화 19:30-21:30; bad tail', '화 19:30-21:30\n토 16:30-']) {
+    assert.match(slots.classScheduleTextValidationError(schedule), /요일과 시간/);
+  }
+});

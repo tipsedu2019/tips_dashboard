@@ -70,6 +70,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_lesson_save_performance_test.sql",
   "supabase/tests/timetable_makeup_domain_sqlstate_test.sql",
   "supabase/tests/timetable_normalized_time_matching_test.sql",
+  "supabase/tests/timetable_nullable_classroom_test.sql",
   "supabase/tests/timetable_operational_conflicts_test.sql",
   "supabase/tests/timetable_repeatable_read_guard_test.sql",
   "supabase/tests/timetable_serializable_guard_test.sql",
@@ -178,6 +179,7 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-ai-agent-http-producer.mjs",
   "tests/probe-ai-agent-personal-integration.mjs",
   "tests/probe-ai-agent-thread-replies-concurrency.mjs",
+  "tests/probe-timetable-nullable-room-concurrency.mjs",
 ])
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
