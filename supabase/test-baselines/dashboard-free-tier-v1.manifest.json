@@ -879,6 +879,11 @@
       "fileName": "20261019100046_academic_calendar_move_atomic.sql",
       "status": "final",
       "sha256": "4fd992887e81cfb23e9e3585ee4a63eda82de8bb6bdbb21b5392501bcb5e83de"
+    },
+    {
+      "fileName": "20261020001626_word_retest_completed_failed_retry.sql",
+      "status": "final",
+      "sha256": "7b964368c629ac92e1655513783147a985b9dc659f818c1148e765eb11dfa35b"
     }
   ]
 }
