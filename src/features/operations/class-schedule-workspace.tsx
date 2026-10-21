@@ -10,6 +10,7 @@ import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectio
   type LegacyPastStateCorrectionInput, type LegacyPastStateCorrectionTarget } from "./legacy-past-state-correction";
 import { LegacyPastStateCorrectionDialog } from "./legacy-past-state-correction-dialog";
 import { LegacyLessonScheduleFields } from "./legacy-lesson-schedule-fields";
+import { legacyLessonMonthRange, newLegacyLessonMonthError, prepareLegacyLessonMonth, suggestedLegacyLessonMonth } from "./legacy-lesson-month";
 import { resolveLegacyLessonDetails, snapshotNewLegacyLessonDetails, snapshotRestoredLegacyLessonDetails } from "./legacy-lesson-defaults";
 import { projectLegacyEffectivePlan, resolveEffectiveSchedule, setLegacyLessonOverride, resetLegacyLessonToBasics } from "./legacy-effective-schedule.js";
 import { useCommittedSearch } from "@/hooks/use-committed-search";
@@ -39,7 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AcademicFilterToolbar } from "@/features/academic/filter-toolbar";
-import { applyCalendarDateSubstitution, applyCalendarDateToggle, buildSchedulePlanForSave, computeAutoEndDate, getNextBillingPeriodMonth, getSuggestedNextStartDate, normalizeSchedulePlan, isRequestMakeupSession } from "@/lib/class-schedule-planner";
+import { applyCalendarDateSubstitution, applyCalendarDateToggle, buildSchedulePlanForSave, computeAutoEndDate, normalizeSchedulePlan, isRequestMakeupSession } from "@/lib/class-schedule-planner";
 import { useDraftNavigation } from "@/hooks/use-draft-navigation";
 import { supabase } from "@/lib/supabase";
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js";
@@ -2259,6 +2260,8 @@ export function ClassScheduleWorkspace() {
   const [lessonMonthDetailsOpen, setLessonMonthDetailsOpen] = useState(false);
   const [lessonPlanDraft, setLessonPlanDraft] = useState<Record<string, unknown> | null>(null);
   const [lessonPlanBaseline, setLessonPlanBaseline] = useState<Record<string, unknown> | null>(null);
+  const [lessonMonthToAdd, setLessonMonthToAdd] = useState<{ owner: string; value: string } | null>(null);
+  const lessonAddedMonthsRef = useRef(new Map<string, string>());
   const lessonPlanBaselineRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanOwnerRef = useRef("");
   const lessonPlanSaveRef = useRef<symbol | null>(null);
@@ -2943,6 +2946,7 @@ export function ClassScheduleWorkspace() {
   useEffect(() => {
     const owner = isLessonDesignRouteActive ? requestedClassId : text(selectedRow?.id);
     const ownerChanged = lessonPlanOwnerRef.current !== owner;
+    if (ownerChanged) lessonAddedMonthsRef.current.clear();
     if (!selectedRow) {
       // A bounded read can temporarily omit the current row. It does not own the draft.
       if (!ownerChanged && owner) return;
@@ -3654,6 +3658,19 @@ export function ClassScheduleWorkspace() {
   const handleLessonPeriodChange = useCallback(
     (periodId: string, field: "startDate" | "endDate", value: string) => {
       if (!lessonScheduleReadReady || isNormalizedLessonSchedule) return;
+      const periods = (lessonPlanDraftRef.current?.billingPeriods || []) as Record<string, unknown>[];
+      const period = periods.find(item => text(item.id) === periodId);
+      const savedPeriods = (lessonPlanBaselineRef.current?.billingPeriods || []) as Record<string, unknown>[];
+      const selectedMonth = lessonAddedMonthsRef.current.get(periodId);
+      if (period && selectedMonth && !savedPeriods.some(item => text(item.id) === periodId)) {
+        const monthKey = selectedMonth;
+        const range = legacyLessonMonthRange(monthKey);
+        if (!range || value < range.startDate || value > range.endDate) {
+          setLessonDesignSaveError(`신규 구간의 날짜는 선택한 ${monthKey.replace('-', '년 ')}월 안에서 입력해 주세요.`);
+          return;
+        }
+      }
+      setLessonDesignSaveError("");
       updateLessonPlanDraft((current) => {
         const billingPeriods = Array.isArray(current.billingPeriods)
           ? (current.billingPeriods as Record<string, unknown>[])
@@ -3679,42 +3696,25 @@ export function ClassScheduleWorkspace() {
         };
       });
     },
-    [isNormalizedLessonSchedule, lessonScheduleReadReady, updateLessonPlanDraft],
+    [isNormalizedLessonSchedule, lessonScheduleReadReady, setLessonDesignSaveError, updateLessonPlanDraft],
   );
+  const lessonMonthToAddValue = lessonMonthToAdd && lessonMonthToAdd.owner === selectedRow?.id ? lessonMonthToAdd.value
+    : suggestedLegacyLessonMonth(normalizedLessonPlan || {}, new Date().toISOString().slice(0, 10));
+  const lessonMonthAddition = prepareLegacyLessonMonth(normalizedLessonPlan || {}, lessonMonthToAddValue);
   const handleAddLessonPeriod = useCallback(() => {
     if (!lessonScheduleReadReady || isNormalizedLessonSchedule) return;
-    updateLessonPlanDraft((current) => {
-      const billingPeriods = Array.isArray(current.billingPeriods)
-        ? [...(current.billingPeriods as Record<string, unknown>[])]
-        : [];
-      const lastPeriod = billingPeriods[billingPeriods.length - 1] || null;
-      const startDate = getSuggestedNextStartDate(
-        text(lastPeriod?.endDate || lastPeriod?.end_date),
-        Array.isArray(current.selectedDays) ? (current.selectedDays as Array<string | number>) : [],
-      );
-      const endDate = computeAutoEndDate(
-        startDate,
-        Array.isArray(current.selectedDays) ? (current.selectedDays as Array<string | number>) : [],
-        Number(current.globalSessionCount || 0),
-      );
-      const nextPeriodIndex = billingPeriods.length + 1;
-      const nextMonth = lastPeriod ? getNextBillingPeriodMonth(lastPeriod) : 1;
-      billingPeriods.push({
-        id: `period-${Date.now()}-${nextPeriodIndex}`,
-        month: nextMonth,
-        label: `${nextMonth}월`,
-        startDate,
-        endDate,
-      });
-      return {
-        ...current,
-        billingPeriods,
-      };
-    });
-  }, [isNormalizedLessonSchedule, lessonScheduleReadReady, updateLessonPlanDraft]);
+    const addition = prepareLegacyLessonMonth(lessonPlanDraftRef.current || {}, lessonMonthToAddValue, `period-${crypto.randomUUID()}`);
+    if (!addition.period) { setLessonDesignSaveError(addition.error); return; }
+    lessonAddedMonthsRef.current.set(addition.period.id, lessonMonthToAddValue);
+    updateLessonPlanDraft(current => ({ ...current,
+      billingPeriods: [...(Array.isArray(current.billingPeriods) ? current.billingPeriods : []), addition.period],
+    }));
+    setLessonDesignSaveError("");
+  }, [isNormalizedLessonSchedule, lessonMonthToAddValue, lessonScheduleReadReady, setLessonDesignSaveError, updateLessonPlanDraft]);
   const handleRemoveLessonPeriod = useCallback(
     (periodId: string) => {
       if (!lessonScheduleReadReady || isNormalizedLessonSchedule) return;
+      lessonAddedMonthsRef.current.delete(periodId);
       updateLessonPlanDraft((current) => {
         const billingPeriods = Array.isArray(current.billingPeriods)
           ? (current.billingPeriods as Record<string, unknown>[])
@@ -3737,6 +3737,8 @@ export function ClassScheduleWorkspace() {
       setLessonDesignSaveError("최신 수업 일정을 다시 불러온 뒤 저장해 주세요.");
       return;
     }
+    const monthError = newLegacyLessonMonthError(lessonPlanForSave, lessonPlanBaselineRef.current || {}, lessonAddedMonthsRef.current);
+    if (monthError) { setLessonDesignSaveError(monthError); return; }
     const client = supabase;
     const mutationToken = lessonMutationLifecycleRef.current?.capture(selectedRow.id) || null;
     if (!mutationToken) return;
@@ -4942,11 +4944,21 @@ export function ClassScheduleWorkspace() {
                       setFocusedLessonMonthKey(event.target.value); setGenerationPreview(null);
                     }} />
                   </label>
-                ) : <Button type="button" size="sm" variant="outline" disabled={!lessonScheduleReadReady} onClick={handleAddLessonPeriod}>
-                  월 추가
-                </Button>}
+                ) : <>
+                  <label className="flex items-center gap-2 text-sm">
+                    <span>추가할 연월</span>
+                    <Input type="month" aria-label="추가할 연월" className="w-40" value={lessonMonthToAddValue}
+                      disabled={!lessonScheduleReadReady} aria-describedby={lessonMonthAddition.error ? "lesson-month-add-error" : undefined}
+                      onChange={event => setLessonMonthToAdd({ owner: text(selectedRow?.id), value: event.target.value })} />
+                  </label>
+                  <Button type="button" size="form" variant="outline" disabled={!lessonScheduleReadReady || Boolean(lessonMonthAddition.error)} onClick={handleAddLessonPeriod}>
+                    월 추가
+                  </Button>
+                </>}
               </div>
             </div>
+
+            {!isNormalizedLessonSchedule && lessonMonthAddition.error ? <p id="lesson-month-add-error" role="status" className="mt-2 text-sm text-destructive">{lessonMonthAddition.error}</p> : null}
 
             {isNormalizedLessonSchedule ? <p className="mt-2 text-sm text-muted-foreground">기존 날짜를 선택해 일정을 수정하세요. 새 회차는 선택한 월의 일정 미리보기에서 생성합니다.</p> : null}
             <div className="mt-4">
@@ -4954,6 +4966,9 @@ export function ClassScheduleWorkspace() {
                 {lessonDesignSnapshot.billingPeriods.length > 0 ? (
                   lessonDesignSnapshot.billingPeriods.map((period) => {
                     const periodStartMonthKey = buildLessonMonthKey(period.startDate);
+                    const savedPeriods = (lessonPlanBaseline?.billingPeriods || []) as Record<string, unknown>[];
+                    const addedMonthRange = savedPeriods.some(saved => text(saved.id) === period.id) ? null
+                      : legacyLessonMonthRange(lessonAddedMonthsRef.current.get(period.id) || "");
                     const periodSessions = filteredLessonSessions
                       .filter(
                         (session) =>
@@ -5042,6 +5057,8 @@ export function ClassScheduleWorkspace() {
                               type="date"
                               disabled={!lessonScheduleReadReady}
                               aria-label={`${period.label} 시작일`}
+                              min={addedMonthRange?.startDate}
+                              max={addedMonthRange?.endDate}
                               value={period.startDate}
                               onChange={(event) => handleLessonPeriodChange(period.id, "startDate", event.target.value)}
                             />
@@ -5052,6 +5069,8 @@ export function ClassScheduleWorkspace() {
                               type="date"
                               disabled={!lessonScheduleReadReady}
                               aria-label={`${period.label} 종료일`}
+                              min={addedMonthRange?.startDate}
+                              max={addedMonthRange?.endDate}
                               value={period.endDate}
                               onChange={(event) => handleLessonPeriodChange(period.id, "endDate", event.target.value)}
                             />

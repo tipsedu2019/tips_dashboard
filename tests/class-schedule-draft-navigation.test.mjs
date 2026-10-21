@@ -211,6 +211,101 @@ async function changeInput(label, value) {
   assert.equal(input.value,value);
 }
 
+function missingOctoberDetail() {
+  const payload = detail();
+  Object.assign(payload.classItem, { subject: '영어', schedule: '화목 19:30-21:30' });
+  payload.classItem.schedulePlan = buildSchedulePlanForSave({ selectedDays: [2, 4],
+    billingPeriods: [
+      [4, '2026-04-02', '2026-04-30'], [6, '2026-05-05', '2026-06-02'],
+      [6, '2026-06-04', '2026-06-30'], [7, '2026-07-02', '2026-07-30'],
+      [8, '2026-08-04', '2026-08-27'], [9, '2026-09-01', '2026-09-29'],
+      [11, '2026-11-03', '2026-11-26'], [12, '2026-12-01', '2026-12-24'],
+    ].map(([month, startDate, endDate], index) => ({ id: `synthetic-period-${index}`, month, startDate, endDate })),
+    sessionStates: { '2026-04-04': { state: 'force_active' }, '2026-04-11': { state: 'force_active' } },
+  });
+  for (const row of payload.classItem.schedulePlan.sessions) {
+    row.teacherNote = `합성 보존 기록 ${row.date}`;
+    row.textbookEntries = [{ textbookId: id(700), plan: { label: '합성 학습 기록' } }];
+    row.progressStatus = 'done';
+  }
+  assert.equal(payload.classItem.schedulePlan.sessions.length, 70);
+  return payload;
+}
+
+test('explicit past month adds October nine with matching billing labels and preserves all seventy saved rows', async t => {
+  const payload = missingOctoberDetail(), saved = structuredClone(payload.classItem.schedulePlan);
+  const page = await setup(t, 'operations', { workspace: true, route: 'curriculum/lesson-design',
+    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-periods` });
+  await act(async () => page.requests.find(r => r.name === 'get_operations_class_lesson_design_detail_v1').resolve({ error: null, data: payload }));
+  if (page.numbered()[0]) await act(async () => page.finish(page.numbered()[0]));
+  await changeInput('추가할 연월', '2026-10');
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '월 추가').click());
+  const october = document.getElementById('lesson-design-period-detail-2026-10');
+  assert.ok(october);
+  assert.match(october.textContent, /10월/);
+  assert.equal(october.querySelector('[data-slot="badge"]').textContent, '9회');
+  assert.equal(saveRequests(page).length, 0, 'adding a month only edits the draft');
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  assert.equal(saveRequests(page).length, 1);
+  const request = saveRequests(page)[0], plan = request.args.p_patch.schedule_plan;
+  assert.deepEqual(request.args.p_expected_schedule_plan, saved);
+  assert.equal(plan.sessions.length, 79);
+  for (const original of saved.sessions) assert.deepEqual(plan.sessions.find(row => row.id === original.id), original);
+  const added = plan.sessions.filter(row => row.date.startsWith('2026-10'));
+  assert.deepEqual(added.map(row => row.date), [1,6,8,13,15,20,22,27,29].map(day => `2026-10-${String(day).padStart(2,'0')}`));
+  assert.ok(added.every(row => row.billingLabel === '10월'));
+  assert.ok(added.every(row => row.startTime === '19:30' && row.endTime === '21:30'));
+  assert.deepEqual(plan.billingPeriods.filter(period => saved.billingPeriods.some(old => old.id === period.id)), saved.billingPeriods);
+  const addedPeriod = plan.billingPeriods.find(period => period.id === added[0].billingId);
+  assert.deepEqual([addedPeriod.month, addedPeriod.label, addedPeriod.startDate, addedPeriod.endDate], [10, '10월', '2026-10-01', '2026-10-29']);
+  assert.equal(plan.sessions.filter(row => row.date.startsWith('2026-11')).length, 8);
+  assert.equal(plan.sessions.filter(row => row.date.startsWith('2026-12')).length, 8);
+});
+
+test('month picker distinguishes years, blocks duplicate months and retains the chosen month after rejected date edits', async t => {
+  const payload = missingOctoberDetail();
+  const page = await setup(t, 'operations', { workspace: true, route: 'curriculum/lesson-design',
+    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-periods` });
+  await act(async () => page.requests.find(r => r.name === 'get_operations_class_lesson_design_detail_v1').resolve({ error: null, data: payload }));
+  if (page.numbered()[0]) await act(async () => page.finish(page.numbered()[0]));
+  const addButton = () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '월 추가');
+  assert.equal(document.querySelector('input[aria-label="추가할 연월"]').value, '2027-01');
+  await changeInput('추가할 연월', '2026-11');
+  assert.equal(addButton().disabled, true);
+  assert.match(document.getElementById('lesson-month-add-error').textContent, /이미 있습니다/);
+  assert.equal(page.observed.lessonPlanForSave.sessions.length, 70);
+  for (const month of ['2025-10', '2026-10', '2027-01']) {
+    await changeInput('추가할 연월', month);
+    assert.equal(addButton().disabled, false);
+    await act(async () => addButton().click());
+    assert.equal(addButton().disabled, true, 'the same month cannot be added twice');
+    const card = document.getElementById(`lesson-design-period-detail-${month}`);
+    assert.ok(card);
+    assert.equal(card.querySelector('input[type="date"]').value.slice(0, 7), month);
+  }
+  assert.equal(document.querySelectorAll('input[aria-label="10월 시작일"]').length, 2, 'same month in distinct years is supported');
+  const start = document.getElementById('lesson-design-period-detail-2026-10').querySelector('input[aria-label="10월 시작일"]');
+  const originalDate = start.value;
+  await act(async () => {
+    start.focus();
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(start, '2027-10-01');
+    start.dispatchEvent(new window.Event('input', { bubbles: true }));
+    start.dispatchEvent(new window.Event('change', { bubbles: true }));
+    start.dispatchEvent(new window.KeyboardEvent('keyup', { key: '1', bubbles: true }));
+  });
+  assert.equal(start.value, originalDate);
+  assert.match(page.observed.lessonDesignSaveError, /선택한 2026년 10월/);
+  assert.equal(saveRequests(page).length, 0);
+
+  const addedId = page.observed.lessonPlanForSave.billingPeriods.find(period => period.startDate === '2026-10-01').id;
+  await act(async () => page.observed.updateLessonPlanDraft(plan => ({ ...plan,
+    billingPeriods: plan.billingPeriods.map(period => period.id === addedId ? { ...period, month: 1, label: '1월' } : period),
+  })));
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  assert.equal(saveRequests(page).length, 0, 'the submit boundary also rejects a mismatched draft');
+  assert.match(page.observed.lessonDesignSaveError, /일치해야/);
+});
+
 test('legacy October date edits snapshot only two new lessons, preserve stored history and retain a conflicted save for explicit retry', async t => {
   const payload = septemberOctoberDetail(), savedPlan = structuredClone(payload.classItem.schedulePlan);
   const octoberDates = ['2026-10-06','2026-10-08','2026-10-13','2026-10-15','2026-10-20','2026-10-22','2026-10-27'];

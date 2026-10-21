@@ -187,16 +187,15 @@ test("normalized session editor keeps time and resource fields behind an explici
   );
 });
 
-test("lesson design period add follows the previous period month sequence", async () => {
+test("lesson design exposes an explicit year-month for new legacy periods", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
-  const plannerSource = await readSource("src/lib/class-schedule-planner.js");
-
-  assert.match(source, /getNextBillingPeriodMonth/);
-  assert.match(source, /const nextMonth = lastPeriod \? getNextBillingPeriodMonth\(lastPeriod\) : 1;/);
-  assert.match(source, /month: nextMonth/);
-  assert.match(source, /label: `\$\{nextMonth\}월`/);
+  // The former sequence-only rule made a missing October inherit January
+  // after December. Actual input/save behavior is covered by the DOM suite.
+  assert.match(source, /<Input type="month" aria-label="추가할 연월"/);
+  assert.match(source, /id="lesson-month-add-error" role="status"/);
+  assert.match(source, /prepareLegacyLessonMonth\(lessonPlanDraftRef\.current \|\| \{\}, lessonMonthToAddValue/);
+  assert.doesNotMatch(source, /getNextBillingPeriodMonth/);
   assert.doesNotMatch(source, /month: nextPeriodIndex/);
-  assert.match(plannerSource, /export function getNextBillingPeriodMonth/);
 });
 
 test("lesson design keeps every generated month visible while focusing one month", async () => {
