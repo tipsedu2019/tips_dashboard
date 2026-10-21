@@ -1629,3 +1629,41 @@ test('independent: canonical date-map fields and editing do not silently alter a
   await changeInput('2026-10-08 종료','13:00');
   assert.equal(page.observed.lessonPlanForSave.sessions[0].startTime,shownStart,'editing end preserves displayed start');
 });
+
+test('adjacent React: first calendar click cancels the existing ordinary lesson', async t => {
+ const payload=septemberOctoberDetail();
+ payload.classItem.schedulePlan.sessionStates={};
+ payload.classItem.schedulePlan.sessionSchedules={};
+ const page=await recoveryEditor(t,payload);
+ const selector='[data-lesson-calendar-month="2026-10"] [data-lesson-calendar-date="2026-10-08"]';
+ const cell=document.querySelector(selector);assert.ok(cell);assert.equal(cell.dataset.lessonCalendarState,'active');
+ await act(async()=>cell.click());
+ const stored=page.observed.lessonPlanForSave.sessions.find(row=>row.date==='2026-10-08');
+ assert.ok(stored,'calendar preserves a stored lesson for this date');
+ assert.equal(stored.scheduleState,'exception','actual calendar click must cancel exactly once');
+ assert.equal(document.querySelector(selector).dataset.lessonCalendarState,'exception','calendar must display the cancellation');
+});
+
+test('adjacent date-map React: displayed edit and emitted save payload must agree with the operating resolver', async t => {
+ const payload=septemberOctoberDetail();
+ const row=payload.classItem.schedulePlan.sessions.find(row=>row.date==='2026-10-08');
+ for(const field of ['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'])delete row[field];
+ payload.classItem.schedulePlan.sessions=[row];
+ payload.classItem.schedulePlan.sessionSchedules={'2026-10-08':{startTime:'12:00',endTime:'13:00',teacherCatalogId:id(101),classroomCatalogId:id(201)}};
+ const context={version:1,basicSlots:[{id:'basic',weekday:4,startTime:'09:00',endTime:'10:00',teacherCatalogId:id(101),classroomCatalogId:id(201)}],catalogs:{teachers:payload.teacherCatalogs,rooms:payload.classroomCatalogs}};
+ const page=await recoveryEditor(t,payload);
+ await page.normalized({status:'ready',value:{source:'legacy',sessions:[],effectiveScheduleContext:context}});
+ await selectLegacyRecoveryRow(page,'2026-10-08');
+ assert.equal(document.querySelector('input[aria-label="2026-10-08 종료"]').value,'13:00');
+ await changeInput('2026-10-08 종료','13:30');
+ assert.equal(document.querySelector('input[aria-label="2026-10-08 종료"]').value,'13:30');
+ await clickLessonSave();
+ assert.equal(saveRequests(page).length,1,page.observed.lessonDesignSaveError);
+ const sent=saveRequests(page)[0].args.p_patch.schedule_plan;
+ assert.equal(sent.sessions[0].endTime,'13:30','actual save payload contains authored edit');
+ const {effectiveInputForLesson,resolveEffectiveSchedule}=page.load('src/features/operations/legacy-effective-schedule.js');
+ const result=resolveEffectiveSchedule(effectiveInputForLesson(sent,sent.sessions[0],context));
+ t.diagnostic(JSON.stringify({raw:sent.sessions[0],dateMap:sent.sessionSchedules['2026-10-08'],resolved:result}));
+ assert.equal(result.values.endTime,'13:30','operating resolver must consume the field emitted by the actual save path');
+ t.diagnostic(JSON.stringify({lessonReaderCase:'actual-react-save-payload',input:effectiveInputForLesson(sent,sent.sessions[0],context),expected:result}));
+});

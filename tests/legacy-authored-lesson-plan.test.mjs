@@ -4,6 +4,7 @@ import { authoredLegacyLessonDraft, applyAuthoredLegacyLessonEdit, patchAuthored
   setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyLessonValidationError } from '../src/features/operations/legacy-authored-lesson-plan.ts';
 
 import { applyCalendarDateToggle } from '../src/lib/class-schedule-planner.js';
+import { effectiveInputForLesson, resolveEffectiveSchedule } from '../src/features/operations/legacy-effective-schedule.js';
 import { prepareLegacyLessonMonth } from '../src/features/operations/legacy-lesson-month.ts';
 
 const teacher = 'ab000000-0000-4000-8000-000000000101', room = 'ab000000-0000-4000-8000-000000000201';
@@ -75,7 +76,7 @@ test('editing one fallback field preserves other fallbacks without materializing
   assert.equal(result.sessions[0].endTime, '13:30');
   assert.deepEqual(result.sessions[0], { ...saved.sessions[0], endTime: '13:30' });
   assert.deepEqual(result.sessions.slice(1), saved.sessions.slice(1));
-  assert.deepEqual(result.sessionSchedules['2026-10-20'], { startTime: '12:00', classroomCatalogId: room });
+  assert.deepEqual(result.sessionSchedules['2026-10-20'], { startTime: '12:00', endTime: '13:30', classroomCatalogId: room });
   const reset = setAuthoredLegacyLessonFields(result, 'later', {}, {}, true);
   assert.deepEqual(reset.sessions[0], saved.sessions[0]);
   assert.equal(Object.hasOwn(reset.sessionSchedules, '2026-10-20'), false);
@@ -194,7 +195,7 @@ test('partial detail input and a no-op never import hidden map fields or erase o
   assert.equal(setAuthoredLegacyLessonFields(saved, 'source', { endTime: '10:00' }, saved.sessions[0]), saved);
   const next = setAuthoredLegacyLessonFields(saved, 'source', { endTime: '13:00' }, saved.sessions[0]);
   assert.deepEqual(next.sessions[0], { ...saved.sessions[0], endTime: '13:00' });
-  assert.deepEqual(next.sessionSchedules['2026-10-05'], { memo: 'map memo', opaque: { retained: true } });
+  assert.deepEqual(next.sessionSchedules['2026-10-05'], { startTime: '09:00', endTime: '13:00', teacherCatalogId: teacher, memo: 'map memo', opaque: { retained: true } });
   assert.deepEqual(saved.sessions[0].startTime, '09:00');
 });
 
@@ -204,7 +205,7 @@ test('calendar map edit applies only changed schedule fields and preserves row a
   const next = { ...saved, sessionSchedules: { '2026-10-05': { ...saved.sessionSchedules['2026-10-05'], endTime: '13:00', memo: 'changed map memo' } } };
   const result = applyAuthoredLegacyLessonEdit(next, saved);
   assert.deepEqual(result.sessions[0], { ...saved.sessions[0], endTime: '13:00' });
-  assert.deepEqual(result.sessionSchedules['2026-10-05'], { id: 'not-a-lesson', billingId: 'not-a-period', memo: 'changed map memo' });
+  assert.deepEqual(result.sessionSchedules['2026-10-05'], { startTime: '09:00', endTime: '13:00', id: 'not-a-lesson', billingId: 'not-a-period', memo: 'changed map memo' });
   const metadataOnly = applyAuthoredLegacyLessonEdit({ ...saved, sessionSchedules: { '2026-10-05': { ...saved.sessionSchedules['2026-10-05'], memo: 'changed map memo' } } }, saved);
   assert.deepEqual(metadataOnly.sessions, saved.sessions);
 });
@@ -230,4 +231,153 @@ test('new makeup row accepts schedule fallback fields without importing another 
   assert.equal(makeup.classroomCatalogId, room);
   assert.equal(Object.hasOwn(makeup, 'teacherNote'), false); assert.equal(Object.hasOwn(makeup, 'textbookEntries'), false);
   assert.deepEqual(result.sessionSchedules, saved.sessionSchedules);
+});
+
+// Second independent review: unchanged consumer assertions for initial reproduction.
+const adjacentFixture=()=>({selectedDays:[1],billingPeriods:[{id:'oct',month:10,label:'10월',startDate:'2026-10-01',endDate:'2026-10-31'}],
+ sessions:[{id:'source',sessionKey:'source',date:'2026-10-05',billingId:'oct',memo:'  user memo  ',teacherNote:'user teacher note',textbookEntries:[{id:'learning-entry',content:'keep'}]}],sessionStates:{},sessionSchedules:{}});
+const adjacentContext={version:1,basicSlots:[{id:'basic',weekday:1,startTime:'09:00',endTime:'10:00',teacherCatalogId:teacher,classroomCatalogId:room}],catalogs:{teachers:[{id:teacher,name:'teacher'}],rooms:[{id:room,name:'room'}]}};
+const resolved=plan=>resolveEffectiveSchedule(effectiveInputForLesson(plan,plan.sessions[0],adjacentContext));
+
+test('adjacent: first calendar cancellation must survive absent-to-empty makeup normalization',()=>{
+ const saved=adjacentFixture();
+ const clicked=applyCalendarDateToggle(saved,'2026-10-05',{hasSession:true,hasBaseSession:true,isMakeup:false});
+ assert.equal(clicked.sessionStates['2026-10-05'].state,'exception','the actual planner expresses cancellation');
+ assert.equal(clicked.sessionStates['2026-10-05'].makeupDate,'','planner normalizes absent makeup date to empty');
+ const result=applyAuthoredLegacyLessonEdit(clicked,saved);
+ assert.equal(result.sessions[0].scheduleState,'exception','one normal calendar click must cancel');
+ assert.equal(result.sessions[0].state,'exception');
+ assert.equal(result.sessionStates['2026-10-05'].state,'exception');
+ assert.equal(result.sessions[0].memo,saved.sessions[0].memo);
+});
+
+test('adjacent: partial date-map migration must remain visible to the existing effective reader',()=>{
+ const saved=adjacentFixture();saved.sessionSchedules['2026-10-05']={startTime:'12:00',endTime:'13:00',classroomCatalogId:room};
+ const displayed=resolved(saved).values;
+ assert.equal(displayed.endTime,'13:00');
+ const updated=setAuthoredLegacyLessonFields(saved,'source',{...displayed,endTime:'13:30'},displayed);
+ const result=applyAuthoredLegacyLessonEdit(updated,saved);
+ assert.equal(result.sessions[0].endTime,'13:30','raw authored edit is present');
+ assert.equal(resolved(result).values.endTime,'13:30','existing reader must use the saved edit instead of basic 10:00');
+ assert.equal(resolved(result).kind,'resolved');
+});
+
+test('adjacent: retaining opaque date-map metadata must not hide raw schedule fields',()=>{
+ const saved=adjacentFixture();Object.assign(saved.sessions[0],{startTime:'14:00',endTime:'15:00',teacherCatalogId:teacher,classroomCatalogId:null});
+ saved.sessionSchedules['2026-10-05']={startTime:'12:00',endTime:'13:00',opaque:{retained:true}};
+ const updated=setAuthoredLegacyLessonFields(saved,'source',{endTime:'15:30'},saved.sessions[0]);
+ // The existing reader treats any object as the complete override. Keep opaque
+ // metadata and assert the exact synchronized schedule instead of a broken
+ // metadata-only representation; all effective-value assertions stay intact.
+ assert.deepEqual(updated.sessionSchedules['2026-10-05'],{startTime:'14:00',endTime:'15:30',teacherCatalogId:teacher,classroomCatalogId:null,opaque:{retained:true}});
+ assert.equal(updated.sessions[0].endTime,'15:30');
+ assert.equal(resolved(updated).values.endTime,'15:30','metadata-only map must not suppress raw saved fields');
+ assert.equal(resolved(updated).values.classroomCatalogId,null,'explicit unassigned room must remain unassigned');
+});
+
+test('adjacent control: cancellation with already-empty makeup metadata remains cancelled',()=>{
+ const saved=adjacentFixture();saved.sessionStates['2026-10-05']={state:'active',makeupDate:''};
+ const clicked=applyCalendarDateToggle(saved,'2026-10-05',{hasSession:true,hasBaseSession:true,isMakeup:false});
+ const result=applyAuthoredLegacyLessonEdit(clicked,saved);
+ assert.equal(result.sessions[0].scheduleState,'exception');assert.equal(result.sessions[0].memo,saved.sessions[0].memo);
+});
+
+test('adjacent control: clearing a real linked makeup restores the original without touching approved peer',()=>{
+ const saved=adjacentFixture(),request='ab000000-0000-4000-8000-000000000900',id=`makeup-request:${request}:0`;
+ const approved={id,sessionKey:id,makeupRequestId:request,makeupRequestRole:'makeup',date:'2026-10-06',memo:'approved',teacherNote:'preserve',textbookEntries:[{id:'approved-learning'}]};
+ saved.sessions.push(approved);
+ const added=setAuthoredLegacyMakeupDate(saved,'source','2026-10-06');
+ const restored=setAuthoredLegacyMakeupDate(added,'source','');
+ assert.equal(restored.sessions.length,2);assert.equal(restored.sessions[0].scheduleState,'active');assert.deepEqual(restored.sessions[1],approved);
+});
+
+test('reader parity fixtures preserve authored fields through the existing consumer contract', t => {
+  const check = (name, plan, row, expected) => {
+    const input = JSON.parse(JSON.stringify(effectiveInputForLesson(plan, row, adjacentContext)));
+    const result = resolveEffectiveSchedule(input);
+    for (const [field, value] of Object.entries(expected)) {
+      assert.deepEqual(field === 'kind' ? result.kind : result.values[field], value, `${name}: ${field}`);
+    }
+    t.diagnostic(JSON.stringify({ lessonReaderCase: name, input, expected: result }));
+  };
+  const partial = adjacentFixture();
+  partial.sessionSchedules['2026-10-05'] = { startTime: '12:00', endTime: '13:00', classroomCatalogId: room };
+  const edited = setAuthoredLegacyLessonFields(partial, 'source', { endTime: '13:30' }, resolved(partial).values);
+  assert.deepEqual(edited.sessions[0], { ...partial.sessions[0], endTime: '13:30' });
+  check('partial-map', edited, edited.sessions[0], { startTime: '12:00', endTime: '13:30', kind: 'resolved' });
+
+  const metadata = adjacentFixture();
+  Object.assign(metadata.sessions[0], { startTime: '14:00', endTime: '15:00', teacherCatalogId: teacher, classroomCatalogId: null });
+  metadata.sessionSchedules['2026-10-05'] = { opaque: { retained: true } };
+  const metadataEdited = setAuthoredLegacyLessonFields(metadata, 'source', { endTime: '15:30' }, metadata.sessions[0]);
+  assert.deepEqual(metadataEdited.sessionSchedules['2026-10-05'].opaque, metadata.sessionSchedules['2026-10-05'].opaque);
+  check('metadata-map-null-room', metadataEdited, metadataEdited.sessions[0], { startTime: '14:00', endTime: '15:30', classroomCatalogId: null, kind: 'resolved' });
+
+  const explicit = independentReviewOriginal();
+  explicit.sessionSchedules['2026-10-05'] = { startTime: '11:00', endTime: '12:00', memo: 'unrelated map memo' };
+  const explicitEdited = setAuthoredLegacyLessonFields(explicit, 'source', { endTime: '13:00' }, explicit.sessions[0]);
+  check('raw-start-survives-map', explicitEdited, explicitEdited.sessions[0], { startTime: '09:00', endTime: '13:00', kind: 'resolved' });
+  assert.equal(explicitEdited.sessions[0].memo, explicit.sessions[0].memo);
+
+  const clearRoom = adjacentFixture();
+  clearRoom.sessionSchedules['2026-10-05'] = { startTime: '12:00', endTime: '13:00', classroomCatalogId: room, classroomName: 'room', classroomUnresolved: true };
+  clearRoom.sessions[0].classroomUnresolved = true;
+  const roomEdited = setAuthoredLegacyLessonFields(clearRoom, 'source', { classroomCatalogId: null }, { classroomCatalogId: room });
+  assert.equal(Object.hasOwn(roomEdited.sessionSchedules['2026-10-05'], 'classroomName'), false);
+  assert.equal(Object.hasOwn(roomEdited.sessionSchedules['2026-10-05'], 'classroomUnresolved'), false);
+  assert.equal(Object.hasOwn(roomEdited.sessions[0], 'classroomUnresolved'), false);
+  check('explicit-null-clears-room-name', roomEdited, roomEdited.sessions[0], { startTime: '12:00', endTime: '13:00', classroomCatalogId: null, kind: 'resolved' });
+
+  const reset = setAuthoredLegacyLessonFields(metadataEdited, 'source', {}, {}, true);
+  assert.deepEqual(reset.sessionSchedules['2026-10-05'], { opaque: { retained: true } });
+  check('reset-to-basics', reset, reset.sessions[0], { startTime: '09:00', endTime: '10:00', classroomCatalogId: room, kind: 'resolved' });
+
+  const mapped = adjacentFixture();
+  mapped.sessionSchedules['2026-10-05'] = { startTime: '12:00', endTime: '13:00', opaque: true };
+  const mapEdited = applyAuthoredLegacyLessonEdit({ ...mapped, sessionSchedules: { '2026-10-05': { ...mapped.sessionSchedules['2026-10-05'], endTime: '13:30' } } }, mapped);
+  check('calendar-map-edit', mapEdited, mapEdited.sessions[0], { startTime: '12:00', endTime: '13:30', kind: 'resolved' });
+
+  const sameDate = adjacentFixture(), request = 'ab000000-0000-4000-8000-000000000900';
+  Object.assign(sameDate.sessions[0], { startTime: '14:00', endTime: '15:00' });
+  const peer = { ...sameDate.sessions[0], id: 'peer', sessionKey: 'peer', startTime: '16:00', endTime: '17:00' };
+  const approvedId = `makeup-request:${request}:0`;
+  const approved = { ...peer, id: approvedId, sessionKey: approvedId, makeupRequestId: request, makeupRequestRole: 'makeup', startTime: '18:00', endTime: '19:00' };
+  sameDate.sessions.push(peer, approved);
+  const sameDateEdited = setAuthoredLegacyLessonFields(sameDate, 'source', { endTime: '15:30' }, sameDate.sessions[0]);
+  assert.deepEqual(sameDateEdited.sessions.slice(1), sameDate.sessions.slice(1));
+  assert.deepEqual(sameDateEdited.sessionSchedules, sameDate.sessionSchedules);
+  check('same-date-selected', sameDateEdited, sameDateEdited.sessions[0], { startTime: '14:00', endTime: '15:30', kind: 'resolved' });
+  check('same-date-peer-preserved', sameDateEdited, sameDateEdited.sessions[1], { startTime: '16:00', endTime: '17:00', kind: 'resolved' });
+  check('same-date-approved-preserved', sameDateEdited, sameDateEdited.sessions[2], { startTime: '18:00', endTime: '19:00', kind: 'resolved' });
+
+  const cancelled = applyAuthoredLegacyLessonEdit(applyCalendarDateToggle(adjacentFixture(), '2026-10-05', { hasSession: true, hasBaseSession: true }), adjacentFixture());
+  check('first-cancellation', cancelled, cancelled.sessions[0], { kind: 'cancelled' });
+  const linked = setAuthoredLegacyMakeupDate(adjacentFixture(), 'source', '2026-10-06');
+  const restored = applyAuthoredLegacyLessonEdit(applyCalendarDateToggle(linked, '2026-10-05', { hasSession: true, hasBaseSession: true }), linked);
+  assert.equal(restored.sessions.length, 1);
+  check('linked-restoration', restored, restored.sessions[0], { startTime: '09:00', endTime: '10:00', kind: 'resolved' });
+});
+
+test('empty unlink is a no-op; an existing ambiguous shared date map is not rewritten for a peer', () => {
+  const saved = adjacentFixture();
+  assert.equal(setAuthoredLegacyMakeupDate(saved, 'source', ''), saved);
+  const cancelled = { ...saved, sessions: [{ ...saved.sessions[0], state: 'exception', scheduleState: 'exception' }] };
+  assert.equal(setAuthoredLegacyMakeupDate(cancelled, 'source', ''), cancelled);
+  const peer = { ...saved.sessions[0], id: 'peer', sessionKey: 'peer', endTime: '17:00' };
+  saved.sessions.push(peer);
+  saved.sessionSchedules['2026-10-05'] = { startTime: '12:00', endTime: '13:00', opaque: true };
+  const edited = setAuthoredLegacyLessonFields(saved, 'source', { endTime: '15:30' }, { endTime: '13:00' });
+  assert.deepEqual(edited.sessions[1], peer);
+  assert.deepEqual(edited.sessionSchedules, saved.sessionSchedules);
+  assert.ok(resolved(edited).errors.includes('endTime:ambiguous_date_override'), 'existing shared-map ambiguity is not silently rewritten or claimed resolved');
+});
+
+
+test('calendar map intents cannot rewrite one ordinary row when an approved peer shares its date', () => {
+  const saved = adjacentFixture(), request = 'ab000000-0000-4000-8000-000000000900';
+  const id = `makeup-request:${request}:0`;
+  saved.sessions.push({ id, sessionKey: id, makeupRequestId: request, makeupRequestRole: 'makeup', date: '2026-10-05', startTime: '16:00', endTime: '17:00' });
+  saved.sessionSchedules['2026-10-05'] = { startTime: '12:00', endTime: '13:00' };
+  const result = applyAuthoredLegacyLessonEdit({ ...saved, sessionSchedules: { '2026-10-05': { startTime: '12:00', endTime: '13:30' } } }, saved);
+  assert.deepEqual(result.sessions, saved.sessions, 'date-addressed intent does not select an ordinary ID through an approved peer');
 });

@@ -11,14 +11,17 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const dateValid = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
   && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 
-// A date map is a fallback, not a replacement row. Retain its unedited fallback
-// values and opaque metadata; remove only known fields shadowed by this row.
-function clearShadowedScheduleFields(plan: Plan, date: string, row: Row, cleared: string[] = []): unknown {
-  const schedules = object(plan.sessionSchedules), details = object(schedules[date]);
-  const removed = fields.filter(field => owns(details, field) && (owns(row, field) || cleared.includes(field)));
-  if (!removed.length) return plan.sessionSchedules;
+// Existing JS/SQL readers use a date-map object instead of the raw row. Keep
+// that object consistent with authored row fields, without copying its metadata
+// into the row or materializing unedited fallback fields into the row.
+function syncScheduleFields(plan: Plan, date: string, row: Row, cleared: string[] = []): unknown {
+  const schedules = object(plan.sessionSchedules), entry = schedules[date];
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return plan.sessionSchedules;
+  const details = object(entry);
   const remaining = { ...details };
-  removed.forEach(field => delete remaining[field]);
+  cleared.forEach(field => delete remaining[field]);
+  fields.filter(field => owns(row, field)).forEach(field => { remaining[field] = row[field]; });
+  if (same(remaining, details)) return plan.sessionSchedules;
   const next = { ...schedules };
   if (Object.keys(remaining).length) next[date] = remaining;
   else delete next[date];
@@ -90,14 +93,14 @@ export function applyAuthoredLegacyLessonEdit(next: Plan, previous: Plan, defaul
       state: state.state === 'force_active' ? 'active' : state.state || 'active',
       ...(state.state === 'force_active' ? { isForced: true } : {}),
     });
-    if (object(old).makeupDate !== state.makeupDate) plan = setAuthoredLegacyMakeupDate(plan, key(onDate[0]), String(state.makeupDate || ''), String(state.makeupMemo || ''));
+    if (String(object(old).makeupDate || '') !== String(state.makeupDate || '')) plan = setAuthoredLegacyMakeupDate(plan, key(onDate[0]), String(state.makeupDate || ''), String(state.makeupMemo || ''));
   }
   for (const date of new Set([...Object.keys(object(previous.sessionSchedules)), ...Object.keys(object(plan.sessionSchedules))])) {
     const details = object(plan.sessionSchedules)[date];
     const oldDetails = object(object(previous.sessionSchedules)[date]);
     if (same(details, object(previous.sessionSchedules)[date])) continue;
     const onDate = rows(plan.sessions).filter(row => object(row).date === date && !isRequestMakeupSession(row));
-    if (onDate.length !== 1) continue;
+    if (onDate.length !== 1 || rows(plan.sessions).filter(row => object(row).date === date).length !== 1) continue;
     if (!same(onDate[0], rows(previous.sessions).find(row => key(row) === key(onDate[0])))) continue;
     const row = { ...onDate[0] };
     const changed = fields.filter(field => !same(oldDetails[field], object(details)[field]) || owns(oldDetails, field) !== owns(object(details), field));
@@ -106,7 +109,7 @@ export function applyAuthoredLegacyLessonEdit(next: Plan, previous: Plan, defaul
       if (owns(object(details), field)) row[field] = object(details)[field];
       else delete row[field];
     }
-    plan = { ...plan, sessionSchedules: clearShadowedScheduleFields(plan, date, row, changed),
+    plan = { ...plan, sessionSchedules: syncScheduleFields(plan, date, row, changed),
       sessions: rows(plan.sessions).map(item => item === onDate[0] ? row : item) };
   }
   return updatePeriodCounts(plan, affected);
@@ -132,14 +135,14 @@ export function setAuthoredLegacyLessonFields(plan: Plan, id: string, next: Row,
   const uniqueDate = rows(plan.sessions).filter(row => object(row).date === date).length === 1;
   const row = { ...before };
   const cleared: string[] = [];
-  if (reset) fields.forEach(field => delete row[field]);
+  if (reset) [...fields, 'classroomUnresolved'].forEach(field => delete row[field]);
   else for (const field of fields.slice(0, 4)) if (owns(next, field) && next[field] !== displayed[field]) {
     row[field] = next[field];
     if (field === 'teacherCatalogId') { delete row.teacherName; cleared.push('teacherName'); }
-    if (field === 'classroomCatalogId') { delete row.classroomName; cleared.push('classroomName'); }
+    if (field === 'classroomCatalogId') { delete row.classroomName; delete row.classroomUnresolved; cleared.push('classroomName', 'classroomUnresolved'); }
   }
   if (!reset && same(row, before)) return plan;
-  return { ...plan, sessionSchedules: uniqueDate ? clearShadowedScheduleFields(plan, date, row, reset ? fields : cleared) : plan.sessionSchedules,
+  return { ...plan, sessionSchedules: uniqueDate ? syncScheduleFields(plan, date, row, reset ? [...fields, 'classroomUnresolved'] : cleared) : plan.sessionSchedules,
     sessions: rows(plan.sessions).map(item => item === before ? row : item) };
 }
 
@@ -148,6 +151,7 @@ export function setAuthoredLegacyMakeupDate(plan: Plan, id: string, date: string
   if (!source || isRequestMakeupSession(source) || (date && (!dateValid(date) || date === source.date))) return plan;
   const linked = rows(plan.sessions).filter(row => object(row).originalDate === source.date && object(row).billingId === source.billingId && !isRequestMakeupSession(row));
   if (linked.length > 1 || rows(plan.sessions).filter(row => object(row).date === source.date).length !== 1) return plan;
+  if (!date && !source.makeupDate && !object(object(plan.sessionStates)[String(source.date)]).makeupDate && !linked.length) return plan;
   let next = patchAuthoredLegacyLesson(plan, id, { state: date ? 'exception' : 'active', scheduleState: date ? 'exception' : 'active', makeupDate: date });
   next = { ...next, sessionStates: { ...object(next.sessionStates), [String(source.date)]: {
     ...object(object(next.sessionStates)[String(source.date)]), makeupDate: date,
