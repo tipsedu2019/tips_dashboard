@@ -6,9 +6,24 @@ const rows = (value: unknown): Row[] => Array.isArray(value) ? value : [];
 const object = (value: unknown): Row => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Row : {};
 const key = (row: Row) => String(object(row).id || object(row).sessionKey || '');
 const fields = ['startTime', 'endTime', 'teacherCatalogId', 'classroomCatalogId', 'teacherName', 'classroomName'];
+const owns = (row: Row, field: string) => Object.prototype.hasOwnProperty.call(row, field);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const dateValid = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
   && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+
+// A date map is a fallback, not a replacement row. Retain its unedited fallback
+// values and opaque metadata; remove only known fields shadowed by this row.
+function clearShadowedScheduleFields(plan: Plan, date: string, row: Row, cleared: string[] = []): unknown {
+  const schedules = object(plan.sessionSchedules), details = object(schedules[date]);
+  const removed = fields.filter(field => owns(details, field) && (owns(row, field) || cleared.includes(field)));
+  if (!removed.length) return plan.sessionSchedules;
+  const remaining = { ...details };
+  removed.forEach(field => delete remaining[field]);
+  const next = { ...schedules };
+  if (Object.keys(remaining).length) next[date] = remaining;
+  else delete next[date];
+  return next;
+}
 
 // Reading and saving materialized lessons must never run the weekly generator.
 // In particular, keep absent fields, whitespace, unknown history and array order.
@@ -79,14 +94,20 @@ export function applyAuthoredLegacyLessonEdit(next: Plan, previous: Plan, defaul
   }
   for (const date of new Set([...Object.keys(object(previous.sessionSchedules)), ...Object.keys(object(plan.sessionSchedules))])) {
     const details = object(plan.sessionSchedules)[date];
+    const oldDetails = object(object(previous.sessionSchedules)[date]);
     if (same(details, object(previous.sessionSchedules)[date])) continue;
     const onDate = rows(plan.sessions).filter(row => object(row).date === date && !isRequestMakeupSession(row));
     if (onDate.length !== 1) continue;
     if (!same(onDate[0], rows(previous.sessions).find(row => key(row) === key(onDate[0])))) continue;
     const row = { ...onDate[0] };
-    fields.forEach(field => delete row[field]);
-    Object.assign(row, object(details));
-    plan = { ...plan, sessions: rows(plan.sessions).map(item => item === onDate[0] ? row : item) };
+    const changed = fields.filter(field => !same(oldDetails[field], object(details)[field]) || owns(oldDetails, field) !== owns(object(details), field));
+    if (!changed.length) continue;
+    for (const field of changed) {
+      if (owns(object(details), field)) row[field] = object(details)[field];
+      else delete row[field];
+    }
+    plan = { ...plan, sessionSchedules: clearShadowedScheduleFields(plan, date, row, changed),
+      sessions: rows(plan.sessions).map(item => item === onDate[0] ? row : item) };
   }
   return updatePeriodCounts(plan, affected);
 }
@@ -109,21 +130,16 @@ export function setAuthoredLegacyLessonFields(plan: Plan, id: string, next: Row,
   if (matches.length !== 1 || isRequestMakeupSession(matches[0])) return plan;
   const before = matches[0], date = String(before.date);
   const uniqueDate = rows(plan.sessions).filter(row => object(row).date === date).length === 1;
-  const schedules = object(plan.sessionSchedules);
   const row = { ...before };
-  if (uniqueDate && Object.prototype.hasOwnProperty.call(schedules, date)) {
-    fields.forEach(field => delete row[field]);
-    Object.assign(row, object(schedules[date]));
-  }
+  const cleared: string[] = [];
   if (reset) fields.forEach(field => delete row[field]);
-  else for (const field of fields.slice(0, 4)) if (next[field] !== displayed[field]) {
+  else for (const field of fields.slice(0, 4)) if (owns(next, field) && next[field] !== displayed[field]) {
     row[field] = next[field];
-    if (field === 'teacherCatalogId') delete row.teacherName;
-    if (field === 'classroomCatalogId') delete row.classroomName;
+    if (field === 'teacherCatalogId') { delete row.teacherName; cleared.push('teacherName'); }
+    if (field === 'classroomCatalogId') { delete row.classroomName; cleared.push('classroomName'); }
   }
-  const sessionSchedules = { ...schedules };
-  if (uniqueDate) delete sessionSchedules[date];
-  return { ...plan, sessionSchedules: uniqueDate && Object.prototype.hasOwnProperty.call(schedules, date) ? sessionSchedules : plan.sessionSchedules,
+  if (!reset && same(row, before)) return plan;
+  return { ...plan, sessionSchedules: uniqueDate ? clearShadowedScheduleFields(plan, date, row, reset ? fields : cleared) : plan.sessionSchedules,
     sessions: rows(plan.sessions).map(item => item === before ? row : item) };
 }
 
@@ -132,7 +148,7 @@ export function setAuthoredLegacyMakeupDate(plan: Plan, id: string, date: string
   if (!source || isRequestMakeupSession(source) || (date && (!dateValid(date) || date === source.date))) return plan;
   const linked = rows(plan.sessions).filter(row => object(row).originalDate === source.date && object(row).billingId === source.billingId && !isRequestMakeupSession(row));
   if (linked.length > 1 || rows(plan.sessions).filter(row => object(row).date === source.date).length !== 1) return plan;
-  let next = patchAuthoredLegacyLesson(plan, id, { state: 'exception', scheduleState: 'exception', makeupDate: date });
+  let next = patchAuthoredLegacyLesson(plan, id, { state: date ? 'exception' : 'active', scheduleState: date ? 'exception' : 'active', makeupDate: date });
   next = { ...next, sessionStates: { ...object(next.sessionStates), [String(source.date)]: {
     ...object(object(next.sessionStates)[String(source.date)]), makeupDate: date,
   } } };
@@ -142,7 +158,7 @@ export function setAuthoredLegacyMakeupDate(plan: Plan, id: string, date: string
   next = { ...next, sessions: [...rows(next.sessions), { id: makeupId, sessionKey: makeupId, date,
     billingId: source.billingId, billingLabel: source.billingLabel, billingColor: source.billingColor,
     originalDate: source.date, scheduleState: 'makeup', state: 'makeup', memo, sessionNumber: null,
-    ...object(object(plan.sessionSchedules)[date]),
+    ...Object.fromEntries(Object.entries(object(object(plan.sessionSchedules)[date])).filter(([field]) => fields.includes(field))),
   }] };
   return next;
 }

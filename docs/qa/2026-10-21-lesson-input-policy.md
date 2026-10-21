@@ -9,19 +9,19 @@ Local implementation and focused validation only. No production reads/writes, sc
 ## Implementation boundaries
 
 - Legacy lesson UI reads and edits materialized rows by stable identity rather than rebuilding every row from weekday defaults. An explicitly added month/range can generate new rows; existing rows, order, learning content, billing ownership and opaque historical values are retained. Distinct lesson identities can share a date and interval.
-- Normalized note editing/merge/save preserves memo, public note and teacher note whitespace and deliberate empty values. Approved makeup rows remain read-only by exact session identity; an unrelated ordinary row sharing that date remains editable. Date-level calendar ambiguity and broader layout/scroll/selection UX remain a follow-up, not a completed redesign.
+- Normalized note editing/merge/save preserves memo, public note and teacher note whitespace and deliberate empty values. In the UI, approved makeup rows remain read-only by exact session identity; an unrelated ordinary row sharing that date remains editable. Date-level calendar ambiguity and broader layout/scroll/selection UX remain a follow-up, not a completed redesign.
 - Existing `update_class_operational_v1` receives the input policy only for an exact `{schedule_plan}` patch. Mixed/basic-information/closure commands retain their original strict path.
 - Normalized `generate_class_lesson_sessions_v1` and `save_class_lesson_session_v1` retain authentication, class authorization, revision checks, catalog references, generation identity uniqueness, audit and request-receipt behavior. Projection updates only the changed keys, preserving peer JSON and array positions.
-- Shared occupancy reader/validator/assertion, generic projection, weekly-default and makeup-approval policies are unchanged. Completed makeup reflection and owned makeup rows remain protected. The changed tests retain strict diagnostics by exercising mixed patches where appropriate; they do not disable the shared validators.
+- Shared occupancy reader/validator/assertion, generic projection, weekly-default and makeup-approval policies are unchanged. Completed makeup reflection retains the existing approval path; owned makeup rows are protected in the UI. Independent review reproduced an existing server limitation on both baseline and candidate: ordinary normalized RPC editing of an approved row can cause subsequent approval cancellation to fail with makeup_lesson_session_stale. This change does not claim server-wide immutability or fix that separate issue. The changed tests retain strict diagnostics by exercising mixed patches where appropriate; they do not disable the shared validators.
 - Whole-plan CAS/revision, request key/body hash replay, atomic receipt/data rollback, valid changed wire values and references remain. Unchanged malformed historical rows are retained only up to their previous multiplicity. Explicit deletion with a current CAS is allowed; the implementation never silently regenerates IDs.
 
 ## SQL footprint
 
 `supabase/migrations/20261021155723_class_lesson_input_policy.sql`
 
-- 37,354 bytes; SHA256 `67186bb67b32982f1bce9b9e8aa881fec97ed53756b94b3d1d0ebf2a35bb1525`.
+- 36,891 bytes; SHA256 `f9da4cf18a4380ce37c14f8c42be65d64c5491894bf2562527ab2081f336e587`.
 - Replaces five existing functions: the three public gateways above and private `timetable_operating_before_statement_v1` / `timetable_operating_after_statement_v1`.
-- Adds eight owner-only private helpers, one private transaction-scoped capability table and five AFTER ROW guards. Existing public table RLS/ACL, indexes, constraints and auth functions are not changed. New private objects revoke direct access/execution from PUBLIC, anon, authenticated and service_role.
+- Adds seven owner-only private helpers, one **permanent** private capability table with a primary-key index, and five AFTER ROW guards. The table is not temporary; only its rows are transaction scoped. Existing public table RLS/ACL, indexes, constraints and auth functions are not changed. New private objects revoke direct access/execution from PUBLIC, anon, authenticated and service_role.
 - Each capability is tied to actor, transaction, command, relation, SQL operation and exact OLD/NEW rows. It is not a client GUC. Suppressed/extra/altered/nested writes fail atomically. A preceding strict segment must validate before a lesson scope opens; later strict writes start their own baseline. Constraint modes are unchanged.
 - Pure lesson input does not build a global timetable reference. A pre-existing strict segment deliberately retains its validation boundary and cost.
 
@@ -49,11 +49,11 @@ Three paired runs used the same container, unchanged synthetic background finger
 | Baseline | 1173.80 /1188.41 /1162.41 | 1173.80ms | 3 |
 | Candidate | 7.55 /7.66 /7.62 | 7.62ms | 0 |
 
-This confirms removal of the repeated full-reference work under the changed policy. It does not estimate production speed or establish that operational SQLSTATE57014 is resolved. The synthetic statement budget was8s; production scale/hardware and live result still require post-release verification. This is a policy change, not merely a faster equivalent conflict checker.
+These measurements belong to the prior bab7b30 candidate. They include the authenticated RPC and SET CONSTRAINTS ALL IMMEDIATE, but exclude HTTP/PostgREST, network and durable COMMIT latency. The pairs used fixed baseline→candidate order, and the baseline comparator restored five function definitions inside the candidate schema, leaving the new row guards installed. The original paired runner source was not retained; the six raw execution logs are retained. This confirms removal of the repeated full-reference work under the changed policy within that experiment. It does not estimate production speed or establish that operational SQLSTATE57014 is resolved. The synthetic statement budget was8s; production scale/hardware and live result still require post-release verification. This is a policy change, not merely a faster equivalent conflict checker.
 
 ## Recovery and release prerequisites
 
-`../nullable-room-handoff/input-policy-rollback-review.sql` restores the exact five captured baseline definitions and explicitly removes the five new triggers, eight private helpers and scope table in dependency order, without CASCADE or deleting accepted data/receipts. A transaction-only local dry run succeeded and ROLLBACK restored the candidate catalog. Reverting policy can make later strict edits reject already accepted overlaps; never delete history to hide that consequence.
+`../nullable-room-handoff/input-policy-rollback-review.sql` restores the exact five captured baseline definitions and explicitly removes the five new triggers, seven private helpers and scope table in dependency order, without CASCADE or deleting accepted data/receipts. A transaction-only local dry run succeeded and ROLLBACK restored the candidate catalog. Reverting policy can make later strict edits reject already accepted overlaps; never delete history to hide that consequence.
 
 Before any publication/release: independent review of the exact immutable candidate; complete applicable release gates with honest current evidence; separately confirm this **new SQL footprint** and authorized production application. Prior PR159 SQL approval is not approval of this new migration. Preserve auth/RLS/ACL and existing guardrails. Do not reapply PR159/160 or resume014.
 
@@ -71,3 +71,46 @@ Local evidence directory: `../nullable-room-handoff/` relative to the repository
 - `input-policy-rollback-review.sql`, `input-policy-rollback-dry-run.log`, `input-policy-cleanup.json`
 
 The implementation handoff outside Git records the final candidate commit/diff hash and UI validation evidence. The first concurrency runner failed while collecting output ordering, and its attempted fixture deletion failed on an audit FK; both were preserved as test-harness evidence. Corrected runs passed without changing product SQL or audit protections. Cleanup was verified by a separate read after a case-sensitive status-message assertion failed; no second removal was attempted.
+
+
+## Independent-review P2 follow-up (2026-10-22)
+
+The prior immutable candidate `bab7b30e0955d130e577a3a45be070d964e63acf` received three P2 findings. The independent four helper and two React fixtures were copied into the existing registered test files without changing their assertions. Before edits they reproduced **5 failures / 1 pass** (`input-policy-ui-review-red.log`). After the fixes they all pass in the complete related runs; no independent fixture was removed or softened.
+
+- An end-time edit now applies only explicitly changed schedule fields, preserving the row's existing start time, ID, billing metadata, memo and learning content. An unchanged fallback stays in the date map instead of being materialized into the row; shadowed known schedule keys are removed, while opaque map metadata is retained. Calendar map edits and newly created makeup rows also cannot import arbitrary row metadata. Partial form input, no-op, reset and makeup metadata regressions are covered.
+- Clearing an ordinary makeup link restores the original lesson to active and removes only its linked ordinary makeup row. Approval/decision logic is untouched.
+- Selected-row, original-lesson and drag-source lookups tolerate null history. Opaque array elements remain in the save payload at their original positions; they are not removed from stored history.
+
+The single-use `finish_timetable_strict_boundary_v1` body was folded into `begin_class_lesson_input_scope_v1`, reducing the new private functions from eight to seven. Prior strict validation, invalidation and baseline cleanup remain in their original order. A missing strict baseline skips only that block, not scope issuance. No locks, receipts, revision checks or shared validator definitions changed in this follow-up.
+
+### Why the remaining SQL structures exist
+
+This is not a function-only migration. Its exact objects are five existing function replacements; seven new private functions; `dashboard_private.class_lesson_input_scopes` with its primary-key index and RLS; and five new AFTER ROW triggers. New objects have no API privileges. Existing public RLS/ACLs, auth functions, table constraints and indexes are not modified, and there is no business-data migration.
+
+| New private helper | Purpose |
+| --- | --- |
+| `begin_class_lesson_input_scope_v1` | Close any preceding strict segment and issue a private, actor/transaction/statement/row-bound capability. Shared by three official writers. |
+| `end_class_lesson_input_scope_v1` | Verify statement completion and exact row consumption, then delete the scope; shared by three writers. |
+| `class_lesson_input_after_row_v1` | Compare actual OLD/NEW values and row identities after BEFORE-trigger processing, including nested writes. Shared by five guards. |
+| `assert_class_lesson_input_fields_v1` | Validate changed types and catalog references, shared by row and date-map validation. |
+| `assert_legacy_lesson_input_v1` | Preserve opaque unchanged history while validating authored rows and identities. Kept separate for readable gateway code; inlining would not reduce the validation work. |
+| `write_class_lesson_plan_input_v1` | Reuse exact class UPDATE/CAS behavior for direct legacy input and normalized projection. |
+| `project_class_lesson_input_sessions_v1` | Update only specified normalized IDs in their original JSON positions; the existing generic projection rebuilds peers. |
+
+The permanent private table supplies non-client-writable capability state across statement and row trigger execution. Each transaction has at most one row, normally inserted/consumed/deleted inside one statement; failures roll it back. It incurs real table write work. The two guards on classes and class_lesson_sessions check the intended target. Three guards on class_schedule_slots, teacher_catalogs and classroom_catalogs reject nested writes to other operating data, including columns absent from the existing UPDATE-column trigger lists. Outside a scope all five guards still execute a lookup then return; their cost is not zero.
+
+A client GUC, caller role or trigger depth alone cannot prove the exact allowed statement/row set. Reusing the existing operating baseline/proof table would require changing its reference/finalizer/foreign-key consumers. Removing the two catalog guards weakens the existing exact-write boundary; replacement guards would still be needed. Transition-table triggers would require event-specific redesign beyond this narrow change. The scope and guards are therefore retained for the current security boundary; they are not claimed to be the mathematically smallest possible design. Inlining the single-use finisher is the concrete reduction made here.
+
+### Exact follow-up verification and limits
+
+- Related UI/helper/month/source-contract Node run: **112/112**, skipped 0. TypeScript, changed-file ESLint and production build pass.
+- New task-owned network-isolated DB `tips_timetable_input_p2_20261022`: clean baseline/prerequisite + **178 ordered migrations** applied. Unchanged policy **77/77** and full-save contract **38/38** pass with the new SQL hash, including reader zero and 70→79 preservation. No new production latency claim is made.
+- Runtime catalog: exactly five baseline function definitions changed and seven added; the sole-use helper is absent. All other public/private function definitions and replaced-function metadata match baseline. Existing public table metadata matches baseline, and public policies match the prior reviewed candidate. The known isolated setup reconciliation removes the old `makeup_notification_settings_staff_write` policy; this is not an effect of this migration. New table/helper API privileges are denied, RLS enabled, PK count 1, guard count 5, residual scope 0, diagnostic parameter ACL null.
+- Updated exact rollback: **11/11**, existing definitions/security metadata and business rows/receipts preserved, new objects removed within the rehearsal, then ROLLBACK restored the candidate catalog exactly. Rollback file: **13,635 bytes**, SHA256 `7103a73ca405c97fba387c84e0f8ec2e38cca87b85939eae63b82d8d6e1ff6e6`.
+- Migration layout, domain SQLSTATE and Squawk pass (0 issues). Prior independent **8 SQL / 557 assertions**, two actual concurrency races and rollback 11 remain evidence for bab7b30; they were not rerun wholesale or relabeled as new-head tests. The new SQL inlining is covered by the two SQL files and new rollback/catalog checks above.
+
+The complete canonical **105 SQL / 24 probes**, applicable AI producer/consumer parity, full release contract flags and remote CI remain **unexecuted for this candidate**. Narrow follow-up success does not establish the three full required release checks. Exact-head independent re-review is pending. A no-weekday new month remains a separate UX boundary; this fix does not alter weekday policy. NULL expected-revision handling and the approved-row server limitation found on baseline are not newly proven safe or repaired here.
+
+No production write, publish, merge, deployment, migration application, or October save retry occurred. Production 70 rows and the October draft remain untouched. There is no current access blocker: normal approved Docker escalation succeeded after the default sandbox denied socket access. No socket permissions or other container state were changed.
+
+Follow-up evidence prefix in `../nullable-room-handoff/`: `input-policy-p2-*`, plus `inputp2-clean-replay.log` and `input-policy-ui-review-red.log`. The baseline-policy comparison first failed because of the documented setup reconciliation; its corrected comparison explicitly records that difference instead of treating it as a product change. Final immutable candidate/diff and resource cleanup are recorded in the follow-up handoff.

@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { authoredLegacyLessonDraft, applyAuthoredLegacyLessonEdit, patchAuthoredLegacyLesson,
   setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyLessonValidationError } from '../src/features/operations/legacy-authored-lesson-plan.ts';
 
+import { applyCalendarDateToggle } from '../src/lib/class-schedule-planner.js';
+import { prepareLegacyLessonMonth } from '../src/features/operations/legacy-lesson-month.ts';
+
 const teacher = 'ab000000-0000-4000-8000-000000000101', room = 'ab000000-0000-4000-8000-000000000201';
 const catalogs = { teachers: [{ id: teacher, name: 'Synthetic teacher' }], rooms: [{ id: room, name: 'Synthetic room' }] };
 const fixture = () => ({ selectedDays: [2, 4], billingPeriods: [{ id: 'oct', month: 10, label: '10월', startDate: '2026-10-01', endDate: '2026-10-29' }],
@@ -63,17 +66,19 @@ test('row fields are explicit, date-sharing peers and old ambiguous date maps re
   assert.equal(authoredLegacyLessonValidationError(result, saved, catalogs), '');
 });
 
-test('a single date-map edit migrates only its selected row; reset is explicit and preserves peers', () => {
+test('editing one fallback field preserves other fallbacks without materializing them; reset is explicit', () => {
   const saved = fixture();
   saved.sessionSchedules['2026-10-20'] = { startTime: '12:00', endTime: '13:00', classroomCatalogId: room };
   const displayed = saved.sessionSchedules['2026-10-20'];
   const next = setAuthoredLegacyLessonFields(saved, 'later', { ...displayed, endTime: '13:30' }, displayed);
   const result = applyAuthoredLegacyLessonEdit(next, saved);
   assert.equal(result.sessions[0].endTime, '13:30');
-  assert.equal(result.sessions[0].classroomCatalogId, room);
+  assert.deepEqual(result.sessions[0], { ...saved.sessions[0], endTime: '13:30' });
   assert.deepEqual(result.sessions.slice(1), saved.sessions.slice(1));
-  assert.equal(Object.hasOwn(result.sessionSchedules, '2026-10-20'), false);
-  assert.deepEqual(setAuthoredLegacyLessonFields(result, 'later', {}, {}, true).sessions[0], saved.sessions[0]);
+  assert.deepEqual(result.sessionSchedules['2026-10-20'], { startTime: '12:00', classroomCatalogId: room });
+  const reset = setAuthoredLegacyLessonFields(result, 'later', {}, {}, true);
+  assert.deepEqual(reset.sessions[0], saved.sessions[0]);
+  assert.equal(Object.hasOwn(reset.sessionSchedules, '2026-10-20'), false);
 });
 
 test('missing historical/inherited details and overlapping explicit rows are allowed, invalid authored values are not', () => {
@@ -126,6 +131,8 @@ test('calendar substitution creates one separate intended ID even when the desti
   assert.deepEqual(setAuthoredLegacyMakeupDate(next, 'later', '2026-10-09'), next, 'same substitution is idempotent');
   const cleared = setAuthoredLegacyMakeupDate(next, 'later', '');
   assert.equal(cleared.sessions.length, 3);
+  assert.equal(cleared.sessions[0].state, 'active');
+  assert.equal(cleared.sessions[0].scheduleState, 'active');
   assert.deepEqual(cleared.sessions.slice(1), saved.sessions.slice(1));
 });
 
@@ -138,4 +145,89 @@ test('approved makeup rows remain opaque through ordinary editing and period gen
     { id: 'nov', month: 11, label: '11월', startDate: '2026-11-03', endDate: '2026-11-26' }] }, saved);
   assert.deepEqual(result.sessions.slice(0, saved.sessions.length), saved.sessions);
   assert.equal(result.sessions.length, saved.sessions.length + 8);
+});
+
+// Independent review fixtures retained with unchanged assertions.
+const independentReviewOriginal = () => ({selectedDays:[1],billingPeriods:[{id:'oct',month:10,label:'10월',startDate:'2026-10-01',endDate:'2026-10-31'}],
+ sessions:[{id:'source',sessionKey:'source',date:'2026-10-05',billingId:'oct',memo:'  user memo  ',teacherNote:'user teacher note',textbookEntries:[{id:'learning-entry',content:'keep'}],startTime:'09:00',endTime:'10:00'}],sessionStates:{},sessionSchedules:{}});
+
+test('independent: calendar restores original lesson after clearing linked makeup',()=>{
+ const saved=setAuthoredLegacyMakeupDate(independentReviewOriginal(),'source','2026-10-06');
+ const clicked=applyCalendarDateToggle(saved,'2026-10-05',{hasSession:true,hasBaseSession:true,isMakeup:false});
+ const result=applyAuthoredLegacyLessonEdit(clicked,saved);
+ assert.equal(result.sessions.length,1,'linked makeup removed');
+ assert.equal(result.sessions[0].scheduleState,'active','calendar active intent must not be rewritten to cancelled');
+ assert.equal(result.sessions[0].state,'active');
+});
+
+test('independent: editing a time must not import date-map identity, content, billing or memo',()=>{
+ const saved=independentReviewOriginal();
+ saved.sessionSchedules['2026-10-05']={startTime:'11:00',endTime:'12:00',id:'opaque-map-id',billingId:'other-billing',memo:'map-only memo',teacherNote:'map-only teacher note',textbookEntries:[{id:'map-only-entry'}]};
+ const displayed={startTime:'11:00',endTime:'12:00',teacherCatalogId:'',classroomCatalogId:''};
+ const result=setAuthoredLegacyLessonFields(saved,'source',{...displayed,endTime:'12:30'},displayed);
+ for(const key of ['id','billingId','memo','teacherNote','textbookEntries'])assert.deepEqual(result.sessions[0][key],saved.sessions[0][key],`unrelated ${key} remains authored`);
+ assert.equal(result.sessions[0].endTime,'12:30');
+});
+
+test('independent policy boundary: month creation without weekly days remains blocked',()=>{
+ const result=prepareLegacyLessonMonth({selectedDays:[],billingPeriods:[],sessions:[]},'2026-10','oct');
+ assert.equal(result.period,null);
+ assert.equal(result.error,'수업 요일을 먼저 설정해 주세요.');
+});
+
+
+test('independent: date-map migration cannot silently change another displayed time',()=>{
+ const saved=independentReviewOriginal();
+ saved.sessionSchedules['2026-10-05']={startTime:'11:00',endTime:'12:00'};
+ // Candidate workspace explicitly overlays raw row values over the effective
+ // projection, so these are the field values shown to the operator.
+ const displayed={startTime:'09:00',endTime:'10:00',teacherCatalogId:'',classroomCatalogId:''};
+ const result=setAuthoredLegacyLessonFields(saved,'source',{...displayed,endTime:'13:00'},displayed);
+ assert.equal(result.sessions[0].endTime,'13:00');
+ assert.equal(result.sessions[0].startTime,'09:00','unchanged displayed start must not switch to hidden date-map time');
+});
+
+test('partial detail input and a no-op never import hidden map fields or erase omitted fields', () => {
+  const saved = independentReviewOriginal();
+  saved.sessions[0].teacherCatalogId = teacher;
+  saved.sessionSchedules['2026-10-05'] = { startTime: '11:00', endTime: '12:00', memo: 'map memo', opaque: { retained: true } };
+  assert.equal(setAuthoredLegacyLessonFields(saved, 'source', { endTime: '10:00' }, saved.sessions[0]), saved);
+  const next = setAuthoredLegacyLessonFields(saved, 'source', { endTime: '13:00' }, saved.sessions[0]);
+  assert.deepEqual(next.sessions[0], { ...saved.sessions[0], endTime: '13:00' });
+  assert.deepEqual(next.sessionSchedules['2026-10-05'], { memo: 'map memo', opaque: { retained: true } });
+  assert.deepEqual(saved.sessions[0].startTime, '09:00');
+});
+
+test('calendar map edit applies only changed schedule fields and preserves row and map metadata', () => {
+  const saved = independentReviewOriginal();
+  saved.sessionSchedules['2026-10-05'] = { startTime: '11:00', endTime: '12:00', id: 'not-a-lesson', billingId: 'not-a-period', memo: 'map memo' };
+  const next = { ...saved, sessionSchedules: { '2026-10-05': { ...saved.sessionSchedules['2026-10-05'], endTime: '13:00', memo: 'changed map memo' } } };
+  const result = applyAuthoredLegacyLessonEdit(next, saved);
+  assert.deepEqual(result.sessions[0], { ...saved.sessions[0], endTime: '13:00' });
+  assert.deepEqual(result.sessionSchedules['2026-10-05'], { id: 'not-a-lesson', billingId: 'not-a-period', memo: 'changed map memo' });
+  const metadataOnly = applyAuthoredLegacyLessonEdit({ ...saved, sessionSchedules: { '2026-10-05': { ...saved.sessionSchedules['2026-10-05'], memo: 'changed map memo' } } }, saved);
+  assert.deepEqual(metadataOnly.sessions, saved.sessions);
+});
+
+test('explicit reset clears only schedule overrides and retains opaque map metadata', () => {
+  const saved = independentReviewOriginal();
+  saved.sessionSchedules['2026-10-05'] = { startTime: '11:00', classroomCatalogId: room, memo: 'map memo', opaque: null };
+  const result = setAuthoredLegacyLessonFields(saved, 'source', {}, {}, true);
+  const expected = { ...saved.sessions[0] }; delete expected.startTime; delete expected.endTime;
+  assert.deepEqual(result.sessions[0], expected);
+  assert.deepEqual(result.sessionSchedules['2026-10-05'], { memo: 'map memo', opaque: null });
+});
+
+test('new makeup row accepts schedule fallback fields without importing another identity or learning content', () => {
+  const saved = independentReviewOriginal();
+  saved.sessionSchedules['2026-10-06'] = { startTime: '14:00', endTime: '15:00', classroomCatalogId: room,
+    id: 'map-id', sessionKey: 'map-key', billingId: 'map-billing', memo: 'map memo', teacherNote: 'map note', textbookEntries: ['map learning'], state: 'active' };
+  const result = setAuthoredLegacyMakeupDate(saved, 'source', '2026-10-06', 'chosen memo');
+  const makeup = result.sessions[1];
+  assert.notEqual(makeup.id, 'map-id'); assert.equal(makeup.id, makeup.sessionKey);
+  assert.equal(makeup.billingId, 'oct'); assert.equal(makeup.memo, 'chosen memo');
+  assert.equal(makeup.state, 'makeup'); assert.equal(makeup.startTime, '14:00');
+  assert.equal(makeup.classroomCatalogId, room);
+  assert.equal(Object.hasOwn(makeup, 'teacherNote'), false); assert.equal(Object.hasOwn(makeup, 'textbookEntries'), false);
+  assert.deepEqual(result.sessionSchedules, saved.sessionSchedules);
 });

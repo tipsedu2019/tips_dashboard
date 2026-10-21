@@ -329,7 +329,7 @@ test('optional classroom final pin preserves all earlier migrations and rejects 
  }finally{await rm(root,{recursive:true,force:true});}
 });
 test('class lesson input policy extends the exact final inventory and preserves the earlier 177 migrations',async()=>{
- const pin={fileName:'20261021155723_class_lesson_input_policy.sql',status:'final',sha256:'67186bb67b32982f1bce9b9e8aa881fec97ed53756b94b3d1d0ebf2a35bb1525'};
+ const pin={fileName:'20261021155723_class_lesson_input_policy.sql',status:'final',sha256:'f9da4cf18a4380ce37c14f8c42be65d64c5491894bf2562527ab2081f336e587'};
  assert.deepEqual(receiptProtocol.CLASS_LESSON_INPUT_MIGRATION,pin);
  assert.ok(Object.isFrozen(receiptProtocol.CLASS_LESSON_INPUT_MIGRATION));
  const current=await snapshotAiSource();

@@ -22,30 +22,10 @@ alter table dashboard_private.class_lesson_input_scopes owner to postgres;
 alter table dashboard_private.class_lesson_input_scopes enable row level security;
 revoke all on dashboard_private.class_lesson_input_scopes from public,anon,authenticated,service_role;
 
--- Finish the preceding STRICT segment before entering the separate input
--- policy. Never rewrite its immutable baseline with the newly accepted input.
--- Queued old constraint events see no baseline, or finalize a subsequent strict
--- segment using that segment's own fresh baseline. Constraint modes stay intact.
-create function dashboard_private.finish_timetable_strict_boundary_v1()
-returns void language plpgsql security definer set search_path='' as $f$
-declare oldref jsonb; currentref jsonb;
-begin
- if exists(select 1 from dashboard_private.class_lesson_input_scopes where transaction_id=txid_current()) then
-  raise exception using errcode='42501',message='class_lesson_input_scope_invalid';
- end if;
- select reference into oldref from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current();
- if oldref is null then return;end if;
- currentref:=dashboard_private.validate_timetable_operating_reference_v1();
- if oldref->>'shadowFingerprint' is distinct from currentref->>'shadowFingerprint' then
-  update public.timetable_invalidation_signals set change_sequence=change_sequence+1,updated_at=clock_timestamp() where id='operating';
- end if;
- delete from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current();
-end $f$;
-
 create function dashboard_private.begin_class_lesson_input_scope_v1(
  p_class_id uuid,p_request_key uuid,p_operation text,p_relation regclass,p_write_operation text,p_expected_rows jsonb)
 returns void language plpgsql security definer set search_path='' as $f$
-declare actor uuid;
+declare actor uuid; oldref jsonb; currentref jsonb;
 begin
  actor:=dashboard_private.assert_continuous_class_schedule_actor_v1(false);
  perform dashboard_private.lock_timetable_operating_resources_v1();
@@ -57,7 +37,20 @@ begin
  or jsonb_typeof(p_expected_rows) is distinct from 'object' then
   raise exception using errcode='42501',message='class_lesson_input_scope_invalid';
  end if;
- perform dashboard_private.finish_timetable_strict_boundary_v1();
+ -- Finish the preceding strict segment before opening this input scope.
+ -- Its immutable baseline must never include the newly accepted input. Queued
+ -- constraint events see no baseline, or a subsequent strict segment's own one.
+ if exists(select 1 from dashboard_private.class_lesson_input_scopes where transaction_id=txid_current()) then
+  raise exception using errcode='42501',message='class_lesson_input_scope_invalid';
+ end if;
+ select reference into oldref from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current();
+ if oldref is not null then
+  currentref:=dashboard_private.validate_timetable_operating_reference_v1();
+  if oldref->>'shadowFingerprint' is distinct from currentref->>'shadowFingerprint' then
+   update public.timetable_invalidation_signals set change_sequence=change_sequence+1,updated_at=clock_timestamp() where id='operating';
+  end if;
+  delete from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current();
+ end if;
  insert into dashboard_private.class_lesson_input_scopes(transaction_id,actor_id,api_role,class_id,request_key,operation,relation_id,write_operation,expected_rows)
  values(txid_current(),actor,coalesce(current_setting('role',true),'none'),p_class_id,p_request_key,p_operation,p_relation,p_write_operation,p_expected_rows);
 end $f$;
@@ -459,7 +452,6 @@ end $f$;
 
 -- CREATE OR REPLACE preserves all pre-existing public/private ACLs and owners.
 -- New implementation objects have no direct API entry point, including service_role.
-alter function dashboard_private.finish_timetable_strict_boundary_v1() owner to postgres;
 alter function dashboard_private.begin_class_lesson_input_scope_v1(uuid,uuid,text,regclass,text,jsonb) owner to postgres;
 alter function dashboard_private.end_class_lesson_input_scope_v1() owner to postgres;
 alter function dashboard_private.class_lesson_input_after_row_v1() owner to postgres;
@@ -468,7 +460,6 @@ alter function dashboard_private.assert_legacy_lesson_input_v1(jsonb,jsonb) owne
 alter function dashboard_private.write_class_lesson_plan_input_v1(uuid,jsonb,jsonb,uuid,text) owner to postgres;
 alter function dashboard_private.project_class_lesson_input_sessions_v1(uuid,uuid[],uuid,text) owner to postgres;
 revoke all on function
- dashboard_private.finish_timetable_strict_boundary_v1(),
  dashboard_private.begin_class_lesson_input_scope_v1(uuid,uuid,text,regclass,text,jsonb),
  dashboard_private.end_class_lesson_input_scope_v1(),
  dashboard_private.class_lesson_input_after_row_v1(),

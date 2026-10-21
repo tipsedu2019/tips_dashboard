@@ -3315,7 +3315,7 @@ export function ClassScheduleWorkspace() {
       if (!session || requestOwnedLessonSessionIds.has(session.id)) return;
       updateLessonPlanDraft(current => {
         const source = session.originalDate
-          ? (current.sessions as Record<string, unknown>[] || []).find(row => row.date === session.originalDate && row.billingId === session.billingId)
+          ? (current.sessions as Record<string, unknown>[] || []).find(row => row?.date === session.originalDate && row?.billingId === session.billingId)
           : session;
         return source ? setAuthoredLegacyMakeupDate(current, text(source.id), nextMakeupDate) : current;
       });
@@ -3393,7 +3393,7 @@ export function ClassScheduleWorkspace() {
 
       const sourceDate = lessonCalendarDragSource;
       const nextDraft = buildNextLessonPlanDraft((current) =>
-        setAuthoredLegacyMakeupDate(current, text((current.sessions as Record<string, unknown>[] || []).find(row => row.date === sourceDate)?.id), targetDate),
+        setAuthoredLegacyMakeupDate(current, text((current.sessions as Record<string, unknown>[] || []).find(row => row?.date === sourceDate)?.id), targetDate),
       );
 
       setLessonCalendarDragSource("");
@@ -4237,7 +4237,7 @@ export function ClassScheduleWorkspace() {
       : resolveLegacyLessonDetails(selectedLessonSession.dateValue, legacyLessonSnapshotDefaults) : null;
   const legacySelectedOverride = selectedLessonSession && normalizedLessonPlan
     ? ((normalizedLessonPlan.sessionSchedules as Record<string, Record<string, unknown>> || {})[selectedLessonSession.dateValue]
-      || (normalizedLessonPlan.sessions as Record<string, unknown>[] || []).find(row => text(row.id) === selectedLessonSession.id) || {}) : {};
+      || (normalizedLessonPlan.sessions as Record<string, unknown>[] || []).find(row => text(row?.id) === selectedLessonSession.id) || {}) : {};
   const legacyHasExplicitOverride = ["startTime", "endTime", "teacherCatalogId", "classroomCatalogId", "teacherName", "classroomName"]
     .some(key => Object.prototype.hasOwnProperty.call(legacySelectedOverride, key));
   const pastCorrectionSavedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;

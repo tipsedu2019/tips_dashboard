@@ -1598,3 +1598,34 @@ test('ordinary lesson sharing an approved makeup date stays editable by ID while
   assert.deepEqual(sent.billingPeriods, saved.billingPeriods);
   assert.deepEqual(payload.classItem.schedulePlan, saved);
 });
+
+// Independent review fixtures retained with unchanged assertions.
+test('independent: selecting an authored lesson after opaque null history must remain usable', async t => {
+  const payload = missingOctoberDetail();
+  const target = payload.classItem.schedulePlan.sessions.at(-1);
+  payload.classItem.schedulePlan.sessions.splice(1, 0, null, 'opaque historical entry');
+  const page = await recoveryEditor(t, payload);
+  await act(async () => page.observed.setSelectedLessonSessionId(target.id));
+  assert.ok(page.observed.lessonDesignSnapshot.sessions.some(row => row.id === target.id));
+  assert.deepEqual(page.observed.lessonPlanForSave.sessions, payload.classItem.schedulePlan.sessions);
+});
+
+
+test('independent: canonical date-map fields and editing do not silently alter an untouched displayed field', async t => {
+  const payload = septemberOctoberDetail();
+  const target = payload.classItem.schedulePlan.sessions.find(row => row.date === '2026-10-08');
+  target.startTime='09:00';target.endTime='10:00';
+  payload.classItem.schedulePlan.sessions=[target];
+  payload.classItem.schedulePlan.sessionSchedules={'2026-10-08':{startTime:'11:00',endTime:'12:00'}};
+  const page = await recoveryEditor(t, payload);
+  await page.normalized({status:'ready',value:{source:'legacy',sessions:[],effectiveScheduleContext:{version:1,basicSlots:[],catalogs:{teachers:payload.teacherCatalogs,rooms:payload.classroomCatalogs}}}});
+  await act(async()=>page.observed.setSelectedLessonSessionId(target.id));
+  const detailButton=document.querySelector('button[aria-label="10월 상세 보기"]');
+  if(detailButton)await act(async()=>detailButton.click());
+  const item=[...document.querySelectorAll('[data-lesson-period-session-id]')].find(row=>row.dataset.lessonPeriodSessionId===target.id);
+  await act(async()=>item.querySelector('button').click());
+  const shownStart=document.querySelector('input[aria-label="2026-10-08 시작"]').value;
+  assert.equal(shownStart,'09:00','reproduction confirms candidate displays the raw value');
+  await changeInput('2026-10-08 종료','13:00');
+  assert.equal(page.observed.lessonPlanForSave.sessions[0].startTime,shownStart,'editing end preserves displayed start');
+});
