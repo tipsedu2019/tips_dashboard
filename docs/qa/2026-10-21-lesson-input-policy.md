@@ -4,11 +4,11 @@
 
 Base: `59c0621749349d511a2010a7162ce123abd70704` (production PR159/160 baseline). The held performance candidate `6f33c07c0f16c23f3ddc27d34e40a3fe49cbfea5` is not included. This candidate implements the user's explicit policy that lesson schedules store authored dates, times, teachers, classrooms and notes without date-by-date occupancy blocking.
 
-Local implementation and focused validation only. No production reads/writes, schedule save retry, SQL installation, push, PR, merge or deployment occurred in this phase. The P5 section below supersedes earlier stage summaries; exact-head independent delta review is pending. Historical runs are not relabeled as current execution. Existing production 70 lessons and Chrome 352210481's October nine-lesson draft were not touched.
+Local implementation and focused validation only. No production reads/writes, schedule save retry, SQL installation, push, PR, merge or deployment occurred in this phase. The P5 section below supersedes earlier stage summaries; exact-head independent delta review is pending. Historical runs are not relabeled as current execution. Existing production 70 lessons and the browser's October nine-lesson draft were not touched.
 
 ## P5 — API consumers retain authored empty values (current)
 
-Addresses the P4 independent review at `/Users/hyunjun/Documents/Codex/2026-10-22/task/input-policy-p4-review/independent-review.md`, source `5b80edef03dc4b49b76baa57858d6e5c90c6a85b`. Its actual synthetic DB→API failures (explicit NULL room and empty teacher) are retained with the same equality assertions and now pass. The captured DTO fixture is synthetic and is explicitly labeled as reused producer evidence, not a fresh DB run.
+Addresses the P4 independent review, source `5b80edef03dc4b49b76baa57858d6e5c90c6a85b`. Its actual synthetic DB→API failures (explicit NULL room and empty teacher) are retained with the same equality assertions and now pass. The captured DTO fixture is synthetic and is explicitly labeled as reused producer evidence, not a fresh DB run.
 
 `classWorkspace` delegates legacy timing/resource selection to the existing common resolver: own canonical scalar (including NULL/empty) → date map, or raw names when no map exists → available basic slots. The API context does not contain verified approval bindings; no such authority/source is fabricated. Cancelled/skipped/undecided rows retain timing for display while their state remains unchanged. Normalized storage and request schemas/scopes are unchanged. GET, preview before/after, commit receipt and operation re-read all consume this projection. Safe response fields and deterministic verification hashes remain.
 
@@ -26,7 +26,7 @@ The first two focused probe attempts had fixture extraction mistakes (the real r
 
 ## P4 — consistent per-field input consumption (previous)
 
-Review addressed: `/Users/hyunjun/Documents/Codex/2026-10-22/task/input-policy-p3-review/independent-review.md`, exact previous head `e6f38dce8d839d1ac9a320a11a41b4e56ecbf51d`.
+Review addressed: P3 independent review, exact previous head `e6f38dce8d839d1ac9a320a11a41b4e56ecbf51d`.
 
 **Priority contract.** For an ordinary lesson, an own `startTime`, `endTime`, `teacherCatalogId` or `classroomCatalogId` on its stable-ID row is explicit (including NULL/empty); otherwise use the legacy date-map object if present, or the raw row if no date map exists; then the verified approved fallback; then class basics. Resource ID/name are selected as one group. A date map continues to mask raw legacy names, even when empty or metadata-only. Thus name-only map B is not replaced by raw name A during an unrelated time edit. Request-owned rows retain the existing map bypass and approval binding checks. No new intent marker, backfill or permission bypass is introduced.
 
@@ -97,7 +97,7 @@ These measurements belong to the prior bab7b30 candidate. They include the authe
 
 Before any publication/release: independent review of the exact immutable candidate; complete applicable release gates with honest current evidence; separately confirm this **new SQL footprint** and authorized production application. Prior PR159 SQL approval is not approval of this new migration. Preserve auth/RLS/ACL and existing guardrails. Do not reapply PR159/160 or resume014.
 
-After an eventual approved release, confirm the actual deployed code/schema, read the current English class before saving, then submit only missing October1/6/8/13/15/20/22/27/29 at19:30–21:30 (권용재/별관2강), October billing ownership. Verify existing70 preserved, October9/November8/December8 and total79 by fresh read. A success message alone is not completion.
+After an eventual approved release, confirm the actual deployed code/schema, read the current target class before saving, then submit only missing requested dates with the existing instructor/classroom and correct billing month. Verify existing70 preserved, October9/November8/December8 and total79 by fresh read. A success message alone is not completion.
 
 ## Evidence index
 
@@ -158,7 +158,7 @@ Follow-up evidence prefix in `../nullable-room-handoff/`: `input-policy-p2-*`, p
 
 ## Second P2 follow-up — cancellation and actual reader parity
 
-Review source: `/Users/hyunjun/Documents/Codex/2026-10-22/task/input-policy-p2-review/independent-review.md` and `execution-summary.json`, reviewed head `4c1dea8596064803abb92b8ad847efe849fa3ae8`. This follow-up changes **one product helper only** (`legacy-authored-lesson-plan.ts`), its tests and this evidence document. SQL, shared JS resolver, SQL resolver, permissions, atomic gateways and approval workflow are unchanged. The SQL remains **36,891 bytes / f9da4cf18a4380ce37c14f8c42be65d64c5491894bf2562527ab2081f336e587**; its prior object inventory and rollback remain exact.
+Review source: P2 independent review and its execution summary, reviewed head `4c1dea8596064803abb92b8ad847efe849fa3ae8`. This follow-up changes **one product helper only** (`legacy-authored-lesson-plan.ts`), its tests and this evidence document. SQL, shared JS resolver, SQL resolver, permissions, atomic gateways and approval workflow are unchanged. The SQL remains **36,891 bytes / f9da4cf18a4380ce37c14f8c42be65d64c5491894bf2562527ab2081f336e587**; its prior object inventory and rollback remain exact.
 
 The first cancellation is now distinct from makeup unlinking: absent and empty map dates compare equally, and an empty unlink with no actual source/map/link is a no-op. A real linked makeup still restores the source to active. Thus a first ordinary calendar click remains exception instead of being overwritten by the restore path.
 

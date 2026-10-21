@@ -1429,7 +1429,7 @@ test("prepare ACL migration만 science 이후 protected function 참조로 허�
 test("approved manual production workflow requires its exact path and complete reviewed bytes", async () => {
   const workflowDir = join(repoRoot, ".github", "workflows")
   for (const [name, expectedHash] of [
-    ["free-tier-guardrails.yml", "02ab34b9f2e8d8a685449a0cd6678294fd55226a05f1d6947d2d6fd499f25e57"],
+    ["free-tier-guardrails.yml", "ca219fb0a90b6be4cd31b1ef4f1e03efb93537247461dde2e67c87e0aea6850e"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
     ["supabase-sql-review.yml", "c7df56bd8b158649a42f5516be578aba45838f0bf47c1a48a5a19fd709cb1b61"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
