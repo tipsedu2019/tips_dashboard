@@ -43,6 +43,27 @@ test('existing month, overlapping cycle and repeated addition are blocked, other
   assert.equal(newLegacyLessonMonthError(crossMonth, crossMonth), '', 'historical cross-month definitions remain allowed');
 });
 
+test('cross-year billing months belong to their occurrence in the existing date range', () => {
+  for (const [month, startDate] of [[12, '2026-12-08'], [12, '2026-11-24'], [1, '2026-12-08']]) {
+    const baseline = { selectedDays: [2, 4], billingPeriods: [period('year-crossing', month, startDate, '2027-01-05')] };
+    const original = structuredClone(baseline);
+    const nextKey = month === 12 ? '2027-12' : '2028-01';
+    const addition = prepareLegacyLessonMonth(baseline, nextKey, 'new-year');
+    assert.equal(addition.error, '', `the ${month}월 cycle must not own ${nextKey}`);
+    assert.ok(addition.period);
+    assert.equal(newLegacyLessonMonthError({ ...baseline, billingPeriods: [...baseline.billingPeriods, addition.period] }, baseline, new Map([['new-year', nextKey]])), '');
+    for (const occupied of ['2026-12', '2027-01']) {
+      assert.match(prepareLegacyLessonMonth(baseline, occupied).error, /이미 있습니다/);
+      const overlapping = prepareLegacyLessonMonth({ selectedDays: [2, 4] }, occupied, 'overlap').period;
+      assert.match(newLegacyLessonMonthError({ billingPeriods: [...baseline.billingPeriods, overlapping] }, baseline), /이미 있습니다/);
+    }
+    assert.deepEqual(baseline, original);
+  }
+  const sameYear = { selectedDays: [2, 4], billingPeriods: [period('authored-october', 10, '2026-09-01', '2026-09-29')] };
+  assert.match(prepareLegacyLessonMonth(sameYear, '2026-10').error, /이미 있습니다/, 'same-year authored billing ownership is retained');
+  assert.equal(prepareLegacyLessonMonth(sameYear, '2027-10').error, '');
+});
+
 test('new period validation rejects mismatched month, dates and duplicate billing ownership', () => {
   const valid = prepareLegacyLessonMonth(stored, '2026-10', 'oct').period;
   for (const patch of [

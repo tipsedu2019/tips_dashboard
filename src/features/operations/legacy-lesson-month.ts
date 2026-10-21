@@ -30,7 +30,14 @@ function monthExists(periods: Period[], monthKey: string) {
     const start = dateKey(period.startDate), end = dateKey(period.endDate);
     // A billing cycle can begin in the preceding month. Keep its authored
     // billing month as well as its occupied date range when checking additions.
-    const billingYear = (end || start).slice(0, 4);
+    let billingYear = (end || start).slice(0, 4);
+    if (start && end && start.slice(0, 4) !== end.slice(0, 4)) {
+      // Find the authored month inside the cycle, e.g. December 2026 in a
+      // December 2026–January 2027 range. The end year does not own December.
+      const year = Number(start.slice(0, 4)) + (Number(period.month) < Number(start.slice(5, 7)) ? 1 : 0);
+      const occurrence = `${year}-${String(period.month).padStart(2, '0')}`;
+      if (occurrence >= start.slice(0, 7) && occurrence <= end.slice(0, 7)) billingYear = String(year);
+    }
     return (start && end && start <= range.endDate && end >= range.startDate)
       || (billingYear === monthKey.slice(0, 4) && Number(period.month) === range.month);
   });
