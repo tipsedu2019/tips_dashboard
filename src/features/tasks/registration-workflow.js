@@ -218,6 +218,24 @@ export function getSelectableRegistrationScheduleSessions(schedulePlan, options 
       ? schedulePlan.session_list
       : [];
   const seen = new Set();
+  const legacyId = (entry) => {
+    const id = [entry?.id, entry?.session_id, entry?.sessionKey, entry?.session_key]
+      .find(value => typeof value === "string" && text(value));
+    return id ? text(id) : "";
+  };
+  const legacyIdCounts = new Map(), legacyNumberCounts = new Map();
+  if (options.normalized === false) for (const entry of sessions) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const id = legacyId(entry);
+    if (id) legacyIdCounts.set(id, (legacyIdCounts.get(id) || 0) + 1);
+    const state = text(entry.scheduleState || entry.schedule_state || entry.state || "active").toLowerCase() || "active";
+    const date = registrationScheduleDateKey(entry.date || entry.session_date || entry.dateValue || entry.date_value);
+    const number = Number(entry.sessionNumber ?? entry.session_number);
+    if (date && Number.isInteger(number) && number > 0 && ["active", "normal", "makeup"].includes(state)) {
+      const key = `${date}:${number}`;
+      legacyNumberCounts.set(key, (legacyNumberCounts.get(key) || 0) + 1);
+    }
+  }
 
   return sessions.flatMap((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
@@ -231,10 +249,13 @@ export function getSelectableRegistrationScheduleSessions(schedulePlan, options 
       ? ""
       : text(entry.id || entry.lesson_session_id || entry.lessonSessionId);
     const normalizedSessionKey = text(entry.sessionKey || entry.session_key);
-    if (!dateKey || (sessionNumber <= 0 && (!lessonSessionId || !normalizedSessionKey))) return [];
+    const numberedKey = `${dateKey}:${sessionNumber}`;
+    const id = legacyId(entry);
     const value = options.normalized === false
-      ? `${dateKey}:${sessionNumber}`
-      : normalizedSessionKey || `${dateKey}:${sessionNumber}`;
+      ? sessionNumber > 0 && legacyNumberCounts.get(numberedKey) === 1 ? numberedKey
+        : id && legacyIdCounts.get(id) === 1 ? `legacy:${id}` : ""
+      : normalizedSessionKey || numberedKey;
+    if (!dateKey || !value || (options.normalized !== false && sessionNumber <= 0 && (!lessonSessionId || !normalizedSessionKey))) return [];
     if (seen.has(value)) return [];
     seen.add(value);
     return [{
@@ -242,7 +263,7 @@ export function getSelectableRegistrationScheduleSessions(schedulePlan, options 
       ...(lessonSessionId ? { lessonSessionId } : {}),
       dateKey,
       sessionNumber,
-      sessionLabel: sessionNumber > 0 ? `${sessionNumber}회차` : "수업",
+      sessionLabel: options.normalized === false && value.startsWith("legacy:") ? "수업" : sessionNumber > 0 ? `${sessionNumber}회차` : "수업",
       state,
     }];
   }).sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.sessionNumber - right.sessionNumber);

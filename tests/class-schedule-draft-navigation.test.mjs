@@ -1818,3 +1818,53 @@ test('field-priority reset: shared date fallback is labelled and only the select
  assert.equal(resolveEffectiveSchedule(effectiveInputForLesson(sent,sent.sessions[0],context)).values.startTime,'12:00');
  assert.equal(resolveEffectiveSchedule(effectiveInputForLesson(sent,sent.sessions[1],context)).values.startTime,'16:00');
 });
+
+for (const action of ['tbd','skipped','unlink']) {
+ test(`PR161 P2: previously scheduled makeup on source date ${action} clears only selected link`,async t=>{
+  const {setAuthoredLegacyMakeupDate}=await import('../src/features/operations/legacy-authored-lesson-plan.ts');
+  const payload=legacyRecoveryDetail({firstState:'active'});
+  let plan=payload.classItem.schedulePlan;
+  const source=plan.sessions.find(row=>row.date==='2026-10-01'),september=plan.sessions.find(row=>row.date==='2026-09-29');
+  plan=setAuthoredLegacyMakeupDate(plan,source.id,'2026-10-02');
+  plan=setAuthoredLegacyMakeupDate(plan,september.id,source.date);
+  const child=plan.sessions.find(row=>row.originalDate===source.date&&row.billingId===source.billingId);
+  const peer=plan.sessions.find(row=>row.originalDate===september.date&&row.billingId===september.billingId);
+  assert.ok(child);assert.ok(peer);assert.equal(peer.date,source.date);
+  payload.classItem.schedulePlan=plan;
+  const before=structuredClone(plan),page=await recoveryEditor(t,payload),panel=await selectLegacyRecoveryRow(page,source.date);
+  const button=action==='skipped'?panel.querySelector('button[aria-label$=" 일정 해제"]'):[...panel.querySelectorAll('button')].find(item=>item.textContent.trim()===({tbd:'미정',unlink:'보강 해제'})[action]);
+  assert.ok(button);await act(async()=>button.click());
+  await clickLessonSave();assert.equal(saveRequests(page).length,1,page.observed.lessonDesignSaveError);
+  const sent=saveRequests(page)[0].args.p_patch.schedule_plan;
+  assert.deepEqual(sent.sessions.find(row=>row.id===peer.id),peer,'other original lesson\'s makeup is preserved');
+  assert.deepEqual(sent.sessions.find(row=>row.id===september.id),before.sessions.find(row=>row.id===september.id),'other original source is preserved');
+  t.diagnostic(JSON.stringify({reachable:true,action,source:sent.sessions.find(row=>row.id===source.id),child:sent.sessions.find(row=>row.id===child.id),peer:sent.sessions.find(row=>row.id===peer.id),saveRequests:saveRequests(page).length}));
+  assert.equal(sent.sessions.some(row=>row.id===child.id),false,'selected link child must be removed');
+  assert.equal(sent.sessions.find(row=>row.id===source.id).makeupDate,'');
+  assert.equal(sent.sessions.find(row=>row.id===source.id).scheduleState,action==='unlink'?'exception':action);
+  assert.deepEqual(sent.sessionStates,before.sessionStates,'shared date map is not reassigned to the selected source');
+ });
+}
+
+test('PR161 P2: selecting a linked child resolves its exact same-date source in the React save path',async t=>{
+ const {setAuthoredLegacyMakeupDate}=await import('../src/features/operations/legacy-authored-lesson-plan.ts');
+ const payload=legacyRecoveryDetail({firstState:'active'});
+ let plan=payload.classItem.schedulePlan;
+ const source=plan.sessions.find(row=>row.date==='2026-10-01');
+ const peer={...source,id:'same-date-source-peer',sessionKey:'same-date-source-peer',memo:' peer learning ',teacherNote:'keep peer'};
+ plan={...plan,sessions:[...plan.sessions,peer]};
+ plan=setAuthoredLegacyMakeupDate(plan,source.id,'2026-10-02',' own ');
+ plan=setAuthoredLegacyMakeupDate(plan,peer.id,'2026-10-03',' other ');
+ const own=plan.sessions.find(row=>row.originalSessionId===source.id),other=plan.sessions.find(row=>row.originalSessionId===peer.id);
+ assert.ok(own);assert.ok(other);payload.classItem.schedulePlan=plan;
+ const page=await recoveryEditor(t,payload),panel=await selectLegacyRecoveryRow(page,'2026-10-02');
+ assert.equal(panel.dataset.lessonPeriodSessionId,own.id);
+ const unlink=[...panel.querySelectorAll('button')].find(button=>button.textContent.trim()==='보강 해제');
+ assert.ok(unlink);await act(async()=>unlink.click());await clickLessonSave();
+ assert.equal(saveRequests(page).length,1,page.observed.lessonDesignSaveError);
+ const saved=saveRequests(page)[0].args.p_patch.schedule_plan;
+ assert.equal(saved.sessions.some(row=>row.id===own.id),false);
+ assert.deepEqual(saved.sessions.find(row=>row.id===other.id),other);
+ assert.deepEqual(saved.sessions.find(row=>row.id===peer.id),plan.sessions.find(row=>row.id===peer.id));
+ assert.deepEqual(saved.sessions.find(row=>row.id===source.id),{...plan.sessions.find(row=>row.id===source.id),makeupDate:''});
+});

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { authoredLegacyLessonDraft, applyAuthoredLegacyLessonEdit, patchAuthoredLegacyLesson,
-  setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyLessonValidationError } from '../src/features/operations/legacy-authored-lesson-plan.ts';
+  setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyMakeupSource, authoredLegacyLessonValidationError } from '../src/features/operations/legacy-authored-lesson-plan.ts';
 
 import { applyCalendarDateToggle } from '../src/lib/class-schedule-planner.js';
 import { effectiveInputForLesson, resolveEffectiveSchedule } from '../src/features/operations/legacy-effective-schedule.js';
@@ -494,4 +494,111 @@ test('shared-date reset removes only selected scalar overrides and inherits the 
   const next = setAuthoredLegacyLessonFields(plan, 'source', {}, {}, true);
   assert.deepEqual(next.sessions[1], peer); assert.deepEqual(next.sessionSchedules, plan.sessionSchedules);
   assert.deepEqual(resolved(next).values, { startTime: '12:00', endTime: '13:00', teacherCatalogId: teacher, classroomCatalogId: room });
+});
+
+// Independent registration reproduction: actual producer and read/UI consumers.
+{
+ const {readFileSync}=await import('node:fs');
+ const {createRequire}=await import('node:module');
+ const {default:vm}=await import('node:vm');
+ const {loadNotificationComponent}=await import('./helpers/notification-component-loader.mjs');
+ const require=createRequire(import.meta.url);
+ const {JSDOM}=require('jsdom'),{act,createElement:h}=require('react'),{createRoot}=require('react-dom/client'),ts=require('typescript');
+ const original={selectedDays:[2,4],billingPeriods:[{id:'oct',month:10,label:'10월',startDate:'2026-10-06',endDate:'2026-10-27'}],
+  sessions:[{id:'original',date:'2026-10-06',billingId:'oct',sessionNumber:1,state:'active'}],sessionStates:{},sessionSchedules:{}};
+ const plans={candidate:applyAuthoredLegacyLessonEdit({...original,billingPeriods:[{...original.billingPeriods[0],startDate:'2026-10-01'}]},original)};
+ const {getSelectableRegistrationScheduleSessions}=await import('../src/features/tasks/registration-workflow.js');
+ test('PR161 P2: expanded null-number lessons retain registration choices without number-only progress',()=>{
+  assert.deepEqual(getSelectableRegistrationScheduleSessions(plans.candidate,{normalized:false}).map(x=>x.dateKey),['2026-10-01','2026-10-06']);
+  assert.deepEqual(plans.candidate.sessions[0],original.sessions[0]);
+  assert.equal(plans.candidate.sessions[1].sessionNumber,null);
+ });
+ test('PR161 P2: newly added month offers all eight legacy registration starts',()=>{
+  const empty={selectedDays:[2,4],billingPeriods:[],sessions:[]};
+  const plan=applyAuthoredLegacyLessonEdit({...empty,billingPeriods:[{id:'nov',month:11,label:'11월',startDate:'2026-11-03',endDate:'2026-11-26'}]},empty);
+  assert.equal(getSelectableRegistrationScheduleSessions(plan,{normalized:false}).length,8);
+ });
+const service=readFileSync(new URL('../src/features/tasks/ops-task-service.ts',import.meta.url),'utf8');
+const between=(start,end)=>service.slice(service.indexOf(start),service.indexOf(end,service.indexOf(start)+start.length));
+function actualReader(plan) {
+ const pieces=[between('function text(value: unknown)', 'const OPS_TASK_PAGE_SIZE'),between('function numberValue(value: unknown)','function nullable(value: unknown)'),between('function recordValue(value: unknown)','function nullableDate(value: unknown)'),between('function normalizeIdList(value: unknown)','function addUniqueId'),between('function optionMeta(parts: unknown[])','function createOpsId()'),between('function mapOpsClassOption(row: Row)','function buildOpsTaskWorkspaceOptionData('),between('async function readOpsRegistrationClassDetail(', 'export async function loadOpsRegistrationClassDetail(')];
+ const mockRow={id:'a',name:'Synthetic',subject:'영어',schedule_storage_mode:'legacy',schedule_plan:plan,textbook_ids:[]};
+ const client={from(table){assert.equal(table,'classes');return {select(){return {eq(column,id){assert.equal(column,'id');assert.equal(id,'a');return {limit:async()=>({data:[mockRow],error:null})}}}}}}};
+ const compiled=ts.transpileModule(pieces.join('\n')+'\nmodule.exports={readOpsRegistrationClassDetail}',{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const loadedModule={exports:{}};
+ vm.runInNewContext(compiled,{module:loadedModule,exports:loadedModule.exports,supabase:client,OPS_REGISTRATION_CLASS_DETAIL_COLUMN_CANDIDATES:['fixture columns'],isMissingColumnError:()=>false});
+ return loadedModule.exports.readOpsRegistrationClassDetail('a',{queryCount:0});
+}
+for (const version of ['candidate']) test(`PR161 P2: actual legacy read and enrollment calendar ${version}`,async(t)=>{
+ const detail=await actualReader(plans[version]);
+ assert.equal(detail.scheduleStorageMode,'legacy');
+ assert.equal(detail.schedulePlan,plans[version], 'real mapper returns same raw plan; no display ordinal projection');
+ const dom=new JSDOM('<div id="root"></div>',{url:'https://fixture.invalid'});
+ globalThis.window=dom.window;globalThis.document=dom.window.document;
+ for(const name of ['HTMLElement','Element','MutationObserver','Event','Node','CustomEvent','getComputedStyle'])globalThis[name]=dom.window[name];
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ const observed=[],savedInputs=[];
+ const Select=({value,options,onValueChange,...props})=>h('select',{value,onChange:e=>onValueChange(e.target.value),'aria-label':props['aria-label'],disabled:props.disabled},options.map(x=>h('option',{key:x.value,value:x.value},x.label)));
+ const Calendar=props=>{observed.push({addedDisabled:props.disabled(new Date(2026,9,1)),oldDisabled:props.disabled(new Date(2026,9,6))});return h('button',{'data-calendar':'fixture',disabled:props.disabled(new Date(2026,9,1)),onClick:()=>props.onSelect(new Date(2026,9,1))},'October 1')};
+ const Div=({children})=>h('div',{},children);
+ const overrides=new Map([
+  ['./registration-select',{RegistrationSelect:Select}],
+  ['./registration-textbook-select',{RegistrationTextbookSelect:()=>null}],
+  ['./ops-task-service',{loadOpsRegistrationClassDetails:async()=>({a:detail})}],
+  ['./registration-track-service',{loadRegistrationEnrollmentStartObservation:async()=>null,createRegistrationMutationRequestKey:()=> 'fixture',saveRegistrationEnrollmentDetails:async(input)=>{savedInputs.push(input);return{rows:input.rows,workflowRevision:1,externalReconciliationRequired:false}}}],
+  ['@/components/ui/popover',{Popover:Div,PopoverContent:Div,PopoverTrigger:Div}],
+  ['@/components/ui/calendar',{Calendar}],
+ ]);
+ const {RegistrationEnrollmentEditor}=loadNotificationComponent('src/features/tasks/registration-enrollment-editor.tsx',overrides);
+ const root=createRoot(document.getElementById('root'));
+ t.after(async()=>{await act(()=>root.unmount());dom.window.close()});
+ const flush=async fn=>act(async()=>{await fn();await new Promise(resolve=>setTimeout(resolve,0))});
+ await flush(()=>root.render(h(RegistrationEnrollmentEditor,{taskId:'task',viewerId:'viewer',track:{id:'track',subject:'영어',status:'enrollment_decided',enrollmentDetailRows:[]},enrollments:[],admissionBatches:[],classes:[{id:'a',label:'Synthetic',subject:'영어',grade:'중1',textbookIds:[]}],textbooks:[],permissions:{canManage:true},onReload:async()=>{},onWarning:()=>{}})));
+ await flush(()=>{const select=document.querySelector('select[aria-label="영어 수업 1 선택"]');assert.ok(select);select.value='a';select.dispatchEvent(new window.Event('change',{bubbles:true}))});
+ const final=observed.at(-1);
+ assert.equal(final.oldDisabled,false);
+ assert.equal(final.addedDisabled,false, 'newly generated active lesson must be selectable as a registration start');
+ await flush(()=>document.querySelector('[data-calendar="fixture"]').click());
+ await flush(()=>document.querySelector('button[aria-label="영어 등록 정보 저장"]').click());
+ assert.equal(savedInputs.length,1,'actual editor submits once through its normal save handler');
+ assert.equal(savedInputs[0].rows[0].classStartSessionKey,`legacy:${plans.candidate.sessions[1].id}`);
+ assert.equal(savedInputs[0].rows[0].classStartLessonSessionId,null);
+ assert.equal(savedInputs[0].rows[0].classStartDate,'2026-10-01');
+});
+
+}
+
+for (const legacy of [false, true]) test(`PR161 P2: exact makeup source preserves same-date peer and progress (legacy=${legacy})`, () => {
+  const source={id:'source',date:'2026-10-01',billingId:'oct',sessionNumber:1,memo:' source ',teacherNote:'learning'};
+  const peer={...source,id:'peer',billingId:legacy?'other':'oct',memo:' peer ',teacherNote:'other learning'};
+  let plan={sessions:[source,peer],sessionStates:{'2026-10-01':{state:'active',memo:'shared'}}};
+  plan=setAuthoredLegacyMakeupDate(plan,'source','2026-10-02',' child ');
+  plan=setAuthoredLegacyMakeupDate(plan,'peer','2026-10-03',' peer child ');
+  const children=plan.sessions.filter(row=>row.originalDate);
+  assert.equal(children.length,2);
+  if(legacy) plan={...plan,sessions:plan.sessions.map(row=>{const result={...row};delete result.originalSessionId;return result;})};
+  const own=plan.sessions.find(row=>row.date==='2026-10-02'),other=plan.sessions.find(row=>row.date==='2026-10-03');
+  assert.equal(authoredLegacyMakeupSource(plan,own.id).id,'source');
+  const moved=setAuthoredLegacyMakeupDate(plan,'source','2026-10-05');
+  assert.deepEqual(moved.sessions.find(row=>row.id===own.id),{...own,date:'2026-10-05'});
+  const removed=setAuthoredLegacyMakeupDate(moved,'source','');
+  assert.equal(removed.sessions.some(row=>row.id===own.id),false);
+  assert.deepEqual(removed.sessions.find(row=>row.id===other.id),other);
+  assert.deepEqual(removed.sessions.find(row=>row.id==='peer'),plan.sessions.find(row=>row.id==='peer'));
+  assert.equal(removed.sessions.find(row=>row.id==='source').teacherNote,'learning');
+  assert.equal(removed.sessions.find(row=>row.id==='source').memo,' source ');
+  assert.equal(removed.sessions.find(row=>row.id==='source').sessionNumber,1);
+  assert.equal(removed.sessions.find(row=>row.id==='source').scheduleState,'exception');
+  assert.deepEqual(removed.sessionStates,plan.sessionStates);
+});
+
+test('PR161 P2: genuinely ambiguous old makeup links and duplicate source IDs are not guessed',()=>{
+  const plan={sessions:[{id:'a',date:'2026-10-01',billingId:'oct',makeupDate:'2026-10-02'},
+    {id:'b',date:'2026-10-01',billingId:'oct'},
+    {id:'child',date:'2026-10-02',billingId:'oct',originalDate:'2026-10-01'}]};
+  assert.equal(authoredLegacyMakeupSource(plan,'child'),null);
+  assert.equal(setAuthoredLegacyMakeupDate(plan,'a',''),plan);
+  const duplicate={sessions:[plan.sessions[0],{...plan.sessions[0],date:'2026-10-03'}]};
+  assert.equal(setAuthoredLegacyMakeupDate(duplicate,'a',''),duplicate);
+  assert.equal(authoredLegacyMakeupSource(duplicate,'a'),null);
 });

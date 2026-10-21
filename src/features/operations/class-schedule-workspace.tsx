@@ -6,7 +6,7 @@ import { LessonSaveConflictDetails } from "./lesson-save-conflict-details";
 import Link from "next/link";
 import { scheduleOnlyDraft } from "./schedule-only-plan";
 import { authoredLegacyLessonDraft, applyAuthoredLegacyLessonEdit, patchAuthoredLegacyLesson,
-  setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyLessonValidationError } from "./legacy-authored-lesson-plan";
+  setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyMakeupSource, authoredLegacyLessonValidationError } from "./legacy-authored-lesson-plan";
 import { projectMaterializedLessonOrdinals } from "@/lib/materialized-lesson-ordinals";
 import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectionDraft,
   type LegacyPastStateCorrectionInput, type LegacyPastStateCorrectionTarget } from "./legacy-past-state-correction";
@@ -3314,9 +3314,7 @@ export function ClassScheduleWorkspace() {
     (session: (typeof selectedLessonSession), nextMakeupDate: string) => {
       if (!session || requestOwnedLessonSessionIds.has(session.id)) return;
       updateLessonPlanDraft(current => {
-        const source = session.originalDate
-          ? (current.sessions as Record<string, unknown>[] || []).find(row => row?.date === session.originalDate && row?.billingId === session.billingId)
-          : session;
+        const source = authoredLegacyMakeupSource(current, session.id);
         return source ? setAuthoredLegacyMakeupDate(current, text(source.id), nextMakeupDate) : current;
       });
     }, [requestOwnedLessonSessionIds, updateLessonPlanDraft],

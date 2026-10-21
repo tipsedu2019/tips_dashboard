@@ -577,4 +577,462 @@ begin
  return jsonb_build_object('date',d,'state',state,'kind',kind,'values',vals,'provenance',provenance,'missing',missing,'errors',errors);
 end $fn$;
 
+-- Registration accepts authored IDs without assigning booking numbers to learning records.
+alter table public.ops_registration_enrollments
+  drop constraint ops_registration_enrollments_class_start_session_key_check,
+  add constraint ops_registration_enrollments_class_start_session_key_check check (
+    class_start_session_key is null
+    or class_start_session_key ~ '^\d{4}-\d{2}-\d{2}:[1-9]\d*$'
+    or (left(class_start_session_key, 7) = 'legacy:' and nullif(btrim(substr(class_start_session_key, 8)), '') is not null)
+  ) not valid;
+-- The old validated CHECK is a strict subset, so existing rows already satisfy
+-- this contract. Keep function/key acceptance atomic; transactional preflight
+-- cannot split this migration. Validation still scans under ACCESS EXCLUSIVE:
+-- require the registration-table size/inactive-window deployment preflight.
+-- Waiting is bounded by lock_timeout=5s and each statement by 120s above.
+-- squawk-ignore constraint-missing-not-valid
+alter table public.ops_registration_enrollments validate constraint ops_registration_enrollments_class_start_session_key_check;
+
+CREATE OR REPLACE FUNCTION dashboard_private.validate_registration_class_session(p_class_id uuid, p_date date, p_session_key text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  v_mode text;
+  v_plan jsonb;
+  v_session jsonb;
+  v_state text;
+  v_date_text text;
+  v_number_text text;
+  v_session_date date;
+  v_session_number integer;
+  v_canonical_key text;
+  v_identity text;
+  v_identity_count integer := 0;
+  v_match_count integer := 0;
+  v_result jsonb;
+  v_id_key boolean := left(btrim(p_session_key), 7) = 'legacy:';
+begin
+  select schedule_storage_mode, to_jsonb(schedule_plan)
+  into v_mode, v_plan
+  from public.classes
+  where id = p_class_id;
+
+  if not found or p_date is null or nullif(pg_catalog.btrim(p_session_key), '') is null then
+    return jsonb_build_object('valid', false, 'sessionDate', null, 'sessionKey', null, 'sessionLabel', null);
+  end if;
+
+  if v_mode = 'normalized' then
+    select session_date, session_key into v_session_date, v_canonical_key
+    from public.class_lesson_sessions
+    where class_id = p_class_id
+      and session_date = p_date
+      and session_key = pg_catalog.btrim(p_session_key)
+      and schedule_state in ('active', 'makeup');
+    if found then
+      return jsonb_build_object(
+        'valid', true,
+        'sessionDate', to_char(v_session_date, 'YYYY-MM-DD'),
+        'sessionKey', v_canonical_key,
+        'sessionLabel', '수업'
+      );
+    end if;
+    return jsonb_build_object('valid', false, 'sessionDate', null, 'sessionKey', null, 'sessionLabel', null);
+  end if;
+
+  -- Numbered legacy bookings retain their original key. Authored unnumbered
+  -- rows use a separate ID key, never a display ordinal or normalized UUID FK.
+  for v_session in
+    select item.value from jsonb_array_elements(case
+      when jsonb_typeof(v_plan -> 'sessions') = 'array' then v_plan -> 'sessions'
+      when jsonb_typeof(v_plan -> 'session_list') = 'array' then v_plan -> 'session_list'
+      else '[]'::jsonb
+    end) item(value)
+  loop
+    if jsonb_typeof(v_session) <> 'object' then continue; end if;
+    v_identity := coalesce(case when jsonb_typeof(v_session -> 'id') = 'string' then nullif(btrim(v_session ->> 'id'), '') end, case when jsonb_typeof(v_session -> 'session_id') = 'string' then nullif(btrim(v_session ->> 'session_id'), '') end, case when jsonb_typeof(v_session -> 'sessionKey') = 'string' then nullif(btrim(v_session ->> 'sessionKey'), '') end, case when jsonb_typeof(v_session -> 'session_key') = 'string' then nullif(btrim(v_session ->> 'session_key'), '') end);
+    if v_id_key then
+      if v_identity is null or 'legacy:' || v_identity <> btrim(p_session_key) then continue; end if;
+      v_identity_count := v_identity_count + 1;
+    end if;
+    v_state := lower(coalesce(nullif(btrim(v_session ->> 'scheduleState'), ''), nullif(btrim(v_session ->> 'schedule_state'), ''), nullif(btrim(v_session ->> 'state'), ''), 'active'));
+    if v_state not in ('active', 'normal', 'makeup') then continue; end if;
+    v_date_text := coalesce(nullif(btrim(v_session ->> 'date'), ''), nullif(btrim(v_session ->> 'session_date'), ''), nullif(btrim(v_session ->> 'dateValue'), ''), nullif(btrim(v_session ->> 'date_value'), ''));
+    v_number_text := coalesce(nullif(btrim(v_session ->> 'sessionNumber'), ''), nullif(btrim(v_session ->> 'session_number'), ''));
+    if v_date_text is null or v_date_text !~ '^\d{4}-\d{2}-\d{2}$' then continue; end if;
+    begin
+      v_session_date := v_date_text::date;
+      if v_id_key then
+        v_canonical_key := 'legacy:' || v_identity;
+      else
+        if v_number_text is null or v_number_text !~ '^[1-9]\d*$' then continue; end if;
+        v_session_number := v_number_text::integer;
+        v_canonical_key := to_char(v_session_date, 'YYYY-MM-DD') || ':' || v_session_number::text;
+      end if;
+    exception when invalid_text_representation or numeric_value_out_of_range or invalid_datetime_format or datetime_field_overflow then continue;
+    end;
+    if v_session_date = p_date and v_canonical_key = btrim(p_session_key) then
+      v_match_count := v_match_count + 1;
+      v_result := jsonb_build_object('valid', true, 'sessionDate', to_char(v_session_date, 'YYYY-MM-DD'), 'sessionKey', v_canonical_key,
+        'sessionLabel', case when v_id_key then '수업' else v_session_number::text || '회차' end);
+    end if;
+  end loop;
+  if v_match_count = 1 and (not v_id_key or v_identity_count = 1) then return v_result; end if;
+  return jsonb_build_object('valid', false, 'sessionDate', null, 'sessionKey', null, 'sessionLabel', null);
+end;
+$function$;
+
+
+CREATE OR REPLACE FUNCTION dashboard_private.registration_customer_message_admission_plan_v1(p_enrollment_id uuid, p_runtime_version integer)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+ SET "TimeZone" TO 'UTC'
+AS $function$
+declare
+  v_enrollment public.ops_registration_enrollments%rowtype;
+  v_track public.ops_registration_subject_tracks%rowtype;
+  v_class public.classes%rowtype;
+  v_textbook public.textbooks%rowtype;
+  v_session public.class_lesson_sessions%rowtype;
+  v_authority text;
+  v_slots jsonb;
+  v_first_lesson jsonb;
+  v_schedule_hash text;
+  v_plan_sessions jsonb;
+  v_plan_session jsonb;
+  v_plan_date_text text;
+  v_plan_number_text text;
+  v_plan_key text;
+  v_plan_identity text;
+  v_plan_identity_count integer := 0;
+  v_plan_state text;
+  v_plan_start_text text;
+  v_plan_end_text text;
+  v_plan_start_time time;
+  v_plan_end_time time;
+  v_plan_match_count integer := 0;
+  v_candidate_count integer;
+  v_candidate_slot jsonb;
+  v_textbook_name text;
+  v_textbook_id uuid;
+  v_textbook_updated_at timestamptz;
+  v_textbook_names text[] := array[]::text[];
+begin
+  if p_enrollment_id is null or p_runtime_version is null or p_runtime_version < 0 then
+    raise exception 'registration_customer_message_admission_schedule_incomplete'
+      using errcode = '22023';
+  end if;
+
+  select enrollment.*
+  into v_enrollment
+  from public.ops_registration_enrollments enrollment
+  where enrollment.id = p_enrollment_id
+  for share;
+
+  if not found
+    or v_enrollment.status <> 'planned'
+    or v_enrollment.admission_batch_id is not null
+    or v_enrollment.class_start_date is null
+    or nullif(pg_catalog.btrim(v_enrollment.class_start_session_key), '') is null then
+    raise exception 'registration_customer_message_admission_schedule_incomplete'
+      using errcode = '22023';
+  end if;
+
+  select track.*
+  into v_track
+  from public.ops_registration_subject_tracks track
+  where track.id = v_enrollment.track_id
+    and track.archived_at is null and not track.migration_review_required
+  for share;
+
+  if not found then
+    raise exception 'registration_customer_message_admission_schedule_incomplete'
+      using errcode = '22023';
+  end if;
+
+  select class.*
+  into v_class
+  from public.classes class
+  where class.id = v_enrollment.class_id
+  for share;
+
+  if not found
+    or nullif(pg_catalog.btrim(v_class.name), '') is null
+    or nullif(pg_catalog.btrim(v_class.subject), '') is null
+    or v_class.subject is distinct from v_track.subject then
+    raise exception 'registration_customer_message_admission_schedule_incomplete'
+      using errcode = '22023';
+  end if;
+
+  foreach v_textbook_id in array coalesce(v_enrollment.textbook_ids, array_remove(array[v_enrollment.textbook_id], null)) loop
+    select textbook.* into v_textbook from public.textbooks textbook
+    where textbook.id = v_textbook_id for share;
+    if not found then
+      raise exception 'registration_customer_message_admission_schedule_incomplete' using errcode = '22023';
+    end if;
+    v_textbook_name := coalesce(nullif(pg_catalog.btrim(v_textbook.name), ''), nullif(pg_catalog.btrim(v_textbook.title), ''));
+    if v_textbook_name is null then
+      raise exception 'registration_customer_message_admission_schedule_incomplete' using errcode = '22023';
+    end if;
+    v_textbook_names := pg_catalog.array_append(v_textbook_names, v_textbook_name);
+    v_textbook_updated_at := greatest(v_textbook_updated_at, coalesce(v_textbook.updated_at, v_textbook.created_at, v_enrollment.updated_at));
+  end loop;
+  v_textbook_name := nullif(pg_catalog.array_to_string(v_textbook_names, ', '), '');
+
+  if public.continuous_class_schedule_runtime_version() = 1
+    and p_runtime_version = 1
+    and v_class.schedule_storage_mode = 'normalized' then
+    v_authority := 'normalized';
+    if v_enrollment.class_start_lesson_session_id is null then
+      raise exception 'registration_customer_message_admission_schedule_incomplete'
+        using errcode = '22023';
+    end if;
+
+    perform slot.id
+    from public.class_schedule_slots slot
+    where slot.class_id = v_class.id
+    order by slot.sort_order, slot.weekday, slot.start_time, slot.id
+    for share;
+
+    if not found or exists (
+      select 1
+      from public.class_schedule_slots slot
+      where slot.class_id = v_class.id
+        and (
+          slot.start_time >= slot.end_time
+          or nullif(pg_catalog.btrim(slot.teacher_name), '') is null
+          or nullif(pg_catalog.btrim(slot.classroom_name), '') is null
+        )
+    ) then
+      raise exception 'registration_customer_message_admission_schedule_incomplete'
+        using errcode = '22023';
+    end if;
+
+    select pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'slotId', slot.id,
+        'weekday', slot.weekday,
+        'startTime', pg_catalog.to_char(slot.start_time, 'HH24:MI'),
+        'endTime', pg_catalog.to_char(slot.end_time, 'HH24:MI'),
+        'teacherName', pg_catalog.btrim(slot.teacher_name),
+        'classroomName', pg_catalog.btrim(slot.classroom_name),
+        'sortOrder', slot.sort_order,
+        'updatedAt', slot.updated_at
+      )
+      order by slot.sort_order, slot.weekday, slot.start_time, slot.id
+    )
+    into v_slots
+    from public.class_schedule_slots slot
+    where slot.class_id = v_class.id;
+
+    select session.*
+    into v_session
+    from public.class_lesson_sessions session
+    where session.id = v_enrollment.class_start_lesson_session_id
+      and session.class_id = v_enrollment.class_id
+      and session.session_date = v_enrollment.class_start_date
+      and session.session_key = v_enrollment.class_start_session_key
+      and session.schedule_state in ('active', 'makeup')
+      and session.start_time is not null
+      and session.end_time is not null
+      and session.start_time < session.end_time
+      and nullif(pg_catalog.btrim(session.teacher_name_snapshot), '') is not null
+      and nullif(pg_catalog.btrim(session.classroom_name_snapshot), '') is not null
+    for share;
+
+    if not found then
+      raise exception 'registration_customer_message_admission_schedule_incomplete'
+        using errcode = '22023';
+    end if;
+
+    v_first_lesson := pg_catalog.jsonb_build_object(
+      'sessionId', v_session.id,
+      'sessionKey', v_session.session_key,
+      'sessionDate', pg_catalog.to_char(v_session.session_date, 'YYYY-MM-DD'),
+      'scheduleState', v_session.schedule_state,
+      'startTime', pg_catalog.to_char(v_session.start_time, 'HH24:MI'),
+      'endTime', pg_catalog.to_char(v_session.end_time, 'HH24:MI'),
+      'revision', v_session.revision,
+      'updatedAt', v_session.updated_at
+    );
+    v_schedule_hash := dashboard_private.notification_sha256_hex_v1(
+      dashboard_private.notification_canonical_json_v1(
+        pg_catalog.jsonb_build_object(
+          'slots', v_slots,
+          'firstLesson', v_first_lesson
+        )
+      )
+    );
+  else
+    v_authority := 'legacy';
+    v_slots := dashboard_private.registration_customer_message_legacy_slots_v1(
+      v_class.schedule,
+      v_class.teacher,
+      v_class.room
+    );
+    v_plan_sessions := case
+      when pg_catalog.jsonb_typeof(v_class.schedule_plan -> 'sessions') = 'array'
+        then v_class.schedule_plan -> 'sessions'
+      when pg_catalog.jsonb_typeof(v_class.schedule_plan -> 'session_list') = 'array'
+        then v_class.schedule_plan -> 'session_list'
+      else null
+    end;
+    if v_plan_sessions is null then
+      raise exception 'registration_customer_message_admission_schedule_incomplete'
+        using errcode = '22023';
+    end if;
+
+    for v_plan_session in
+      select item.value
+      from pg_catalog.jsonb_array_elements(v_plan_sessions) item(value)
+    loop
+      v_plan_date_text := coalesce(
+        nullif(pg_catalog.btrim(v_plan_session ->> 'date'), ''),
+        nullif(pg_catalog.btrim(v_plan_session ->> 'session_date'), ''),
+        nullif(pg_catalog.btrim(v_plan_session ->> 'dateValue'), ''),
+        nullif(pg_catalog.btrim(v_plan_session ->> 'date_value'), '')
+      );
+      v_plan_identity := coalesce(case when jsonb_typeof(v_plan_session -> 'id') = 'string' then nullif(btrim(v_plan_session ->> 'id'), '') end, case when jsonb_typeof(v_plan_session -> 'session_id') = 'string' then nullif(btrim(v_plan_session ->> 'session_id'), '') end, case when jsonb_typeof(v_plan_session -> 'sessionKey') = 'string' then nullif(btrim(v_plan_session ->> 'sessionKey'), '') end, case when jsonb_typeof(v_plan_session -> 'session_key') = 'string' then nullif(btrim(v_plan_session ->> 'session_key'), '') end);
+      if left(btrim(v_enrollment.class_start_session_key), 7) = 'legacy:' then
+        if v_plan_identity is null or 'legacy:' || v_plan_identity <> btrim(v_enrollment.class_start_session_key) then continue; end if;
+        v_plan_identity_count := v_plan_identity_count + 1;
+        v_plan_key := 'legacy:' || v_plan_identity;
+      else
+        v_plan_number_text := coalesce(nullif(btrim(v_plan_session ->> 'sessionNumber'), ''), nullif(btrim(v_plan_session ->> 'session_number'), ''));
+        if v_plan_number_text is null or v_plan_number_text !~ '^[1-9]\d*$' then continue; end if;
+        begin
+          v_plan_key := to_char(v_plan_date_text::date, 'YYYY-MM-DD') || ':' || v_plan_number_text::integer::text;
+        exception when invalid_text_representation or numeric_value_out_of_range or invalid_datetime_format or datetime_field_overflow then continue;
+        end;
+      end if;
+      if v_plan_date_text is null or v_plan_date_text !~ '^\d{4}-\d{2}-\d{2}$' then continue; end if;
+      begin
+        perform v_plan_date_text::date;
+      exception when invalid_datetime_format or datetime_field_overflow then continue;
+      end;
+      if v_plan_date_text::date <> v_enrollment.class_start_date
+        or v_plan_key <> pg_catalog.btrim(v_enrollment.class_start_session_key) then
+        continue;
+      end if;
+
+      v_plan_match_count := v_plan_match_count + 1;
+      v_plan_state := pg_catalog.lower(coalesce(
+        nullif(pg_catalog.btrim(v_plan_session ->> 'scheduleState'), ''),
+        nullif(pg_catalog.btrim(v_plan_session ->> 'schedule_state'), ''),
+        nullif(pg_catalog.btrim(v_plan_session ->> 'state'), ''),
+        'active'
+      ));
+      v_plan_start_text := coalesce(
+        nullif(pg_catalog.btrim(v_plan_session ->> 'startTime'), ''),
+        nullif(pg_catalog.btrim(v_plan_session ->> 'start_time'), '')
+      );
+      v_plan_end_text := coalesce(
+        nullif(pg_catalog.btrim(v_plan_session ->> 'endTime'), ''),
+        nullif(pg_catalog.btrim(v_plan_session ->> 'end_time'), '')
+      );
+    end loop;
+
+    if (left(btrim(v_enrollment.class_start_session_key), 7) = 'legacy:' and v_plan_identity_count <> 1)
+      or v_plan_match_count <> 1
+      or v_plan_state not in ('active', 'normal', 'makeup')
+      or (v_plan_start_text is null) <> (v_plan_end_text is null) then
+      raise exception 'registration_customer_message_admission_schedule_incomplete'
+        using errcode = '22023';
+    end if;
+
+    if v_plan_start_text is not null then
+      if v_plan_start_text !~ '^[0-9]{2}:[0-9]{2}$'
+        or v_plan_end_text !~ '^[0-9]{2}:[0-9]{2}$'
+        or pg_catalog.substr(v_plan_start_text, 1, 2)::integer > 23
+        or pg_catalog.substr(v_plan_start_text, 4, 2)::integer > 59
+        or pg_catalog.substr(v_plan_end_text, 1, 2)::integer > 23
+        or pg_catalog.substr(v_plan_end_text, 4, 2)::integer > 59 then
+        raise exception 'registration_customer_message_admission_schedule_incomplete'
+          using errcode = '22023';
+      end if;
+      v_plan_start_time := v_plan_start_text::time;
+      v_plan_end_time := v_plan_end_text::time;
+      if v_plan_start_time >= v_plan_end_time then
+        raise exception 'registration_customer_message_admission_schedule_incomplete'
+          using errcode = '22023';
+      end if;
+    else
+      if v_plan_state not in ('active', 'normal') then
+        raise exception 'registration_customer_message_admission_schedule_incomplete'
+          using errcode = '22023';
+      end if;
+      select pg_catalog.count(*)::integer
+      into v_candidate_count
+      from pg_catalog.jsonb_array_elements(v_slots) slot(value)
+      where (slot.value ->> 'weekday')::integer =
+        pg_catalog.date_part('dow', v_enrollment.class_start_date)::integer;
+      if v_candidate_count <> 1 then
+        raise exception 'registration_customer_message_admission_schedule_incomplete'
+          using errcode = '22023';
+      end if;
+      select slot.value
+      into v_candidate_slot
+      from pg_catalog.jsonb_array_elements(v_slots) slot(value)
+      where (slot.value ->> 'weekday')::integer =
+        pg_catalog.date_part('dow', v_enrollment.class_start_date)::integer;
+      v_plan_start_text := v_candidate_slot ->> 'startTime';
+      v_plan_end_text := v_candidate_slot ->> 'endTime';
+    end if;
+
+    v_first_lesson := pg_catalog.jsonb_build_object(
+      'sessionId', null,
+      'sessionKey', pg_catalog.btrim(v_enrollment.class_start_session_key),
+      'sessionDate', pg_catalog.to_char(v_enrollment.class_start_date, 'YYYY-MM-DD'),
+      'scheduleState', case when v_plan_state = 'makeup' then 'makeup' else 'active' end,
+      'startTime', v_plan_start_text,
+      'endTime', v_plan_end_text,
+      'revision', null,
+      'updatedAt', null
+    );
+    v_schedule_hash := dashboard_private.notification_sha256_hex_v1(
+      dashboard_private.notification_canonical_json_v1(
+        pg_catalog.jsonb_build_object(
+          'schedule', v_class.schedule,
+          'schedulePlan', v_class.schedule_plan,
+          'teacher', v_class.teacher,
+          'room', v_class.room
+        )
+      )
+    );
+  end if;
+
+  return pg_catalog.jsonb_build_object(
+    'enrollmentId', v_enrollment.id,
+    'trackId', v_track.id,
+    'subject', v_track.subject,
+    'sortOrder', v_enrollment.sort_order,
+    'workflowStatus', v_track.workflow_status,
+    'workflowRevision', v_track.workflow_revision,
+    'enrollmentUpdatedAt', v_enrollment.updated_at,
+    'classId', v_class.id,
+    'classSubject', v_class.subject,
+    'className', pg_catalog.btrim(v_class.name),
+    'classUpdatedAt', coalesce(v_class.created_at, v_enrollment.updated_at),
+    'textbookId', v_enrollment.textbook_id,
+    'textbookName', case when v_enrollment.textbook_id is null then null else v_textbook_name end,
+    'textbookUpdatedAt', case
+      when v_enrollment.textbook_id is null then null
+      else v_textbook_updated_at
+    end,
+    'runtimeVersion', p_runtime_version,
+    'storageMode', v_class.schedule_storage_mode,
+    'authority', v_authority,
+    'scheduleRevision', v_class.schedule_revision,
+    'scheduleHash', v_schedule_hash,
+    'slots', v_slots,
+    'firstLesson', v_first_lesson
+  );
+end;
+$function$;
+
+
 commit;

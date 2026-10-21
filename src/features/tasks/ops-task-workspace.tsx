@@ -4257,7 +4257,7 @@ function getSchedulePlanSessions(classItem?: OpsClassOption) {
 }
 
 function getWordRetestClassScheduleItems(classItem?: OpsClassOption): WordRetestClassScheduleItem[] {
-  return getSelectableRegistrationScheduleSessions(classItem?.schedulePlan).map((session) => ({
+  return getSelectableRegistrationScheduleSessions(classItem?.schedulePlan, { normalized: false }).map((session) => ({
     dateKey: session.dateKey,
     label: session.sessionLabel,
     state: session.state,

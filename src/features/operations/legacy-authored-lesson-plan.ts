@@ -148,16 +148,36 @@ export function setAuthoredLegacyLessonFields(plan: Plan, id: string, next: Row,
     sessions: rows(plan.sessions).map(item => item === before ? row : item) };
 }
 
+// New links carry a stable source ID. Older links can be resolved only when
+// their original date and billing identity name exactly one ordinary source.
+export function authoredLegacyMakeupSource(plan: Plan, id: string): Row | null {
+  const matches = rows(plan.sessions).filter(row => key(row) === id);
+  if (matches.length !== 1 || isRequestMakeupSession(matches[0])) return null;
+  const row = matches[0];
+  if (!row.originalDate && !row.originalSessionId) return row;
+  const sources = rows(plan.sessions).filter(candidate => !isRequestMakeupSession(candidate)
+    && !object(candidate).originalDate && !object(candidate).originalSessionId
+    && object(candidate).billingId === row.billingId
+    && (row.originalSessionId ? key(candidate) === row.originalSessionId : object(candidate).date === row.originalDate));
+  return sources.length === 1 ? sources[0] : null;
+}
+
 export function setAuthoredLegacyMakeupDate(plan: Plan, id: string, date: string, memo = ''): Plan {
-  const source = rows(plan.sessions).find(row => key(row) === id);
+  const sources = rows(plan.sessions).filter(row => key(row) === id);
+  const source = sources.length === 1 ? sources[0] : null;
   if (!source || isRequestMakeupSession(source) || (date && (!dateValid(date) || date === source.date))) return plan;
-  const linked = rows(plan.sessions).filter(row => object(row).originalDate === source.date && object(row).billingId === source.billingId && !isRequestMakeupSession(row));
-  if (linked.length > 1 || rows(plan.sessions).filter(row => object(row).date === source.date).length !== 1) return plan;
-  if (!date && !source.makeupDate && !object(object(plan.sessionStates)[String(source.date)]).makeupDate && !linked.length) return plan;
+  if (rows(plan.sessions).some(row => !isRequestMakeupSession(row) && !object(row).originalSessionId
+    && object(row).originalDate === source.date && object(row).billingId === source.billingId
+    && !authoredLegacyMakeupSource(plan, key(row)))) return plan;
+  const linked = rows(plan.sessions).filter(row => (object(row).originalDate || object(row).originalSessionId)
+    && authoredLegacyMakeupSource(plan, key(row)) === source);
+  const uniqueDate = rows(plan.sessions).filter(row => object(row).date === source.date).length === 1;
+  if (linked.length > 1) return plan;
+  if (!date && !source.makeupDate && !(uniqueDate && object(object(plan.sessionStates)[String(source.date)]).makeupDate) && !linked.length) return plan;
   // Unlinking does not undo a cancellation. Callers that explicitly restore a
   // normal lesson (calendar/state controls) own that separate state transition.
   let next = patchAuthoredLegacyLesson(plan, id, { ...(date ? { state: 'exception', scheduleState: 'exception' } : {}), makeupDate: date });
-  next = { ...next, sessionStates: { ...object(next.sessionStates), [String(source.date)]: {
+  if (uniqueDate) next = { ...next, sessionStates: { ...object(next.sessionStates), [String(source.date)]: {
     ...object(object(next.sessionStates)[String(source.date)]), makeupDate: date,
   } } };
   if (!date) return { ...next, sessions: rows(next.sessions).filter(row => row !== linked[0]) };
@@ -165,7 +185,7 @@ export function setAuthoredLegacyMakeupDate(plan: Plan, id: string, date: string
   const makeupId = `lesson:${crypto.randomUUID()}`;
   next = { ...next, sessions: [...rows(next.sessions), { id: makeupId, sessionKey: makeupId, date,
     billingId: source.billingId, billingLabel: source.billingLabel, billingColor: source.billingColor,
-    originalDate: source.date, scheduleState: 'makeup', state: 'makeup', memo, sessionNumber: null,
+    originalDate: source.date, originalSessionId: id, scheduleState: 'makeup', state: 'makeup', memo, sessionNumber: null,
     ...Object.fromEntries(Object.entries(object(object(plan.sessionSchedules)[date])).filter(([field]) => fields.includes(field))),
   }] };
   return next;
