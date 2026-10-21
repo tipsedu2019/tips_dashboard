@@ -4235,11 +4235,15 @@ export function ClassScheduleWorkspace() {
     ? legacyEffectiveContext?.version === 1
       ? resolveEffectiveSchedule({ ...legacyEffectiveContext, session: { id: "default-preview", date: selectedLessonSession.dateValue, state: "active" } }).values
       : resolveLegacyLessonDetails(selectedLessonSession.dateValue, legacyLessonSnapshotDefaults) : null;
+  const legacySelectedRawOverride = selectedLessonSession && normalizedLessonPlan
+    ? (normalizedLessonPlan.sessions as Record<string, unknown>[] || []).find(row => text(row?.id) === selectedLessonSession.id) || {} : {};
   const legacySelectedOverride = selectedLessonSession && normalizedLessonPlan
-    ? ((normalizedLessonPlan.sessionSchedules as Record<string, Record<string, unknown>> || {})[selectedLessonSession.dateValue]
-      || (normalizedLessonPlan.sessions as Record<string, unknown>[] || []).find(row => text(row?.id) === selectedLessonSession.id) || {}) : {};
+    ? (normalizedLessonPlan.sessionSchedules as Record<string, Record<string, unknown>> || {})[selectedLessonSession.dateValue] || {} : {};
+  const legacyUsesSharedDateSettings = Boolean(selectedLessonSession && normalizedLessonPlan
+    && (normalizedLessonPlan.sessionSchedules as Record<string, unknown> || {})[selectedLessonSession.dateValue]
+    && (normalizedLessonPlan.sessions as Record<string, unknown>[] || []).filter(row => row?.date === selectedLessonSession.dateValue).length > 1);
   const legacyHasExplicitOverride = ["startTime", "endTime", "teacherCatalogId", "classroomCatalogId", "teacherName", "classroomName"]
-    .some(key => Object.prototype.hasOwnProperty.call(legacySelectedOverride, key));
+    .some(key => Object.prototype.hasOwnProperty.call(legacySelectedOverride, key) || Object.prototype.hasOwnProperty.call(legacySelectedRawOverride, key));
   const pastCorrectionSavedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
   const pastCorrectionTarget = lessonScheduleReadReady && !isNormalizedLessonSchedule && actorScope?.endsWith(":admin")
     && selectedRowClassItem?.status === "수강" && selectedLessonSession && !requestOwnedLessonSessionIds.has(selectedLessonSession.id)
@@ -4535,10 +4539,10 @@ export function ClassScheduleWorkspace() {
                               onChange={value => updateLessonPlanDraft(current => setAuthoredLegacyLessonFields(current, selectedLessonSession.id, value, legacyLessonDetails))} />
                           ) : null}
                           {legacySelectedDefaults && legacyLessonDetails && (legacyEffectiveContext?.version === 1 ? legacyHasExplicitOverride : Object.values(legacyLessonDetails).some(value => !value)) ? <Button type="button" size="sm" variant="outline"
-                            aria-label={`${selectedLessonSession.dateValue} 기본 정보 적용`}
+                            aria-label={`${selectedLessonSession.dateValue} ${legacyUsesSharedDateSettings ? "개별 설정 해제" : "기본 정보 적용"}`}
                             onClick={() => updateLessonPlanDraft(current => setAuthoredLegacyLessonFields(current, selectedLessonSession.id,
                               legacyEffectiveContext?.version === 1 ? {} : { ...legacySelectedDefaults, ...Object.fromEntries(Object.entries(legacyLessonDetails).filter(([, value]) => value)) },
-                              legacyLessonDetails, legacyEffectiveContext?.version === 1))}>{legacyEffectiveContext?.version === 1 ? "기본 정보 사용" : "기본 정보 적용"}</Button> : null}
+                              legacyLessonDetails, legacyEffectiveContext?.version === 1))}>{legacyEffectiveContext?.version === 1 ? (legacyUsesSharedDateSettings ? "개별 설정 해제 · 날짜 설정 사용" : "기본 정보 사용") : "기본 정보 적용"}</Button> : null}
                           <Textarea
                             value={selectedLessonSessionEditableMemo}
                             onChange={(event) => handleLessonSessionMemoChange(selectedLessonSession, event.target.value)}

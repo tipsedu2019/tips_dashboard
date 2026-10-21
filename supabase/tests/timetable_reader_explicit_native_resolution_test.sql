@@ -815,8 +815,8 @@ select is(pg_temp.case_blockers(63)#>'{0,startMinute}','null'::jsonb,'invalid st
 select is(pg_temp.case_blockers(63)#>'{0,endMinute}','600'::jsonb,'invalid start retains known end bound');
 select is(jsonb_array_length(pg_temp.case_dated(115)),2,'same-date distinct identities retain multiplicity');
 select ok(not exists(select 1 from jsonb_array_elements(pg_temp.case_dated(115)) v where v ? 'overriddenWeeklySlotId'),'same-date duplicates cannot acquire single-weekly suppression');
-select is(pg_temp.case_dated(131)#>'{0,startMinute}','660'::jsonb,'date override replaces explicit row start');
-select is(pg_temp.case_blockers(133)#>'{0,teacherId}','null'::jsonb,'date override explicit clear suppresses inherited identity');
+select is(pg_temp.case_dated(131)#>'{0,startMinute}','540'::jsonb,'explicit row start precedes the shared date fallback');
+select is(pg_temp.case_dated(133)#>'{0,teacherId}',to_jsonb(pg_temp.bid(101)),'explicit row teacher precedes a shared date clear');
 select is(jsonb_array_length(pg_temp.case_dated(114)),0,'duplicate identities remain diagnostics across dates');
 select is(jsonb_array_length(pg_temp.case_blockers(114)),2,'duplicate identity diagnostics preserve multiplicity');
 select is(jsonb_array_length(pg_temp.case_dated(11)),1,'closed past explicit history is retained');

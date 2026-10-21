@@ -468,4 +468,109 @@ revoke all on function
  dashboard_private.write_class_lesson_plan_input_v1(uuid,jsonb,jsonb,uuid,text),
  dashboard_private.project_class_lesson_input_sessions_v1(uuid,uuid[],uuid,text)
  from public,anon,authenticated,service_role;
+-- Align saved per-ID input with the editor and both operating readers.
+create or replace function dashboard_private.resolve_legacy_effective_schedule_v1(p jsonb)
+returns jsonb language plpgsql immutable security invoker set search_path='' as $fn$
+declare
+ lesson jsonb:=coalesce(p->'session','{}'); d text:=coalesce(lesson->>'date',''); dt date;
+ state text:=coalesce(nullif(lesson->>'scheduleState',''),nullif(lesson->>'state',''),'active');
+ kind text:='unresolved'; vals jsonb:='{}'; provenance jsonb:='{}'; missing jsonb:='[]'; errors jsonb:='[]';
+ allslots jsonb:=coalesce(p->'basicSlots','[]'); slots jsonb; basic_source text;
+ sources jsonb; source jsonb; chosen jsonb; source_name text; source_error text;
+ field text; name_field text; catalogs jsonb; candidate text; value text;
+ n int; distinct_n int; common_value jsonb; has_choice boolean; request_owned boolean:=false; request_id text:=lesson->>'makeupRequestId'; prefix text; unassigned_room boolean;
+begin
+ if jsonb_typeof(p->'session') is distinct from 'object' then errors:=errors||'"invalid_session"'::jsonb;end if;
+ if coalesce(nullif(lesson->>'id',''),nullif(lesson->>'sessionKey',''),'')='' or coalesce((p->>'identityCount')::int,1)<>1 then errors:=errors||'"ambiguous_identity"'::jsonb;end if;
+ begin
+  dt:=d::date;
+  if d!~'^[0-9]{4}-[0-9]{2}-[0-9]{2}$' or dt::text<>d then raise exception 'invalid date';end if;
+ exception when others then errors:=errors||'"invalid_date"'::jsonb;end;
+ if state not in('active','makeup','exception','skipped','tbd') then errors:=errors||'"invalid_state"'::jsonb;end if;
+ if errors<>'[]'::jsonb and not (errors='["invalid_date"]'::jsonb and lesson ?| array['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName']) then
+  return jsonb_build_object('date',d,'state',state,'kind',kind,'values',vals,'provenance',provenance,'missing',missing,'errors',errors);
+ end if;
+ if errors='[]'::jsonb and state in('exception','skipped','tbd') then
+  return jsonb_build_object('date',d,'state',state,'kind','cancelled','values',vals,'provenance',provenance,'missing',missing,'errors',errors);
+ end if;
+ if errors ? 'invalid_date' then allslots:='[]';dt:=null;end if;
+ if lesson ? 'sourceSlotId' then
+  select coalesce(jsonb_agg(s),'[]') into slots from jsonb_array_elements(allslots) s where coalesce(lesson->>'sourceSlotId','')<>'' and s->>'id'=lesson->>'sourceSlotId';
+  basic_source:='basic_bound_slot';
+ else
+  select coalesce(jsonb_agg(s),'[]') into slots from jsonb_array_elements(allslots) s where (s->>'weekday')::int=extract(dow from dt)::int;
+  basic_source:=case when slots='[]'::jsonb then 'basic_shared' else 'basic_weekday' end;
+  if slots='[]'::jsonb then slots:=allslots;end if;
+ end if;
+ -- Field-level authored scalar priority; keep request-lesson map bypass.
+ if request_id~*'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
+  prefix:='makeup-request:'||request_id||':';
+  request_owned:=coalesce((lesson->>'makeupRequestRole'='cancel' and jsonb_typeof(coalesce(nullif(lesson->'id','""'::jsonb),lesson->'sessionKey'))='string')
+   or (lesson->>'id'='makeup-cancel:'||request_id and lesson->>'sessionKey'=lesson->>'id')
+   or (left(lesson->>'id',length(prefix))=prefix and substring(lesson->>'id' from length(prefix)+1)~'^[0-9]+$' and lesson->>'sessionKey'=lesson->>'id'),false);
+ end if;
+ -- A date map masks legacy raw names, but not explicit row times/catalog IDs.
+ -- Shared dates inherit missing fields; stable identity remains independently checked.
+ if not request_owned and jsonb_typeof(p->'dateOverride')='object' then
+  select jsonb_build_array(jsonb_build_object('name','session','value',coalesce(jsonb_object_agg(k,v),'{}'::jsonb)),
+   jsonb_build_object('name','date_override','value',p->'dateOverride')) into sources
+  from jsonb_each(lesson) e(k,v) where k=any(array['startTime','endTime','teacherCatalogId','classroomCatalogId','classroomUnresolved']);
+ else sources:=jsonb_build_array(jsonb_build_object('name','session','value',lesson));end if;
+ if jsonb_typeof(p->'approvedOverride')='object' then sources:=sources||jsonb_build_array(jsonb_build_object('name','approved_override','value',p->'approvedOverride'));end if;
+ foreach field in array array['startTime','endTime','teacherCatalogId','classroomCatalogId'] loop
+  name_field:=case field when 'teacherCatalogId' then 'teacherName' when 'classroomCatalogId' then 'classroomName' end;
+  catalogs:=case field when 'teacherCatalogId' then coalesce(p#>'{catalogs,teachers}','[]') when 'classroomCatalogId' then coalesce(p#>'{catalogs,rooms}','[]') end;
+  has_choice:=false; chosen:='{}';source_error:=null;source_name:=basic_source;value:=null;
+  for source in select s from jsonb_array_elements(sources) s loop
+   if (source->'value') ? field or (name_field is not null and (source->'value') ? name_field) then
+    has_choice:=true; chosen:=source->'value';source_name:=source->>'name';
+    if source_name='approved_override' and (p->'approvedOverrideVerified') is distinct from 'true'::jsonb then source_error:='unverified_approved_override';end if;
+    if source_error is null and field='classroomCatalogId' and chosen->'classroomUnresolved'='true'::jsonb then source_error:='invalid_resource';end if;
+    exit;
+   end if;
+  end loop;
+  if not has_choice then
+   select count(*),count(distinct coalesce(s->field,'null'::jsonb)),(jsonb_agg(coalesce(s->field,'null'::jsonb)))->0 into n,distinct_n,common_value from jsonb_array_elements(slots) s;
+   if n>0 and distinct_n=1 then chosen:=jsonb_build_object(field,common_value);end if;
+   if field='classroomCatalogId' then
+    if exists(select 1 from jsonb_array_elements(slots) s where s->'classroomUnresolved'='true'::jsonb) then source_error:='invalid_resource';
+    elsif n>0 and distinct_n>1 then source_error:='ambiguous_basic_resource';end if;
+   end if;
+  end if;
+  provenance:=provenance||jsonb_build_object(field,source_name);
+  unassigned_room:=field='classroomCatalogId' and source_error is null;
+  if source_error is not null then errors:=errors||to_jsonb(field||':'||source_error);
+  elsif name_field is not null then
+   if chosen ? field then
+    candidate:=btrim(coalesce(chosen->>field,''));
+    if candidate<>'' and (select count(*) from jsonb_array_elements(catalogs) c where c->>'id'=candidate)=1 then value:=candidate;end if;
+    if field='classroomCatalogId' and (candidate<>'' or jsonb_typeof(chosen->field) not in('null','string')) then
+     unassigned_room:=false;
+     if value is null then errors:=errors||to_jsonb(field||':invalid_resource');end if;
+    end if;
+   elsif chosen ? name_field then
+    candidate:=btrim(coalesce(chosen->>name_field,''));
+    select count(*),min(c->>'id') into n,value from jsonb_array_elements(catalogs) c where candidate<>'' and btrim(c->>'name')=candidate;
+    if n<>1 or coalesce(value,'')='' then value:=null;end if;
+    if field='classroomCatalogId' then
+     unassigned_room:=jsonb_typeof(chosen->name_field) in('null','string') and n=0 and candidate in('','미정','강의실 미정');
+     if value is null and not unassigned_room then errors:=errors||to_jsonb(field||':invalid_resource');end if;
+    end if;
+   end if;
+  else
+   candidate:=btrim(coalesce(chosen->>field,''));
+   if candidate~'^[0-9]{1,2}:[0-5][0-9](:00([.]0+)?)?$' then
+    if split_part(candidate,':',1)::int<=23 or (field='endTime' and split_part(candidate,':',1)::int=24 and split_part(candidate,':',2)='00') then
+     value:=lpad(split_part(candidate,':',1),2,'0')||':'||split_part(candidate,':',2);
+    end if;
+   end if;
+  end if;
+  vals:=vals||jsonb_build_object(field,value);
+  if value is null and not unassigned_room then missing:=missing||to_jsonb(field);end if;
+ end loop;
+ if vals->>'startTime' is not null and vals->>'endTime' is not null and vals->>'startTime'>=vals->>'endTime' then errors:=errors||'"invalid_time_range"'::jsonb;end if;
+ if missing='[]'::jsonb and errors='[]'::jsonb then kind:='resolved';end if;
+ return jsonb_build_object('date',d,'state',state,'kind',kind,'values',vals,'provenance',provenance,'missing',missing,'errors',errors);
+end $fn$;
+
 commit;

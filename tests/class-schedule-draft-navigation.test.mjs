@@ -1667,3 +1667,84 @@ test('adjacent date-map React: displayed edit and emitted save payload must agre
  assert.equal(result.values.endTime,'13:30','operating resolver must consume the field emitted by the actual save path');
  t.diagnostic(JSON.stringify({lessonReaderCase:'actual-react-save-payload',input:effectiveInputForLesson(sent,sent.sessions[0],context),expected:result}));
 });
+
+const boundaryContext=payload=>({version:1,basicSlots:[{id:'basic',weekday:4,startTime:'09:00',endTime:'10:00',teacherCatalogId:id(101),classroomCatalogId:id(201)}],catalogs:{teachers:payload.teacherCatalogs,rooms:payload.classroomCatalogs}});
+test('p3 boundary A: raw start remains displayed and an earlier edited end is rejected', async t=>{
+ const payload=septemberOctoberDetail(),row=payload.classItem.schedulePlan.sessions.find(row=>row.date==='2026-10-08');
+ Object.assign(row,{startTime:'14:00',endTime:'15:00'});payload.classItem.schedulePlan.sessions=[row];
+ payload.classItem.schedulePlan.sessionSchedules={'2026-10-08':{startTime:'12:00',endTime:'13:00'}};
+ const page=await recoveryEditor(t,payload),context=boundaryContext(payload);
+ await page.normalized({status:'ready',value:{source:'legacy',sessions:[],effectiveScheduleContext:context}});
+ await selectLegacyRecoveryRow(page,'2026-10-08');
+ assert.equal(document.querySelector('input[aria-label="2026-10-08 시작"]').value,'14:00');
+ await changeInput('2026-10-08 종료','13:30');
+ assert.equal(document.querySelector('input[aria-label="2026-10-08 시작"]').value,'14:00');
+ await clickLessonSave();
+
+ assert.equal(saveRequests(page).length,0,'invalid end before the unchanged displayed start must not reach RPC');
+ assert.match(page.observed.lessonDesignSaveError,/종료 시간을 시작 시간 이후로/);
+});
+
+test('p3 boundary B: explicit same-date edit must be represented by the operating resolver after save', async t=>{
+ const payload=septemberOctoberDetail(),row=payload.classItem.schedulePlan.sessions.find(row=>row.date==='2026-10-08');
+ Object.assign(row,{startTime:'14:00',endTime:'15:00',teacherCatalogId:id(101),classroomCatalogId:id(201)});
+ const peer={...structuredClone(row),id:'peer-id',sessionKey:'peer-id',startTime:'16:00',endTime:'17:00'};
+ payload.classItem.schedulePlan.sessions=[row,peer];
+ payload.classItem.schedulePlan.sessionSchedules={'2026-10-08':{startTime:'12:00',endTime:'13:00',teacherCatalogId:id(101),classroomCatalogId:id(201)}};
+ const page=await recoveryEditor(t,payload),context=boundaryContext(payload);
+ await page.normalized({status:'ready',value:{source:'legacy',sessions:[],effectiveScheduleContext:context}});
+ await selectLegacyRecoveryRow(page,'2026-10-08');
+ assert.equal(document.querySelector('input[aria-label="2026-10-08 종료"]').value,'15:00');
+ await changeInput('2026-10-08 종료','15:30');await clickLessonSave();
+ assert.equal(saveRequests(page).length,1,page.observed.lessonDesignSaveError);
+ const sent=saveRequests(page)[0].args.p_patch.schedule_plan;
+ assert.equal(sent.sessions[0].endTime,'15:30');assert.deepEqual(sent.sessions[1],peer);
+ const {effectiveInputForLesson,resolveEffectiveSchedule}=page.load('src/features/operations/legacy-effective-schedule.js');
+ const input=effectiveInputForLesson(sent,sent.sessions[0],context),result=resolveEffectiveSchedule(input);
+ t.diagnostic(JSON.stringify({lessonReaderCase:'same-date-shared-map',input,expected:result}));
+ assert.equal(result.values.endTime,'15:30','a valid ID-addressed field edit must remain effective for that row');
+});
+
+test('p3 boundary C: editing only time preserves displayed name-only teacher and room', async t=>{
+ const payload=septemberOctoberDetail(),row=payload.classItem.schedulePlan.sessions.find(row=>row.date==='2026-10-08');
+ for(const field of ['teacherCatalogId','classroomCatalogId'])delete row[field];
+ Object.assign(row,{startTime:'09:00',endTime:'10:00',teacherName:'합성 담당',classroomName:'합성 강의실'});
+ payload.classItem.schedulePlan.sessions=[row];
+ payload.classItem.schedulePlan.sessionSchedules={'2026-10-08':{startTime:'09:00',endTime:'10:00',teacherName:'다른 합성 담당',classroomName:'다른 합성 강의실'}};
+ const page=await recoveryEditor(t,payload),context=boundaryContext(payload);
+ await page.normalized({status:'ready',value:{source:'legacy',sessions:[],effectiveScheduleContext:context}});
+ await selectLegacyRecoveryRow(page,'2026-10-08');
+ const resourceValues=()=>({teacher:document.querySelector('[aria-label="2026-10-08 선생님"]').value,room:document.querySelector('[aria-label="2026-10-08 강의실"]').value});
+ const before=resourceValues();assert.equal(before.teacher,id(102));assert.equal(before.room,id(202));
+ await changeInput('2026-10-08 종료','13:30');const after=resourceValues();await clickLessonSave();
+ assert.equal(saveRequests(page).length,1,page.observed.lessonDesignSaveError);
+ const sent=saveRequests(page)[0].args.p_patch.schedule_plan;
+ assert.equal(sent.sessions[0].endTime,'13:30');assert.equal(sent.sessions[0].teacherName,row.teacherName);assert.equal(sent.sessions[0].classroomName,row.classroomName);
+ const {effectiveInputForLesson,resolveEffectiveSchedule}=page.load('src/features/operations/legacy-effective-schedule.js');
+ const input=effectiveInputForLesson(sent,sent.sessions[0],context),result=resolveEffectiveSchedule(input);
+ t.diagnostic(JSON.stringify({lessonReaderCase:'name-only-resources',input,expected:result}));
+ assert.deepEqual(after,before,'editing only end time must not change either displayed resource');
+ assert.equal(result.values.teacherCatalogId,before.teacher);assert.equal(result.values.classroomCatalogId,before.room);
+});
+
+test('field-priority reset: shared date fallback is labelled and only the selected row is reset', async t => {
+ const payload=septemberOctoberDetail(),row=payload.classItem.schedulePlan.sessions.find(row=>row.date==='2026-10-08');
+ Object.assign(row,{startTime:'14:00',endTime:'15:00',teacherCatalogId:id(101),classroomCatalogId:id(201)});
+ const peer={...structuredClone(row),id:'peer-id',sessionKey:'peer-id',startTime:'16:00',endTime:'17:00'};
+ payload.classItem.schedulePlan.sessions=[row,peer];
+ const dateMap={startTime:'12:00',endTime:'13:00',teacherCatalogId:id(102),classroomCatalogId:id(202),opaque:true};
+ payload.classItem.schedulePlan.sessionSchedules={'2026-10-08':dateMap};
+ const page=await recoveryEditor(t,payload),context=boundaryContext(payload);
+ await page.normalized({status:'ready',value:{source:'legacy',sessions:[],effectiveScheduleContext:context}});
+ await selectLegacyRecoveryRow(page,'2026-10-08');
+ const reset=document.querySelector('button[aria-label="2026-10-08 개별 설정 해제"]');
+ assert.ok(reset);assert.match(reset.textContent,/날짜 설정 사용/);
+ await act(async()=>reset.click());
+ assert.equal(document.querySelector('input[aria-label="2026-10-08 시작"]').value,'12:00');
+ await clickLessonSave();assert.equal(saveRequests(page).length,1,page.observed.lessonDesignSaveError);
+ const sent=saveRequests(page)[0].args.p_patch.schedule_plan;
+ assert.deepEqual(sent.sessions[1],peer);assert.deepEqual(sent.sessionSchedules['2026-10-08'],dateMap);
+ const {effectiveInputForLesson,resolveEffectiveSchedule}=page.load('src/features/operations/legacy-effective-schedule.js');
+ assert.equal(resolveEffectiveSchedule(effectiveInputForLesson(sent,sent.sessions[0],context)).values.startTime,'12:00');
+ assert.equal(resolveEffectiveSchedule(effectiveInputForLesson(sent,sent.sessions[1],context)).values.startTime,'16:00');
+});

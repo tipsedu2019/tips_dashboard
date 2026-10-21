@@ -11,16 +11,16 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const dateValid = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
   && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 
-// Existing JS/SQL readers use a date-map object instead of the raw row. Keep
-// that object consistent with authored row fields, without copying its metadata
-// into the row or materializing unedited fallback fields into the row.
+// Keep unique-date compatibility data aligned with explicit scalar row values.
+// Legacy names are NOT row overrides when a date map exists: copying them would
+// replace an unedited map-selected resource. Preserve map names and metadata.
 function syncScheduleFields(plan: Plan, date: string, row: Row, cleared: string[] = []): unknown {
   const schedules = object(plan.sessionSchedules), entry = schedules[date];
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return plan.sessionSchedules;
   const details = object(entry);
   const remaining = { ...details };
   cleared.forEach(field => delete remaining[field]);
-  fields.filter(field => owns(row, field)).forEach(field => { remaining[field] = row[field]; });
+  fields.slice(0, 4).filter(field => owns(row, field)).forEach(field => { remaining[field] = row[field]; });
   if (same(remaining, details)) return plan.sessionSchedules;
   const next = { ...schedules };
   if (Object.keys(remaining).length) next[date] = remaining;

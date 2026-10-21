@@ -50,16 +50,20 @@ export function resolveEffectiveSchedule(input) {
     basicSource = slots.length ? 'basic_weekday' : 'basic_shared';
     if (!slots.length) slots = allSlots;
   }
-  // normalizeSessionSchedules replaces the ordinary row's entire override
-  // object with its date map. Request-owned rows bypass that shared map.
+  // Match the lesson editor's field-level contract: explicit row times/catalog
+  // IDs (including null) win; then the legacy date map, or the row when no map
+  // exists; then verified approved values and basics. A map still masks legacy
+  // raw names, including when it is empty/metadata-only. Names and IDs form one
+  // resource group. Shared maps are fallbacks, never an identity for a lesson.
+  // Request-owned rows keep the existing complete bypass of the shared map.
   const sources = !requestOwned(row) && object(input.dateOverride)
-    ? [{ name: 'date_override', value: input.dateOverride }]
+    ? [{ name: 'session', value: Object.fromEntries([...fields, 'classroomUnresolved'].filter(key => own(row, key)).map(key => [key, row[key]])) },
+      { name: 'date_override', value: input.dateOverride }]
     : [{ name: 'session', value: row }];
   if (object(input.approvedOverride)) sources.push({ name: 'approved_override', value: input.approvedOverride });
   const pick = keys => {
     for (const source of sources) {
       if (!keys.some(key => own(source.value, key))) continue;
-      if (source.name === 'date_override' && (input.sessionCountOnDate ?? 1) !== 1) return { source: source.name, error: 'ambiguous_date_override' };
       if (source.name === 'approved_override' && input.approvedOverrideVerified !== true) return { source: source.name, error: 'unverified_approved_override' };
       if (keys[0] === 'classroomCatalogId' && source.value.classroomUnresolved === true) return { source: source.name, error: 'invalid_resource' };
       return { source: source.name, value: source.value };
@@ -158,16 +162,29 @@ export function setLegacyLessonOverride(plan, date, next, displayed) {
   const keys = [...fields, 'teacherName', 'classroomName'];
   const previous = object(plan.sessionSchedules?.[date]) ? plan.sessionSchedules[date] : onDate[0];
   const details = Object.fromEntries(keys.filter(k => own(previous, k)).map(k => [k, previous[k]]));
-  for (const key of fields) if (next[key] !== displayed[key]) {
+  for (const key of fields) if (own(next, key) && next[key] !== displayed[key]) {
     details[key] = next[key];
     if (key === 'teacherCatalogId') delete details.teacherName;
     if (key === 'classroomCatalogId') delete details.classroomName;
   }
-  return { ...plan, sessionSchedules: { ...plan.sessionSchedules, [date]: details } };
+  // Older date-addressed callers keep their map representation. If the row
+  // already owns an edited scalar, update that scalar too so it cannot mask
+  // the explicit edit. Do not materialize unrelated inherited row values.
+  const row = { ...onDate[0] };
+  for (const key of fields) if (own(next, key) && own(row, key) && next[key] !== displayed[key]) {
+    row[key] = next[key];
+    if (key === 'teacherCatalogId') delete row.teacherName;
+    if (key === 'classroomCatalogId') { delete row.classroomName; delete row.classroomUnresolved; }
+  }
+  return { ...plan, sessions: plan.sessions.map(item => item === onDate[0] ? row : item),
+    sessionSchedules: { ...plan.sessionSchedules, [date]: details } };
 }
 
 export function resetLegacyLessonToBasics(plan, date) {
   const onDate = (plan.sessions || []).filter(row => row.date === date);
   if (onDate.length !== 1 || requestOwned(onDate[0])) return plan;
-  return { ...plan, sessionSchedules: { ...plan.sessionSchedules, [date]: {} } };
+  const row = { ...onDate[0] };
+  for (const key of [...fields, 'teacherName', 'classroomName', 'classroomUnresolved']) delete row[key];
+  return { ...plan, sessions: plan.sessions.map(item => item === onDate[0] ? row : item),
+    sessionSchedules: { ...plan.sessionSchedules, [date]: {} } };
 }

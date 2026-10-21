@@ -358,7 +358,7 @@ test('reader parity fixtures preserve authored fields through the existing consu
   check('linked-restoration', restored, restored.sessions[0], { startTime: '09:00', endTime: '10:00', kind: 'resolved' });
 });
 
-test('empty unlink is a no-op; an existing ambiguous shared date map is not rewritten for a peer', () => {
+test('empty unlink is a no-op; an ID edit consumes shared date fallbacks without rewriting peers', () => {
   const saved = adjacentFixture();
   assert.equal(setAuthoredLegacyMakeupDate(saved, 'source', ''), saved);
   const cancelled = { ...saved, sessions: [{ ...saved.sessions[0], state: 'exception', scheduleState: 'exception' }] };
@@ -369,7 +369,9 @@ test('empty unlink is a no-op; an existing ambiguous shared date map is not rewr
   const edited = setAuthoredLegacyLessonFields(saved, 'source', { endTime: '15:30' }, { endTime: '13:00' });
   assert.deepEqual(edited.sessions[1], peer);
   assert.deepEqual(edited.sessionSchedules, saved.sessionSchedules);
-  assert.ok(resolved(edited).errors.includes('endTime:ambiguous_date_override'), 'existing shared-map ambiguity is not silently rewritten or claimed resolved');
+  assert.equal(resolved(edited).values.endTime, '15:30');
+  assert.equal(resolved(edited).values.startTime, '12:00');
+  assert.equal(resolved(edited).kind, 'resolved');
 });
 
 
@@ -380,4 +382,65 @@ test('calendar map intents cannot rewrite one ordinary row when an approved peer
   saved.sessionSchedules['2026-10-05'] = { startTime: '12:00', endTime: '13:00' };
   const result = applyAuthoredLegacyLessonEdit({ ...saved, sessionSchedules: { '2026-10-05': { startTime: '12:00', endTime: '13:30' } } }, saved);
   assert.deepEqual(result.sessions, saved.sessions, 'date-addressed intent does not select an ordinary ID through an approved peer');
+});
+
+// One contract across UI scalar overrides, shared date fallbacks and legacy names.
+// Independently stated expectations; SQL consumes these same emitted inputs.
+for (const count of [1, 2]) for (const shape of ['raw-scalars', 'map-names', 'metadata-map', 'explicit-null']) {
+  for (const editedField of ['startTime', 'endTime', 'teacherCatalogId', 'classroomCatalogId', 'memo']) {
+    test(`field precedence: ${count} rows / ${shape} / ${editedField}`, t => {
+      const teacherB = 'ab000000-0000-4000-8000-000000000102', roomB = 'ab000000-0000-4000-8000-000000000202';
+      const context = { ...adjacentContext, catalogs: {
+        teachers: [{ id: teacher, name: 'A teacher' }, { id: teacherB, name: 'B teacher' }],
+        rooms: [{ id: room, name: 'A room' }, { id: roomB, name: 'B room' }],
+      } };
+      const plan = adjacentFixture(), row = plan.sessions[0];
+      Object.assign(row, { memo: '  preserved\n memo  ', teacherNote: 'learning', textbookEntries: [{ id: 'book', progress: 'same' }] });
+      plan.sessionSchedules['2026-10-05'] = { startTime: '12:00', endTime: '13:00', teacherName: 'B teacher', classroomName: 'B room', opaque: { keep: true }, memo: 'not row memo' };
+      const expected = { startTime: '12:00', endTime: '13:00', teacherCatalogId: teacherB, classroomCatalogId: roomB };
+      if (shape === 'raw-scalars') {
+        Object.assign(row, { startTime: '14:00', endTime: '15:00', teacherCatalogId: teacher, classroomCatalogId: room });
+        Object.assign(expected, { startTime: '14:00', endTime: '15:00', teacherCatalogId: teacher, classroomCatalogId: room });
+      } else if (shape === 'map-names') {
+        Object.assign(row, { teacherName: 'A teacher', classroomName: 'A room' });
+      } else if (shape === 'metadata-map') {
+        plan.sessionSchedules['2026-10-05'] = { opaque: { keep: true } };
+        Object.assign(row, { teacherName: 'B teacher', classroomName: 'B room' });
+        Object.assign(expected, { startTime: '09:00', endTime: '10:00', teacherCatalogId: teacher, classroomCatalogId: room });
+      } else {
+        Object.assign(row, { teacherCatalogId: '', classroomCatalogId: null });
+        Object.assign(expected, { teacherCatalogId: null, classroomCatalogId: null });
+      }
+      if (count === 2) plan.sessions.push({ ...structuredClone(row), id: 'peer', sessionKey: 'peer', memo: 'peer memo' });
+      const before = structuredClone(plan);
+      const consume = (p, r) => resolveEffectiveSchedule(effectiveInputForLesson(p, r, context));
+      assert.deepEqual(consume(plan, row).values, expected, 'unedited consumer contract');
+      const changes = { startTime: '08:30', endTime: '17:30', teacherCatalogId: teacher, classroomCatalogId: room, memo: '  edited\n memo  ' };
+      const value = editedField === 'teacherCatalogId' && expected.teacherCatalogId === teacher ? teacherB
+        : editedField === 'classroomCatalogId' && expected.classroomCatalogId === room ? roomB : changes[editedField];
+      const next = editedField === 'memo' ? patchAuthoredLegacyLesson(plan, 'source', { memo: value })
+        : setAuthoredLegacyLessonFields(plan, 'source', { [editedField]: value }, expected);
+      const result = consume(next, next.sessions[0]);
+      assert.deepEqual(result.values, { ...expected, ...(editedField === 'memo' ? {} : { [editedField]: value }) });
+      assert.equal(next.sessions[0].memo, editedField === 'memo' ? value : before.sessions[0].memo);
+      for (const field of ['id', 'sessionKey', 'date', 'billingId', 'teacherNote', 'textbookEntries']) assert.deepEqual(next.sessions[0][field], before.sessions[0][field]);
+      assert.deepEqual(next.sessions.slice(1), before.sessions.slice(1));
+      if (count === 2) {
+        assert.deepEqual(next.sessionSchedules, before.sessionSchedules);
+        assert.deepEqual(consume(next, next.sessions[1]), consume(before, before.sessions[1]));
+      }
+      assert.deepEqual(plan, before, 'input is never mutated');
+      t.diagnostic(JSON.stringify({ lessonReaderCase: `matrix-${count}-${shape}-${editedField}`, input: effectiveInputForLesson(next, next.sessions[0], context), expected: result }));
+    });
+  }
+}
+
+test('shared-date reset removes only selected scalar overrides and inherits the shared date settings', () => {
+  const plan = adjacentFixture();
+  Object.assign(plan.sessions[0], { startTime: '14:00', endTime: '15:00', teacherCatalogId: teacher, classroomCatalogId: null });
+  const peer = { ...plan.sessions[0], id: 'peer', sessionKey: 'peer', startTime: '16:00', endTime: '17:00' };
+  plan.sessions.push(peer); plan.sessionSchedules['2026-10-05'] = { startTime: '12:00', endTime: '13:00', classroomCatalogId: room, opaque: true };
+  const next = setAuthoredLegacyLessonFields(plan, 'source', {}, {}, true);
+  assert.deepEqual(next.sessions[1], peer); assert.deepEqual(next.sessionSchedules, plan.sessionSchedules);
+  assert.deepEqual(resolved(next).values, { startTime: '12:00', endTime: '13:00', teacherCatalogId: teacher, classroomCatalogId: room });
 });

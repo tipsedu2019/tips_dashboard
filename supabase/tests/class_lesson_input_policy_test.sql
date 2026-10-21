@@ -401,5 +401,41 @@ select ok(not has_function_privilege('anon','public.update_class_operational_v1(
 select lives_ok('set constraints all immediate','deferred guards finalize after permitted lesson saves');
 select is((select count(*) from dashboard_private.notification_events),(select events from input_before),'lesson input creates no notification event');
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from input_before),'lesson input sends no notification delivery');
+-- ID-addressed authored values must survive both actual operating readers.
+-- The same-date peer and shared name resources are deliberate, not conflicts.
+insert into public.teacher_catalogs(id,name,subjects) values(pg_temp.input_id(102),'Synthetic mapped teacher',array['영어']);
+insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.input_id(202),'Synthetic mapped room',array['영어']);
+create temp table authored_reader_cases(label text,plan jsonb,expected jsonb);
+insert into authored_reader_cases values
+('same-date',jsonb_build_object('sessions',jsonb_build_array(
+ jsonb_build_object('id','authored-a','date','2026-10-08','startTime','14:00','endTime','15:30','teacherCatalogId',pg_temp.input_id(101),'classroomCatalogId',pg_temp.input_id(201),'memo','  original memo  '),
+ jsonb_build_object('id','authored-peer','date','2026-10-08','startTime','16:00','endTime','17:00','teacherCatalogId',pg_temp.input_id(101),'classroomCatalogId',pg_temp.input_id(201),'teacherNote','peer learning')),
+ 'sessionSchedules',jsonb_build_object('2026-10-08',jsonb_build_object('startTime','12:00','endTime','13:00','teacherCatalogId',pg_temp.input_id(101),'classroomCatalogId',pg_temp.input_id(201),'opaque',true))),
+ jsonb_build_array(jsonb_build_object('startMinute',840,'endMinute',930,'teacherId',pg_temp.input_id(101),'classroomId',pg_temp.input_id(201)),jsonb_build_object('startMinute',960,'endMinute',1020,'teacherId',pg_temp.input_id(101),'classroomId',pg_temp.input_id(201)))),
+('name-only',jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','authored-a','date','2026-10-08','startTime','09:00','endTime','13:30','teacherName','Synthetic input teacher','classroomName','Synthetic input room','memo','  original memo  ')),
+ 'sessionSchedules',jsonb_build_object('2026-10-08',jsonb_build_object('startTime','09:00','endTime','13:30','teacherName','Synthetic mapped teacher','classroomName','Synthetic mapped room','opaque',true))),
+ jsonb_build_array(jsonb_build_object('startMinute',540,'endMinute',810,'teacherId',pg_temp.input_id(102),'classroomId',pg_temp.input_id(202))));
+create function pg_temp.assert_authored_reader_case(n int,label_arg text) returns setof text language plpgsql as $$
+declare target uuid:=pg_temp.input_id(303); before_plan jsonb; candidate jsonb; expected jsonb; ref jsonb; found jsonb;
+begin
+ select schedule_plan into before_plan from public.classes where id=target;
+ select c.plan,c.expected into candidate,expected from authored_reader_cases c where c.label=label_arg;
+ perform set_config('role','authenticated',true);
+ perform public.update_class_operational_v1(target,jsonb_build_object('schedule_plan',candidate),pg_temp.input_id(n),before_plan);
+ perform set_config('role','postgres',true);
+ return next is((select schedule_plan from public.classes where id=target),candidate,label_arg||': official save retains exact raw rows, metadata, names, memo and order');
+ foreach ref in array array[dashboard_private.read_timetable_operating_reference_v1(),dashboard_private.read_makeup_operating_reference_v1('2026-10-08','2026-10-08')] loop
+  select coalesce(jsonb_agg(jsonb_build_object('startMinute',x->'startMinute','endMinute',x->'endMinute','teacherId',x->'teacherId','classroomId',x->'classroomId') order by x->>'id'),'[]') into found
+  from jsonb_array_elements(ref->'datedSessions') x where x->>'classId'=target::text;
+  return next is(found,expected,label_arg||': actual operating/makeup reader preserves authored fields and peer');
+  return next is((select count(*)::int from jsonb_array_elements(ref->'datedUnresolvedOccupancies') x where x->>'classId'=target::text),0,label_arg||': no date-count ambiguity drops the saved row');
+ end loop;
+end $$;
+select * from pg_temp.assert_authored_reader_case(651,'same-date');
+select * from pg_temp.assert_authored_reader_case(652,'name-only');
+select lives_ok('set constraints all immediate','authored reader fixtures finalize with real guards');
+select is((select count(*) from dashboard_private.notification_events),(select events from input_before),'authored reader fixtures create no notification event');
+select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from input_before),'authored reader fixtures create no notification delivery');
+
 select * from finish();
 rollback;
