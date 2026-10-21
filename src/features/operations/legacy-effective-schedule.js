@@ -61,9 +61,16 @@ export function resolveEffectiveSchedule(input) {
       if (!keys.some(key => own(source.value, key))) continue;
       if (source.name === 'date_override' && (input.sessionCountOnDate ?? 1) !== 1) return { source: source.name, error: 'ambiguous_date_override' };
       if (source.name === 'approved_override' && input.approvedOverrideVerified !== true) return { source: source.name, error: 'unverified_approved_override' };
+      if (keys[0] === 'classroomCatalogId' && source.value.classroomUnresolved === true) return { source: source.name, error: 'invalid_resource' };
       return { source: source.name, value: source.value };
     }
     const values = slots.map(slot => keys[0] in slot ? slot[keys[0]] : null);
+    if (keys[0] === 'classroomCatalogId' && slots.some(slot => slot.classroomUnresolved === true)) {
+      return { source: basicSource, error: 'invalid_resource' };
+    }
+    if (keys[0] === 'classroomCatalogId' && values.length && !values.every(v => v === values[0])) {
+      return { source: basicSource, error: 'ambiguous_basic_resource' };
+    }
     return { source: basicSource, value: values.length && values.every(v => v === values[0]) ? { [keys[0]]: values[0] } : {}, basic: true };
   };
   for (const key of fields) {
@@ -72,22 +79,34 @@ export function resolveEffectiveSchedule(input) {
     const chosen = pick(resource ? [key, resource.name] : [key]);
     out.provenance[key] = chosen.source;
     let value = null;
+    let unassignedRoom = key === 'classroomCatalogId' && !chosen.error;
     if (chosen.error) out.errors.push(`${key}:${chosen.error}`);
     else if (resource) {
       if (own(chosen.value, key)) {
         const id = text(chosen.value[key]);
         if (id && resource.catalog.filter(r => r.id === id).length === 1) value = id;
+        if (key === 'classroomCatalogId' && (id || (chosen.value[key] !== null && typeof chosen.value[key] !== 'string'))) {
+          unassignedRoom = false;
+          if (value === null) out.errors.push(`${key}:invalid_resource`);
+        }
       } else if (own(chosen.value, resource.name)) {
         const name = text(chosen.value[resource.name]);
         const matches = name ? resource.catalog.filter(r => text(r.name) === name) : [];
         if (matches.length === 1 && text(matches[0].id)) value = matches[0].id;
+        if (key === 'classroomCatalogId') {
+          unassignedRoom = (chosen.value[resource.name] === null || typeof chosen.value[resource.name] === 'string')
+            && matches.length === 0 && ['', '미정', '강의실 미정'].includes(name);
+          if (value === null && !unassignedRoom) out.errors.push(`${key}:invalid_resource`);
+        }
       }
     } else {
       const time = text(chosen.value[key]);
       value = timeValue(time, key === 'endTime');
     }
     out.values[key] = value;
-    if (value === null) out.missing.push(key);
+    // A genuinely unassigned room is optional; invalid catalog data is not.
+    // Keep the known teacher and interval in the resolved occupancy.
+    if (value === null && !unassignedRoom) out.missing.push(key);
   }
   if (out.values.startTime !== null && out.values.endTime !== null && out.values.startTime >= out.values.endTime) out.errors.push('invalid_time_range');
   out.kind = out.missing.length || out.errors.length ? 'unresolved' : 'resolved';

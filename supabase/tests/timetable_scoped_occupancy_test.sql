@@ -26,8 +26,8 @@ set local role authenticated;
 select lives_ok($q$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','create','planId',pg_temp.sid(1),'name','scoped future','requestKey','scoped-create'))$q$,'create future preset with existing unresolved occupancy');
 select is((public.get_timetable_plan_v1(pg_temp.sid(1))->>'occupancyValidationVersion')::int,2,'snapshot advertises scoped validation, not global lock');
 select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') s where s->>'classId'=pg_temp.sid(301)::text and s->>'teacherId'=pg_temp.sid(101)::text and s->>'classroomId'=pg_temp.sid(201)::text),1,'normalized labels resolve without writing missing UUIDs');
-select is((select b->>'weekday' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'unresolvedOccupancies') b where b->>'classId'=pg_temp.sid(302)::text),'2','undecided room keeps exact weekday');
-select is((select b->>'startMinute' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'unresolvedOccupancies') b where b->>'classId'=pg_temp.sid(302)::text),'1170','undecided room keeps exact interval');
+select is((select b->>'weekday' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') b where b->>'classId'=pg_temp.sid(302)::text),'2','unassigned room keeps exact weekday in resolved occupancy');
+select is((select b->>'startMinute' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') b where b->>'classId'=pg_temp.sid(302)::text),'1170','unassigned room keeps exact interval in resolved occupancy');
 select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedSessions') s where s->>'classId'=pg_temp.sid(303)::text),2,'real legacy regular producer shape inherits every default interval');
 select ok((select bool_and(s->>'sourceSlotId' is null and s->>'inheritedWeeklySlotId' is not null) from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedSessions') s where s->>'classId'=pg_temp.sid(303)::text),'inherited legacy rows never invent normalized source authority');
 select is((select s->>'teacherId' from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedSessions') s where s->>'id'='session:'||pg_temp.sid(501)::text),pg_temp.sid(101)::text,'normalized dated retained labels resolve read-only');
@@ -37,7 +37,7 @@ create function pg_temp.command(i int,d int,a int,b int) returns jsonb language 
 set local role authenticated;
 select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(11,1,600,660))$q$,'unrelated Monday saves despite unresolved Tuesday');
 select throws_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(12,1,1200,1230))$q$,'23P01','timetable_resource_conflict','resolved normalized shadow still prevents teacher and room overlap');
-select throws_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(12,2,1170,1230))$q$,'23P01','timetable_resource_conflict','only the undecided room interval blocks new placement');
+select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(15,2,1170,1230))$q$,'different teacher can use a known room beside an unassigned-room class');
 select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(12,2,1290,1350))$q$,'half-open interval immediately after uncertainty saves');
 select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.command(13,4,600,660)||jsonb_build_object('slots','[]'::jsonb))$q$,'unplaced draft saves regardless of uncertainty');
 select lives_ok($q$select public.mutate_timetable_plan_v1(jsonb_build_object('operation','rename','planId',pg_temp.sid(1),'expectedMetaRevision',0,'name','dated review','targetStartDate',pg_temp.next_day(0),'targetEndDate',pg_temp.next_day(0)+14,'requestKey','scope-period'))$q$,'dated period can be selected without locking unrelated draft editing');
@@ -87,7 +87,8 @@ update public.classes set schedule_plan=jsonb_build_object('sessions',jsonb_buil
  jsonb_build_object('id','duplicate','date',pg_temp.next_day(3),'scheduleState','active','isForced',false),
  jsonb_build_object('id','past','date',pg_temp.next_day(3)-21,'scheduleState','active','isForced',false)
 )) where id=pg_temp.sid(303);
-select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') s where s->>'classId'=pg_temp.sid(303)::text),5,'ambiguous multi-period overrides and duplicate identities remain uncertain; plain past and unmarked rows inherit');
+select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') s where s->>'classId'=pg_temp.sid(303)::text),6,'ambiguous same-day multi-period rows and duplicate identities remain uncertain; single plain past row inherits');
+select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedSessions') s where s->>'classId'=pg_temp.sid(303)::text and s->>'date'=(pg_temp.next_day(3)-21)::text),2,'the single plain past lesson still inherits both known weekly intervals');
 -- Duplicate names must never choose a catalog arbitrarily.
 drop index public.teacher_catalogs_name_key;
 insert into public.teacher_catalogs(id,name,subjects) values(pg_temp.sid(103),'scoped teacher',array['영어']);

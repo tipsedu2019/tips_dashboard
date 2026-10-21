@@ -27,7 +27,7 @@ export type ShadowSlot = {
   startMinute: number;
   endMinute: number;
   teacherId: string;
-  classroomId: string;
+  classroomId: string | null;
   classRevision: number;
 };
 

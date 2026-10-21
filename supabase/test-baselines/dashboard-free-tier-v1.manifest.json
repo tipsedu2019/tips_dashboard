@@ -884,6 +884,11 @@
       "fileName": "20261020001626_word_retest_completed_failed_retry.sql",
       "status": "final",
       "sha256": "7b964368c629ac92e1655513783147a985b9dc659f818c1148e765eb11dfa35b"
+    },
+    {
+      "fileName": "20261020134458_timetable_optional_classroom_occupancy.sql",
+      "status": "final",
+      "sha256": "31cd689964a52b5f084a8a167cb41a0b61b12403a88d4dff7b20d9106e29a8b6"
     }
   ]
 }

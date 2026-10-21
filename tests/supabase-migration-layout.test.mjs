@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = new Set()
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "41f43adca1536abbba135fd2e3303624cd8bac295aa7729f677fdf905d253ac3"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "f5d1991db673175494a10559b615d1a21423aa55b5a5172b99543d79af6ba068"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -70,6 +70,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_lesson_save_performance_test.sql",
   "supabase/tests/timetable_makeup_domain_sqlstate_test.sql",
   "supabase/tests/timetable_normalized_time_matching_test.sql",
+  "supabase/tests/timetable_nullable_classroom_test.sql",
   "supabase/tests/timetable_operational_conflicts_test.sql",
   "supabase/tests/timetable_repeatable_read_guard_test.sql",
   "supabase/tests/timetable_serializable_guard_test.sql",
@@ -178,6 +179,7 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-ai-agent-http-producer.mjs",
   "tests/probe-ai-agent-personal-integration.mjs",
   "tests/probe-ai-agent-thread-replies-concurrency.mjs",
+  "tests/probe-timetable-nullable-room-concurrency.mjs",
 ])
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
@@ -1425,9 +1427,9 @@ test("prepare ACL migration만 science 이후 protected function 참조로 허�
 test("approved manual production workflow requires its exact path and complete reviewed bytes", async () => {
   const workflowDir = join(repoRoot, ".github", "workflows")
   for (const [name, expectedHash] of [
-    ["free-tier-guardrails.yml", "9f3cbe57401854d8d7cebcc8a75d30b882ef5c529e1d2be54d2d9340b48f3972"],
+    ["free-tier-guardrails.yml", "b4645de1d1c546da1bd461cfeff88a3d86314a148767a5e764ff60b352bf488d"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "154e43f6d610517b12502d00dfe1cb033201daf4de76f3d7df4b7c559f96a621"],
+    ["supabase-sql-review.yml", "0f769d56cc070261d460e56039bee77402961886fd239a136d25ea9e2f0e0a35"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {

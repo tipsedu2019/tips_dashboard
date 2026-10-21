@@ -242,9 +242,9 @@ insert into expected_counts values
  (31,0,1),
  (32,0,1),
  (33,0,1),
- (34,0,1),
+ (34,1,0),
  (35,0,1),
- (36,0,1),
+ (36,1,0),
  (40,0,1),
  (41,2,0);
 select is((select count(*)::int from reader_result,jsonb_array_elements(after_reference->'datedSessions') x where x->>'classId'=pg_temp.fid(300+c.n)::text),e.dated,c.label||': effective dated row count') from cases c join expected_counts e using(n) order by n;

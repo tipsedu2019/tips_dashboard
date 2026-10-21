@@ -12,7 +12,8 @@ export type ProjectedTimetableSlot = {
 export function projectTimetableSlot(slot: PlanSlot | ShadowSlot, view: TimetableView): ProjectedTimetableSlot {
   const weekly = view === "teacher-weekly" || view === "classroom-weekly";
   const teacher = view === "teacher-weekly" || view === "daily-teacher";
-  const resourceId = teacher ? slot.teacherId : slot.classroomId;
+  // An unassigned operating room has no room-grid coordinate.
+  const resourceId = (teacher ? slot.teacherId : slot.classroomId) ?? "";
   const weekdayKey = String(slot.weekday);
   return {
     id: slot.id,

@@ -110,7 +110,7 @@ test('every explicit regular occupancy key, including empty and null, requires c
   }
   assert.equal(validateLessons([regularLesson('2026-10-06', { startTime: undefined })]), '', 'undefined does not become an override key on the JSON wire');
   assert.match(validateLessons([regularLesson('2026-10-06', { ...occupancy, endTime: '18:00' })]), /종료.*시작/);
-  assert.match(validateLessons([regularLesson('2026-10-06', { ...occupancy, classroomCatalogId: '' })]), /수업.*선생님·강의실/);
+  assert.equal(validateLessons([regularLesson('2026-10-06', { ...occupancy, classroomCatalogId: '' })]), '');
   assert.equal(validateLessons([regularLesson('2026-10-06', { startTime: '17:00', endTime: '19:00', teacherName: 'Synthetic teacher', classroomName: 'Synthetic room' })]), '');
 });
 

@@ -64,7 +64,7 @@ const planMetadata = (value: unknown) => record(value) && string(value.id) && st
   && nullableString(value.targetEndDate) && (value.targetStartDate === null) === (value.targetEndDate === null);
 const shadowSlot = (value: unknown) => record(value) && string(value.id) && string(value.classId)
   && nullableString(value.sourceSlotId) && integer(value.weekday) && integer(value.startMinute)
-  && integer(value.endMinute) && string(value.teacherId) && string(value.classroomId)
+  && integer(value.endMinute) && string(value.teacherId) && nullableString(value.classroomId)
   && integer(value.classRevision);
 const shadowClass = (value: unknown) => record(value) && string(value.id) && string(value.name)
   && nullableString(value.subject) && nullableString(value.grade) && (value.status === '수강' || value.status === '개강 준비')

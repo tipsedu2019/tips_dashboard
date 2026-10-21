@@ -1472,7 +1472,7 @@ export function buildClassPayload(record = {}, options = {}) {
   const { generateId = createId, candidateMembershipContext } = options;
   const id = trimText(record.id) || generateId();
   const name = trimText(record.name || record.className || record.class_name);
-  const classroom = normalizeClassroomName(record.classroom || record.room);
+  const classroom = normalizeClassroomName(Object.hasOwn(record, "classroom") ? record.classroom : record.room);
   const rawSubject = trimText(record.subject);
   const subject = parseAcademicSubject(rawSubject) || rawSubject;
   const grade = trimText(record.grade);

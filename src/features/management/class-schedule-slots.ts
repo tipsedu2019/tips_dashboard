@@ -15,7 +15,7 @@ type ClassScheduleDay = (typeof CLASS_SCHEDULE_DAYS)[number];
 const CLASS_SCHEDULE_DAY_SET = new Set<string>(CLASS_SCHEDULE_DAYS);
 const CLASS_SCHEDULE_DAY_INDEX = new Map<string, number>(CLASS_SCHEDULE_DAYS.map((day, index) => [day, index === 6 ? 0 : index + 1]));
 const CLASS_SCHEDULE_DAY_BY_INDEX = new Map([...CLASS_SCHEDULE_DAY_INDEX].map(([day, index]) => [index, day]));
-const DAY_GROUP_PATTERN = /([월화수목금토일]+)\s*(\d{1,2}:\d{2})\s*[-~–]\s*(\d{1,2}:\d{2})(?:\s*\(([^)]*)\))?/g;
+const DAY_GROUP_PATTERN = /([월화수목금토일][월화수목금토일 /,]*)\s*(\d{1,2}:\d{2})\s*[-~–]\s*(\d{1,2}:\d{2})(?:\s*\(([^)]*)\))?/g;
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -106,8 +106,41 @@ export function fromContinuousClassScheduleDefaults(rows: unknown[]): ClassSched
   });
 }
 
+function hasPlacement(slot: ClassScheduleSlot) {
+  return Boolean(slot.id || text(slot.day) || text(slot.startTime) || text(slot.endTime));
+}
+
+export function classScheduleTextValidationError(value: unknown) {
+  const schedule = text(value);
+  if (!schedule) return '';
+  let cursor = 0;
+  for (const match of schedule.matchAll(DAY_GROUP_PATTERN)) {
+    if (schedule.slice(cursor, match.index).replace(/[\s,，;·/]+/g, '')) {
+      return '수업 요일과 시간을 올바르게 입력해 주세요.';
+    }
+    cursor = match.index + match[0].length;
+  }
+  return cursor === 0 || schedule.slice(cursor).replace(/[\s,，;·/]+/g, '')
+    ? '수업 요일과 시간을 올바르게 입력해 주세요.' : '';
+}
+
+export function classScheduleSlotsValidationError(slots: ClassScheduleSlot[]) {
+  const time = /^(?:[01]?\d|2[0-3]):[0-5]\d(?::00)?$/;
+  const minutes = (value: string) => {
+    const [hour, minute] = value.split(':').map(Number);
+    return hour * 60 + minute;
+  };
+  for (const slot of slots.filter(hasPlacement)) {
+    if (!CLASS_SCHEDULE_DAY_SET.has(text(slot.day))) return '수업 요일을 선택해 주세요.';
+    if (!time.test(text(slot.startTime)) || !(time.test(text(slot.endTime)) || /^24:00(?::00)?$/.test(text(slot.endTime)))
+      || minutes(slot.startTime) >= minutes(slot.endTime)) return '수업 시작·종료 시간을 올바르게 입력해 주세요.';
+    if (!text(slot.teacherCatalogId) && !text(slot.teacher)) return '수업 선생님을 선택해 주세요.';
+  }
+  return '';
+}
+
 export function toContinuousClassScheduleSlots(slots: ClassScheduleSlot[]) {
-  return slots.map((slot, index) => ({
+  return slots.filter(hasPlacement).map((slot, index) => ({
     id: slot.id,
     weekday: CLASS_SCHEDULE_DAY_INDEX.get(text(slot.day)) ?? -1,
     startTime: text(slot.startTime),

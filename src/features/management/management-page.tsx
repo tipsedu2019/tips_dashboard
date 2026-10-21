@@ -90,6 +90,8 @@ import {
   parseClassScheduleSlots,
   stripSharedScheduleDetails,
   toContinuousClassScheduleSlots,
+  classScheduleSlotsValidationError,
+  classScheduleTextValidationError,
   type ClassScheduleSlot,
 } from "./class-schedule-slots";
 import type { ClassStudentPickerFilters, StudentClassPickerFilters } from "./student-class-picker-model";
@@ -771,7 +773,7 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
   delete payload.textbookIds;
   delete payload.textbookUsage;
   if (payload.parentContact) payload.parent_contact = payload.parentContact;
-  if (payload.classroom) payload.room = payload.classroom;
+  if (Object.prototype.hasOwnProperty.call(payload, "classroom")) payload.room = payload.classroom;
   if (payload.name && kind === "classes") {
     payload.class_name = payload.name;
     payload.className = payload.name;
@@ -2096,7 +2098,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       const classroomOptions = getClassClassroomOptionsForSubject(rawRows, normalizedValue);
       // A subject change must clear incompatible resources even when its catalog is empty.
       const enforceExactCandidates = true;
-      const nextSlots = (classScheduleSlots.length > 0 ? classScheduleSlots : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom)).map((slot) => ({
+      const nextSlots = (dialogMode !== "create" && classScheduleSlots.length > 0 ? classScheduleSlots : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom)).map((slot) => ({
         ...slot,
         teacher: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactCandidates) ? "" : slot.teacher,
         teacherCatalogId: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactCandidates) ? null : slot.teacherCatalogId,
@@ -2155,9 +2157,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     });
   };
 
-  const getClassScheduleSlotsFromForm = () => classScheduleSlots.length > 0
-    ? classScheduleSlots
-    : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom);
+  const getClassScheduleSlotsFromForm = () => {
+    // Creation uses the free-text form, whereas detail editing owns slot state.
+    // Resolve the submitted labels against the same loaded subject catalogs.
+    if (dialogMode === "create") {
+      return parseClassScheduleSlots(form.schedule, form.teacher, form.classroom).map((slot) => ({
+        ...slot,
+        teacherCatalogId: getClassTeacherCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.teacher),
+        classroomCatalogId: getClassClassroomCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.classroom),
+      }));
+    }
+    return classScheduleSlots.length > 0
+      ? classScheduleSlots
+      : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom);
+  };
   const syncClassScheduleSlots = (slots: ClassScheduleSlot[]) => {
     if (classFormReferencesBlocked) return;
     scheduleEditRevisionRef.current += 1;
@@ -2252,6 +2265,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   };
   const handleClassScheduleDefaultsSave = async () => {
     if (!selectedRow || !normalizedScheduleDefaults || !canMutateRows || classFormReferencesBlocked || !classScheduleDefaultsDirty) return;
+    const scheduleError = classScheduleSlotsValidationError(getClassScheduleSlotsFromForm());
+    if (scheduleError) {
+      setOperationError(scheduleError);
+      return;
+    }
     const classId = selectedRow.id;
     if (scheduleDefaultsPendingRef.current.has(classId)) return;
     const requestKey = scheduleDefaultsRequestKey || createContinuousScheduleRequestKey();
@@ -2496,7 +2514,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       && (kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject))
       && !text(form[field.name])
     ));
-    if (!missing) return true;
+    if (!missing) {
+      // An unplaced class is valid. Once a placement is entered, creation and
+      // edits use the same timing/teacher contract; its room may stay unassigned.
+      if (kind === "classes" && (scope === "form" || (!normalizedScheduleDefaults && scheduleDraft !== savedScheduleDraft))) {
+        const slots = getClassScheduleSlotsFromForm();
+        const scheduleError = (scope === "form" ? classScheduleTextValidationError(form.schedule) : '')
+          || classScheduleSlotsValidationError(slots);
+        if (scheduleError) {
+          setOperationError(scheduleError);
+          return false;
+        }
+      }
+      return true;
+    }
     setOperationError(null);
     setSaveNotice("");
     document.getElementById(`${kind}-${scope}-${missing.name}`)?.focus();

@@ -1362,7 +1362,10 @@ test("pending save coverage combines separately submitted class fields and sched
 
 test("pending save coverage compares legacy schedule submissions canonically", async t => {
   const ui = await setup(t, { configureFixture: fixture => {
-    for (const row of fixture.rows) row.raw.schedule_storage_mode = "legacy";
+    for (const row of fixture.rows) {
+      row.raw.schedule_storage_mode = "legacy";
+      row.raw.schedule = "월 16:00-20:00";
+    }
     deferServices(fixture, ["updateClass"]);
   } });
   await ui.click("A 영어반");
@@ -1425,7 +1428,10 @@ test("saving class information does not clear an unsaved normalized schedule", a
 
 test("legacy schedule drafts compare canonical slots and accept a completed general save", async t => {
   const ui = await setup(t, { configureFixture: fixture => {
-    for (const row of fixture.rows) row.raw.schedule_storage_mode = "legacy";
+    for (const row of fixture.rows) {
+      row.raw.schedule_storage_mode = "legacy";
+      row.raw.schedule = "월 16:00-20:00";
+    }
   } });
   await ui.click("A 영어반");
   await ui.editTime("18:00");
@@ -1439,6 +1445,46 @@ test("legacy schedule drafts compare canonical slots and accept a completed gene
   await ui.click("저장");
   await ui.click("수업 상세 닫기");
   assert.equal(document.querySelector('[role="dialog"]'), null);
+});
+
+test("invalid legacy timing is rejected before saving and correcting it preserves the unassigned room", async t => {
+  const ui = await setup(t, { configureFixture: fixture => {
+    for (const row of fixture.rows) {
+      row.raw.schedule_storage_mode = "legacy";
+      row.raw.classroom = "";
+    }
+    deferServices(fixture, ["updateClass"]);
+  } });
+  await ui.click("A 영어반");
+  await ui.editTime("18:00");
+  await ui.click("저장");
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /시작·종료 시간을 올바르게/);
+  assert.equal(ui.time(), "18:00");
+  await ui.editTime("17:00");
+  await ui.click("저장");
+  assert.equal(ui.mutations.length, 1);
+  assert.equal(ui.mutations[0].args[0].room, "");
+});
+
+test("normalized schedule validation applies only to its own save and permits an unassigned room", async t => {
+  const ui = await setup(t, { configureFixture: fixture => deferServices(fixture, ["updateClass"]) });
+  await ui.click("A 영어반");
+  const defaults = defaultsFor();
+  defaults.slots[0].classroomCatalogId = null;
+  defaults.slots[0].classroomName = "";
+  await ui.resolve(0, defaults);
+  await ui.editTime("20:00");
+  await ui.click("기본 시간표 저장");
+  assert.equal(ui.requests.filter(request => request.type === "save").length, 0);
+  assert.match(ui.text(), /시작·종료 시간을 올바르게/);
+  await ui.editField("classes-detail-name", "별도 수업명 저장");
+  await ui.click("저장");
+  assert.equal(ui.mutations.length, 1, "metadata save does not submit the invalid normalized schedule draft");
+  await ui.editTime("18:00");
+  await ui.click("기본 시간표 저장");
+  assert.equal(ui.requests.filter(request => request.type === "save").length, 1);
+  assert.equal(ui.requests.find(request => request.type === "save").input.slots[0].classroomCatalogId, null);
 });
 
 test("new student drafts require explicit discard while untouched creation can close", async t => {
@@ -1553,6 +1599,58 @@ test("late relation addition keeps the new detail's relation candidate intact", 
   await ui.click("수강 추가");
   assert.deepEqual(ui.mutations[1].args[0], { studentId: "student-b", classId: "new-class", mode: "enrolled" });
   await act(async () => ui.mutations[1].resolve(undefined));
+});
+
+for (const schedule of ["화목 19:30-21:30", "화/목 19:30-21:30", "화, 목 19:30-21:30"]) {
+test(`class creation initializes the entire entered schedule ${schedule} with optional room`, async t => {
+  const previousScroll = window.HTMLElement.prototype.scrollIntoView;
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+  t.after(() => { window.HTMLElement.prototype.scrollIntoView = previousScroll; });
+  const ui = await setup(t, { configureFixture: fixture => {
+    deferServices(fixture, ["createClass", "initializeClassSchedule"]);
+    fixture.service.getClassScheduleDefaults = async () => ({ runtimeVersion: 1, authoritativeSource: "legacy", scheduleRevision: 0, schedulePlanHash: "created-class-plan" });
+  } });
+  const select = async (id, label) => {
+    await act(async () => document.getElementById(id).dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    const option = [...document.querySelectorAll('[role="option"]')].find(node => node.textContent === label);
+    assert.ok(option, `option not found: ${label}`);
+    await act(async () => option.click());
+  };
+  await ui.click("수업 등록");
+  await ui.editField("classes-form-name", "미정 방 신규 수업");
+  await select("classes-form-subject", "영어");
+  await select("classes-form-teacher", "영어교사");
+  await ui.editField("classes-form-schedule", schedule);
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 1);
+  await act(async () => ui.mutations[0].resolve({ id: "created-class" }));
+  assert.deepEqual(ui.mutations[1].args[0].slots, [2, 4].map((weekday, sortOrder) => ({
+    id: null, weekday, startTime: "19:30", endTime: "21:30",
+    teacherCatalogId: "teacher-1", classroomCatalogId: null, sortOrder,
+  })));
+});
+}
+
+test("class creation validates the actual entered placement before creating a class", async t => {
+  const ui = await setup(t, { configureFixture: fixture => deferServices(fixture, ["createClass"]) });
+  await ui.click("수업 등록");
+  await ui.editField("classes-form-name", "검증할 신규 수업");
+  await ui.editField("classes-form-schedule", "화 19:30-21:30");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /선생님/);
+  await ui.editField("classes-form-schedule", "화 21:30-19:30 (영어교사, )");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /시작·종료 시간/);
+  await ui.editField("classes-form-schedule", "invalid schedule");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /요일|시간/);
+  await ui.editField("classes-form-schedule", "화 19:30-21:30 (영어교사, ); invalid tail");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 0);
+  assert.match(ui.text(), /요일|시간/);
 });
 
 for (const retry of [false, true]) {
@@ -1918,7 +2016,10 @@ test("pending catalogs prevent schedule edits from losing normalized resource ID
 });
 
 test("typing before the initial defaults arrive retains the draft and catalog IDs", async t => {
-  const ui = await setup(t);
+  const ui = await setup(t, { configureFixture: fixture => {
+    // This race edits the start before defaults arrive; retain a valid end.
+    for (const row of fixture.rows) row.raw.schedule = "월 16:00-20:00";
+  } });
   await ui.click("A 영어반");
   await ui.editTime("18:30");
   await ui.resolve(0, defaultsFor("09:00", 7));
