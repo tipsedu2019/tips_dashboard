@@ -92,6 +92,7 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'src/features/agent-api/server/calendar-compiler.mjs',
  'src/features/agent-api/server/calendar-contract.ts',
  'src/features/agent-api/server/class-edit-compiler.mjs',
+ 'src/features/operations/legacy-effective-schedule.js',
  'src/features/agent-api/server/class-edit-contract.ts',
  'src/lib/auth-utils.ts',
  'src/lib/class-schedule-planner.js',

@@ -1,0 +1,294 @@
+[
+  {
+    "case": "explicit-null-room",
+    "classId": "40000000-0000-4000-8000-000000000001",
+    "context": {
+      "id": "40000000-0000-4000-8000-000000000001",
+      "plan": {
+        "sessions": [
+          {
+            "id": "ordinary",
+            "date": "2026-10-21",
+            "state": "active",
+            "endTime": "15:00",
+            "startTime": "14:00",
+            "teacherCatalogId": "10000000-0000-4000-8000-000000000001",
+            "classroomCatalogId": null
+          }
+        ],
+        "billingPeriods": [],
+        "sessionSchedules": {
+          "2026-10-21": {
+            "endTime": "15:00",
+            "startTime": "14:00",
+            "teacherCatalogId": "10000000-0000-4000-8000-000000000001",
+            "classroomCatalogId": "20000000-0000-4000-8000-000000000001"
+          }
+        }
+      },
+      "basic": {
+        "fee": 0,
+        "name": "Independent consumer 1",
+        "grade": null,
+        "subject": "영어",
+        "capacity": 0,
+        "classType": "정규",
+        "subjectAreaKey": null
+      },
+      "version": "4bc69cd6d679745fc78d99c40c05eb4a45b0365f5e86922b7dbbfe581000ecc7",
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "10000000-0000-4000-8000-000000000001",
+            "name": "Teacher",
+            "subjects": [
+              "영어"
+            ],
+            "isVisible": true
+          },
+          {
+            "id": "35c5a064-12f8-4f95-a0e1-03f487fc1640",
+            "name": "lesson-input-admin",
+            "subjects": [
+              "영어팀"
+            ],
+            "isVisible": true
+          },
+          {
+            "id": "ac510000-0000-4000-8000-000000000101",
+            "name": "Synthetic input teacher",
+            "subjects": [
+              "영어"
+            ],
+            "isVisible": true
+          },
+          {
+            "id": "af7cbc90-7bca-4d42-aac1-58f07fb36b6e",
+            "name": "lesson-input-teacher",
+            "subjects": [
+              "영어팀"
+            ],
+            "isVisible": true
+          }
+        ],
+        "classrooms": [
+          {
+            "id": "20000000-0000-4000-8000-000000000001",
+            "name": "Room",
+            "subjects": [
+              "영어"
+            ],
+            "isVisible": true
+          },
+          {
+            "id": "ac510000-0000-4000-8000-000000000201",
+            "name": "Synthetic input room",
+            "subjects": [
+              "영어"
+            ],
+            "isVisible": true
+          }
+        ]
+      },
+      "schedule": "수 14:00-15:00",
+      "sessions": [],
+      "storageMode": "legacy",
+      "weeklySlots": [
+        {
+          "id": "live:40000000-0000-4000-8000-000000000001:4c1ca76f-4364-94a1-884d-65bcecdda4c3",
+          "weekday": 3,
+          "endMinute": 900,
+          "sortOrder": 0,
+          "teacherId": "10000000-0000-4000-8000-000000000001",
+          "classroomId": "20000000-0000-4000-8000-000000000001",
+          "startMinute": 840
+        }
+      ],
+      "weeklyScheduleComplete": true
+    },
+    "operating": {
+      "dated": [
+        {
+          "id": "legacy-session:40000000-0000-4000-8000-000000000001:ordinary",
+          "date": "2026-10-21",
+          "state": "active",
+          "classId": "40000000-0000-4000-8000-000000000001",
+          "revision": 0,
+          "endMinute": 900,
+          "teacherId": "10000000-0000-4000-8000-000000000001",
+          "classroomId": null,
+          "startMinute": 840,
+          "sourceSlotId": null,
+          "overriddenWeeklySlotId": "live:40000000-0000-4000-8000-000000000001:4c1ca76f-4364-94a1-884d-65bcecdda4c3"
+        }
+      ],
+      "unresolved": []
+    },
+    "pureResolver": {
+      "date": "2026-10-21",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "14:00",
+        "endTime": "15:00",
+        "teacherCatalogId": "10000000-0000-4000-8000-000000000001",
+        "classroomCatalogId": null
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "session",
+        "teacherCatalogId": "session",
+        "classroomCatalogId": "session"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "case": "explicit-empty-teacher",
+    "classId": "40000000-0000-4000-8000-000000000002",
+    "context": {
+      "id": "40000000-0000-4000-8000-000000000002",
+      "plan": {
+        "sessions": [
+          {
+            "id": "ordinary",
+            "date": "2026-10-21",
+            "state": "active",
+            "endTime": "15:00",
+            "startTime": "14:00",
+            "teacherCatalogId": "",
+            "classroomCatalogId": "20000000-0000-4000-8000-000000000001"
+          }
+        ],
+        "billingPeriods": [],
+        "sessionSchedules": {
+          "2026-10-21": {
+            "endTime": "15:00",
+            "startTime": "14:00",
+            "teacherCatalogId": "10000000-0000-4000-8000-000000000001",
+            "classroomCatalogId": "20000000-0000-4000-8000-000000000001"
+          }
+        }
+      },
+      "basic": {
+        "fee": 0,
+        "name": "Independent consumer 2",
+        "grade": null,
+        "subject": "영어",
+        "capacity": 0,
+        "classType": "정규",
+        "subjectAreaKey": null
+      },
+      "version": "c576535af98d9866f88a95db5aa85f2c413ca741c1ed535885d01da33236cfbe",
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "10000000-0000-4000-8000-000000000001",
+            "name": "Teacher",
+            "subjects": [
+              "영어"
+            ],
+            "isVisible": true
+          },
+          {
+            "id": "35c5a064-12f8-4f95-a0e1-03f487fc1640",
+            "name": "lesson-input-admin",
+            "subjects": [
+              "영어팀"
+            ],
+            "isVisible": true
+          },
+          {
+            "id": "ac510000-0000-4000-8000-000000000101",
+            "name": "Synthetic input teacher",
+            "subjects": [
+              "영어"
+            ],
+            "isVisible": true
+          },
+          {
+            "id": "af7cbc90-7bca-4d42-aac1-58f07fb36b6e",
+            "name": "lesson-input-teacher",
+            "subjects": [
+              "영어팀"
+            ],
+            "isVisible": true
+          }
+        ],
+        "classrooms": [
+          {
+            "id": "20000000-0000-4000-8000-000000000001",
+            "name": "Room",
+            "subjects": [
+              "영어"
+            ],
+            "isVisible": true
+          },
+          {
+            "id": "ac510000-0000-4000-8000-000000000201",
+            "name": "Synthetic input room",
+            "subjects": [
+              "영어"
+            ],
+            "isVisible": true
+          }
+        ]
+      },
+      "schedule": "수 14:00-15:00",
+      "sessions": [],
+      "storageMode": "legacy",
+      "weeklySlots": [
+        {
+          "id": "live:40000000-0000-4000-8000-000000000002:412e93cd-52c0-c4ca-c133-76ac2400d714",
+          "weekday": 3,
+          "endMinute": 900,
+          "sortOrder": 0,
+          "teacherId": "10000000-0000-4000-8000-000000000001",
+          "classroomId": "20000000-0000-4000-8000-000000000001",
+          "startMinute": 840
+        }
+      ],
+      "weeklyScheduleComplete": true
+    },
+    "operating": {
+      "dated": [],
+      "unresolved": [
+        {
+          "date": "2026-10-21",
+          "label": "Independent consumer 2",
+          "scope": "all",
+          "reason": "incomplete_read",
+          "classId": "40000000-0000-4000-8000-000000000002",
+          "endMinute": 900,
+          "teacherId": null,
+          "resourceId": null,
+          "classroomId": "20000000-0000-4000-8000-000000000001",
+          "startMinute": 840,
+          "occupancyFingerprint": "76778fff22bb7982c81769f8244440dd"
+        }
+      ]
+    },
+    "pureResolver": {
+      "date": "2026-10-21",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": "14:00",
+        "endTime": "15:00",
+        "teacherCatalogId": null,
+        "classroomCatalogId": "20000000-0000-4000-8000-000000000001"
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "session",
+        "teacherCatalogId": "session",
+        "classroomCatalogId": "session"
+      },
+      "missing": [
+        "teacherCatalogId"
+      ],
+      "errors": []
+    }
+  }
+]

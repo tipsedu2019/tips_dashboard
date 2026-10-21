@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { normalizeSchedulePlan, buildSchedulePlanForSave } from '../../../lib/class-schedule-planner.js';
+import { resolveEffectiveSchedule } from '../../operations/legacy-effective-schedule.js';
 
 export class EditError extends Error {}
 const fail = code => { throw new EditError(code); };
@@ -35,16 +36,37 @@ function legacyRows(context) {
     ...saved,
   ];
 }
+function legacyTiming(context, row, source) {
+  // API context has weekly slots/catalogs, not verified approval bindings. Use
+  // the common authored-value precedence without inventing an approval source.
+  // Cancelled rows still display their timing in this DTO; this projection does
+  // not reactivate them or feed an occupancy/authorization decision.
+  const session = ['exception', 'skipped', 'tbd', 'force_active'].includes(row.scheduleState || row.state)
+    ? { ...row, state: 'active', scheduleState: 'active' } : row;
+  const identity = item => String(item.id || item.sessionKey || '').trim();
+  const resolved = resolveEffectiveSchedule({
+    session, identityCount: source.filter(item => identity(item) === identity(row)).length,
+    dateOverride: context.plan?.sessionSchedules?.[row.date],
+    basicSlots: rows(context.weeklySlots).map(slot => ({
+      id: slot.id, weekday: slot.weekday,
+      startTime: Number.isInteger(slot.startMinute) ? clockTime(slot.startMinute) : null,
+      endTime: Number.isInteger(slot.endMinute) ? clockTime(slot.endMinute) : null,
+      teacherCatalogId: slot.teacherId, classroomCatalogId: slot.classroomId,
+    })),
+    catalogs: { teachers: rows(context.catalogs?.teachers), rooms: rows(context.catalogs?.classrooms) },
+  });
+  return { startMinute: minutes(resolved.values.startTime), endMinute: minutes(resolved.values.endTime),
+    teacherId: resolved.values.teacherCatalogId ?? null, classroomId: resolved.values.classroomCatalogId ?? null };
+}
 export function classWorkspace(context, window) {
   const normalized = context.storageMode === 'normalized';
   const source = normalized ? rows(context.sessions) : legacyRows(context);
   const lessons = source.filter(row => inWindow(normalized ? row.session_date : row.date, window)).map(row => {
     const date = normalized ? row.session_date : row.date;
     const state = normalized ? row.schedule_state : row.scheduleState || row.state || 'active';
-    const inherited = inheritedTiming(context, date);
     const timing = normalized
       ? { startMinute: minutes(row.start_time), endMinute: minutes(row.end_time), teacherId: row.teacher_catalog_id, classroomId: row.classroom_catalog_id }
-      : { startMinute: minutes(row.startTime) ?? inherited?.startMinute ?? null, endMinute: minutes(row.endTime) ?? inherited?.endMinute ?? null, teacherId: row.teacherCatalogId || (row.teacherName ? rows(context.catalogs.teachers).filter(x=>x.name===row.teacherName).length === 1 ? rows(context.catalogs.teachers).find(x=>x.name===row.teacherName).id : null : inherited?.teacherId || null), classroomId: row.classroomCatalogId || (row.classroomName ? rows(context.catalogs.classrooms).filter(x=>x.name===row.classroomName).length === 1 ? rows(context.catalogs.classrooms).find(x=>x.name===row.classroomName).id : null : inherited?.classroomId || null) };
+      : legacyTiming(context, row, source);
     return { id: String(normalized || rows(context.plan?.sessions).some(x=>x.id === row.id) ? row.id : `virtual:${row.date}:${row.billingId}:${row.originalDate || ''}`), date, state: state === 'tbd' ? 'undecided' : state === 'skipped' ? 'skipped' : !normalized && state === 'exception' ? 'cancelled' : state === 'makeup' ? 'makeup' : 'scheduled', ...timing,
       sourceSlotId: normalized ? row.source_schedule_slot_id : null, makeupOfLessonId: normalized ? row.makeup_of_session_id : null,
       originalDate: normalized ? rows(context.sessions).find(x => x.id === row.makeup_of_session_id)?.session_date || null : row.originalDate || null,
@@ -190,6 +212,7 @@ export function compileClassEdit(context, request, { today = new Intl.DateTimeFo
   } else {
     const saved = structuredClone(context.plan), draft = normalizedPlan(context);
     const affected = new Set(touched);
+    const authoredTimings = new Map();
     for (const change of request.lessons) {
       if (!draft.billingPeriods.some(period=>change.date >= period.startDate && change.date <= period.endDate)) fail('agent_missing_billing_period');
       const old = selectLesson(workspace,change);
@@ -207,12 +230,19 @@ export function compileClassEdit(context, request, { today = new Intl.DateTimeFo
       }
       if (nextMakeup && workspace.lessons.some(row=>row.date === nextMakeup && row.state !== 'skipped' && row.originalDate !== change.date)) fail('agent_makeup_date_occupied');
       draft.sessionStates[change.date] = { ...previous, state: { scheduled: draft.selectedDays.includes(weekday(change.date)) ? 'active' : 'force_active', cancelled:'exception', skipped:'skipped', undecided:'tbd' }[change.state], makeupDate:nextMakeup };
-      if (change.timing) draft.sessionSchedules[change.date] = details(effectiveContext,change.timing);
+      if (change.timing) {
+        draft.sessionSchedules[change.date] = details(effectiveContext,change.timing);
+        authoredTimings.set(change.date,draft.sessionSchedules[change.date]);
+      }
       else if (change.state === 'scheduled' && !draft.selectedDays.includes(weekday(change.date)) && !draft.sessionSchedules[change.date]) fail('agent_timing_required');
-      if (change.makeup) draft.sessionSchedules[change.makeup.date] = details(effectiveContext,change.makeup);
+      if (change.makeup) {
+        draft.sessionSchedules[change.makeup.date] = details(effectiveContext,change.makeup);
+        authoredTimings.set(change.makeup.date,draft.sessionSchedules[change.makeup.date]);
+      }
     }
     const generated = buildSchedulePlanForSave(draft,defaults(effectiveContext));
-    const owned = ['date','billingId','billingLabel','billingColor','sessionNumber','scheduleState','state','makeupDate','originalDate','isForced','startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'];
+    const owned = ['date','billingId','billingLabel','billingColor','sessionNumber','scheduleState','state','makeupDate','originalDate','isForced'];
+    const occupancy = ['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'];
     const oldRows = rows(saved.sessions);
     const newRows = rows(generated.sessions).filter(row=>affected.has(row.date) || affected.has(row.originalDate)).map(row=>{
       const matches = oldRows.filter(old=>rowKey(old) === rowKey(row));
@@ -221,7 +251,13 @@ export function compileClassEdit(context, request, { today = new Intl.DateTimeFo
       // Planner sequence-based matching can copy learning content from a different
       // lesson. Only retain content for the exact same date/source identity.
       const result = old ? {...old} : {id:uuid(),sessionKey:uuid()};
-      for (const field of owned) { if (Object.hasOwn(row,field)) result[field]=row[field]; }
+      for (const field of [...owned,...(old ? [] : occupancy)]) { if (Object.hasOwn(row,field)) result[field]=row[field]; }
+      // State-only edits cannot serialize the planner's inherited timing back
+      // over explicit empty values (or turn absent raw fields into overrides).
+      if (authoredTimings.has(row.date)) {
+        Object.assign(result,authoredTimings.get(row.date));
+        delete result.classroomUnresolved;
+      }
       return result;
     });
     const removed = oldRows.filter(old=>(affected.has(old.date) || affected.has(old.originalDate)) && !newRows.some(row=>rowKey(row)===rowKey(old))).map(old=>({...old,state:'skipped',scheduleState:'skipped',makeupDate:''}));
@@ -229,7 +265,7 @@ export function compileClassEdit(context, request, { today = new Intl.DateTimeFo
       const computed=generated.billingPeriods.find(row=>row.id===period.id);
       return computed && [...affected].some(date=>date>=computed.startDate && date<=computed.endDate) ? {...period,totalSessions:computed.totalSessions} : period;
     }), sessionStates: { ...(saved.sessionStates || {}), ...Object.fromEntries([...affected].filter(date=>draft.sessionStates[date]).map(date=>[date,{...(saved.sessionStates?.[date] || {}),...draft.sessionStates[date]}])) },
-      sessionSchedules: {...(saved.sessionSchedules || {}), ...Object.fromEntries([...affected].filter(date=>draft.sessionSchedules[date]).map(date=>[date,{...(saved.sessionSchedules?.[date] || {}),...draft.sessionSchedules[date]}])) },
+      sessionSchedules: {...(saved.sessionSchedules || {}), ...Object.fromEntries([...authoredTimings].map(([date,timing])=>[date,{...(saved.sessionSchedules?.[date] || {}),...timing}])) },
       sessions:[...oldRows.filter(old=>!affected.has(old.date) && !affected.has(old.originalDate)),...newRows,...removed].sort((a,b)=>a.date.localeCompare(b.date)) };
     command.changedDates = [...affected].sort();
   }
