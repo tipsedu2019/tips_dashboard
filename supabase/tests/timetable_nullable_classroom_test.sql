@@ -84,13 +84,13 @@ select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303
 select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'datedSessions') s
  where s->>'classId'=pg_temp.room_id(303)::text and s->>'teacherId'=pg_temp.room_id(103)::text and s->>'classroomId' is null),
  1,'saved nullable lesson has known teacher occupancy after fresh projection');
-select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
+select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('schedule_plan',jsonb_build_object('sessions',jsonb_build_array(
  jsonb_build_object('id','nullable-one','date',pg_temp.room_day(2),'scheduleState','active','isForced',false,'classroomCatalogId',pg_temp.room_id(201))))),
  pg_temp.room_id(608),(select schedule_plan from public.classes where id=pg_temp.room_id(303)))$q$,
- '23P01','timetable_resource_conflict','assigning an occupied room to a dated lesson is rejected');
-select ok(not (select (schedule_plan->'sessions'->0) ? 'classroomCatalogId' from public.classes where id=pg_temp.room_id(303)),
- 'dated room conflict preserves the unassigned saved lesson');
+ 'dated lesson input accepts the selected room even when another class occupies it');
+select is((select schedule_plan#>>'{sessions,0,classroomCatalogId}' from public.classes where id=pg_temp.room_id(303)),
+ pg_temp.room_id(201)::text,'fresh dated lesson read preserves the selected occupied room');
 select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('schedule_plan',jsonb_build_object('sessions',jsonb_build_array(
  jsonb_build_object('id','nullable-one','date',pg_temp.room_day(2),'scheduleState','active','isForced',false,'classroomCatalogId',pg_temp.room_id(203))))),
@@ -102,19 +102,24 @@ select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(30
  jsonb_build_object('schedule_plan',jsonb_build_object('sessions',jsonb_build_array(
  jsonb_build_object('id','nullable-one','date',pg_temp.room_day(2),'scheduleState','active','classroomCatalogId',pg_temp.room_id(999))))),
  pg_temp.room_id(609),(select schedule_plan from public.classes where id=pg_temp.room_id(303)))$q$,
- '23P01','timetable_resource_conflict','a nonexistent dated room ID remains invalid');
-select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
+ '22023','class_schedule_catalog_invalid','a nonexistent dated room ID remains invalid');
+select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('schedule_plan',jsonb_build_object('sessions',jsonb_build_array(
  jsonb_build_object('id','nullable-one','date',pg_temp.room_day(2),'scheduleState','active'),
  jsonb_build_object('id','nullable-two','date',pg_temp.room_day(2),'scheduleState','active')))),
  pg_temp.room_id(610),(select schedule_plan from public.classes where id=pg_temp.room_id(303)))$q$,
- '23P01','timetable_resource_conflict','two overlapping same-class lessons do not become legal with null rooms');
+ 'distinct same-class lesson identities may occupy the same date with null rooms');
+select is((select schedule_plan->'sessions' from public.classes where id=pg_temp.room_id(303)),
+ jsonb_build_array(
+ jsonb_build_object('id','nullable-one','date',pg_temp.room_day(2),'scheduleState','active'),
+ jsonb_build_object('id','nullable-two','date',pg_temp.room_day(2),'scheduleState','active')),
+ 'both intended same-date lessons retain their exact identities and order');
 select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('schedule_plan',jsonb_build_object('sessions',jsonb_build_array(
  jsonb_build_object('id','nullable-one','date',pg_temp.room_day(2),'scheduleState','active'),
  jsonb_build_object('id','nullable-one','date',pg_temp.room_day(2),'scheduleState','active')))),
  pg_temp.room_id(612),(select schedule_plan from public.classes where id=pg_temp.room_id(303)))$q$,
- '23P01','timetable_resource_conflict','duplicate lesson identity remains rejected with unassigned rooms');
+ '22023','class_schedule_validation','duplicate lesson identity remains rejected with unassigned rooms');
 
 -- A second actual writer covers normalized creation, generation, edits and the
 -- bounded makeup availability DTO. Known teacher occupancy is retained throughout.
@@ -150,12 +155,15 @@ create function pg_temp.save_nullable_session(room_number int,teacher_number int
  memo,public_note,teacher_note,pg_temp.room_id(key_number),null)
  from public.class_lesson_sessions where class_id=pg_temp.room_id(306)
 $f$;
-select throws_ok($q$select pg_temp.save_nullable_session(201,101,622)$q$,'23P01','timetable_resource_conflict',
- 'normalized later assignment rejects the actual room already occupied by another teacher');
-select throws_ok($q$select pg_temp.save_nullable_session(null,102,623)$q$,'23P01','timetable_resource_conflict',
- 'normalized null-room edit still rejects a known teacher conflict');
-select is((select classroom_catalog_id from public.class_lesson_sessions where class_id=pg_temp.room_id(306)),null::uuid,
- 'both rejected normalized edits preserve the unassigned room');
+select lives_ok($q$select pg_temp.save_nullable_session(201,101,622)$q$,
+ 'normalized dated input accepts the actual room already occupied by another teacher');
+select is((select classroom_catalog_id from public.class_lesson_sessions where class_id=pg_temp.room_id(306)),pg_temp.room_id(201),
+ 'normalized read preserves the explicitly selected occupied room');
+select lives_ok($q$select pg_temp.save_nullable_session(null,102,623)$q$,
+ 'normalized null-room input accepts the selected teacher despite a dated conflict');
+select ok((select classroom_catalog_id is null and teacher_catalog_id=pg_temp.room_id(102)
+ from public.class_lesson_sessions where class_id=pg_temp.room_id(306)),
+ 'normalized read preserves the explicit room clear and selected teacher');
 select lives_ok($q$select pg_temp.save_nullable_session(202,101,624)$q$,
  'normalized later assignment to a free actual room succeeds');
 select is((select classroom_catalog_id from public.class_lesson_sessions where class_id=pg_temp.room_id(306)),

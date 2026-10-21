@@ -21,8 +21,8 @@ reset role;
 select is(dashboard_private.read_timetable_operating_reference_v1(),(select ref from legacy_before),'textbook and progress edits preserve the complete reference and fingerprint');
 select is((select schedule_plan#>>'{sessions,0,progressStatus}' from public.classes where id='ac240000-0000-4000-8000-000000000100'),'완료','progress is persisted');
 select is((select schedule_plan#>'{sessions,0,textbookEntries}' from public.classes where id='ac240000-0000-4000-8000-000000000100'),'[{"textbookId":"book","progress":"done"}]'::jsonb,'textbook content is persisted without rewriting originals');
-select throws_ok($q$select public.update_class_operational_v1('ac240000-0000-4000-8000-000000000100',jsonb_build_object('schedule_plan',jsonb_set(schedule_plan,'{sessions,0,date}','"2026-10-06"')),'ac240000-0000-4000-8000-000000000201',schedule_plan) from public.classes where id='ac240000-0000-4000-8000-000000000100'$q$,'23P01','timetable_resource_conflict','a real occupancy change still fails closed with exact SQLSTATE');
-select is((select schedule_plan#>>'{sessions,0,date}' from public.classes where id='ac240000-0000-4000-8000-000000000100'),'2026-10-05','rejected occupancy change preserves the original date');
+select lives_ok($q$select public.update_class_operational_v1('ac240000-0000-4000-8000-000000000100',jsonb_build_object('schedule_plan',jsonb_set(schedule_plan,'{sessions,0,date}','"2026-10-06"')),'ac240000-0000-4000-8000-000000000201',schedule_plan) from public.classes where id='ac240000-0000-4000-8000-000000000100'$q$,'manual date edit does not require missing historical time or resources');
+select is((select schedule_plan#>>'{sessions,0,date}' from public.classes where id='ac240000-0000-4000-8000-000000000100'),'2026-10-06','manual date edit persists the submitted date');
 select lives_ok($q$insert into auth.users(id,instance_id,aud,role,email) values('ac240000-0000-4000-8000-000000000002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','legacy-signup@test.invalid');set constraints all immediate$q$,'signup catalog trigger preserves existing incomplete occupancy');
 
 -- Legacy schedule edits use the same content-preserving operational RPC.
@@ -61,9 +61,15 @@ set local role authenticated;
 select lives_ok($q$select pg_temp.save(pg_temp.plan(true,true),503)$q$,'explicit makeup retains time and resources and saves with cancellation');
 select is((select schedule_plan#>>'{sessions,2,startTime}' from public.classes where id=pg_temp.sid(301)),'19:20','saved makeup time reads back');
 select is((select schedule_plan#>>'{sessions,0,teacherNote}' from public.classes where id=pg_temp.sid(301)),'retained history','historical learning note remains unchanged');
-select throws_ok($q$select pg_temp.save(jsonb_set(pg_temp.plan(true,true),'{sessions,2}',(pg_temp.plan(true,true)#>'{sessions,2}')-'startTime'),504)$q$,'23P01','timetable_resource_conflict','new ambiguous makeup remains blocked with exact SQLSTATE');
-select throws_ok($q$select pg_temp.save(jsonb_set(pg_temp.plan(true,true),'{sessions,2,date}',to_jsonb(pg_temp.day(2)+7)),505)$q$,'23P01','timetable_resource_conflict','real same-class teacher and room overlap remains blocked');
-select throws_ok($q$select pg_temp.save(jsonb_set(pg_temp.plan(true,true),'{sessions,0,date}','"2026-03-30"'),506)$q$,'23P01','timetable_resource_conflict','changing unknown historical occupancy is still blocked');
+select lives_ok($q$select pg_temp.save(jsonb_set(pg_temp.plan(true,true),'{sessions,2}',(pg_temp.plan(true,true)#>'{sessions,2}')-'startTime'),504)$q$,'manual makeup input preserves an omitted time without requiring complete occupancy');
+select ok(not (select schedule_plan#>'{sessions,2}' ? 'startTime' from public.classes where id=pg_temp.sid(301)),
+ 'manual makeup save does not invent the missing time');
+select lives_ok($q$select pg_temp.save(jsonb_set(pg_temp.plan(true,true),'{sessions,2,date}',to_jsonb(pg_temp.day(2)+7)),505)$q$,'manual dated input permits same-class teacher and room overlap');
+select is((select schedule_plan#>>'{sessions,2,date}' from public.classes where id=pg_temp.sid(301)),
+ (pg_temp.day(2)+7)::text,'overlapping manual lesson keeps its selected date');
+select lives_ok($q$select pg_temp.save(jsonb_set(pg_temp.plan(true,true),'{sessions,0,date}','"2026-03-30"'),506)$q$,'manual history date correction does not require missing occupancy');
+select is((select schedule_plan#>>'{sessions,0,teacherNote}' from public.classes where id=pg_temp.sid(301)),
+ 'retained history','accepted date edits preserve the existing learning note');
 reset role;
 set constraints all immediate; set constraints all deferred;
 select is((select count(*) from dashboard_private.notification_events),(select events from no_send),'no notification event');

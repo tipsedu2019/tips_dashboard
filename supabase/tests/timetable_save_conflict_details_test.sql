@@ -1,8 +1,9 @@
 begin;
 select no_plan();
 
--- Synthetic fixtures only. Calls exercise the main Save RPC with its complete
--- expected source and unsaved draft, plus the same deferred final guard.
+-- Synthetic fixtures only. Mixed class patches retain the strict occupancy
+-- policy and complete expected source. Schedule-plan-only input is covered by
+-- class_lesson_input_policy_test.sql and does not produce collision diagnostics.
 create function pg_temp.sid(n int) returns uuid language sql immutable as
 $$select ('ad130000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 create function pg_temp.day(n int) returns date language sql stable as
@@ -18,11 +19,11 @@ create function pg_temp.seed_baseline() returns void language plpgsql as $$begin
  set constraints all immediate;set constraints all deferred;
 end$$;
 create function pg_temp.try_save(sessions jsonb,expected jsonb default null) returns jsonb language plpgsql as $$
-declare source jsonb; draft jsonb; code text; message text; detail text;
+declare source jsonb; source_name text; draft jsonb; code text; message text; detail text;
 begin
- select schedule_plan into source from public.classes where id=pg_temp.sid(301);
+ select schedule_plan,name into source,source_name from public.classes where id=pg_temp.sid(301);
  draft:=jsonb_set(source,'{sessions}',sessions);
- perform public.update_class_operational_v1(pg_temp.sid(301),jsonb_build_object('schedule_plan',draft),gen_random_uuid(),coalesce(expected,source));
+ perform public.update_class_operational_v1(pg_temp.sid(301),jsonb_build_object('name',source_name,'schedule_plan',draft),gen_random_uuid(),coalesce(expected,source));
  return jsonb_build_object('ok',true);
 exception when others then
  get stacked diagnostics code=RETURNED_SQLSTATE,message=MESSAGE_TEXT,detail=PG_EXCEPTION_DETAIL;
@@ -101,8 +102,8 @@ select is((select pg_get_userbyid(proowner) from pg_proc where oid='dashboard_pr
 select set_config('request.jwt.claim.sub',pg_temp.sid(901)::text,true);
 set local role authenticated;
 insert into ev values('teacher',pg_temp.try_save(jsonb_build_array(pg_temp.lesson('unsaved-teacher',pg_temp.day(2),101,201))));
-select is((select v->>'code' from ev where k='teacher'),'23P01','actual main Save retains exact business SQLSTATE');
-select is((select v->>'message' from ev where k='teacher'),'timetable_resource_conflict','actual main Save retains exact conflict message');
+select is((select v->>'code' from ev where k='teacher'),'23P01','strict mixed class save retains exact business SQLSTATE');
+select is((select v->>'message' from ev where k='teacher'),'timetable_resource_conflict','strict mixed class save retains exact conflict message');
 select is((select v#>>'{detail,version}' from ev where k='teacher'),'1','PostgREST DETAIL uses versioned JSON');
 select is((select v#>>'{detail,confirmed,0,className}' from ev where k='teacher'),'Synthetic teacher collision','unsaved candidate explains actual existing counterpart');
 select is((select v#>>'{detail,confirmed,0,date}' from ev where k='teacher'),pg_temp.day(2)::text,'historical exact date remains proven');
@@ -113,7 +114,7 @@ select is((select v#>>'{detail,confirmed,0,overlapEndMinute}' from ev where k='t
 select is((select v#>>'{detail,confirmed,0,teacherName}' from ev where k='teacher'),'Synthetic shared teacher','teacher-only collision identifies the matched teacher');
 select ok(not (select v#>'{detail,confirmed,0}' ? 'classroomName' from ev where k='teacher'),'teacher-only collision does not claim unmatched room');
 select is((select v#>>'{detail,unresolvedCount}' from ev where k='teacher'),'0','fully known collision has no uncertainty');
-select is((select schedule_plan from public.classes where id=pg_temp.sid(301)),(select plan from original),'rejected main Save preserves complete saved source');
+select is((select schedule_plan from public.classes where id=pg_temp.sid(301)),(select plan from original),'rejected strict mixed save preserves complete saved source');
 
 insert into ev values('room',pg_temp.try_save(jsonb_build_array(pg_temp.lesson('unsaved-room',pg_temp.day(3),101,201))));
 select is((select v#>>'{detail,confirmed,0,className}' from ev where k='room'),'Synthetic room collision','closed-class dated reservation is still checked');
@@ -130,7 +131,7 @@ select is((select v->>'code' from ev where k='stale'),'P0001','full expected-sou
 select ok((select v->'detail'='null'::jsonb from ev where k='stale'),'technical/stale error gets no collision detail');
 select is(pg_temp.try_save(jsonb_build_array(pg_temp.lesson('adjacent',pg_temp.day(2),101,201,'10:00','11:00')))->>'ok','true',
  'adjacent exact minute intervals remain saveable');
-select is((select pg_temp.try_save(jsonb_build_array(pg_temp.lesson('nonoverlap',pg_temp.day(2),101,201,'11:00','12:00')))->>'ok'),'true','safe corrected draft commits through real main Save');
+select is((select pg_temp.try_save(jsonb_build_array(pg_temp.lesson('nonoverlap',pg_temp.day(2),101,201,'11:00','12:00')))->>'ok'),'true','safe corrected draft commits through the strict mixed class writer');
 reset role;
 select pg_temp.seed_baseline();
 update public.classes set schedule_plan=(select plan from original) where id=pg_temp.sid(301);

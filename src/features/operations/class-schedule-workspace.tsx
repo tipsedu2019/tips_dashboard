@@ -4,15 +4,17 @@ import { timetableOperationalErrorMessage } from "../academic/timetable-operatio
 import { parseTimetableOperationalConflictDetails, type TimetableOperationalConflictDetails } from "../academic/timetable-operational-conflict-details";
 import { LessonSaveConflictDetails } from "./lesson-save-conflict-details";
 import Link from "next/link";
-import { preserveScheduleLearningContent, preserveUneditedLegacyPeriods, scheduleOnlyDraft, legacyLessonScheduleValidationError } from "./schedule-only-plan";
+import { scheduleOnlyDraft } from "./schedule-only-plan";
+import { authoredLegacyLessonDraft, applyAuthoredLegacyLessonEdit, patchAuthoredLegacyLesson,
+  setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyLessonValidationError } from "./legacy-authored-lesson-plan";
 import { projectMaterializedLessonOrdinals } from "@/lib/materialized-lesson-ordinals";
 import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectionDraft,
   type LegacyPastStateCorrectionInput, type LegacyPastStateCorrectionTarget } from "./legacy-past-state-correction";
 import { LegacyPastStateCorrectionDialog } from "./legacy-past-state-correction-dialog";
 import { LegacyLessonScheduleFields } from "./legacy-lesson-schedule-fields";
 import { legacyLessonMonthRange, newLegacyLessonMonthError, prepareLegacyLessonMonth, suggestedLegacyLessonMonth } from "./legacy-lesson-month";
-import { resolveLegacyLessonDetails, snapshotNewLegacyLessonDetails, snapshotRestoredLegacyLessonDetails } from "./legacy-lesson-defaults";
-import { projectLegacyEffectivePlan, resolveEffectiveSchedule, setLegacyLessonOverride, resetLegacyLessonToBasics } from "./legacy-effective-schedule.js";
+import { resolveLegacyLessonDetails, snapshotNewLegacyLessonDetails } from "./legacy-lesson-defaults";
+import { projectLegacyEffectivePlan, resolveEffectiveSchedule } from "./legacy-effective-schedule.js";
 import { useCommittedSearch } from "@/hooks/use-committed-search";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
@@ -40,7 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AcademicFilterToolbar } from "@/features/academic/filter-toolbar";
-import { applyCalendarDateSubstitution, applyCalendarDateToggle, buildSchedulePlanForSave, computeAutoEndDate, normalizeSchedulePlan, isRequestMakeupSession } from "@/lib/class-schedule-planner";
+import { applyCalendarDateToggle, buildSchedulePlanForSave, computeAutoEndDate, normalizeSchedulePlan, isRequestMakeupSession } from "@/lib/class-schedule-planner";
 import { useDraftNavigation } from "@/hooks/use-draft-navigation";
 import { supabase } from "@/lib/supabase";
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js";
@@ -855,100 +857,6 @@ function getLessonCalendarSessionSurfaceStyle(scheduleState: string, accentColor
   };
 }
 
-function buildLessonSessionStateDraft(
-  existingState: Record<string, unknown> | null,
-  {
-    nextState,
-    memo,
-    makeupMemo,
-    makeupDate,
-    isForced,
-  }: {
-    nextState: string;
-    memo?: string;
-    makeupMemo?: string;
-    makeupDate?: string;
-    isForced?: boolean;
-  },
-) {
-  const current = existingState || {
-    state: isForced ? "force_active" : "active",
-    memo: "",
-    makeupDate: "",
-  };
-  const nextMemo = text(memo ?? current.memo);
-  const nextMakeupMemo = text(makeupMemo ?? current.makeupMemo);
-  const nextMakeupDate = text(makeupDate ?? current.makeupDate);
-
-  if (nextState === "active") {
-    if (isForced) {
-      return {
-        state: "force_active",
-        memo: nextMemo,
-        makeupDate: "",
-      };
-    }
-
-    if (!nextMemo && !nextMakeupDate && !nextMakeupMemo) {
-      return null;
-    }
-
-    return {
-      state: "active",
-      memo: nextMemo,
-      makeupDate: "",
-    };
-  }
-
-  if (nextState === "tbd") {
-    return {
-      state: "tbd",
-      memo: nextMemo,
-      makeupDate: "",
-    };
-  }
-
-  return {
-    state: nextState,
-    memo: nextMemo,
-    makeupMemo: nextState === "exception" ? nextMakeupMemo : "",
-    makeupDate: nextState === "exception" ? nextMakeupDate : "",
-  };
-}
-
-function applyLessonSessionStateChange(
-  planInput: Record<string, unknown>,
-  dateString: string,
-  options: {
-    nextState: string;
-    memo?: string;
-    makeupMemo?: string;
-    makeupDate?: string;
-    isForced?: boolean;
-  },
-) {
-  if (!dateString) {
-    return planInput;
-  }
-
-  const nextStates = {
-    ...(((planInput.sessionStates || {}) as Record<string, unknown>) || {}),
-  };
-  const currentState = (nextStates[dateString] || null) as Record<string, unknown> | null;
-  const nextDraft = buildLessonSessionStateDraft(currentState, options);
-
-  if (!nextDraft) {
-    delete nextStates[dateString];
-  } else {
-    nextStates[dateString] = nextDraft;
-  }
-
-  return {
-    ...planInput,
-    sessionStates: nextStates,
-  };
-}
-
 function resolveLessonSessionDraftDate(
   session: {
     scheduleState?: string;
@@ -986,39 +894,6 @@ function getLessonSessionDraftState(
   return text(session?.scheduleState) || "active";
 }
 
-function getLessonSessionDraftMemo(
-  session: {
-    memo?: string;
-  } | null,
-  currentState: Record<string, unknown> | null,
-) {
-  return text(currentState?.memo) || text(session?.memo);
-}
-
-function getLessonSessionEditableMemo(
-  session: {
-    scheduleState?: string;
-    memo?: string;
-  } | null,
-  currentState: Record<string, unknown> | null,
-) {
-  if (text(session?.scheduleState) === "makeup") {
-    return text(currentState?.makeupMemo) || text(session?.memo);
-  }
-
-  return getLessonSessionDraftMemo(session, currentState);
-}
-
-function getLessonSessionDraftMakeupMemo(
-  session: {
-    scheduleState?: string;
-    memo?: string;
-  } | null,
-  currentState: Record<string, unknown> | null,
-) {
-  return text(currentState?.makeupMemo) || (text(session?.scheduleState) === "makeup" ? text(session?.memo) : "");
-}
-
 function getLessonSessionDraftMakeupDate(
   session: {
     makeupDate?: string;
@@ -1027,20 +902,6 @@ function getLessonSessionDraftMakeupDate(
   currentState: Record<string, unknown> | null,
 ) {
   return text(currentState?.makeupDate) || text(session?.makeupDate || session?.makeup_date);
-}
-
-function getLessonSessionDraftIsForced(
-  session: {
-    scheduleState?: string;
-  } | null,
-  currentState: Record<string, unknown> | null,
-) {
-  const currentValue = text(currentState?.state);
-  if (currentValue) {
-    return currentValue === "force_active";
-  }
-
-  return text(session?.scheduleState) === "force_active";
 }
 
 function buildLessonScheduleConnectionLabel({
@@ -1075,12 +936,7 @@ function buildLessonScheduleConnectionLabel({
 
 function buildLessonScheduleContext(session: Record<string, unknown> | null, fallbackSession?: Record<string, unknown> | null) {
   const resolvedSession = session || fallbackSession || null;
-  const memo = text(
-    session?.memo ||
-      session?.session_memo ||
-      fallbackSession?.memo ||
-      fallbackSession?.session_memo,
-  );
+  const memo = String(session?.memo ?? session?.session_memo ?? fallbackSession?.memo ?? fallbackSession?.session_memo ?? "");
   const makeupDate = text(
     session?.makeupDate ||
       session?.makeup_date ||
@@ -1316,16 +1172,16 @@ function buildLessonDesignSnapshot(
   const classItem = (raw?.classItem || null) as Record<string, unknown> | null;
   const plan = (planOverride || classItem?.schedulePlan || classItem?.schedule_plan || null) as Record<string, unknown> | null;
   const actualSessions = Array.isArray(raw?.sessions)
-    ? [...(raw.sessions as Record<string, unknown>[])]
+    ? [...(raw.sessions as Record<string, unknown>[])].filter(row => row !== null && typeof row === "object" && !Array.isArray(row))
         .sort(sortLessonSessionRecords)
     : [];
   const rawSessions =
     planOverride && Array.isArray(plan?.sessions)
-      ? [...(plan.sessions as Record<string, unknown>[])]
+      ? [...(plan.sessions as Record<string, unknown>[])].filter(row => row !== null && typeof row === "object" && !Array.isArray(row))
           .sort(sortLessonSessionRecords)
       : actualSessions;
   const planSessions = Array.isArray(plan?.sessions)
-    ? (plan.sessions as Record<string, unknown>[])
+    ? (plan.sessions as Record<string, unknown>[]).filter(row => row !== null && typeof row === "object" && !Array.isArray(row))
     : Array.isArray(plan?.session_list)
       ? (plan.session_list as Record<string, unknown>[])
       : [];
@@ -1510,8 +1366,8 @@ function buildLessonDesignSnapshot(
       progressTone: getProgressTone(text(sessionSource.progressStatus || sessionSource.progress_status)),
       noteSummary: text(sessionSource.noteSummary || sessionSource.note_summary) || "기록 메모 없음",
       rangeLabel: text(sessionSource.rangeLabel || sessionSource.range_label) || "범위 기록 없음",
-      publicNote: text(session.publicNote || session.public_note || sessionSource.publicNote || sessionSource.public_note),
-      teacherNote: text(session.teacherNote || session.teacher_note || sessionSource.teacherNote || sessionSource.teacher_note),
+      publicNote: String(session.publicNote ?? session.public_note ?? sessionSource.publicNote ?? sessionSource.public_note ?? ""),
+      teacherNote: String(session.teacherNote ?? session.teacher_note ?? sessionSource.teacherNote ?? sessionSource.teacher_note ?? ""),
       content: text(sessionSource.content) || "수업 기록 없음",
       homework: text(sessionSource.homework) || "과제 없음",
       updatedAt: formatUpdatedDate(text(sessionSource.updatedAt || sessionSource.updated_at)),
@@ -2847,8 +2703,8 @@ export function ClassScheduleWorkspace() {
     };
   }, [selectedRow, selectedRowClassItem]);
   const normalizeLessonDraft = useCallback((plan: Record<string, unknown>) => {
+    if (!isNormalizedLessonSchedule) return authoredLegacyLessonDraft(plan, lessonPlanDefaults);
     const normalized = normalizeSchedulePlan(scheduleOnlyDraft(plan), { ...lessonPlanDefaults, textbooks: [], textbookIds: [] }) as Record<string, unknown>;
-    if (!isNormalizedLessonSchedule) return normalized;
     // Authoritative rows may move off the weekly pattern or share a date.
     return { ...normalized, sessions: (scheduleOnlyDraft(plan).sessions as Record<string, unknown>[]).slice().sort(sortLessonSessionRecords) };
   }, [isNormalizedLessonSchedule, lessonPlanDefaults]);
@@ -2856,8 +2712,13 @@ export function ClassScheduleWorkspace() {
     () => (lessonPlanDraft ? normalizeLessonDraft(lessonPlanDraft) : null),
     [lessonPlanDraft, normalizeLessonDraft],
   );
-  // Legacy editor controls address dates, while an approved request can own
-  // several separate slots on one date. Keep those effects in the approval flow.
+  // Detail controls address a session ID. Calendar controls address a date and
+  // must still avoid changing several request-owned slots through one date key.
+  const requestOwnedLessonSessionIds = useMemo(() => {
+    if (isNormalizedLessonSchedule) return new Set<string>();
+    const rows = Array.isArray(normalizedLessonPlan?.sessions) ? normalizedLessonPlan.sessions as Record<string, unknown>[] : [];
+    return new Set(rows.filter(isRequestMakeupSession).map(row => text(row.id || row.sessionKey)).filter(Boolean));
+  }, [isNormalizedLessonSchedule, normalizedLessonPlan]);
   const requestOwnedLessonDates = useMemo(() => {
     if (isNormalizedLessonSchedule) return new Set<string>();
     const rows = Array.isArray(normalizedLessonPlan?.sessions) ? normalizedLessonPlan.sessions as Record<string, unknown>[] : [];
@@ -2873,27 +2734,27 @@ export function ClassScheduleWorkspace() {
   // Version 1 resolves defaults on read. Keep the old snapshot behavior only
   // during a rolling release against a database without the new read contract.
   const buildEditedLessonDraft = useCallback((plan: Record<string, unknown>, previous: Record<string, unknown>) => {
-    const normalized = normalizeLessonDraft(plan);
+    const normalized = isNormalizedLessonSchedule ? normalizeLessonDraft(plan) : applyAuthoredLegacyLessonEdit(plan, previous, lessonPlanDefaults);
     if (isNormalizedLessonSchedule || legacyEffectiveContext?.version === 1) return normalized;
     // The accepted baseline, rather than the previous in-memory edit, identifies
     // new dates even if an earlier draft was generated before defaults arrived.
-    let draft = snapshotNewLegacyLessonDetails(normalized, lessonPlanBaselineRef.current || previous, legacyLessonSnapshotDefaults);
-    for (const row of (previous.sessions as Record<string, unknown>[] || [])) {
-      if (!["skipped", "exception", "tbd"].includes(text(row.scheduleState) || text(row.state))) continue;
-      draft = snapshotRestoredLegacyLessonDetails(draft, previous, legacyLessonSnapshotDefaults, text(row.date));
-    }
-    return draft;
-  }, [isNormalizedLessonSchedule, legacyEffectiveContext, legacyLessonSnapshotDefaults, normalizeLessonDraft]);
+    const snapshot = snapshotNewLegacyLessonDetails(normalized, lessonPlanBaselineRef.current || previous, legacyLessonSnapshotDefaults);
+    if (snapshot === normalized) return normalized;
+    // The rolling-release snapshot helper handles object rows only. Preserve
+    // opaque historical elements at their exact original array positions.
+    let objectIndex = 0;
+    return { ...snapshot, sessions: (normalized.sessions as Record<string, unknown>[] || []).map(row =>
+      row !== null && typeof row === "object" && !Array.isArray(row)
+        ? (snapshot.sessions as Record<string, unknown>[])[objectIndex++] : row) };
+  }, [isNormalizedLessonSchedule, legacyEffectiveContext, legacyLessonSnapshotDefaults, lessonPlanDefaults, normalizeLessonDraft]);
   const lessonPlanForSave = useMemo(
     () => {
       if (!normalizedLessonPlan) return null;
+      if (!isNormalizedLessonSchedule) return normalizedLessonPlan;
       const generated = buildSchedulePlanForSave(normalizedLessonPlan, lessonPlanDefaults) as Record<string, unknown>;
-      if (isNormalizedLessonSchedule) return { ...generated, sessions: normalizedLessonPlan.sessions };
-      if (!lessonPlanBaseline) return generated;
-      return preserveUneditedLegacyPeriods(generated,
-        (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>, lessonPlanBaseline);
+      return { ...generated, sessions: normalizedLessonPlan.sessions };
     },
-    [isNormalizedLessonSchedule, lessonPlanDefaults, normalizedLessonPlan, lessonPlanBaseline, selectedRowClassItem],
+    [isNormalizedLessonSchedule, lessonPlanDefaults, normalizedLessonPlan],
   );
   // Saved ordinals still identify booking/history records. Only the display
   // copy supplies labels; it never becomes a save or record-matching payload.
@@ -2909,8 +2770,14 @@ export function ClassScheduleWorkspace() {
   }, [isNormalizedLessonSchedule, lessonPlanForSave]);
   const lessonDesignSnapshot = useMemo(() => {
     if (!normalizedScheduleData || !lessonPlanForSave) {
+      // Invalid historical elements are retained in the write; only object rows
+      // can be rendered as editable lessons.
+      const authoredRows = ((lessonPlanForSave?.sessions || []) as Record<string, unknown>[]).filter(row => row !== null && typeof row === "object" && !Array.isArray(row));
       const displayPlan = lessonPlanForSave && !isNormalizedLessonSchedule
-        ? projectLegacyEffectivePlan(lessonPlanForSave, legacyEffectiveContext) : lessonPlanForSave;
+        ? { ...lessonPlanForSave, sessions: (projectLegacyEffectivePlan({ ...lessonPlanForSave, sessions: authoredRows }, legacyEffectiveContext).sessions as Record<string, unknown>[]).map((projected: Record<string, unknown>, index: number) => {
+            const raw = authoredRows[index];
+            return { ...projected, ...Object.fromEntries(["startTime", "endTime", "teacherCatalogId", "classroomCatalogId", "memo"].filter(key => Object.prototype.hasOwnProperty.call(raw, key)).map(key => [key, raw[key]])) };
+          }) } : lessonPlanForSave;
       const snapshot = buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, displayPlan);
       if (!snapshot || isNormalizedLessonSchedule) return snapshot;
       return { ...snapshot, sessions: snapshot.sessions.map(session => {
@@ -3273,7 +3140,7 @@ export function ClassScheduleWorkspace() {
       setLessonDesignSaveError("");
       setLessonDesignSaveNotice("");
 
-      const nextPlanForSave = buildSchedulePlanForSave(nextDraft, lessonPlanDefaults) as Record<string, unknown>;
+      const nextPlanForSave = isNormalizedLessonSchedule ? buildSchedulePlanForSave(nextDraft, lessonPlanDefaults) as Record<string, unknown> : nextDraft;
       const nextLessonDesignSnapshot = buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, nextPlanForSave);
       const focusTargetDate = text(options.targetDate);
       const focusSourceDate = text(options.sourceDate);
@@ -3302,7 +3169,7 @@ export function ClassScheduleWorkspace() {
 
       return text(nextFocusedSession?.id);
     },
-    [lessonDesignEditorTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow, setLessonDesignSaveError],
+    [isNormalizedLessonSchedule, lessonDesignEditorTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow, setLessonDesignSaveError],
   );
   const selectedLessonSessionDraftDate = resolveLessonSessionDraftDate(selectedLessonSession);
   const selectedLessonSessionDraftStateEntry = useMemo(() => {
@@ -3313,14 +3180,10 @@ export function ClassScheduleWorkspace() {
     const sessionStates = ((normalizedLessonPlan.sessionStates || {}) as Record<string, unknown>) || {};
     return (sessionStates[selectedLessonSessionDraftDate] || null) as Record<string, unknown> | null;
   }, [normalizedLessonPlan, selectedLessonSessionDraftDate]);
-  const selectedLessonSessionEditableState = getLessonSessionDraftState(
-    selectedLessonSession,
-    selectedLessonSessionDraftStateEntry,
-  );
-  const selectedLessonSessionEditableMemo = getLessonSessionEditableMemo(
-    selectedLessonSession,
-    selectedLessonSessionDraftStateEntry,
-  );
+  const selectedLessonSessionEditableState = isNormalizedLessonSchedule
+    ? getLessonSessionDraftState(selectedLessonSession, selectedLessonSessionDraftStateEntry)
+    : selectedLessonSession?.scheduleState || "active";
+  const selectedLessonSessionEditableMemo = selectedLessonSession?.memo ?? "";
   const selectedLessonSessionEditableMakeupDate = getLessonSessionDraftMakeupDate(
     selectedLessonSession,
     selectedLessonSessionDraftStateEntry,
@@ -3435,128 +3298,40 @@ export function ClassScheduleWorkspace() {
   }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail, selectedRow?.id, setLessonDesignSaveError, setLessonDesignSaveFailure]);
   const handleLessonSessionStateChange = useCallback(
     (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
-      const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
-        return;
-      }
-      const isMakeupSession = text(session?.scheduleState) === "makeup";
-
-      updateLessonPlanDraft((current) => {
-        const sessionStates = ((current.sessionStates || {}) as Record<string, unknown>) || {};
-        const currentState = (sessionStates[sessionDate] || null) as Record<string, unknown> | null;
-        return applyLessonSessionStateChange(current, sessionDate, {
-          nextState: isMakeupSession && nextState === "makeup" ? "exception" : nextState,
-          memo: isMakeupSession ? text(currentState?.memo) : getLessonSessionDraftMemo(session, currentState),
-          makeupMemo: getLessonSessionDraftMakeupMemo(session, currentState),
-          makeupDate: getLessonSessionDraftMakeupDate(session, currentState),
-          isForced: getLessonSessionDraftIsForced(session, currentState),
-        });
-      });
-    },
-    [requestOwnedLessonDates, updateLessonPlanDraft],
+      if (!session || requestOwnedLessonSessionIds.has(session.id)) return;
+      updateLessonPlanDraft(current => patchAuthoredLegacyLesson(
+        nextState === "active" && session.makeupDate ? setAuthoredLegacyMakeupDate(current, session.id, "") : current,
+        session.id, { state: nextState, scheduleState: nextState }));
+    }, [requestOwnedLessonSessionIds, updateLessonPlanDraft],
   );
   const handleLessonSessionMemoChange = useCallback(
     (session: (typeof selectedLessonSession), nextMemo: string) => {
-      const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) => {
-        const sessionStates = ((current.sessionStates || {}) as Record<string, unknown>) || {};
-        const currentState = (sessionStates[sessionDate] || null) as Record<string, unknown> | null;
-        const isMakeupSession = text(session?.scheduleState) === "makeup";
-        return applyLessonSessionStateChange(current, sessionDate, {
-          nextState: isMakeupSession ? "exception" : getLessonSessionDraftState(session, currentState),
-          memo: isMakeupSession ? text(currentState?.memo) : nextMemo,
-          makeupMemo: isMakeupSession ? nextMemo : getLessonSessionDraftMakeupMemo(session, currentState),
-          makeupDate: getLessonSessionDraftMakeupDate(session, currentState),
-          isForced: getLessonSessionDraftIsForced(session, currentState),
-        });
-      });
-    },
-    [requestOwnedLessonDates, updateLessonPlanDraft],
+      if (!session || requestOwnedLessonSessionIds.has(session.id)) return;
+      updateLessonPlanDraft(current => patchAuthoredLegacyLesson(current, session.id, { memo: nextMemo }));
+    }, [requestOwnedLessonSessionIds, updateLessonPlanDraft],
   );
   const handleLessonSessionMakeupDateDirectChange = useCallback(
     (session: (typeof selectedLessonSession), nextMakeupDate: string) => {
-      if (text(nextMakeupDate) && requestOwnedLessonDates.has(nextMakeupDate)) {
-        setLessonDesignSaveError("승인된 휴보강 날짜입니다. 휴보강 화면에서 일정을 확인해 주세요.");
-        return;
-      }
-      const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) => {
-        const sessionStates = ((current.sessionStates || {}) as Record<string, unknown>) || {};
-        const currentState = (sessionStates[sessionDate] || null) as Record<string, unknown> | null;
-        return applyLessonSessionStateChange(current, sessionDate, {
-          nextState: text(nextMakeupDate) ? "exception" : getLessonSessionDraftState(session, currentState),
-          memo: getLessonSessionDraftMemo(session, currentState),
-          makeupMemo: getLessonSessionDraftMakeupMemo(session, currentState),
-          makeupDate: nextMakeupDate,
-          isForced: getLessonSessionDraftIsForced(session, currentState),
-        });
+      if (!session || requestOwnedLessonSessionIds.has(session.id)) return;
+      updateLessonPlanDraft(current => {
+        const source = session.originalDate
+          ? (current.sessions as Record<string, unknown>[] || []).find(row => row.date === session.originalDate && row.billingId === session.billingId)
+          : session;
+        return source ? setAuthoredLegacyMakeupDate(current, text(source.id), nextMakeupDate) : current;
       });
-    },
-    [requestOwnedLessonDates, setLessonDesignSaveError, updateLessonPlanDraft],
+    }, [requestOwnedLessonSessionIds, updateLessonPlanDraft],
   );
-  const handleLessonSessionSubstitution = useCallback(
-    (session: (typeof selectedLessonSession), targetDate: string) => {
-      const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate || !targetDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue)) || requestOwnedLessonDates.has(targetDate)) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) =>
-        applyCalendarDateSubstitution(current, sessionDate, targetDate) as Record<string, unknown>,
-      );
-    },
-    [requestOwnedLessonDates, updateLessonPlanDraft],
-  );
+  const handleLessonSessionSubstitution = handleLessonSessionMakeupDateDirectChange;
   const handleLessonSessionClearSubstitution = useCallback(
-    (session: (typeof selectedLessonSession)) => {
-      const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) => {
-        const sessionStates = ((current.sessionStates || {}) as Record<string, unknown>) || {};
-        const currentState = (sessionStates[sessionDate] || null) as Record<string, unknown> | null;
-        return applyLessonSessionStateChange(current, sessionDate, {
-          nextState: "exception",
-          memo: getLessonSessionDraftMemo(session, currentState),
-          makeupMemo: getLessonSessionDraftMakeupMemo(session, currentState),
-          makeupDate: "",
-          isForced: false,
-        });
-      });
-    },
-    [requestOwnedLessonDates, updateLessonPlanDraft],
+    (session: (typeof selectedLessonSession)) => handleLessonSessionMakeupDateDirectChange(session, ""),
+    [handleLessonSessionMakeupDateDirectChange],
   );
   const handleLessonSessionRelease = useCallback(
     (session: (typeof selectedLessonSession)) => {
-      const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) => {
-        const sessionStates = ((current.sessionStates || {}) as Record<string, unknown>) || {};
-        const currentState = (sessionStates[sessionDate] || null) as Record<string, unknown> | null;
-        return applyLessonSessionStateChange(current, sessionDate, {
-          nextState: "skipped",
-          memo: getLessonSessionDraftMemo(session, currentState),
-          makeupMemo: "",
-          makeupDate: "",
-          isForced: false,
-        });
-      });
-      setSelectedLessonCalendarDate(sessionDate);
-    },
-    [requestOwnedLessonDates, updateLessonPlanDraft],
+      if (!session || requestOwnedLessonSessionIds.has(session.id)) return;
+      updateLessonPlanDraft(current => patchAuthoredLegacyLesson(current, session.id, { state: "skipped", scheduleState: "skipped" }));
+      setSelectedLessonCalendarDate(session.dateValue);
+    }, [requestOwnedLessonSessionIds, updateLessonPlanDraft],
   );
   const handleLessonCalendarToggle = useCallback(
     (dateKey: string, meta: { hasSession: boolean; hasBaseSession: boolean; isMakeup: boolean }) => {
@@ -3603,11 +3378,11 @@ export function ClassScheduleWorkspace() {
     pendingLessonDesignCalendarPointerScrollTopRef.current = getLessonDesignDialogScrollTop();
   }, []);
   const handleLessonCalendarDrop = useCallback(
-    (targetDate: string, meta: { hasSession: boolean }) => {
+    (targetDate: string) => {
       if (
         !lessonScheduleReadReady || isNormalizedLessonSchedule ||
         requestOwnedLessonDates.has(targetDate) || requestOwnedLessonDates.has(lessonCalendarDragSource) ||
-        meta.hasSession ||
+        (lessonDesignSnapshot?.sessions.filter(row => row.dateValue === lessonCalendarDragSource).length || 0) > 1 ||
         !lessonCalendarDragSource ||
         !targetDate ||
         lessonCalendarDragSource === targetDate
@@ -3618,7 +3393,7 @@ export function ClassScheduleWorkspace() {
 
       const sourceDate = lessonCalendarDragSource;
       const nextDraft = buildNextLessonPlanDraft((current) =>
-        applyCalendarDateSubstitution(current, sourceDate, targetDate) as Record<string, unknown>,
+        setAuthoredLegacyMakeupDate(current, text((current.sessions as Record<string, unknown>[] || []).find(row => row.date === sourceDate)?.id), targetDate),
       );
 
       setLessonCalendarDragSource("");
@@ -3630,7 +3405,7 @@ export function ClassScheduleWorkspace() {
         preferScheduleState: "makeup",
       });
     },
-    [requestOwnedLessonDates, buildNextLessonPlanDraft, isNormalizedLessonSchedule, lessonCalendarDragSource, lessonScheduleReadReady, syncLessonDesignDraftSnapshot],
+    [lessonDesignSnapshot, requestOwnedLessonDates, buildNextLessonPlanDraft, isNormalizedLessonSchedule, lessonCalendarDragSource, lessonScheduleReadReady, syncLessonDesignDraftSnapshot],
   );
   const handleLessonCalendarDateClick = useCallback(
     (
@@ -3641,7 +3416,7 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
-      if (isNormalizedLessonSchedule || requestOwnedLessonDates.has(dateKey)) {
+      if (isNormalizedLessonSchedule || requestOwnedLessonDates.has(dateKey) || (lessonDesignSnapshot?.sessions.filter(item => item.dateValue === dateKey).length || 0) > 1) {
         const session = lessonDesignSnapshot?.sessions.find((item) => item.dateValue === dateKey);
         if (!session) return;
         setSelectedLessonCalendarDate(dateKey);
@@ -3763,9 +3538,9 @@ export function ClassScheduleWorkspace() {
       token: mutationToken,
       isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
       mutate: async () => {
-        const schedulePlan = preserveScheduleLearningContent(lessonPlanForSave, (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>);
+        const schedulePlan = lessonPlanForSave;
         const expectedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
-        const validationError = legacyLessonScheduleValidationError(schedulePlan, expectedPlan, undefined, legacyEffectiveContext);
+        const validationError = authoredLegacyLessonValidationError(schedulePlan, expectedPlan, { teachers: lessonDesignTeacherCatalogs, rooms: lessonDesignClassroomCatalogs });
         if (validationError) throw { code: "legacy_lesson_details_required", message: validationError,
           date: validationError.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || "" };
         const body = JSON.stringify({ classId: selectedRow.id, schedulePlan, expectedPlan });
@@ -3808,7 +3583,7 @@ export function ClassScheduleWorkspace() {
         setIsLessonDesignSaving(false);
       },
     });
-  }, [legacyEffectiveContext, actorScope, lessonDesignSnapshot, markPendingLessonSessionSelection, lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow, setLessonDesignSaveError, setLessonDesignSaveFailure]);
+  }, [lessonDesignTeacherCatalogs, lessonDesignClassroomCatalogs, actorScope, lessonDesignSnapshot, markPendingLessonSessionSelection, lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow, setLessonDesignSaveError, setLessonDesignSaveFailure]);
 
   const retryLessonDesignRead = useCallback(async () => {
     const token = lessonMutationLifecycleRef.current?.capture(selectedRow?.id) || null;
@@ -4450,17 +4225,13 @@ export function ClassScheduleWorkspace() {
     { key: "classroom", label: `강의실 ${lessonDesignClassroomName || "미정"}` },
   ];
   const legacyRegularLesson = selectedLessonSessionEditableState === "active" && !selectedLessonSession?.originalDate;
-  const legacyRegularDateAmbiguous = legacyRegularLesson && Boolean(selectedLessonSession)
-    && (lessonDesignSnapshot?.sessions.filter(session => session.dateValue === selectedLessonSession?.dateValue).length || 0) > 1;
-  const legacyTeacherName = legacyRegularLesson ? text(selectedLessonSession?.teacherNameSnapshot) : lessonDesignTeacherName;
-  const legacyClassroomName = legacyRegularLesson ? text(selectedLessonSession?.classroomNameSnapshot) : lessonDesignClassroomName;
   const legacyLessonDetails = selectedLessonSession ? {
     startTime: selectedLessonSession.startTime,
     endTime: selectedLessonSession.endTime,
-    teacherCatalogId: selectedLessonSession.teacherCatalogId || (legacyEffectiveContext?.version === 1 ? "" : teacherCatalogOptions.filter(option => option.name === legacyTeacherName).length === 1 ? teacherCatalogOptions.find(option => option.name === legacyTeacherName)?.id || "" : ""),
-    classroomCatalogId: selectedLessonSession.classroomCatalogId || (legacyEffectiveContext?.version === 1 ? "" : classroomCatalogOptions.filter(option => option.name === legacyClassroomName).length === 1 ? classroomCatalogOptions.find(option => option.name === legacyClassroomName)?.id || "" : ""),
+    teacherCatalogId: selectedLessonSession.teacherCatalogId,
+    classroomCatalogId: selectedLessonSession.classroomCatalogId,
   } : null;
-  const legacySelectedDefaults = legacyRegularLesson && selectedLessonSession && !legacyRegularDateAmbiguous
+  const legacySelectedDefaults = legacyRegularLesson && selectedLessonSession
     ? legacyEffectiveContext?.version === 1
       ? resolveEffectiveSchedule({ ...legacyEffectiveContext, session: { id: "default-preview", date: selectedLessonSession.dateValue, state: "active" } }).values
       : resolveLegacyLessonDetails(selectedLessonSession.dateValue, legacyLessonSnapshotDefaults) : null;
@@ -4471,7 +4242,7 @@ export function ClassScheduleWorkspace() {
     .some(key => Object.prototype.hasOwnProperty.call(legacySelectedOverride, key));
   const pastCorrectionSavedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
   const pastCorrectionTarget = lessonScheduleReadReady && !isNormalizedLessonSchedule && actorScope?.endsWith(":admin")
-    && selectedRowClassItem?.status === "수강" && selectedLessonSession && !requestOwnedLessonDates.has(selectedLessonSession.dateValue)
+    && selectedRowClassItem?.status === "수강" && selectedLessonSession && !requestOwnedLessonSessionIds.has(selectedLessonSession.id)
     ? resolveLegacyPastStateCorrectionTarget(pastCorrectionSavedPlan, selectedLessonSession.id) : null;
   const pastCorrectionDraft = pastCorrectionTarget
     ? resolveLegacyPastStateCorrectionDraft(lessonPlanBaseline, normalizedLessonPlan, pastCorrectionTarget) : null;
@@ -4565,7 +4336,7 @@ export function ClassScheduleWorkspace() {
             const isNormalizedSessionDetailsOpen =
               Boolean(normalizedLessonSessionDraft) && normalizedLessonSessionDetailsOpenSessionId === session.id;
             const isSessionReleasable =
-              showScheduleControls && !requestOwnedLessonDates.has(session.dateValue) && !normalizedLessonSessionDraft && !["makeup", "skipped"].includes(session.scheduleState);
+              showScheduleControls && !requestOwnedLessonSessionIds.has(session.id) && !normalizedLessonSessionDraft && !["makeup", "skipped"].includes(session.scheduleState);
             return (
                 <div
                   key={`month-session-edit-${session.id}`}
@@ -4626,7 +4397,7 @@ export function ClassScheduleWorkspace() {
 
                 {isSelectedSession && selectedLessonSession ? (
                   <div className="border-t bg-background px-3 py-3">
-                    {showScheduleControls && requestOwnedLessonDates.has(selectedLessonSession.dateValue) ? (
+                    {showScheduleControls && requestOwnedLessonSessionIds.has(selectedLessonSession.id) ? (
                       <div className="space-y-2 text-sm text-muted-foreground">
                         <p>{selectedLessonSession.startTime || "시간 미정"}{selectedLessonSession.endTime ? `–${selectedLessonSession.endTime}` : ""}</p>
                         <p>승인된 휴보강 일정입니다. 일정 변경은 <Link className="underline underline-offset-4" href="/admin/makeup-requests">휴보강</Link>에서 확인해 주세요.</p>
@@ -4652,7 +4423,7 @@ export function ClassScheduleWorkspace() {
                               </Button>
                             ))}
                           </div>
-                          <Textarea value={text(normalizedLessonSessionDraft.memo)} onChange={(event) => updateNormalizedLessonSessionDraft({ memo: event.target.value })} placeholder="메모" aria-label={`${selectedLessonSession.label} 메모`} rows={1} className="h-9 min-h-9 resize-none overflow-hidden py-2" />
+                          <Textarea value={normalizedLessonSessionDraft.memo ?? ""} onChange={(event) => updateNormalizedLessonSessionDraft({ memo: event.target.value })} placeholder="메모" aria-label={`${selectedLessonSession.label} 메모`} rows={1} className="h-9 min-h-9 resize-none overflow-hidden py-2" />
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <Button
                               type="button"
@@ -4760,23 +4531,14 @@ export function ClassScheduleWorkspace() {
 
                         <div className="mt-3 grid gap-2">
                           {legacyLessonDetails && (legacyRegularLesson || selectedLessonSessionEditableState === "makeup" || selectedLessonSessionEditableState === "force_active" || legacyLessonDetails.startTime || legacyLessonDetails.endTime) ? (
-                            <LegacyLessonScheduleFields date={selectedLessonSession.dateValue} value={legacyLessonDetails} teachers={teacherCatalogOptions} classrooms={classroomCatalogOptions} disabled={legacyRegularDateAmbiguous}
-                              onChange={value => { if (legacyRegularDateAmbiguous) return; updateLessonPlanDraft(current => legacyEffectiveContext?.version === 1
-                                ? setLegacyLessonOverride(current, selectedLessonSession.dateValue, value, legacyLessonDetails)
-                                : ({ ...current, sessionSchedules: { ...(current.sessionSchedules as Record<string, unknown> || {}), [selectedLessonSession.dateValue]: value } })); }} />
+                            <LegacyLessonScheduleFields date={selectedLessonSession.dateValue} value={legacyLessonDetails} teachers={teacherCatalogOptions} classrooms={classroomCatalogOptions}
+                              onChange={value => updateLessonPlanDraft(current => setAuthoredLegacyLessonFields(current, selectedLessonSession.id, value, legacyLessonDetails))} />
                           ) : null}
-                          {legacyRegularDateAmbiguous ? <p role="alert" className="text-sm text-destructive">같은 날짜에 여러 회차가 있어 개별 시간·선생님·강의실을 수정할 수 없습니다.</p> : null}
                           {legacySelectedDefaults && legacyLessonDetails && (legacyEffectiveContext?.version === 1 ? legacyHasExplicitOverride : Object.values(legacyLessonDetails).some(value => !value)) ? <Button type="button" size="sm" variant="outline"
                             aria-label={`${selectedLessonSession.dateValue} 기본 정보 적용`}
-                            onClick={() => updateLessonPlanDraft(current => legacyEffectiveContext?.version === 1
-                              ? resetLegacyLessonToBasics(current, selectedLessonSession.dateValue) : ({ ...current,
-                              sessionSchedules: { ...(current.sessionSchedules as Record<string, unknown> || {}),
-                                [selectedLessonSession.dateValue]: { ...((current.sessionSchedules as Record<string, Record<string, unknown>> || {})[selectedLessonSession.dateValue] || {}),
-                                  startTime: legacyLessonDetails.startTime || legacySelectedDefaults.startTime,
-                                  endTime: legacyLessonDetails.endTime || legacySelectedDefaults.endTime,
-                                  teacherCatalogId: legacyLessonDetails.teacherCatalogId || legacySelectedDefaults.teacherCatalogId,
-                                  classroomCatalogId: legacyLessonDetails.classroomCatalogId || legacySelectedDefaults.classroomCatalogId } },
-                            }))}>{legacyEffectiveContext?.version === 1 ? "기본 정보 사용" : "기본 정보 적용"}</Button> : null}
+                            onClick={() => updateLessonPlanDraft(current => setAuthoredLegacyLessonFields(current, selectedLessonSession.id,
+                              legacyEffectiveContext?.version === 1 ? {} : { ...legacySelectedDefaults, ...Object.fromEntries(Object.entries(legacyLessonDetails).filter(([, value]) => value)) },
+                              legacyLessonDetails, legacyEffectiveContext?.version === 1))}>{legacyEffectiveContext?.version === 1 ? "기본 정보 사용" : "기본 정보 적용"}</Button> : null}
                           <Textarea
                             value={selectedLessonSessionEditableMemo}
                             onChange={(event) => handleLessonSessionMemoChange(selectedLessonSession, event.target.value)}
@@ -5226,10 +4988,10 @@ export function ClassScheduleWorkspace() {
                                           ? `${dateKey} ${daySessions.length > 1 ? daySessions.map((session) => session.scheduleStateLabel).join(" · ") : calendarState === "skipped" ? "해제된 일정" : getScheduleStateLabel(calendarState)}`
                                           : undefined
                                       }
-                                      draggable={!isNormalizedLessonSchedule && lessonScheduleReadReady && !requestOwnedLessonDates.has(dateKey) && Boolean(primarySession) && primarySession?.scheduleState !== "makeup"}
+                                      draggable={!isNormalizedLessonSchedule && lessonScheduleReadReady && !requestOwnedLessonDates.has(dateKey) && daySessions.length === 1 && Boolean(primarySession) && primarySession?.scheduleState !== "makeup"}
                                       style={primarySessionSurfaceStyle}
                                       onDragStart={(event) => {
-                                        if (isNormalizedLessonSchedule || requestOwnedLessonDates.has(dateKey) || !lessonScheduleReadReady || !primarySession || primarySession.scheduleState === "makeup") {
+                                        if (isNormalizedLessonSchedule || daySessions.length !== 1 || requestOwnedLessonDates.has(dateKey) || !lessonScheduleReadReady || !primarySession || primarySession.scheduleState === "makeup") {
                                           return;
                                         }
                                         event.dataTransfer.effectAllowed = "move";
@@ -5244,7 +5006,6 @@ export function ClassScheduleWorkspace() {
                                       onDragOver={(event) => {
                                         if (
                                           requestOwnedLessonDates.has(dateKey) ||
-                                          primarySession ||
                                           !lessonCalendarDragSource ||
                                           lessonCalendarDragSource === dateKey
                                         ) {
@@ -5262,16 +5023,13 @@ export function ClassScheduleWorkspace() {
                                       onDrop={(event) => {
                                         if (
                                           requestOwnedLessonDates.has(dateKey) ||
-                                          primarySession ||
                                           !lessonCalendarDragSource ||
                                           lessonCalendarDragSource === dateKey
                                         ) {
                                           return;
                                         }
                                         event.preventDefault();
-                                        handleLessonCalendarDrop(dateKey, {
-                                          hasSession: Boolean(primarySession),
-                                        });
+                                        handleLessonCalendarDrop(dateKey);
                                       }}
                                       className={cn(
                                         "flex min-h-[5.25rem] min-w-0 flex-col overflow-hidden rounded-md border px-2 py-2 text-left align-top transition-colors",

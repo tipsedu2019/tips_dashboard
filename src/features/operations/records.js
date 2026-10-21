@@ -464,9 +464,9 @@ export function mergeNormalizedLessonSessions(legacyPlan = {}, normalizedSession
         teacherNameSnapshot: text(session?.teacher_name_snapshot || session?.teacherNameSnapshot),
         classroomCatalogId: text(session?.classroom_catalog_id || session?.classroomCatalogId),
         classroomNameSnapshot: text(session?.classroom_name_snapshot || session?.classroomNameSnapshot),
-        memo: text(session?.memo),
-        publicNote: text(session?.public_note || session?.publicNote),
-        teacherNote: text(session?.teacher_note || session?.teacherNote),
+        memo: String(session?.memo ?? ""),
+        publicNote: String(session?.public_note ?? session?.publicNote ?? ""),
+        teacherNote: String(session?.teacher_note ?? session?.teacherNote ?? ""),
       };
     }),
   };
@@ -483,9 +483,9 @@ export function buildNormalizedLessonSessionSaveInput(session = {}) {
     endTime: optional(session?.endTime || session?.end_time),
     teacherCatalogId: optional(session?.teacherCatalogId || session?.teacher_catalog_id),
     classroomCatalogId: optional(session?.classroomCatalogId || session?.classroom_catalog_id),
-    memo: text(session?.memo),
-    publicNote: text(session?.publicNote || session?.public_note),
-    teacherNote: text(session?.teacherNote || session?.teacher_note),
+    memo: String(session?.memo ?? ""),
+    publicNote: String(session?.publicNote ?? session?.public_note ?? ""),
+    teacherNote: String(session?.teacherNote ?? session?.teacher_note ?? ""),
     correctionReason: optional(session?.correctionReason || session?.correction_reason),
   };
 }
