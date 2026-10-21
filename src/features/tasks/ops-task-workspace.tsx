@@ -4635,6 +4635,11 @@ function getTransferClassTuition(classItem?: OpsClassOption) {
 
 function getTransferBillingCycleItems(items: WithdrawalClassScheduleItem[], selectedItem?: WithdrawalClassScheduleItem) {
   if (!selectedItem || !isWithdrawalScheduleSelectable(selectedItem)) return []
+  // Billing identity owns a cycle, including its out-of-month makeup lessons.
+  // A display label can repeat in another year or another period.
+  if (selectedItem.billingId) {
+    return items.filter((item) => isWithdrawalScheduleSelectable(item) && item.billingId === selectedItem.billingId)
+  }
   const selectedMonthKey = getWithdrawalScheduleBillingMonthKey(selectedItem)
   if (!selectedMonthKey) return []
 
@@ -4685,15 +4690,38 @@ function getTransferMonthlyCycleContext(
       cycleSessionCount: 0,
       remainingSessionCount: 0,
       servedSessionCount: 0,
+      usesAuthoredCount: false,
+      isResolved: false,
     }
   }
 
   const sessionNumber = selectedItem.sessionNumber
-  const fallbackCycleSessionCount = getTransferBillingSessionCount(items, classItem, selectedItem)
   const sameMonthItems = getTransferBillingCycleItems(items, selectedItem)
-  const cycleSessionCount = Math.max(sameMonthItems.length, fallbackCycleSessionCount, sessionNumber)
-  const remainingSessionCount = sessionNumber && cycleSessionCount
-    ? Math.max(0, cycleSessionCount - sessionNumber + 1)
+  const fallbackCycleSessionCount = getTransferBillingSessionCount(sameMonthItems, classItem, selectedItem)
+  const usesAuthoredCount = sameMonthItems.some((item) => !item.sessionNumber)
+  const cycleSessionCount = usesAuthoredCount ? sameMonthItems.length
+    : Math.max(sameMonthItems.length, fallbackCycleSessionCount, sessionNumber)
+  const rawSessions = getSchedulePlanSessions(classItem)
+  const rawId = (row: Record<string, unknown> | undefined) => stringValue(row?.id || row?.sessionId || row?.session_id || row?.sessionKey || row?.session_key)
+  const rawIdCounts = new Map<string, number>()
+  rawSessions.forEach((row) => {
+    const id = rawId(row)
+    if (id) rawIdCounts.set(id, (rawIdCounts.get(id) || 0) + 1)
+  })
+  // Check source rows before trusting normalized/deduplicated identities. A
+  // synthetic source-index ID cannot stand in for a saved lesson identity.
+  const hasUniqueSourceIds = sameMonthItems.every((item) => {
+    const id = rawId(rawSessions[item.sourceIndex])
+    return usesAuthoredCount ? id === item.sessionId && rawIdCounts.get(id) === 1
+      : !id || rawIdCounts.get(id) === 1
+  })
+  const isResolved = hasUniqueSourceIds && (!usesAuthoredCount || Boolean(selectedItem.billingId))
+  // Stored ordinals still identify old learning records. Never fill or reorder
+  // them for accounting: mixed/authored cycles count actual eligible IDs.
+  const selectedPosition = sameMonthItems.findIndex((item) => item.sessionId === selectedItem.sessionId) + 1
+  const servedSessionCount = isResolved ? (usesAuthoredCount ? selectedPosition : sessionNumber) : 0
+  const remainingSessionCount = servedSessionCount && cycleSessionCount
+    ? Math.max(0, cycleSessionCount - servedSessionCount + 1)
     : 0
 
   return {
@@ -4702,7 +4730,9 @@ function getTransferMonthlyCycleContext(
     sessionNumber,
     cycleSessionCount,
     remainingSessionCount,
-    servedSessionCount: sessionNumber,
+    servedSessionCount,
+    usesAuthoredCount,
+    isResolved,
   }
 }
 
@@ -4749,13 +4779,28 @@ function getTransferTuitionAdjustment({
     return baseAdjustment
   }
 
+  const ambiguousAuthoredDate = (items: WithdrawalClassScheduleItem[], date: string, usesAuthoredCount: boolean) => (
+    usesAuthoredCount && items.filter((item) => item.dateKey === toDateKey(date) && isWithdrawalScheduleSelectable(item)).length !== 1
+  )
+  if (!fromCycle.isResolved || !toCycle.isResolved
+    || ambiguousAuthoredDate(fromItems, fromDate, fromCycle.usesAuthoredCount)
+    || ambiguousAuthoredDate(toItems, toDate, toCycle.usesAuthoredCount)) {
+    return {
+      ...baseAdjustment,
+      settlementLabel: "회차 확인",
+      message: "정산할 회차와 귀속 기간을 확인해 주세요.",
+      detail: "일정의 귀속 기간이나 선택일의 회차가 불명확하여 정산액을 확정하지 않습니다.",
+      amountLabel: "확인 필요",
+    }
+  }
+
   const fromUnitTuition = fromTuition / fromCycle.cycleSessionCount
   const toUnitTuition = toTuition / toCycle.cycleSessionCount
   const fromServedValue = fromCycle.servedSessionCount * fromUnitTuition
   const toRemainingValue = toCycle.remainingSessionCount * toUnitTuition
   const fromRemainingSessionCount = Math.max(0, fromCycle.cycleSessionCount - fromCycle.servedSessionCount)
   const fromRemainingValue = fromRemainingSessionCount * fromUnitTuition
-  const toSkippedSessionCount = Math.max(0, toCycle.sessionNumber - 1)
+  const toSkippedSessionCount = Math.max(0, toCycle.servedSessionCount - 1)
   const toSkippedValue = toSkippedSessionCount * toUnitTuition
 
   if (fromCycle.monthKey && toCycle.monthKey && fromCycle.monthKey !== toCycle.monthKey) {

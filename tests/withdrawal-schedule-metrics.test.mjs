@@ -247,3 +247,156 @@ test("withdrawal session numbers never fall back to schedule array positions", (
   assert.equal(getWithdrawalSessionNumber({ sessionNumber: null }), 0);
   assert.equal(getWithdrawalSessionNumber({}), 0);
 });
+
+import fs from 'node:fs';
+import vm from 'node:vm';
+import ts from 'typescript';
+import { applyAuthoredLegacyLessonEdit } from '../src/features/operations/legacy-authored-lesson-plan.ts';
+import { buildClassScheduleRouteModel } from '../src/features/operations/records.js';
+import * as withdrawal from '../src/features/tasks/withdrawal-schedule-metrics.js';
+import { toDateKey } from '../src/features/tasks/ops-task-model.js';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { getSelectableRegistrationScheduleSessions } from '../src/features/tasks/registration-workflow.js';
+{
+const path = new URL('../src/features/tasks/ops-task-workspace.tsx',import.meta.url);
+const source = fs.readFileSync(path,'utf8');
+const ast = ts.createSourceFile(String(path),source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const start = ast.statements.find(x=>ts.isFunctionDeclaration(x)&&x.name?.text==='stringValue').getStart(ast);
+const end = ast.statements.find(x=>ts.isFunctionDeclaration(x)&&x.name?.text==='getTransferTuitionAdjustment').end;
+const slice = source.slice(start,end);
+
+const js=ts.transpileModule(slice+'\nglobalThis.actualTransfer={getWithdrawalClassScheduleItems,getTransferMonthlyCycleContext,getTransferTuitionAdjustment};',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
+const context=vm.createContext({...withdrawal,toDateKey,Date,Intl,Map,Set,console});
+vm.runInContext(js,context);
+const actual=context.actualTransfer;
+const empty={selectedDays:[2,4],billingPeriods:[],sessions:[],sessionStates:{},sessionSchedules:{}};
+const input={...empty,billingPeriods:[{id:'oct',label:'10월',month:10,startDate:'2026-10-01',endDate:'2026-10-27'}]};
+const generated=applyAuthoredLegacyLessonEdit(input,empty);
+const numbered={...generated,sessions:generated.sessions.map((x,i)=>({...x,sessionNumber:i+1}))};
+const classItem=plan=>({id:'synthetic',name:'Synthetic',fee:800,schedule:'화목 14:00-16:00',schedulePlan:plan});
+const values={};
+test('narrow alternative max+1 reuses orphan number-only progress despite unique current numbers',()=>{
+ const plan={sessions:[{id:'old',date:'2026-10-06',sessionNumber:1},{id:'new',date:'2026-10-01',sessionNumber:2}]};
+ const result=buildClassScheduleRouteModel({classes:[{id:'synthetic',schedulePlan:plan}],progressLogs:[{class_id:'synthetic',session_order:2,session_id:'',status:'done',content:'orphan learning'}]});
+ values.orphan=result.rows[0].raw.sessions.find(x=>x.id==='new');
+ assert.equal(values.orphan.content,'orphan learning');
+});
+test('actual transfer consumer treats unique max+1 as served count even for chronological first lesson',()=>{
+ const plan={selectedDays:[2,4],sessions:[{id:'old',date:'2026-10-06',sessionNumber:1,billingId:'oct',billingLabel:'10월',state:'active'},{id:'new',date:'2026-10-01',sessionNumber:2,billingId:'oct',billingLabel:'10월',state:'active'}]};
+ const klass=classItem(plan),items=actual.getWithdrawalClassScheduleItems(klass);
+ values.maxPlusOneTransfer=actual.getTransferMonthlyCycleContext(items,klass,items.find(x=>x.sessionId==='new'));
+ assert.equal(values.maxPlusOneTransfer.servedSessionCount,2);
+ assert.equal(values.maxPlusOneTransfer.remainingSessionCount,7);
+});
+test('REGRESSION: current new null-number month must not quote a spurious transfer refund',()=>{
+ assert.equal(generated.sessions.length,8);
+ assert.ok(generated.sessions.every(x=>x.sessionNumber===null));
+ const args=from=>({fromClass:{...classItem(from),id:'synthetic-from'},toClass:{...classItem(numbered),id:'synthetic-to'},fromDate:'2026-10-06',toDate:'2026-10-08'});
+ values.numberedTransfer=actual.getTransferTuitionAdjustment(args(numbered));
+ values.nullTransfer=actual.getTransferTuitionAdjustment(args(generated));
+
+ assert.equal(values.numberedTransfer.settlementType,'balanced');
+ assert.equal(values.numberedTransfer.amountLabel,'0원');
+ assert.equal(values.nullTransfer.settlementType,'balanced');
+});
+const adjust = (from = generated, to = generated, fromDate = '2026-10-06', toDate = '2026-10-08') => actual.getTransferTuitionAdjustment({
+ fromClass: {...classItem(from), id:'from'}, toClass: {...classItem(to), id:'to'}, fromDate, toDate,
+});
+const cycle = (plan, id) => {
+ const klass = classItem(plan), items = actual.getWithdrawalClassScheduleItems(klass);
+ return actual.getTransferMonthlyCycleContext(items, klass, items.find(row => row.sessionId === id));
+};
+test('authored transfer counts actual IDs on both sides and keeps registration start identity',()=>{
+ const before=structuredClone(generated), result=adjust();
+ assert.equal(result.settlementType,'balanced');
+ assert.equal(result.amountLabel,'0원');
+ assert.equal(result.fromProgressLabel,'2/8회 (25%)');
+ assert.equal(result.toProgressLabel,'6/8회 (75%)');
+ const start=generated.sessions[2];
+ const choice=getSelectableRegistrationScheduleSessions(generated,{normalized:false}).find(row=>row.value===`legacy:${start.id}`);
+ assert.equal(choice.dateKey,'2026-10-08');
+ assert.equal(cycle(generated,start.id).remainingSessionCount,6);
+ assert.equal(cycle(generated,start.id).sessionNumber,0);
+ assert.deepEqual(generated,before);
+});
+test('mixed cycles count chronological eligible IDs without changing old numbers, learning or memos',()=>{
+ const mixed={...generated,sessions:generated.sessions.map((row,i)=>({...row,sessionNumber:i===0?null:i===1?99:i,content:`learning-${i}`,memo:`memo-${i}`}))};
+ const before=structuredClone(mixed), result=adjust(mixed,mixed);
+ assert.equal(result.settlementType,'balanced');
+ assert.equal(result.fromProgressLabel,'2/8회 (25%)');
+ assert.equal(cycle(mixed,mixed.sessions[1].id).sessionNumber,99);
+ assert.deepEqual(mixed,before);
+});
+test('authored count uses exact billing identity, excluding same-label periods in other years',()=>{
+ const plan={...generated,billingPeriods:[...generated.billingPeriods,{id:'old-oct',label:'10월',startDate:'2025-10-01',endDate:'2025-10-31'}],sessions:[
+  {id:'old',date:'2025-10-01',sessionNumber:null,billingId:'old-oct',billingLabel:'10월',state:'active'},...generated.sessions,
+  {id:'future',date:'2027-10-01',sessionNumber:null,billingId:'future-oct',billingLabel:'10월',state:'active'},
+ ]};
+ assert.equal(adjust(plan,generated).settlementType,'balanced');
+ assert.equal(cycle(plan,generated.sessions[1].id).cycleSessionCount,8);
+});
+test('authored accounting excludes canceled markers and counts the linked makeup exactly once in its owning period',()=>{
+ const plan={...generated,sessions:generated.sessions.map((row,i)=>i===0?{...row,state:'exception',scheduleState:'exception'}:row).concat([
+  {id:'makeup',originalSessionId:generated.sessions[0].id,originalDate:'2026-10-01',date:'2026-11-01',sessionNumber:null,state:'makeup',billingId:'oct',billingLabel:'10월'},
+  ...['tbd','skipped','canceled'].map((state,i)=>({id:`marker-${i}`,date:`2026-10-${10+i}`,state,sessionNumber:null,billingId:'oct',billingLabel:'10월'})),
+ ])};
+ const before=structuredClone(plan), second=cycle(plan,generated.sessions[1].id), makeup=cycle(plan,'makeup');
+ assert.equal(second.servedSessionCount,1);
+ assert.equal(second.cycleSessionCount,8);
+ assert.equal(makeup.servedSessionCount,8);
+ assert.equal(makeup.remainingSessionCount,1);
+ assert.deepEqual(plan,before);
+});
+test('numbered legacy accounting preserves normal balanced/refund/additional and sparse historic totals',()=>{
+ for(const [fromDate,toDate,type,amount] of [
+  ['2026-10-06','2026-10-08','balanced','0원'],
+  ['2026-10-01','2026-10-08','refund_or_carry','100원'],
+  ['2026-10-08','2026-10-08','additional_payment','100원'],
+ ]) {
+  const result=adjust(numbered,numbered,fromDate,toDate);
+  assert.equal(result.settlementType,type);assert.equal(result.amountLabel,amount);
+ }
+ const sparse={...numbered,sessions:[{...numbered.sessions[0],sessionNumber:1},{...numbered.sessions.at(-1),sessionNumber:12}]};
+ assert.equal(cycle(sparse,sparse.sessions[1].id).cycleSessionCount,12);
+ assert.equal(cycle(sparse,sparse.sessions[1].id).servedSessionCount,12);
+});
+test('unknown billing, nonunique/missing ID and same-date start ambiguity cannot fabricate a monetary quote',()=>{
+ const missingBilling={...generated,billingPeriods:[],sessions:generated.sessions.map(({billingId,billingLabel,...row})=>row)};
+ const duplicate={...generated,sessions:[...generated.sessions,{...generated.sessions[1],date:'2026-10-30',state:'exception'}]};
+ const missingId={...generated,sessions:generated.sessions.map((row,i)=>i===1?{...row,id:'',sessionKey:''}:row)};
+ const sameDate={...generated,sessions:[...generated.sessions,{...generated.sessions[2],id:'another-start'}]};
+ for(const plan of [missingBilling,duplicate,missingId]) {
+  const before=structuredClone(plan), result=adjust(plan,generated);
+  assert.equal(result.settlementType,'not_ready');
+  assert.equal(result.amountLabel,'확인 필요');
+  assert.deepEqual(plan,before);
+ }
+ const result=adjust(generated,sameDate);
+ assert.equal(result.settlementType,'not_ready');assert.equal(result.amountLabel,'확인 필요');
+});
+test('raw duplicate hidden by normalization and synthetic-ID collisions cannot resolve a financial identity',()=>{
+ const hiddenNull={...numbered,sessions:[...numbered.sessions,{...numbered.sessions[1],sessionNumber:null,date:'2026-10-30'}]};
+ const syntheticCollision={...generated,sessions:generated.sessions.map((row,i)=>i===1?{...row,id:'',sessionKey:''}:i===0?{...row,id:'source-index:1'}:row)};
+ for(const plan of [hiddenNull,syntheticCollision]) {
+  const result=adjust(plan,generated);
+  assert.equal(result.settlementType,'not_ready');assert.equal(result.amountLabel,'확인 필요');
+ }
+});
+test('actual React settlement panel displays authored progress and balanced result, never the former 200 refund',()=>{
+ const names=['TransferAdjustmentMetric','TransferTuitionAdjustmentPanel'];
+ const body=names.map(name=>{const node=ast.statements.find(x=>ts.isFunctionDeclaration(x)&&x.name?.text===name);assert.ok(node);return source.slice(node.getStart(ast),node.end)}).join('\n');
+ const compiled=ts.transpileModule(body+'\nglobalThis.Panel=TransferTuitionAdjustmentPanel;',{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None,jsx:ts.JsxEmit.React},
+ }).outputText;
+ const ui=vm.createContext({React,Badge:({children})=>React.createElement('span',null,children)});
+ vm.runInContext(compiled,ui);
+ const html=renderToStaticMarkup(React.createElement(ui.Panel,{adjustment:adjust()}));
+ assert.match(html,/2\/8회 \(25%\)/);assert.match(html,/6\/8회 \(75%\)/);
+ assert.match(html,/정산 없음/);assert.match(html,/추가 납부나 환불\/이월 없이 맞습니다/);
+ assert.doesNotMatch(html,/200원|환불\/이월 필요/);
+ const ambiguous={...generated,sessions:[...generated.sessions,{...generated.sessions[2],id:'another'}]};
+ const blocked=renderToStaticMarkup(React.createElement(ui.Panel,{adjustment:adjust(generated,ambiguous)}));
+ assert.match(blocked,/회차 확인/);assert.match(blocked,/정산액을 확정하지 않습니다/);
+});
+}
