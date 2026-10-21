@@ -64,7 +64,9 @@ export function applyAuthoredLegacyLessonEdit(next: Plan, previous: Plan, defaul
     const existingDates = new Set(sessions.filter(row => object(row).billingId === period.id).map(row => object(row).date));
     sessions = [...sessions, ...generated.sessions.filter((row: Row) => !existingDates.has(object(row).date)
       && (!old || String(object(row).date) < String(old.startDate) || String(object(row).date) > String(old.endDate))).map((row: Row) => {
-      const lesson = { ...row };
+      // Isolated generator ordinals are not identities. Reusing them would
+      // attach existing number-only progress to a new, unrelated lesson.
+      const lesson: Row = { ...row, sessionNumber: null };
       for (const field of ['textbookEntries', 'progressStatus', 'publicNote', 'teacherNote']) delete lesson[field];
       return lesson;
     })];
@@ -152,7 +154,9 @@ export function setAuthoredLegacyMakeupDate(plan: Plan, id: string, date: string
   const linked = rows(plan.sessions).filter(row => object(row).originalDate === source.date && object(row).billingId === source.billingId && !isRequestMakeupSession(row));
   if (linked.length > 1 || rows(plan.sessions).filter(row => object(row).date === source.date).length !== 1) return plan;
   if (!date && !source.makeupDate && !object(object(plan.sessionStates)[String(source.date)]).makeupDate && !linked.length) return plan;
-  let next = patchAuthoredLegacyLesson(plan, id, { state: date ? 'exception' : 'active', scheduleState: date ? 'exception' : 'active', makeupDate: date });
+  // Unlinking does not undo a cancellation. Callers that explicitly restore a
+  // normal lesson (calendar/state controls) own that separate state transition.
+  let next = patchAuthoredLegacyLesson(plan, id, { ...(date ? { state: 'exception', scheduleState: 'exception' } : {}), makeupDate: date });
   next = { ...next, sessionStates: { ...object(next.sessionStates), [String(source.date)]: {
     ...object(object(next.sessionStates)[String(source.date)]), makeupDate: date,
   } } };
@@ -189,7 +193,8 @@ export function authoredLegacyLessonValidationError(plan: Plan, saved: Plan, cat
     for (const field of ['startTime', 'endTime']) {
       const value = row[field];
       if (!changed(field) || value === undefined || value === null || value === '') continue;
-      if (typeof value !== 'string' || !/^(?:[01]?\d|2[0-3]):[0-5]\d(?::00(?:\.0+)?)?$/.test(value)) return `${date} 시작·종료 시간을 확인해 주세요.`;
+      if (typeof value !== 'string' || !/^[0-9]{1,2}:[0-5][0-9](?::00(?:\.0+)?)?$/.test(value)
+        || (Number(value.split(':')[0]) > 23 && !(field === 'endTime' && /^24:00(?::00(?:\.0+)?)?$/.test(value)))) return `${date} 시작·종료 시간을 확인해 주세요.`;
     }
     if ((changed('startTime') || changed('endTime')) && row.startTime && row.endTime) {
       const minutes = (value: unknown) => String(value).split(':').slice(0, 2).map(Number).reduce((a, b) => a * 60 + b);

@@ -3297,10 +3297,10 @@ export function ClassScheduleWorkspace() {
     });
   }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail, selectedRow?.id, setLessonDesignSaveError, setLessonDesignSaveFailure]);
   const handleLessonSessionStateChange = useCallback(
-    (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
+    (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd" | "skipped") => {
       if (!session || requestOwnedLessonSessionIds.has(session.id)) return;
       updateLessonPlanDraft(current => patchAuthoredLegacyLesson(
-        nextState === "active" && session.makeupDate ? setAuthoredLegacyMakeupDate(current, session.id, "") : current,
+        nextState !== "exception" ? setAuthoredLegacyMakeupDate(current, session.id, "") : current,
         session.id, { state: nextState, scheduleState: nextState }));
     }, [requestOwnedLessonSessionIds, updateLessonPlanDraft],
   );
@@ -3329,9 +3329,9 @@ export function ClassScheduleWorkspace() {
   const handleLessonSessionRelease = useCallback(
     (session: (typeof selectedLessonSession)) => {
       if (!session || requestOwnedLessonSessionIds.has(session.id)) return;
-      updateLessonPlanDraft(current => patchAuthoredLegacyLesson(current, session.id, { state: "skipped", scheduleState: "skipped" }));
+      handleLessonSessionStateChange(session, "skipped");
       setSelectedLessonCalendarDate(session.dateValue);
-    }, [requestOwnedLessonSessionIds, updateLessonPlanDraft],
+    }, [requestOwnedLessonSessionIds, handleLessonSessionStateChange],
   );
   const handleLessonCalendarToggle = useCallback(
     (dateKey: string, meta: { hasSession: boolean; hasBaseSession: boolean; isMakeup: boolean }) => {

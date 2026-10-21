@@ -437,5 +437,54 @@ select lives_ok('set constraints all immediate','authored reader fixtures finali
 select is((select count(*) from dashboard_private.notification_events),(select events from input_before),'authored reader fixtures create no notification event');
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from input_before),'authored reader fixtures create no notification delivery');
 
+-- PR161: the official writer and effective readers share minute-precision
+-- start/end boundaries. PostgreSQL time alone also accepts 24:00 and seconds.
+create temp table time_input_before as select
+ (select schedule_plan from public.classes where id=pg_temp.input_id(301)) plan,
+ (select count(*) from dashboard_private.class_schedule_mutation_receipts) receipts;
+create function pg_temp.save_time_input(start_arg text,end_arg jsonb,include_end boolean,key_no int) returns jsonb language plpgsql as $$
+declare before_plan jsonb; candidate jsonb; row_data jsonb; result jsonb;
+begin
+ select schedule_plan into before_plan from public.classes where id=pg_temp.input_id(301);
+ row_data:=jsonb_build_object('id','time-edge','date','2026-10-30','startTime',start_arg,
+  'teacherCatalogId',pg_temp.input_id(101),'classroomCatalogId',pg_temp.input_id(201));
+ if include_end then row_data:=row_data||jsonb_build_object('endTime',end_arg);end if;
+ candidate:=jsonb_set(before_plan,'{sessions}',before_plan->'sessions'||jsonb_build_array(row_data));
+ result:=public.update_class_operational_v1(pg_temp.input_id(301),jsonb_build_object('schedule_plan',candidate),pg_temp.input_id(key_no),before_plan);
+ -- Unexpected success must roll back this case so later cases stay independent.
+ if key_no<707 then raise exception using errcode='PZ001',message='unexpected_time_acceptance';end if;
+ return result;
+end $$;
+set local role authenticated;
+select throws_ok($$select pg_temp.save_time_input('24:00',null,false,701)$$,'22023','class_schedule_validation','PR161: start 24:00 with no end is rejected');
+select throws_ok($$select pg_temp.save_time_input('24:00','null',true,702)$$,'22023','class_schedule_validation','PR161: start 24:00 with null end is rejected');
+select throws_ok($$select pg_temp.save_time_input('24:00','""',true,703)$$,'22023','class_schedule_validation','PR161: start 24:00 with empty end is rejected');
+select throws_ok($$select pg_temp.save_time_input('23:00','"24:01"',true,704)$$,'22023','class_schedule_validation','PR161: end beyond 24:00 is rejected');
+select throws_ok($$select pg_temp.save_time_input('23:00:01','"24:00"',true,705)$$,'22023','class_schedule_validation','PR161: sub-minute start is not silently truncated');
+select throws_ok($$select pg_temp.save_time_input('23:00','"24:00:00.1"',true,706)$$,'22023','class_schedule_validation','PR161: fractional end beyond midnight is rejected');
+reset role;
+select is((select schedule_plan from public.classes where id=pg_temp.input_id(301)),(select plan from time_input_before),'PR161: rejected input preserves the complete prior plan');
+select is((select count(*) from dashboard_private.class_schedule_mutation_receipts),(select receipts from time_input_before),'PR161: rejected input leaves no receipt');
+set local role authenticated;
+select lives_ok($$select pg_temp.save_time_input('23:00','"24:00"',true,707)$$,'PR161: valid end 24:00 saves through the authenticated RPC');
+select is(public.get_operations_class_lesson_design_detail_v1(pg_temp.input_id(301))#>>'{classItem,schedulePlan,sessions,-1,endTime}','24:00','PR161: official detail retains authored end 24:00');
+reset role;
+select is((select jsonb_array_length(schedule_plan->'sessions') from public.classes where id=pg_temp.input_id(301)),80,'PR161: valid time adds exactly one row to the existing 79');
+select is((select (schedule_plan->'sessions') - 79 from public.classes where id=pg_temp.input_id(301)),(select plan->'sessions' from time_input_before),'PR161: valid time save preserves every previous row');
+select is(dashboard_private.resolve_legacy_effective_schedule_v1(jsonb_build_object('session',jsonb_build_object('id','edge','date','2026-10-30','startTime','23:00','endTime','24:00')))#>>'{values,endTime}','24:00','PR161: final SQL resolver preserves end boundary');
+create function pg_temp.assert_time_boundary_readers() returns setof text language plpgsql as $$
+declare ref jsonb; target text:=pg_temp.input_id(301)::text;
+begin
+ foreach ref in array array[dashboard_private.read_timetable_operating_reference_v1(),dashboard_private.read_makeup_operating_reference_v1('2026-10-30','2026-10-30')] loop
+  return next is((select jsonb_build_object('startMinute',x->'startMinute','endMinute',x->'endMinute')
+   from jsonb_array_elements(ref->'datedSessions') x where x->>'classId'=target and x->>'date'='2026-10-30'),
+   '{"startMinute":1380,"endMinute":1440}'::jsonb,'PR161: actual operating/makeup reader preserves midnight end');
+  return next is((select count(*)::int from jsonb_array_elements(ref->'datedUnresolvedOccupancies') x
+   where x->>'classId'=target and x->>'date'='2026-10-30'),0,'PR161: midnight end does not become unresolved');
+ end loop;
+end $$;
+select * from pg_temp.assert_time_boundary_readers();
+select is((select count(*) from dashboard_private.class_lesson_input_scopes),0::bigint,'PR161: successful and rejected time saves leave no scope');
+select lives_ok('set constraints all immediate','PR161: time-boundary saves finalize with actual guards');
 select * from finish();
 rollback;

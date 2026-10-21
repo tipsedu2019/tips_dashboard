@@ -670,6 +670,76 @@ function assertLegacyRecoveryFields(date, values) {
   }
 }
 
+for (const action of ['unlink', 'tbd', 'active', 'calendar', 'skipped']) {
+  test(`PR161: linked makeup ${action} retains the explicitly selected source state`, async t => {
+    const payload = legacyRecoveryDetail({ firstState: 'active' });
+    const plan = payload.classItem.schedulePlan;
+    const source = plan.sessions.find(row => row.date === '2026-10-01');
+    Object.assign(source, { state: 'exception', scheduleState: 'exception', makeupDate: '2026-10-02' });
+    plan.sessionStates['2026-10-01'] = { state: 'exception', makeupDate: '2026-10-02', memo: 'keep source memo' };
+    plan.sessions.push({ id: 'manual-makeup', sessionKey: 'manual-makeup', billingId: source.billingId,
+      billingLabel: source.billingLabel, date: '2026-10-02', originalDate: source.date,
+      state: 'makeup', scheduleState: 'makeup', sessionNumber: null });
+    const saved = structuredClone(plan), page = await recoveryEditor(t, payload);
+    const panel = await selectLegacyRecoveryRow(page, source.date);
+    if (action === 'calendar') {
+      await act(async () => document.querySelector('[data-lesson-calendar-month="2026-10"] [data-lesson-calendar-date="2026-10-01"]').click());
+    } else if (action === 'skipped') {
+      const button = document.querySelector('button[aria-label$=" 일정 해제"]');
+      assert.ok(button, 'explicit selected lesson release'); await act(async () => button.click());
+    } else {
+      const label = { unlink: '보강 해제', tbd: '미정', active: '정상' }[action];
+      const button = [...panel.querySelectorAll('button')].find(item => item.textContent.trim() === label);
+      assert.ok(button, label); await act(async () => button.click());
+    }
+    const expectedState = action === 'unlink' ? 'exception' : ['tbd', 'skipped'].includes(action) ? action : 'active';
+    const changed = page.observed.lessonPlanForSave;
+    assert.equal(changed.sessions.find(row => row.id === source.id).scheduleState, expectedState);
+    assert.equal(changed.sessions.some(row => row.id === 'manual-makeup'), false, 'linked child is removed');
+    assert.equal(changed.sessionStates[source.date].makeupDate, '');
+    await clickLessonSave();
+    assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+    const sent = saveRequests(page)[0].args.p_patch.schedule_plan;
+    assert.deepEqual(sent.sessions.find(row => row.id === source.id), { ...source, state: expectedState, scheduleState: expectedState, makeupDate: '' });
+    assert.deepEqual(sent.sessions.filter(row => row.id !== source.id), saved.sessions.filter(row => ![source.id, 'manual-makeup'].includes(row.id)));
+    assert.deepEqual(sent.billingPeriods, saved.billingPeriods);
+  });
+}
+
+test('PR161: newly prepended lesson keeps display ordinals out of stored identity and preserves the saved original', async t => {
+  const payload = legacyRecoveryDetail({ firstState: 'active' });
+  const saved = payload.classItem.schedulePlan;
+  const source = saved.sessions.find(row => row.date === '2026-10-06');
+  saved.sessions = [source]; saved.billingPeriods = [saved.billingPeriods.find(period => period.id === source.billingId)];
+  saved.billingPeriods[0].startDate = '2026-10-06';
+  const page = await recoveryEditor(t, payload);
+  await act(async () => page.observed.updateLessonPlanDraft(current => ({ ...current,
+    billingPeriods: current.billingPeriods.map(period => ({ ...period, startDate: '2026-10-01' })) })));
+  const added = page.observed.lessonPlanForSave.sessions.find(row => row.date === '2026-10-01');
+  assert.equal(added.sessionNumber, null);
+  assert.deepEqual(page.observed.lessonPlanForSave.sessions[0], source);
+  const shown = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === added.id);
+  assert.doesNotMatch(shown.label, new RegExp(added.id));
+  assert.equal(shown.label, '1회차', 'existing presentation ordinals remain display-only');
+  assert.equal(shown.displaySessionNumber, 1);
+  assert.equal(shown.sessionNumber, 0, 'view model uses its existing no-stored-number sentinel');
+  await selectLegacyRecoveryRow(page, added.date); await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const save = saveRequests(page)[0], sent = structuredClone(save.args.p_patch.schedule_plan);
+  assert.equal(sent.sessions.find(row => row.id === added.id).sessionNumber, null);
+  assert.equal(sent.sessions.some(row => Object.hasOwn(row, 'displaySessionNumber')), false);
+  await act(async () => save.resolve({ error: null, data: null }));
+  const read = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  const freshPayload = structuredClone(payload); freshPayload.classItem.schedulePlan = sent;
+  await act(async () => read.resolve({ error: null, data: freshPayload }));
+  assert.match(page.observed.lessonDesignSaveNotice, /저장했습니다/);
+  assert.deepEqual(page.observed.lessonPlanForSave.sessions, sent.sessions);
+  assert.deepEqual(page.observed.lessonPlanForSave.sessions.find(row => row.id === source.id), source);
+  const rereadView = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === added.id);
+  assert.equal(rereadView.displaySessionNumber, 1);
+  assert.equal(rereadView.sessionNumber, 0);
+});
+
 async function clickLessonSave() {
   const button = [...document.querySelectorAll('button')].find(item => item.textContent.trim() === '일정 저장');
   assert.ok(button, 'explicit schedule save');

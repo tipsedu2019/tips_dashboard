@@ -192,7 +192,11 @@ begin
  for k in select unnest(array['startTime','endTime']) loop
   if not p_row ? k or p_row->k in('null'::jsonb,'""'::jsonb) or p_row->k is not distinct from p_old_row->k then continue;end if;
   value:=p_row->>k;
-  if jsonb_typeof(p_row->k)<>'string' or value!~'^(\d{2}:\d{2})(:\d{2}(\.\d{1,6})?)?$' then raise exception using errcode='22023',message='class_schedule_validation';end if;
+  -- Match JS and both effective readers: minute precision, with midnight
+  -- accepted only as an end boundary. PostgreSQL time is more permissive.
+  if jsonb_typeof(p_row->k)<>'string' or value!~'^[0-9]{1,2}:[0-5][0-9](:00([.]0+)?)?$'
+   or (split_part(value,':',1)::int>23 and not(k='endTime' and value~'^24:00(:00([.]0+)?)?$')) then
+   raise exception using errcode='22023',message='class_schedule_validation';end if;
   parsed_time:=value::time;
  end loop;
  if (p_row->'startTime' is distinct from p_old_row->'startTime' or p_row->'endTime' is distinct from p_old_row->'endTime')

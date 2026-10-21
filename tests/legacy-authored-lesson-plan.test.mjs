@@ -6,6 +6,7 @@ import { authoredLegacyLessonDraft, applyAuthoredLegacyLessonEdit, patchAuthored
 import { applyCalendarDateToggle } from '../src/lib/class-schedule-planner.js';
 import { effectiveInputForLesson, resolveEffectiveSchedule } from '../src/features/operations/legacy-effective-schedule.js';
 import { prepareLegacyLessonMonth } from '../src/features/operations/legacy-lesson-month.ts';
+import { buildClassScheduleRouteModel } from '../src/features/operations/records.js';
 
 const teacher = 'ab000000-0000-4000-8000-000000000101', room = 'ab000000-0000-4000-8000-000000000201';
 const catalogs = { teachers: [{ id: teacher, name: 'Synthetic teacher' }], rooms: [{ id: room, name: 'Synthetic room' }] };
@@ -15,6 +16,56 @@ const fixture = () => ({ selectedDays: [2, 4], billingPeriods: [{ id: 'oct', mon
     { id: 'off-weekday', date: '2026-10-09', billingId: 'oct', startTime: '14:20', endTime: '15:40', teacherCatalogId: teacher, classroomCatalogId: room, memo: '', textbookEntries: [{ arbitrary: 'history' }] },
     { id: 'same-date-peer', date: '2026-10-09', billingId: 'oct', startTime: '16:00', endTime: '17:00', classroomCatalogId: null },
   ], history: [{ opaque: 'history must not be canonicalized' }], sessionStates: {}, sessionSchedules: {} });
+
+for (const direction of ['before', 'after', 'both']) {
+  test(`PR161: ${direction} expansion preserves original rows and never borrows numbered progress`, () => {
+    const saved = fixture();
+    saved.billingPeriods[0] = { ...saved.billingPeriods[0], startDate: '2026-10-06', endDate: '2026-10-27' };
+    saved.sessions = [{ ...saved.sessions[0], id: 'numbered-original', date: '2026-10-06', sessionNumber: 1 }];
+    const period = { ...saved.billingPeriods[0],
+      startDate: direction === 'after' ? '2026-10-06' : '2026-10-01',
+      endDate: direction === 'before' ? '2026-10-27' : '2026-10-29' };
+    const result = applyAuthoredLegacyLessonEdit({ ...saved, billingPeriods: [period] }, saved);
+    assert.deepEqual(result.sessions[0], saved.sessions[0]);
+    const added = result.sessions.slice(1);
+    assert.equal(added.length, direction === 'both' ? 2 : 1);
+    assert.ok(added.every(row => row.sessionNumber === null), 'new rows must not reuse isolated planner ordinals');
+    assert.equal(new Set(result.sessions.map(row => row.id)).size, result.sessions.length);
+    for (const oldId of ['', 'numbered-original']) {
+      const progressLogs = [{ class_id: 'synthetic-class', session_id: oldId, session_order: 1,
+        status: 'done', content: 'original learning', teacher_note: 'original note', updated_at: '2026-10-06' }];
+      const read = (logs) => buildClassScheduleRouteModel({ classes: [{ id: 'synthetic-class', name: 'Synthetic', schedulePlan: result }], progressLogs: logs }).rows[0].raw.sessions;
+      const viewed = read(progressLogs);
+      assert.equal(viewed.find(row => row.id === 'numbered-original').content, 'original learning');
+      for (const row of added) {
+        const fresh = viewed.find(item => item.id === row.id);
+        assert.equal(fresh.progressStatus, 'pending'); assert.equal(fresh.content, ''); assert.equal(fresh.teacherNote, '');
+      }
+      const exact = read([...progressLogs, { class_id: 'synthetic-class', session_id: added[0].id,
+        status: 'done', content: 'new exact-ID learning', updated_at: '2026-10-30' }]);
+      assert.equal(exact.find(row => row.id === added[0].id).content, 'new exact-ID learning');
+    }
+    assert.deepEqual(applyAuthoredLegacyLessonEdit(result, result), result, 'read/save does not renumber accepted rows');
+  });
+}
+
+test('PR161: authored time validation matches resolver start and end boundaries', () => {
+  const saved = { sessions: [] };
+  for (const [startTime, endTime, valid] of [
+    ['24:00', undefined, false], ['24:00', null, false], ['24:00', '', false],
+    ['23:00', '24:00', true], ['23:00:00', '24:00:00.000', true],
+    ['9:00', '10:00', true], ['23:59', undefined, true],
+    ['23:00', '24:01', false], ['23:00:01', '24:00', false], ['23:00', '24:00:00.1', false],
+  ]) {
+    const row = { id: 'time-edge', date: '2026-10-01', startTime, ...(endTime !== undefined ? { endTime } : {}) };
+    assert.equal(authoredLegacyLessonValidationError({ sessions: [row] }, saved) === '', valid, JSON.stringify(row));
+    if (valid && endTime) {
+      const resolved = resolveEffectiveSchedule({ session: row, basicSlots: [], catalogs: {} });
+      assert.equal(resolved.values.startTime, startTime.slice(0, 5).padStart(5, '0'));
+      assert.equal(resolved.values.endTime, endTime.slice(0, 5));
+    }
+  }
+});
 
 test('opening a sparse/off-weekday materialized plan never generates, sorts or canonicalizes its rows', () => {
   const saved = fixture(), draft = authoredLegacyLessonDraft(saved);
@@ -132,8 +183,8 @@ test('calendar substitution creates one separate intended ID even when the desti
   assert.deepEqual(setAuthoredLegacyMakeupDate(next, 'later', '2026-10-09'), next, 'same substitution is idempotent');
   const cleared = setAuthoredLegacyMakeupDate(next, 'later', '');
   assert.equal(cleared.sessions.length, 3);
-  assert.equal(cleared.sessions[0].state, 'active');
-  assert.equal(cleared.sessions[0].scheduleState, 'active');
+  assert.equal(cleared.sessions[0].state, 'exception', 'unlink preserves source cancellation; normal restoration is a separate action');
+  assert.equal(cleared.sessions[0].scheduleState, 'exception');
   assert.deepEqual(cleared.sessions.slice(1), saved.sessions.slice(1));
 });
 
@@ -282,13 +333,13 @@ test('adjacent control: cancellation with already-empty makeup metadata remains 
  assert.equal(result.sessions[0].scheduleState,'exception');assert.equal(result.sessions[0].memo,saved.sessions[0].memo);
 });
 
-test('adjacent control: clearing a real linked makeup restores the original without touching approved peer',()=>{
+test('adjacent control: unlinking a real makeup preserves cancellation without touching approved peer',()=>{
  const saved=adjacentFixture(),request='ab000000-0000-4000-8000-000000000900',id=`makeup-request:${request}:0`;
  const approved={id,sessionKey:id,makeupRequestId:request,makeupRequestRole:'makeup',date:'2026-10-06',memo:'approved',teacherNote:'preserve',textbookEntries:[{id:'approved-learning'}]};
  saved.sessions.push(approved);
  const added=setAuthoredLegacyMakeupDate(saved,'source','2026-10-06');
  const restored=setAuthoredLegacyMakeupDate(added,'source','');
- assert.equal(restored.sessions.length,2);assert.equal(restored.sessions[0].scheduleState,'active');assert.deepEqual(restored.sessions[1],approved);
+ assert.equal(restored.sessions.length,2);assert.equal(restored.sessions[0].scheduleState,'exception');assert.deepEqual(restored.sessions[1],approved);
 });
 
 test('reader parity fixtures preserve authored fields through the existing consumer contract', t => {
