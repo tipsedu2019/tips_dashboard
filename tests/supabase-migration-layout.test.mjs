@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = new Set()
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e619ef16e5a0f181acbd7f9fd833f748e3eb2f6f32d6819580a92ebdfe5abac1"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c95097088cd7ed9337f9993f07707dc752ff70a56cc84dc5f040bde73126f49a"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -58,6 +58,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/management_numbered_pages_test.sql",
   "supabase/tests/management_page_reads_test.sql",
   "supabase/tests/class_detail_roster_counts_test.sql",
+  "supabase/tests/class_public_memo_test.sql",
   "supabase/tests/class_period_membership_optional_test.sql",
   "supabase/tests/curriculum_scheduling_textbook_usage_test.sql",
   "supabase/tests/academic_curriculum_unscoped_period_test.sql",
@@ -162,6 +163,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
 const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
+  "tests/probe-public-class-memo-dto.mjs",
   "tests/probe-curriculum-scheduling-dto.mjs",
   "tests/probe-operations-annual-board-http.mjs",
   "tests/probe-timetable-batch-save-dto.mjs",
@@ -1433,9 +1435,9 @@ test("prepare ACL migration만 science 이후 protected function 참조로 허�
 test("approved manual production workflow requires its exact path and complete reviewed bytes", async () => {
   const workflowDir = join(repoRoot, ".github", "workflows")
   for (const [name, expectedHash] of [
-    ["free-tier-guardrails.yml", "ca219fb0a90b6be4cd31b1ef4f1e03efb93537247461dde2e67c87e0aea6850e"],
+    ["free-tier-guardrails.yml", "01c8eeda3b944091f42487a53ce44d6f60b3336a85ce7fe86d4144795d9fcc35"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "d566101e442b570f922be11d68fc47f304cfc26111b5e17b3c5dbd5756a55dbb"],
+    ["supabase-sql-review.yml", "7fe2131a1be003a6dd56ec7c8fe62316886ea2846def85d85a2beaa024b0aae2"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2396,7 +2398,7 @@ async function assertPinnedPostdeployPredicates(source, requiredPredicates) {
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 }
 
-test("isolated main·PR는 동일한 SQL 107개·probe 26개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 동일한 SQL 108개·probe 27개와 필수 PR 검사 이름을 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {

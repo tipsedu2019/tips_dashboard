@@ -35,6 +35,7 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/management_numbered_pages_test.sql",
   "supabase/tests/management_page_reads_test.sql",
   "supabase/tests/class_detail_roster_counts_test.sql",
+  "supabase/tests/class_public_memo_test.sql",
   "supabase/tests/class_period_membership_optional_test.sql",
   "supabase/tests/curriculum_scheduling_textbook_usage_test.sql",
   "supabase/tests/academic_curriculum_unscoped_period_test.sql",
@@ -139,6 +140,7 @@ const ISOLATED_SQL_TESTS = Object.freeze([
 const ISOLATED_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
+  "tests/probe-public-class-memo-dto.mjs",
   "tests/probe-curriculum-scheduling-dto.mjs",
   "tests/probe-operations-annual-board-http.mjs",
   "tests/probe-timetable-batch-save-dto.mjs",
@@ -193,9 +195,9 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e619ef16e5a0f181acbd7f9fd833f748e3eb2f6f32d6819580a92ebdfe5abac1"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c95097088cd7ed9337f9993f07707dc752ff70a56cc84dc5f040bde73126f49a"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "d566101e442b570f922be11d68fc47f304cfc26111b5e17b3c5dbd5756a55dbb"
+  "7fe2131a1be003a6dd56ec7c8fe62316886ea2846def85d85a2beaa024b0aae2"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -207,7 +209,7 @@ const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-pr
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
   "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "ca219fb0a90b6be4cd31b1ef4f1e03efb93537247461dde2e67c87e0aea6850e"],
+  ["free-tier-guardrails.yml", "01c8eeda3b944091f42487a53ce44d6f60b3336a85ce7fe86d4144795d9fcc35"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
   [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
