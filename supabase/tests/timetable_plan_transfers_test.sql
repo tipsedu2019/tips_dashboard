@@ -41,7 +41,7 @@ update saved set response=public.commit_timetable_plan_transfer_v1(command) wher
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='개강 준비'),1,'prepare-copy-1 creates only selected preparing classes');
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='수강'),0,'prepare-copy-1 never activates classes');
 select is((select count(*)::int from public.timetable_plan_items where plan_id=pg_temp.tid(1)),4,'prepare-copy-1 preserves copy or removes moved sources');
-select is(jsonb_array_length((select response->'addedShadowSlots' from saved where k='prepare-copy-1')),1,'prepare-copy-1 returns complete reserved shadows');
+select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') x where x->>'classId' in(select m->>'targetClassId' from saved,jsonb_array_elements(response->'mappings') m where k='prepare-copy-1')),1,'prepare-copy-1 retains complete reservations in the operating reader');
 select is(public.commit_timetable_plan_transfer_v1((select command from saved where k='prepare-copy-1')),(select response from saved where k='prepare-copy-1'),'prepare-copy-1 receipt replay is immutable');
 select is((select count(*)::int from public.class_lesson_sessions s join public.classes c on c.id=s.class_id where c.name like 'fixture-transfer-%'),0,'prepare-copy-1 has no lesson history');
 reset role;
@@ -54,7 +54,7 @@ update saved set response=public.commit_timetable_plan_transfer_v1(command) wher
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='개강 준비'),3,'prepare-copy-3 creates only selected preparing classes');
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='수강'),0,'prepare-copy-3 never activates classes');
 select is((select count(*)::int from public.timetable_plan_items where plan_id=pg_temp.tid(1)),4,'prepare-copy-3 preserves copy or removes moved sources');
-select is(jsonb_array_length((select response->'addedShadowSlots' from saved where k='prepare-copy-3')),3,'prepare-copy-3 returns complete reserved shadows');
+select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') x where x->>'classId' in(select m->>'targetClassId' from saved,jsonb_array_elements(response->'mappings') m where k='prepare-copy-3')),3,'prepare-copy-3 retains complete reservations in the operating reader');
 select is(public.commit_timetable_plan_transfer_v1((select command from saved where k='prepare-copy-3')),(select response from saved where k='prepare-copy-3'),'prepare-copy-3 receipt replay is immutable');
 select is((select count(*)::int from public.class_lesson_sessions s join public.classes c on c.id=s.class_id where c.name like 'fixture-transfer-%'),0,'prepare-copy-3 has no lesson history');
 reset role;
@@ -67,7 +67,7 @@ update saved set response=public.commit_timetable_plan_transfer_v1(command) wher
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='개강 준비'),4,'prepare-copy-4 creates only selected preparing classes');
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='수강'),0,'prepare-copy-4 never activates classes');
 select is((select count(*)::int from public.timetable_plan_items where plan_id=pg_temp.tid(1)),4,'prepare-copy-4 preserves copy or removes moved sources');
-select is(jsonb_array_length((select response->'addedShadowSlots' from saved where k='prepare-copy-4')),4,'prepare-copy-4 returns complete reserved shadows');
+select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') x where x->>'classId' in(select m->>'targetClassId' from saved,jsonb_array_elements(response->'mappings') m where k='prepare-copy-4')),4,'prepare-copy-4 retains complete reservations in the operating reader');
 select is(public.commit_timetable_plan_transfer_v1((select command from saved where k='prepare-copy-4')),(select response from saved where k='prepare-copy-4'),'prepare-copy-4 receipt replay is immutable');
 select is((select count(*)::int from public.class_lesson_sessions s join public.classes c on c.id=s.class_id where c.name like 'fixture-transfer-%'),0,'prepare-copy-4 has no lesson history');
 reset role;
@@ -80,7 +80,7 @@ update saved set response=public.commit_timetable_plan_transfer_v1(command) wher
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='개강 준비'),1,'prepare-move-1 creates only selected preparing classes');
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='수강'),0,'prepare-move-1 never activates classes');
 select is((select count(*)::int from public.timetable_plan_items where plan_id=pg_temp.tid(1)),3,'prepare-move-1 preserves copy or removes moved sources');
-select is(jsonb_array_length((select response->'addedShadowSlots' from saved where k='prepare-move-1')),1,'prepare-move-1 returns complete reserved shadows');
+select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') x where x->>'classId' in(select m->>'targetClassId' from saved,jsonb_array_elements(response->'mappings') m where k='prepare-move-1')),1,'prepare-move-1 retains complete reservations in the operating reader');
 select is(public.commit_timetable_plan_transfer_v1((select command from saved where k='prepare-move-1')),(select response from saved where k='prepare-move-1'),'prepare-move-1 receipt replay is immutable');
 select is((select count(*)::int from public.class_lesson_sessions s join public.classes c on c.id=s.class_id where c.name like 'fixture-transfer-%'),0,'prepare-move-1 has no lesson history');
 reset role;
@@ -93,7 +93,7 @@ update saved set response=public.commit_timetable_plan_transfer_v1(command) wher
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='개강 준비'),3,'prepare-move-3 creates only selected preparing classes');
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='수강'),0,'prepare-move-3 never activates classes');
 select is((select count(*)::int from public.timetable_plan_items where plan_id=pg_temp.tid(1)),1,'prepare-move-3 preserves copy or removes moved sources');
-select is(jsonb_array_length((select response->'addedShadowSlots' from saved where k='prepare-move-3')),3,'prepare-move-3 returns complete reserved shadows');
+select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') x where x->>'classId' in(select m->>'targetClassId' from saved,jsonb_array_elements(response->'mappings') m where k='prepare-move-3')),3,'prepare-move-3 retains complete reservations in the operating reader');
 select is(public.commit_timetable_plan_transfer_v1((select command from saved where k='prepare-move-3')),(select response from saved where k='prepare-move-3'),'prepare-move-3 receipt replay is immutable');
 select is((select count(*)::int from public.class_lesson_sessions s join public.classes c on c.id=s.class_id where c.name like 'fixture-transfer-%'),0,'prepare-move-3 has no lesson history');
 reset role;
@@ -106,7 +106,7 @@ update saved set response=public.commit_timetable_plan_transfer_v1(command) wher
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='개강 준비'),4,'prepare-move-4 creates only selected preparing classes');
 select is((select count(*)::int from public.classes where name like 'fixture-transfer-%' and status='수강'),0,'prepare-move-4 never activates classes');
 select is((select count(*)::int from public.timetable_plan_items where plan_id=pg_temp.tid(1)),0,'prepare-move-4 preserves copy or removes moved sources');
-select is(jsonb_array_length((select response->'addedShadowSlots' from saved where k='prepare-move-4')),4,'prepare-move-4 returns complete reserved shadows');
+select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') x where x->>'classId' in(select m->>'targetClassId' from saved,jsonb_array_elements(response->'mappings') m where k='prepare-move-4')),4,'prepare-move-4 retains complete reservations in the operating reader');
 select is(public.commit_timetable_plan_transfer_v1((select command from saved where k='prepare-move-4')),(select response from saved where k='prepare-move-4'),'prepare-move-4 receipt replay is immutable');
 select is((select count(*)::int from public.class_lesson_sessions s join public.classes c on c.id=s.class_id where c.name like 'fixture-transfer-%'),0,'prepare-move-4 has no lesson history');
 reset role;
@@ -284,7 +284,7 @@ insert into saved select 'minutes',pg_temp.command(pg_temp.req(1,0,'copy',2),'mi
 update saved set response=public.commit_timetable_plan_transfer_v1(command) where k='minutes';
 select is((select start_time from public.class_schedule_slots where class_id=(select (response#>>'{mappings,0,targetClassId}')::uuid from saved where k='minutes')),'17:13'::time,'transfer preserves 17:13 exactly');
 select is((select end_time from public.class_schedule_slots where class_id=(select (response#>>'{mappings,1,targetClassId}')::uuid from saved where k='minutes')),'24:00'::time,'transfer preserves endMinute1440 as 24:00');
-select is((select x->>'endMinute' from saved,jsonb_array_elements(response->'addedShadowSlots') x where k='minutes' and x->>'classId'=response#>>'{mappings,1,targetClassId}'),'1440','canonical promoted shadow retains endMinute1440');
+select is((select x->>'endMinute' from saved,jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') x where k='minutes' and x->>'classId'=response#>>'{mappings,1,targetClassId}'),'1440','canonical promoted shadow retains endMinute1440');
 rollback to minutes;
 -- Unselected unresolved drafts must not block a valid promotion.
 update public.timetable_plan_items set pending_slots='[{"id":"a7230000-0000-4000-8000-000000000099","sourceText":"원문 미정 17:13","reason":"invalid_time","weekday":null,"startMinute":null,"endMinute":null,"teacherId":null,"classroomId":null}]' where id=pg_temp.tid(104);
@@ -366,7 +366,8 @@ select is((select jsonb_agg(to_jsonb(h) order by id) from public.student_class_e
 select is((select jsonb_agg(to_jsonb(s) order by id) from public.class_lesson_sessions s),(select body->'sessions' from invariant_before),'all pre-existing sessions remain unchanged');
 select throws_ok($$select public.preview_timetable_plan_transfer_v1(pg_temp.req(1,0))$$,'22023','timetable_invalid','applied item cannot promote with new key');
 select is((select state from public.timetable_plan_items where id=pg_temp.tid(101)),'applied','source copy retained as applied');
-select ok(exists(select 1 from jsonb_array_elements(public.get_timetable_plan_v1(pg_temp.tid(2))->'shadowClasses') x where x->>'name'='fixture-transfer-1-1'),'other plans see new labeled shadow');
+select is(public.get_timetable_plan_v1(pg_temp.tid(2))->'shadowClasses','[]'::jsonb,'other presets do not inherit newly published operating classes');
+select is(public.get_timetable_plan_v1(pg_temp.tid(1))#>>'{appliedSnapshots,0,slots,0,itemId}',pg_temp.tid(101)::text,'published copy stays visible by its own applied item identity');
 create temp table operating_before as select to_jsonb(c) body from public.classes c where name='fixture-transfer-1-1';
 update public.timetable_plan_items set source_class_id=(select id from public.classes where name='fixture-transfer-1-1') where id=pg_temp.tid(102);
 update public.timetable_plan_slots set start_minute=60,end_minute=90 where item_id=pg_temp.tid(102);

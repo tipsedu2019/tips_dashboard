@@ -37,7 +37,8 @@ import type {
   SavePlanItemCommand, TimetableConflict, TransferResult,
 } from './timetable-plan-contract.ts';
 import { requireTimetableBatchResult, requireTimetableTransferResult, type TimetablePlanService } from './timetable-plan-service.ts';
-import { findConflicts, findOperatingConflicts, operatingReferenceComplete } from './timetable-conflicts.ts';
+import { findConflicts } from './timetable-conflicts.ts';
+import { planPlacements, planCapacityAvailable } from './timetable-plan-placements.ts';
 import { availableTimetableSessionStorage, timetableDraftStorageKey, type TimetableDraftStorage } from './timetable-plan-recovery.ts';
 
 export type TimetableItemEdit =
@@ -87,8 +88,6 @@ const isStaleError = (error: unknown) => {
   const value = error as { code?: string; message?: string } | null;
   return value?.code === 'P0001' && value.message === 'timetable_stale';
 };
-const periodOf = (snapshot: PlanSnapshot) => snapshot.plan.targetStartDate && snapshot.plan.targetEndDate
-  ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null;
 const toItemDraft = (item: PlanItemDraft): PlanItemDraft => ({
   id: item.id, planId: item.planId, name: item.name, subject: item.subject,
   subjectAreaKey: item.subjectAreaKey, grade: item.grade, capacity: item.capacity, tuition: item.tuition,
@@ -208,13 +207,11 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   const rebuild = (saveState?: TimetableSaveState, error?: unknown) => {
     if (!state.snapshot) return;
     const draft = overlay(state.snapshot, pending());
-    const period = periodOf(state.snapshot);
     let conflicts: TimetableConflict[] = [];
     try {
-      conflicts = [...findConflicts(draft.slots, state.snapshot.shadowSlots),
-        ...findOperatingConflicts(draft.slots, { ...state.snapshot, shadowSlots: [] }, period)];
+      conflicts = findConflicts(planPlacements(draft), []);
     } catch { /* Malformed local input remains editable and server validation fails closed. */ }
-    const complete = operatingReferenceComplete(state.snapshot, period);
+    const complete = planCapacityAvailable(state.snapshot);
     publish({ draft, conflicts, dirty: pending().length > 0,
       pendingOperations: [...queues].map(([itemId, queue]) => ({ itemId, operation: queue[0].edit.operation,
         name: queue[0].itemName || state.snapshot?.items.find(item => item.id === itemId)?.name || '삭제한 수업', failure: failureKind(itemId),
@@ -377,7 +374,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
           const entry = queue[0];
           const base = state.snapshot;
           if (!base || state.referenceStatus !== 'verified') break;
-          if (!operatingReferenceComplete(base, periodOf(base))) { rebuild('stale'); break; }
+          if (!planCapacityAvailable(base)) { rebuild('stale'); break; }
           const revision = base.items.find((item) => item.id === itemId)?.revision ?? null;
           if (!entry.submitted && entry.expectedItemRevision !== undefined && entry.expectedItemRevision !== revision) {
             const error = Error('timetable_stale');
@@ -499,7 +496,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       queues.set(itemId, queue);
     });
     const blocked = state.referenceStatus !== 'verified'
-      || !operatingReferenceComplete(state.snapshot, periodOf(state.snapshot)) || staleItems.has(itemId);
+      || !planCapacityAvailable(state.snapshot) || staleItems.has(itemId);
     if (blocked) {
       const queue = queues.get(itemId)!;
       queue[queue.length - 1].status = 'error';
@@ -543,7 +540,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       coalesceUnsent();
       if (!queues.size) return;
       const base = state.snapshot;
-      if (!base || state.referenceStatus !== 'verified' || !operatingReferenceComplete(base, periodOf(base))) throw Error('timetable_reference_unverifiable');
+      if (!base || state.referenceStatus !== 'verified' || !planCapacityAvailable(base)) throw Error('timetable_reference_unverifiable');
       const edits: BatchPlanItemsCommand['edits'] = [];
       for (const [id, queue] of queues) {
         const entry = queue[0], revision = base.items.find(item => item.id === id)?.revision ?? null;
@@ -627,7 +624,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
         while (queues.get(id)?.[0]?.submitted) {
           if (paused || disposed || token !== epoch) throw Error('timetable_plan_inactive');
           const entry = queues.get(id)![0];
-          if (state.referenceStatus !== 'verified' || !operatingReferenceComplete(state.snapshot, periodOf(state.snapshot))) throw Error('timetable_reference_unverifiable');
+          if (state.referenceStatus !== 'verified' || !planCapacityAvailable(state.snapshot)) throw Error('timetable_reference_unverifiable');
           if (entry.confirmedStale) throw Error('timetable_stale');
           if (entry.confirmedRejection) throw Error('timetable_rejection_required');
           if (staleItems.has(id)) retrying.add(id);
@@ -692,7 +689,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     if (failureKind(itemId) !== 'rejected') return Promise.reject(Error('timetable_rejection_required'));
     if (!state.snapshot?.permissions.canEdit || state.snapshot.plan.state !== 'draft') return Promise.reject(Error('timetable_forbidden'));
     if (edit.operation === 'save' && (edit.item.planId !== planId || edit.slots.some(slot => slot.planId !== planId || slot.itemId !== itemId))) return Promise.reject(Error('timetable_invalid'));
-    if (state.referenceStatus !== 'verified' || !operatingReferenceComplete(state.snapshot, periodOf(state.snapshot))) return Promise.reject(Error('timetable_reference_unverifiable'));
+    if (state.referenceStatus !== 'verified' || !planCapacityAvailable(state.snapshot)) return Promise.reject(Error('timetable_reference_unverifiable'));
     const queue = queues.get(itemId)!;
     if (!autoSave) {
       const rejected = queue[0];
@@ -863,7 +860,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     }
     Object.assign(next, result.operatingReference);
     next.capacity.itemCount = next.items.length;
-    next.capacity.slotCount = next.slots.length;
+    next.capacity.slotCount = planPlacements(next).length;
     publish({ snapshot: next, referenceStatus: 'unverifiable', error: null }); rebuild();
   };
   return { snapshot: () => state, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },

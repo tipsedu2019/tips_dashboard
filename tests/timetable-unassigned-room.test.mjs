@@ -76,9 +76,9 @@ test('dated unassigned rooms keep teacher conflicts and cancellation still remov
   assert.deepEqual(effectiveOperatingSlots({ ...ref, datedSessions: [{ ...dated, state: 'skipped' }] }, dated.date), []);
 });
 
-test('unassigned-room occupancy stays visible on teacher grids without occupying a room column', () => {
+test('unassigned operating occupancy is absent from every preset grid', () => {
   const snapshot = {
-    slots: [], items: [], shadowSlots: [shadow],
+    slots: [], items: [], appliedSnapshots:[], shadowSlots: [shadow],
     shadowClasses: [{ id: shadow.classId, name: 'Synthetic class', subject: '영어' }],
     catalogs: {
       teachers: [{ id: 'teacher-a', name: 'Teacher A', isVisible: true, subjects: ['영어팀'] }],
@@ -87,8 +87,7 @@ test('unassigned-room occupancy stays visible on teacher grids without occupying
   };
   for (const view of ['teacher-weekly', 'daily-teacher']) {
     const blocks = buildPlanPanels(snapshot, view).flatMap(panel => panel.blocks);
-    assert.equal(blocks.length, 1);
-    assert.equal(blocks[0].classroom, '미정');
+    assert.equal(blocks.length, 0);
   }
   for (const view of ['classroom-weekly', 'daily-classroom']) {
     assert.deepEqual(buildPlanPanels(snapshot, view).flatMap(panel => panel.blocks), []);

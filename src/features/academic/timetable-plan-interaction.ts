@@ -1,7 +1,7 @@
-import { timetableTeachers } from './timetable-subjects.ts';
-import type { DropTarget, GridTarget, PendingSlot, PlanItemDraft, PlanSnapshot, PlanSlot, ShadowSlot, TimetableView } from './timetable-plan-contract.ts';
+import type { DropTarget, GridTarget, PendingSlot, PlanItemDraft, PlanSnapshot, PlanSlot, TimetableView } from './timetable-plan-contract.ts';
 import { assertInterval, moveSlot, type TimetableItemEdit } from './timetable-plan-model.ts';
-import { findConflicts, findOperatingConflicts } from './timetable-conflicts.ts';
+import { findConflicts } from './timetable-conflicts.ts';
+import { planDisplayTeachers, planPlacements } from './timetable-plan-placements.ts';
 import { projectTimetableSlot, resolveGridTarget, resolveMovedGridTarget } from './timetable-placement-adapter.ts';
 export const PLAN_DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 export const PLAN_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -86,7 +86,7 @@ export function placementEdit(snapshot: PlanSnapshot, intent: PlacementIntent): 
 export type PlanGridBlock = {
     id: string;
     itemId: string;
-    shadow: boolean;
+    applied: boolean;
     title: string;
     subject: string;
     teacher: string;
@@ -94,24 +94,23 @@ export type PlanGridBlock = {
     columnKey: string;
     startMinute: number;
     endMinute: number;
-    slot: PlanSlot | ShadowSlot;
+    slot: PlanSlot;
 };
 export function buildPlanPanels(snapshot: PlanSnapshot, view: TimetableView, subject = '', selectedTargets: string[] = []) {
     const weekly = view.endsWith('weekly'), teacher = view.includes('teacher');
-    const resources = teacher ? timetableTeachers(snapshot.catalogs.teachers, subject) : snapshot.catalogs.classrooms;
+    const resources = teacher ? planDisplayTeachers(snapshot, subject) : snapshot.catalogs.classrooms;
     if (!resources.length) return [];
     const options = resources.map(r => ({ id: r.id, name: `${r.name}${!r.isVisible || r.isMissing ? ' (사용 불가)' : ''}` }));
     const days = PLAN_DAY_ORDER.map(i => ({ id: String(i), name: PLAN_DAYS[i] }));
     const panels = (weekly ? options : days).filter(p => !selectedTargets.length || selectedTargets.includes(p.id));
     const columns = weekly ? days : options;
-    const all: PlanGridBlock[] = [...snapshot.slots, ...snapshot.shadowSlots].flatMap(slot => {
+    const all: PlanGridBlock[] = planPlacements(snapshot).flatMap(slot => {
         if (!teacher && !slot.classroomId) return [];
-        const shadow = 'classId' in slot;
-        const item = shadow ? snapshot.shadowClasses.find(i => i.id === slot.classId) : snapshot.items.find(i => i.id === slot.itemId);
+        const item = snapshot.items.find(i => i.id === slot.itemId);
         if (!item || (subject && item.subject !== subject))
             return [];
         const projected = projectTimetableSlot(slot, view);
-        return [{ ...projected, itemId: shadow ? slot.classId : slot.itemId, shadow, title: item.name, subject: item.subject || '', teacher: resourceLabel(snapshot.catalogs.teachers, slot.teacherId), classroom: resourceLabel(snapshot.catalogs.classrooms, slot.classroomId), slot }];
+        return [{ ...projected, itemId: slot.itemId, applied: item.state === 'applied', title: item.name, subject: item.subject || '', teacher: resourceLabel(snapshot.catalogs.teachers, slot.teacherId), classroom: resourceLabel(snapshot.catalogs.classrooms, slot.classroomId), slot }];
     });
     return panels.map(panel => ({ ...panel, columns, blocks: all.filter(b => projectTimetableSlot(b.slot, view).panelKey === panel.id) }));
 }
@@ -180,17 +179,13 @@ export function validatePlacementEdit(snapshot: PlanSnapshot, edit: TimetableIte
         return;
     const same = (a: PlanSlot, b: PlanSlot) => a.weekday === b.weekday && a.startMinute === b.startMinute && a.endMinute === b.endMinute && a.teacherId === b.teacherId && a.classroomId === b.classroomId;
     const changed = edit.slots.filter(slot => !snapshot.slots.some(old => old.id === slot.id && same(old, slot)));
-    const all = [...snapshot.slots.filter(s => s.itemId !== edit.item.id), ...edit.slots];
-    const conflicts = [...findConflicts(all, snapshot.shadowSlots, new Set(changed.map(slot => slot.id))), ...findOperatingConflicts(changed, snapshot, snapshot.plan.targetStartDate && snapshot.plan.targetEndDate ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null)].filter(c => changed.some(s => s.id === c.slotId || s.id === c.otherSlotId));
+    const all = [...planPlacements(snapshot).filter(s => s.itemId !== edit.item.id), ...edit.slots];
+    const conflicts = findConflicts(all, [], new Set(changed.map(slot => slot.id)));
     if (conflicts.length) {
         const conflict = conflicts[0];
-        if (conflict.kind === 'unresolved') {
-            throw new PlacementConflictError(`${conflict.date ? conflict.date + ' · ' : ''}${conflict.label || '기존 수업'}의 시간·선생님·강의실을 확인해야 이 시간에 배치할 수 있습니다.`);
-        }
-        const otherId = conflict.otherSlotId;
-        const other = snapshot.shadowSlots.find(s => s.id === otherId);
+        const otherId = changed.some(s => s.id === conflict.slotId) ? conflict.otherSlotId : conflict.slotId;
         const planSlot = all.find(s => s.id === otherId);
-        const name = other ? snapshot.shadowClasses.find(c => c.id === other.classId)?.name : snapshot.items.find(i => i.id === planSlot?.itemId)?.name;
+        const name = snapshot.items.find(i => i.id === planSlot?.itemId)?.name;
         throw new PlacementConflictError(`${conflict.date ? conflict.date + ' · ' : ''}${name || '다른 수업'}과 ${conflict.kind === 'teacher' ? '선생님' : conflict.kind === 'classroom' ? '강의실' : '수업'} 시간이 겹칩니다.`);
     }
 }
