@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPlanPanels, validatePlacementEdit, placementEdit } from '../src/features/academic/timetable-plan-interaction.ts';
 import { createTimetablePlanController } from '../src/features/academic/timetable-plan-model.ts';
+import { planDisplayTeachers } from '../src/features/academic/timetable-plan-placements.ts';
+import { timetableTeachers } from '../src/features/academic/timetable-subjects.ts';
 
 const item = { id:'item', planId:'plan', revision:1, name:'초안', subject:'영어', subjectAreaKey:null, grade:'', capacity:null, tuition:null, defaultTeacherId:'teacher', defaultClassroomId:'room', durationMinutes:60, sourceClassId:null, state:'draft', appliedClassId:null, appliedTransferId:null, appliedAt:null, pendingSlots:[] };
 const slot = { id:'slot', itemId:item.id, planId:item.planId, weekday:2, startMinute:600, endMinute:660, teacherId:'teacher', classroomId:'room', sourceSlotId:null };
@@ -12,6 +14,74 @@ const operating = {...snapshot, shadowSlots:[shadow],shadowClasses:[{id:shadow.c
 const appliedItem = {...item,id:'applied',name:'반영 기록',state:'applied',appliedClassId:'operating-class',appliedTransferId:'transfer',appliedAt:'2026-10-22T00:00:00Z'};
 const appliedSlot = {...slot,id:'applied-slot',itemId:appliedItem.id};
 const applied = {...snapshot,items:[item,appliedItem],appliedSnapshots:[{itemId:appliedItem.id,slots:[appliedSlot]}],capacity:{...snapshot.capacity,itemCount:2,slotCount:1}};
+
+for (const [variant, changes] of [
+  ['hidden',{isVisible:false}],
+  ['deleted',{isVisible:false,isMissing:true,subjects:[]}],
+  ['team changed',{subjects:['수학']}],
+]) for (const state of ['draft','applied']) test(`stored ${state} remains visible after teacher ${variant} without becoming selectable`,()=>{
+  const source=structuredClone(state==='applied'?applied:{...snapshot,slots:[slot]});
+  Object.assign(source.catalogs.teachers[0],changes);
+  source.catalogs.teachers.push({id:'unused',name:'미참조',isVisible:false,subjects:['영어']});
+  const before=JSON.stringify(source),expected=state==='applied'?'applied-slot':'slot';
+  assert.deepEqual(timetableTeachers(source.catalogs.teachers,'영어'),[]);
+  assert.deepEqual(planDisplayTeachers(source,'영어').map(row=>row.id),['teacher']);
+  for(const subject of ['','영어']) for(const view of ['teacher-weekly','daily-teacher']) {
+    const panels=buildPlanPanels(source,view,subject);
+    const rendered=panels.flatMap(panel=>panel.blocks.filter(block=>panel.columns.some(column=>column.id===block.columnKey)));
+    assert.deepEqual(rendered.map(block=>block.id),[expected]);
+    assert.equal(rendered[0].applied,state==='applied');
+    assert.equal(rendered[0].startMinute,slot.startMinute);
+    assert.equal(rendered[0].slot.teacherId,'teacher');
+  }
+  assert.deepEqual(buildPlanPanels(source,'teacher-weekly','영어',['unused']).flatMap(panel=>panel.blocks),[]);
+  assert.deepEqual(buildPlanPanels(source,'teacher-weekly','수학').flatMap(panel=>panel.blocks),[]);
+  assert.equal(JSON.stringify(source),before);
+});
+
+test('display filter does not add unreferenced unavailable teachers to an empty preset',()=>{
+  const source=structuredClone(snapshot);source.catalogs.teachers[0].isVisible=false;
+  assert.deepEqual(planDisplayTeachers(source),[]);
+  assert.deepEqual(buildPlanPanels(source,'teacher-weekly'),[]);
+});
+
+test('workspace target filter includes the same stored teachers as its panels',async()=>{
+  const {createElement}=await import('react');
+  const {renderToStaticMarkup}=await import('react-dom/server');
+  const {loadNotificationComponent}=await import('./helpers/notification-component-loader.mjs');
+  const box=({children})=>createElement('div',null,children),empty=()=>null;
+  let filterOptions;
+  const mocks=new Map([
+    ['./timetable-grid-skin.module.css',{__esModule:true,default:{}}],
+    ['@/lib/export-as-image',{exportElementAsImage:empty}],
+    ['./timetable-plan-recovery-actions',{TimetablePlanRecoveryActions:empty}],
+    ['./timetable-transfer-dialog',{TimetableTransferDialog:empty}],
+    ['./timetable-plan-class-list',{TimetablePlanClassList:empty}],
+    ['./timetable-placement-editor',{TimetablePlacementEditor:empty}],
+    ['./timetable-target-filter',{TimetableTargetFilter:props=>{filterOptions=props.options;return null;}}],
+    ['./components/legacy-timetable-grid.jsx',{__esModule:true,default:empty}],
+    ['@/components/ui/button',{Button:box}],['@/components/ui/label',{Label:box}],
+    ['@/components/ui/form-dialog',{ConfirmationDialogContent:box}],
+    ['@/components/data-table/data-table-filter-panel',{DataTableFilterPanel:box}],
+  ]);
+  for(const [path,names] of [
+    ['select',['Select','SelectContent','SelectItem','SelectTrigger','SelectValue']],
+    ['dialog',['Dialog','DialogContent','DialogHeader','DialogTitle','DialogDescription','DialogFooter']],
+    ['sheet',['Sheet','SheetContent','SheetHeader','SheetTitle','SheetDescription']],
+    ['workspace-tabs',['WorkspaceTabs','WorkspaceTabsList','WorkspaceTabsTrigger','WorkspaceTabsPanel']],
+  ])mocks.set('@/components/ui/'+path,Object.fromEntries(names.map(name=>[name,box])));
+  const {TimetablePlanWorkspace}=loadNotificationComponent('src/features/academic/timetable-plan-workspace.tsx',mocks);
+  for(const changes of [{isVisible:false},{isVisible:false,isMissing:true,subjects:[]},{subjects:['관리팀']}]){
+    const source=structuredClone(applied);Object.assign(source.catalogs.teachers[0],changes);
+    source.catalogs.teachers.push({id:'unused',name:'미참조',isVisible:false,subjects:['영어']});
+    const before=JSON.stringify(source);
+    const state={draft:source,snapshot:source,pendingOperations:[],conflicts:[],referenceStatus:'verified',saveState:'saved',dirty:false};
+    const markup=renderToStaticMarkup(createElement(TimetablePlanWorkspace,{state,view:'teacher-weekly',onViewChange:empty,onEditorDirty:empty,onTransferDirty:empty,requestAction:empty,onTransferred:empty}));
+    assert.deepEqual(filterOptions,['teacher']);
+    assert.match(markup,/강사/);assert.doesNotMatch(markup,/미참조/);
+    assert.equal(JSON.stringify(source),before);
+  }
+});
 
 for (const [name, extra] of [
   ['teacher shadow',{shadowSlots:[{...shadow,classroomId:'other-room'}]}],

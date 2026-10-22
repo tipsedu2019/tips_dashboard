@@ -1,5 +1,6 @@
 'use client';
-import { TIMETABLE_SUBJECTS, timetableTeachers, newTimetableSubject } from './timetable-subjects';
+import { TIMETABLE_SUBJECTS, newTimetableSubject } from './timetable-subjects';
+import { planDisplayTeachers } from './timetable-plan-placements';
 import { TimetablePlanRecoveryActions } from './timetable-plan-recovery-actions';
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -265,7 +266,7 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onEditorDirt
     if (!snapshot)
         return <div className="px-4 py-12 text-sm" role="status">{state.error ? <><span>프리셋을 불러오지 못했습니다.</span><Button variant="outline" onClick={() => void state.refresh()}>다시 시도</Button></> : '프리셋을 불러오는 중입니다.'}</div>;
     const targetLabel = view === 'teacher-weekly' ? '선생님' : view === 'classroom-weekly' ? '강의실' : '요일';
-    const resourceOptions = view === 'teacher-weekly' ? timetableTeachers(snapshot.catalogs.teachers, subject) : view === 'classroom-weekly' ? snapshot.catalogs.classrooms : PLAN_DAY_ORDER.map(i => ({ id: String(i), name: PLAN_DAYS[i] }));
+    const resourceOptions = view === 'teacher-weekly' ? planDisplayTeachers(snapshot, subject) : view === 'classroom-weekly' ? snapshot.catalogs.classrooms : PLAN_DAY_ORDER.map(i => ({ id: String(i), name: PLAN_DAYS[i] }));
     const classList = <TimetablePlanClassList snapshot={snapshot} search={search} setSearch={setSearch}
       listFilter={listFilter} setListFilter={setListFilter} selectedItemIds={selectedItemIds} setSelectedItemIds={setSelectedItemIds}
       activeItemId={activeItemId} canEdit={canEdit} onActivate={id=>{setActiveItemId(id);setSheetOpen(false);}}
