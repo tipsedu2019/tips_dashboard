@@ -4366,7 +4366,6 @@ export function ClassScheduleWorkspace() {
                     isSelectedSession && "border-l-primary bg-primary/5",
                     isSelectedSession && isSessionReleasable && "pr-12",
                   )}
-                  onPointerDown={() => markPendingLessonSessionSelection(session.id)}
                   onClick={() =>
                     focusLessonDesignSession(session.id, {
                       sectionId: LESSON_DESIGN_SECTION_IDS.periods,

@@ -1984,3 +1984,68 @@ for (const scenario of [
     if (scenario.route === 'class-schedule') assert.ok(recorder.scrollCalls.some(call => call.target === 'dialog' && call.top > 200), 'dialog alignment runs with the resolved whole date cell');
   }
 });
+
+for (const scenario of [
+  { name: 'legacy page mouse', route: 'curriculum/lesson-design', pointerType: 'mouse' },
+  { name: 'legacy dialog touch', route: 'class-schedule', pointerType: 'touch' },
+  { name: 'normalized page mouse', route: 'curriculum/lesson-design', pointerType: 'mouse', normalized: true },
+  { name: 'normalized dialog pen', route: 'class-schedule', pointerType: 'pen', normalized: true },
+]) test(`calendar activation: ${scenario.name} waits for activation and preserves edited input`, async t => {
+  const page = await editor(t, scenario.route);
+  if (scenario.normalized) {
+    await page.normalized({ status: 'ready', value: { source: 'normalized', data: {
+      scheduleRevision: 1, contentHash: 'pointer-fixture', sessions: [
+        { id: id(600), session_key: 'session-one', session_date: '2026-08-03', session_number: 1, revision: 1, schedule_state: 'active', memo: 'ORIGINAL' },
+        { id: id(601), session_key: 'session-two', session_date: '2026-08-03', session_number: 2, revision: 1, schedule_state: 'active', memo: 'PEER' },
+      ],
+    } } });
+    await act(async () => page.observed.setSelectedLessonSessionId(id(600)));
+  } else await refreshDetail(page, calendarPairDetail(false));
+  const originalId = page.observed.selectedLessonSessionId;
+  const targetId = scenario.normalized ? id(601) : 'same-date-second';
+  assert.notEqual(originalId, targetId);
+  const originalSession = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === originalId);
+  const open = document.querySelector('button[aria-label="8월 상세 보기"]');
+  if (open) await act(async () => open.click());
+  const memo = `  unsaved ${scenario.name}\n마지막 입력 보존  `;
+  await changeTextarea(document.querySelector(`textarea[aria-label="${originalSession.label} 메모"]`), memo);
+  const before = {
+    plan: JSON.stringify(page.observed.lessonPlanDraft),
+    normalized: JSON.stringify(page.observed.normalizedLessonSessionDrafts),
+    writes: page.writes.length,
+    editor: document.querySelector('[data-lesson-selected-editor="true"]'),
+  };
+  const geometry = recordCalendarPairGeometry();
+  const trigger = document.querySelector(`[data-lesson-period-session-id="${targetId}"] button[aria-pressed]`);
+  assert.ok(trigger);
+  const pointer = type => {
+    const event = new window.Event(type, { bubbles: true });
+    Object.defineProperty(event, 'pointerType', { value: scenario.pointerType });
+    Object.defineProperty(event, 'button', { value: 0 });
+    return event;
+  };
+  await act(async () => trigger.dispatchEvent(pointer('pointerdown')));
+  assert.equal(page.observed.selectedLessonSessionId, originalId, 'pressing alone must not reflow the editor before pointerup/click');
+  assert.equal(document.querySelector('[data-lesson-selected-editor="true"]'), before.editor);
+  assert.equal(page.writes.length, before.writes, 'pointerdown alone must not navigate');
+  await act(async () => trigger.dispatchEvent(pointer('pointercancel')));
+  assert.equal(page.observed.selectedLessonSessionId, originalId, 'cancelled touch/drag must not select a different lesson');
+  assert.equal(geometry.calendarDates.length, 0);
+  assert.equal(JSON.stringify(page.observed.lessonPlanDraft), before.plan);
+  assert.equal(JSON.stringify(page.observed.normalizedLessonSessionDrafts), before.normalized);
+  await act(async () => trigger.dispatchEvent(pointer('pointerdown')));
+  await act(async () => {
+    trigger.dispatchEvent(pointer('pointerup'));
+    trigger.click();
+  });
+  for (let step = 0; step < 5; step++) await act(async () => new Promise(resolve => window.setTimeout(resolve, 12)));
+  assert.equal(page.observed.selectedLessonSessionId, targetId);
+  assert.ok(geometry.calendarDates.includes('2026-08-03'), 'completed activation pairs the exact lesson with its date cell');
+  assert.equal(JSON.stringify(page.observed.lessonPlanDraft), before.plan);
+  assert.equal(JSON.stringify(page.observed.normalizedLessonSessionDrafts), before.normalized);
+  const originalTrigger = document.querySelector(`[data-lesson-period-session-id="${originalId}"] button[aria-pressed]`);
+  await act(async () => originalTrigger.click());
+  assert.equal(document.querySelector(`textarea[aria-label="${originalSession.label} 메모"]`).value, memo);
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 0);
+});
