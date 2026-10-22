@@ -85,6 +85,9 @@ insert into ev values('race',pg_temp.api('preview',pg_temp.input(301,840,900)));
 reset role;
 update public.classes set schedule='월 14:00-15:00' where id=pg_temp.aid(302);
 set constraints all immediate;set constraints all deferred;
+insert into ev values('race-domain-receipts-before',jsonb_build_object('count',
+ (select count(*) from dashboard_private.class_schedule_mutation_receipts
+  where actor_profile_id=pg_temp.aid(1) and operation='update_class_operational_v1')));
 set local role service_role;
 select is(pg_temp.api('commit',jsonb_build_object('previewToken',(select v#>>'{data,previewToken}' from ev where k='race'),'requestKey',pg_temp.aid(505)))#>>'{data,state}','applied','legacy weekly commit accepts the input despite another class resource change');
 select is(pg_temp.api('commit',jsonb_build_object('previewToken',(select v#>>'{data,previewToken}' from ev where k='race'),'requestKey',pg_temp.aid(505)))#>>'{data,replayed}','true','accepted overlapping weekly input still replays one durable operation');
@@ -93,7 +96,10 @@ select is((select schedule from public.classes where id=pg_temp.aid(301)),'월 1
 select is((select schedule_plan from public.classes where id=pg_temp.aid(301)),(select schedule_plan from baseline),'overlapping weekly edit preserves original lesson history');
 select is((select student_ids from public.classes where id=pg_temp.aid(301)),(select student_ids from baseline),'overlapping weekly edit preserves enrolled students');
 select is((select count(*) from dashboard_private.agent_operations where request_key=pg_temp.aid(505)),1::bigint,'overlapping input and its replay create exactly one operation');
-select is((select count(*) from dashboard_private.class_schedule_mutation_receipts where request_key=pg_temp.aid(505) and operation='update_class_operational_v1'),1::bigint,'accepted weekly input has one domain receipt after replay');
+select is((select count(*) from dashboard_private.class_schedule_mutation_receipts
+ where actor_profile_id=pg_temp.aid(1) and operation='update_class_operational_v1'),
+ (select (v->>'count')::bigint+1 from ev where k='race-domain-receipts-before'),
+ 'accepted weekly input adds one internal domain receipt and replay adds none');
 -- Expiry, suspension, and rate limits are checked by the final gateway.
 update auth.users set banned_until=now()+interval '1 day' where id=pg_temp.aid(1);
 set local role service_role;
