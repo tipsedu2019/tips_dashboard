@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = new Set()
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "4c1bde39852238632932c55449b577274793d787a6533c40592241d9f69f59dc"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "f37ed96aa6a7d98156a0e1dc64f408e5a06e58b433a1b6b446468b6de58c45ae"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -72,6 +72,7 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_normalized_time_matching_test.sql",
   "supabase/tests/timetable_nullable_classroom_test.sql",
   "supabase/tests/class_lesson_input_policy_test.sql",
+  "supabase/tests/class_basic_info_input_policy_test.sql",
   "supabase/tests/class_lesson_input_save_performance_test.sql",
   "supabase/tests/timetable_operational_conflicts_test.sql",
   "supabase/tests/timetable_repeatable_read_guard_test.sql",
@@ -1431,7 +1432,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "ca219fb0a90b6be4cd31b1ef4f1e03efb93537247461dde2e67c87e0aea6850e"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "c7df56bd8b158649a42f5516be578aba45838f0bf47c1a48a5a19fd709cb1b61"],
+    ["supabase-sql-review.yml", "de4a6d437226db065ce137daef70860da3f1f6887a378d3a817d25771b3bc934"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2392,7 +2393,7 @@ async function assertPinnedPostdeployPredicates(source, requiredPredicates) {
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 }
 
-test("isolated main·PR는 동일한 SQL 105개·probe 24개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 동일한 SQL 106개·probe 24개와 필수 PR 검사 이름을 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {

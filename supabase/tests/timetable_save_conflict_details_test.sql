@@ -41,10 +41,13 @@ exception when others then
  return jsonb_build_object('code',code,'message',message,'details',nullif(detail,''),'detail',case when detail<>'' then detail::jsonb end);
 end$$;
 create function pg_temp.try_weekly() returns jsonb language plpgsql as $$
-declare code text; message text; detail text;
+declare source jsonb; code text; message text; detail text;
 begin
+ -- This fixture tests strict mixed-command diagnostics, not ordinary basic
+ -- input (which now accepts activation and entered weekly times).
+ select schedule_plan into source from public.classes where id=pg_temp.sid(301);
  perform public.update_class_operational_v1(pg_temp.sid(301),jsonb_build_object('status','수강','schedule','월 09:30-10:30',
-  'teacher','Synthetic shared teacher','room','Synthetic shared room'),gen_random_uuid());
+  'teacher','Synthetic shared teacher','room','Synthetic shared room','schedule_plan',source),gen_random_uuid(),source);
  return jsonb_build_object('ok',true);
 exception when others then
  get stacked diagnostics code=RETURNED_SQLSTATE,message=MESSAGE_TEXT,detail=PG_EXCEPTION_DETAIL;

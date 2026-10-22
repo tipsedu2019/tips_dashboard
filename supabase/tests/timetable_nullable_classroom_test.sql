@@ -57,25 +57,29 @@ select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(301
 select is((select schedule from public.classes where id=pg_temp.room_id(301)),
  E'화 19:30-21:30 (Nullable teacher A, Nullable room B)\n토 16:30-18:00 (Nullable teacher A, 강의실 미정)',
  'Tuesday assignment persists through the ordinary class read');
-select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(301),
+select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(301),
  jsonb_build_object('schedule',E'화 19:30-21:30 (Nullable teacher A, Nullable room A)\n토 16:30-18:00 (Nullable teacher A, 강의실 미정)',
  'room','Nullable room A(화), 강의실 미정(토)'),pg_temp.room_id(602),null)$q$,
- '23P01','timetable_resource_conflict','later assignment to an occupied actual room is rejected');
+ 'basic room input may select an occupied actual room without rewriting other classes');
 select is((select schedule from public.classes where id=pg_temp.room_id(301)),
- E'화 19:30-21:30 (Nullable teacher A, Nullable room B)\n토 16:30-18:00 (Nullable teacher A, 강의실 미정)',
- 'rejected actual room conflict rolls back to the previous weekly values');
-select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
+ E'화 19:30-21:30 (Nullable teacher A, Nullable room A)\n토 16:30-18:00 (Nullable teacher A, 강의실 미정)',
+ 'accepted room input preserves exact per-day weekly values');
+select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('teacher','Nullable teacher A'),pg_temp.room_id(603),null)$q$,
- '23P01','timetable_resource_conflict','known teacher conflict is still rejected with an unassigned room');
+ 'basic teacher input is not blocked by other dated or weekly occupancy');
+select is((select teacher from public.classes where id=pg_temp.room_id(303)),'Nullable teacher A','selected teacher persists');
+select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
+ jsonb_build_object('teacher','Nullable teacher C'),pg_temp.room_id(620),null)$q$,
+ 'restore the synthetic teacher before independent nullable lesson reader cases');
 select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('room','Unknown nonempty room'),pg_temp.room_id(604),null)$q$,
- '23P01','timetable_resource_conflict','a bad room label is not converted to optional null');
+ '22023','class_schedule_catalog_invalid','a bad room label is not converted to optional null');
 select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('teacher',''),pg_temp.room_id(605),null)$q$,
- '23P01','timetable_resource_conflict','a placed class still requires its teacher');
+ '22023','class_schedule_catalog_invalid','a placed class still requires its teacher');
 select throws_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('schedule','화 21:30-19:30'),pg_temp.room_id(606),null)$q$,
- '23P01','timetable_resource_conflict','invalid time ranges remain rejected');
+ '22023','class_schedule_validation','invalid time ranges remain rejected');
 
 select lives_ok($q$select public.update_class_operational_v1(pg_temp.room_id(303),
  jsonb_build_object('schedule_plan',jsonb_build_object('sessions',jsonb_build_array(

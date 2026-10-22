@@ -791,9 +791,9 @@ select throws_ok(
       null
     )
   $$,
-  '23P01',
-  'timetable_resource_conflict',
-  'a newly introduced unknown is still rejected after the owner fixture boundary'
+  '22023',
+  'class_schedule_validation',
+  'malformed newly entered time is rejected before historic occupancy lookup'
 );
 set local role postgres;
 select ok(
@@ -1358,6 +1358,20 @@ select ok(
     where student.id = '87000000-0000-4000-8000-000000000205'
   ),
   'student-side invalid-roster refusal leaves both asymmetric projections unchanged'
+);
+
+select throws_ok(
+  $$select public.update_class_operational_v1(
+    '87000000-0000-4000-8000-000000000101',
+    '{"status":"수강"}'::jsonb,
+    '87000000-0000-4000-8000-000000000798', null)$$,
+  '42501', 'class_close_requires_rpc',
+  'ordinary basic status edits cannot reopen a closed class or bypass its roster guard'
+);
+select ok(
+  (select status = '종강' and closed_at is not null
+   from public.classes where id = '87000000-0000-4000-8000-000000000101'),
+  'rejected reopening leaves the completed close intact'
 );
 
 select * from finish();
