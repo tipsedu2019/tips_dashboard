@@ -7,6 +7,7 @@ import { JSDOM } from "jsdom";
 import { act, createElement } from "react";
 import ts from "typescript";
 import { configureSnapshotFixture, snapshotStudentId } from "./helpers/management-relation-snapshot-fixture.mjs";
+import {parseClassScheduleSlots,toContinuousClassScheduleSlots} from "../src/features/management/class-schedule-slots.ts";
 import { classRow, createManagementDetailFixture, defaultsFor } from "./helpers/management-detail-fixture.mjs";
 import { requestAppNavigation } from "../src/lib/guarded-navigation.ts";
 import { extractManagementReconcile } from "../scripts/measure-management-refresh.mjs";
@@ -1403,7 +1404,7 @@ test("pending save coverage locks student creation fields and restores them afte
 });
 
 for (const [kind, serviceName, fieldIds] of [
-  ["classes", "createClass", ["name", "status", "teacher", "schedule", "classroom", "capacity", "fee"]],
+  ["classes", "createClass", ["name", "status", "capacity", "fee"]],
   ["textbooks", "createTextbook", ["title", "price", "tags"]],
 ]) {
   test(`pending save coverage locks ${kind} creation controls while preserving exit`, async t => {
@@ -1412,20 +1413,21 @@ for (const [kind, serviceName, fieldIds] of [
     await ui.editField(`${kind}-form-${fieldIds[0]}`, "신규 등록");
     await ui.submitTogether();
     for (const field of fieldIds) assert.equal(document.getElementById(`${kind}-form-${field}`).disabled, true, `${field} must be locked`);
+    if (kind === "classes") for (const control of document.querySelectorAll('[data-testid="class-schedule-rows"] input,[data-testid="class-schedule-rows"] button')) assert.equal(control.disabled,true,"submitted schedule controls must be locked");
     await ui.escape();
     assert.equal(document.querySelector('[role="dialog"]'), null);
     assert.equal(ui.mutations.length, 1);
   });
 }
 
-test("class creation protects free-text schedule drafts before their values can be normalized", async t => {
+test("class creation protects partial row drafts before their values can be normalized", async t => {
   const ui = await setup(t);
   await ui.click("수업 등록");
-  await ui.editField("classes-form-schedule", "월요일 시간 입력 중");
+  await ui.editField("class-schedule-slot-0-startTime", "17:");
   await ui.escape();
   assert.ok(document.querySelector('[data-testid="management-discard-confirm-dialog"]'));
   await ui.click("계속 편집");
-  assert.equal(document.getElementById("classes-form-schedule").value, "월요일 시간 입력 중");
+  assert.equal(document.getElementById("class-schedule-slot-0-startTime").value, "17:");
 });
 
 test("pending save coverage never includes a dirty form in a relation mutation", async t => {
@@ -1744,56 +1746,38 @@ test("late relation addition keeps the new detail's relation candidate intact", 
   await act(async () => ui.mutations[1].resolve(undefined));
 });
 
-for (const schedule of ["화목 19:30-21:30", "화/목 19:30-21:30", "화, 목 19:30-21:30"]) {
-test(`class creation initializes the entire entered schedule ${schedule} with optional room`, async t => {
-  const previousScroll = window.HTMLElement.prototype.scrollIntoView;
-  window.HTMLElement.prototype.scrollIntoView = () => {};
-  t.after(() => { window.HTMLElement.prototype.scrollIntoView = previousScroll; });
-  const ui = await setup(t, { configureFixture: fixture => {
-    deferServices(fixture, ["createClass", "initializeClassSchedule"]);
-    fixture.service.getClassScheduleDefaults = async () => ({ runtimeVersion: 1, authoritativeSource: "legacy", scheduleRevision: 0, schedulePlanHash: "created-class-plan" });
-  } });
-  const select = async (id, label) => {
-    await act(async () => document.getElementById(id).dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    const option = [...document.querySelectorAll('[role="option"]')].find(node => node.textContent === label);
-    assert.ok(option, `option not found: ${label}`);
-    await act(async () => option.click());
-  };
-  await ui.click("수업 등록");
-  await ui.editField("classes-form-name", "미정 방 신규 수업");
-  await select("classes-form-subject", "영어");
-  await select("classes-form-teacher", "영어교사");
-  await ui.editField("classes-form-schedule", schedule);
-  await ui.submitTogether();
-  assert.equal(ui.mutations.length, 1);
-  await act(async () => ui.mutations[0].resolve({ id: "created-class" }));
-  assert.deepEqual(ui.mutations[1].args[0].slots, [2, 4].map((weekday, sortOrder) => ({
-    id: null, weekday, startTime: "19:30", endTime: "21:30",
-    teacherCatalogId: "teacher-1", classroomCatalogId: null, sortOrder,
-  })));
-});
+async function selectClassFormOption(id, label) {
+  // JSDOM omits scrolling; real-browser tests exercise the Radix list focus.
+  window.HTMLElement.prototype.scrollIntoView ??= () => {};
+  const trigger=document.getElementById(id);assert.ok(trigger,`select ${id}`);
+  await act(async()=>trigger.dispatchEvent(new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true})));
+  const option=[...document.querySelectorAll('[role="option"]')].find(node=>node.textContent===label);assert.ok(option,`option ${label}`);
+  await act(async()=>option.click());
 }
-
-test("class creation validates the actual entered placement before creating a class", async t => {
-  const ui = await setup(t, { configureFixture: fixture => deferServices(fixture, ["createClass"]) });
-  await ui.click("수업 등록");
-  await ui.editField("classes-form-name", "검증할 신규 수업");
-  await ui.editField("classes-form-schedule", "화 19:30-21:30");
-  await ui.submitTogether();
-  assert.equal(ui.mutations.length, 0);
-  assert.match(ui.text(), /선생님/);
-  await ui.editField("classes-form-schedule", "화 21:30-19:30 (영어교사, )");
-  await ui.submitTogether();
-  assert.equal(ui.mutations.length, 0);
-  assert.match(ui.text(), /시작·종료 시간/);
-  await ui.editField("classes-form-schedule", "invalid schedule");
-  await ui.submitTogether();
-  assert.equal(ui.mutations.length, 0);
-  assert.match(ui.text(), /요일|시간/);
-  await ui.editField("classes-form-schedule", "화 19:30-21:30 (영어교사, ); invalid tail");
-  await ui.submitTogether();
-  assert.equal(ui.mutations.length, 0);
-  assert.match(ui.text(), /요일|시간/);
+for (const schedule of ["화목 19:30-21:30", "화/목 19:30-21:30", "화, 목 19:30-21:30"]) {
+ test(`legacy creation schedule grammar is preserved for ${schedule}`,()=>{
+   const slots=parseClassScheduleSlots(schedule,"영어교사","");
+   assert.deepEqual(toContinuousClassScheduleSlots(slots).map(({weekday,startTime,endTime})=>({weekday,startTime,endTime})),[2,4].map(weekday=>({weekday,startTime:"19:30",endTime:"21:30"})));
+ });
+}
+test("class creation initializes every independent row with optional rooms and one create request",async t=>{
+  const ui=await setup(t,{configureFixture:fixture=>{deferServices(fixture,["createClass","initializeClassSchedule"]);fixture.service.getClassScheduleDefaults=async()=>({runtimeVersion:1,authoritativeSource:"legacy",scheduleRevision:0,schedulePlanHash:"created-class-plan"});}});
+  await ui.click("수업 등록");await ui.editField("classes-form-name","미정 방 신규 수업");
+  await selectClassFormOption("classes-form-subject","영어");
+  await selectClassFormOption("class-schedule-slot-0-day","화");
+  await selectClassFormOption("class-schedule-slot-0-teacher","영어교사");
+  await ui.editField("class-schedule-slot-0-startTime","19:30");await ui.editField("class-schedule-slot-0-endTime","21:30");
+  await ui.click("시간 추가");await selectClassFormOption("class-schedule-slot-1-day","목");
+  await ui.editField("class-schedule-slot-1-startTime","19:13");await ui.editField("class-schedule-slot-1-endTime","21:43");
+  await ui.submitTogether();assert.equal(ui.mutations.length,1);await act(async()=>ui.mutations[0].resolve({id:"created-class"}));
+  assert.deepEqual(ui.mutations[1].args[0].slots,[{id:null,weekday:2,startTime:"19:30",endTime:"21:30",teacherCatalogId:"teacher-1",classroomCatalogId:null,sortOrder:0},{id:null,weekday:4,startTime:"19:13",endTime:"21:43",teacherCatalogId:"teacher-1",classroomCatalogId:null,sortOrder:1}]);
+});
+test("class creation validates the actual entered placement before creating a class",async t=>{
+  const ui=await setup(t,{configureFixture:fixture=>deferServices(fixture,["createClass"])});await ui.click("수업 등록");await ui.editField("classes-form-name","검증할 신규 수업");
+  await selectClassFormOption("class-schedule-slot-0-day","화");await ui.editField("class-schedule-slot-0-startTime","19:30");await ui.editField("class-schedule-slot-0-endTime","21:30");await ui.submitTogether();assert.equal(ui.mutations.length,0);assert.match(ui.text(),/선생님/);
+  await selectClassFormOption("class-schedule-slot-0-teacher","영어교사");await ui.editField("class-schedule-slot-0-startTime","21:30");await ui.editField("class-schedule-slot-0-endTime","19:30");await ui.submitTogether();assert.equal(ui.mutations.length,0);assert.match(ui.text(),/시작·종료 시간/);
+  await ui.editField("class-schedule-slot-0-startTime","invalid time");await ui.submitTogether();assert.equal(ui.mutations.length,0);assert.match(ui.text(),/시간/);
+  await ui.editField("class-schedule-slot-0-startTime","24:00");await ui.submitTogether();assert.equal(ui.mutations.length,0);assert.match(ui.text(),/시간/);
 });
 
 for (const retry of [false, true]) {
@@ -2095,13 +2079,13 @@ test("a closed class response cannot populate a new class form", async t => {
   await ui.click("수업 상세 닫기");
   await ui.click("수업 등록");
   await act(async () => {
-    const input = document.querySelector("#classes-form-schedule");
+    const input = document.querySelector("#class-schedule-slot-0-startTime");
     assert.ok(input);
-    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "화 18:45-20:00");
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "18:45");
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
   });
   await ui.resolve(0, defaultsFor("09:00"));
-  assert.equal(document.querySelector("#classes-form-schedule").value, "화 18:45-20:00");
+  assert.equal(document.querySelector("#class-schedule-slot-0-startTime").value, "18:45");
   assert.doesNotMatch(ui.text(), /기본 시간표 저장/);
 });
 
@@ -2400,4 +2384,22 @@ test("confirmed class state reports pending public cache without claiming a requ
   await ui.click("저장");
   assert.match(ui.text(), /종강 상태 확인됨 · 공개 수업 캐시 갱신 대기 중/);
   assert.doesNotMatch(ui.text(), /저장은 완료되었습니다|저장 실패/);
+});
+
+
+test("common class form displays exact won amount instead of rounding its edit value", async t => {
+  const ui = await setup(t, { configureFixture: fixture => { fixture.rows[0].raw.fee = 325000; } });
+  await ui.click("A 영어반");
+  assert.equal(document.getElementById("classes-detail-fee").value, "325000");
+});
+test("common class form retains explicit zero in the metadata input", async t => {
+  const writes = [];
+  const ui = await setup(t, { configureFixture: fixture => { fixture.rows[0].raw.fee = 325000; fixture.service.updateClass = async (...args) => { writes.push(args); return {}; }; } });
+  await ui.click("A 영어반");
+  await ui.editField("classes-detail-fee", "0");
+  assert.equal(document.getElementById("classes-detail-fee").value, "0");
+  await ui.click("저장");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0][0].fee, "0");
+  assert.equal(writes[0][1].scheduleOwnership, "normalized");
 });
