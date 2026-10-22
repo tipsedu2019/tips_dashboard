@@ -56,7 +56,7 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
     const save = async (values: Values, candidate?: DropTarget) => { if (!canEdit || busy)
         return; setBusy(true); setError(''); try {
         const candidateRows = candidate ? [{key:values.scheduleRows?.[0]?.key || crypto.randomUUID(),day:PLAN_DAYS[candidate.weekday],startTime:formatPlanTime(candidate.startMinute),endTime:formatPlanTime(candidate.startMinute + Number(values.duration)),teacher:values.scheduleRows?.[0] ? values.scheduleRows[0].teacher : values.teacher,classroom:values.scheduleRows?.[0] ? values.scheduleRows[0].classroom : values.room}] : values.scheduleRows;
-        const edit = buildPlacementRowsEdit(draft,values,candidateRows);
+        const edit = buildPlacementRowsEdit(draft,values,candidateRows,{isNewItem:!snapshot.items.some(item=>item.id===draft.item.id)});
         submittedValues.current = JSON.stringify(values);
         await onSave(edit);
         form.reset(values);

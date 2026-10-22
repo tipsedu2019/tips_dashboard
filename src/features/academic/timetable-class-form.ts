@@ -14,7 +14,7 @@ export function placementScheduleRows(draft: PlacementEditorDraft): ClassSchedul
 export function placementClassFormDefaults(draft: PlacementEditorDraft) {
   return {...placementFormDefaults(draft),teacher:draft.item.defaultTeacherId||'',room:draft.item.defaultClassroomId||'',scheduleRows:placementScheduleRows(draft)};
 }
-export function buildPlacementRowsEdit(draft: PlacementEditorDraft, values: PlacementFormValues, rows: ClassScheduleFormRow[]): TimetableItemEdit {
+export function buildPlacementRowsEdit(draft: PlacementEditorDraft, values: PlacementFormValues, rows: ClassScheduleFormRow[], {isNewItem=false}: {isNewItem?: boolean} = {}): TimetableItemEdit {
   const scope=placementScope(draft);
   if(scope==='slot'&&!draft.slots.some(slot=>slot.id===draft.slotId))throw Error('선택한 배치를 다시 확인해 주세요.');
   if(draft.pendingResolutionId&&(scope!=='add'||!rows.length||!draft.item.pendingSlots.some(row=>row.id===draft.pendingResolutionId)))throw Error('해결할 미배치와 배치 요일을 선택해 주세요.');
@@ -40,6 +40,10 @@ export function buildPlacementRowsEdit(draft: PlacementEditorDraft, values: Plac
     return slot;
   });
   const slots=scope==='item'?next:scope==='add'?[...draft.slots,...next]:draft.slots.flatMap(slot=>slot.id===draft.slotId?next:[slot]);
+  // A new grid-created item has no independent stored defaults yet. Seed its
+  // first placement so subsequent drag placement keeps the selected resources.
+  // Existing items keep explicit null or different defaults unchanged.
+  if(isNewItem&&next.length){item.defaultTeacherId=next[0].teacherId;item.defaultClassroomId=next[0].classroomId;}
   if(draft.pendingResolutionId)item.pendingSlots=item.pendingSlots.filter(row=>row.id!==draft.pendingResolutionId);
   return {operation:'save',item,slots};
 }
