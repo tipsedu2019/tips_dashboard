@@ -153,6 +153,7 @@ jobs:
             --test supabase/tests/timetable_normalized_time_matching_test.sql \
             --test supabase/tests/timetable_nullable_classroom_test.sql \
             --test supabase/tests/class_lesson_input_policy_test.sql \
+            --test supabase/tests/class_basic_info_input_policy_test.sql \
             --test supabase/tests/class_lesson_input_save_performance_test.sql \
             --test supabase/tests/timetable_operational_conflicts_test.sql \
             --test supabase/tests/timetable_repeatable_read_guard_test.sql \

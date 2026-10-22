@@ -81,7 +81,7 @@ set constraints all immediate;set constraints all deferred;
 rollback to manual_legacy_input;
 release savepoint manual_legacy_input;
 select throws_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule_plan":{"sessions":[]}}','ad240000-0000-4000-8000-000000000512','{"changed":true}')$q$,'P0001','class_schedule_stale','legacy gateway detects stale source JSON');
-select throws_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule":"판독 불가"}','ad240000-0000-4000-8000-000000000513')$q$,'23P01','timetable_resource_conflict','new unresolved active legacy occupancy fails closed');
+select throws_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule":"판독 불가"}','ad240000-0000-4000-8000-000000000513')$q$,'22023','class_schedule_validation','malformed new basic schedule input is rejected without inspecting historical occupancy');
 select throws_ok($q$select public.save_class_schedule_defaults_v1('ad240000-0000-4000-8000-000000000301',0,'[{"id":"ad240000-0000-4000-8000-000000000401","weekday":1,"startTime":"09:00","endTime":"10:00","teacherCatalogId":null,"classroomCatalogId":null,"sortOrder":0}]','ad240000-0000-4000-8000-000000000514')$q$,'23P01','timetable_resource_conflict','active normalized defaults cannot introduce unresolved resources');
 set constraints all immediate; set constraints all deferred;
 -- Seed an explicitly pre-existing conflicting pair, then seal fixture baseline.
@@ -206,7 +206,7 @@ update dashboard_private.timetable_operating_write_baselines set reference=dashb
 set constraints all immediate;set constraints all deferred;
 select is(public.get_timetable_plan_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','bounded plan never reports complete on unresolved dated data');
 select is(public.get_timetable_plan_revision_v1('ad240000-0000-4000-8000-000000000701')->>'complete','false','revision poll agrees with bounded snapshot completeness');
-select throws_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule":"금 20:00-21:00"}','ad240000-0000-4000-8000-000000000523')$q$,'23P01','timetable_resource_conflict','unscoped legacy dated blocker prevents new weekly placement');
+select lives_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule":"금 20:00-21:00"}','ad240000-0000-4000-8000-000000000523')$q$,'unscoped old dated input does not block explicit basic schedule changes');
 select lives_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000305','{"name":"미해결 이름 변경"}','ad240000-0000-4000-8000-000000000524')$q$,'existing unresolved data allows metadata-only edit');
 -- Review regression: explicitly seed pre-existing malformed data, without admitting it as a new client write.
 create function pg_temp.seed_review_sessions(p_sessions jsonb) returns void language plpgsql as $f$

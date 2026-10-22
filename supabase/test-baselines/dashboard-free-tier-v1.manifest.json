@@ -894,6 +894,11 @@
       "fileName": "20261021155723_class_lesson_input_policy.sql",
       "status": "final",
       "sha256": "ffd1a50c7c08afbf1e71c65449d29565f93275b3465ec894c3b56ab1e4a65e06"
+    },
+    {
+      "fileName": "20261022015000_class_basic_info_input_policy.sql",
+      "status": "final",
+      "sha256": "9ceff82df3ad1122dd505702320ff733bc0ee1f03782f69347dfda275ed393ff"
     }
   ]
 }

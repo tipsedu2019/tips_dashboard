@@ -175,8 +175,8 @@ select is((select count(*) from dashboard_private.class_schedule_mutation_receip
  pg_temp.input_id(602),pg_temp.input_id(604),pg_temp.input_id(605),pg_temp.input_id(606),pg_temp.input_id(607),pg_temp.input_id(608),pg_temp.input_id(609),pg_temp.input_id(610)])),0::bigint,
  'failed requests create no success receipt');
 
--- A client-controlled GUC is not a capability. Generic and mixed edits still
--- invoke the original conflict policy; this test never disables their guards.
+-- A client-controlled GUC is not a capability. Basic-info-only edits now use
+-- authored input policy through the real RPC; mixed plan commands stay separate.
 set local role authenticated;
 select throws_ok($$select dashboard_private.begin_class_lesson_input_scope_v1(pg_temp.input_id(301),pg_temp.input_id(620),'update_class_operational_v1','public.classes'::regclass,'UPDATE','{}'::jsonb)$$,
  '42501',null::text,'authenticated cannot invoke the private scope issuer');
@@ -184,10 +184,12 @@ select throws_ok($$select * from dashboard_private.class_lesson_input_scopes$$,'
  'authenticated cannot inspect or reuse scope rows');
 select set_config('app.class_lesson_input_scope','true',true);
 select set_config('app.class_schedule_mutation','release2-rpc',true);
-select throws_ok($$select public.update_class_operational_v1(pg_temp.input_id(303),'{"schedule":"화 19:30-21:30"}'::jsonb,pg_temp.input_id(621),null)$$,
- '23P01','timetable_resource_conflict','forged GUCs do not exempt a general weekly conflict');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.input_id(303),'{"schedule":"화 19:30-21:30"}'::jsonb,pg_temp.input_id(621),null)$$,
+ 'ordinary basic schedule input is accepted by the public RPC, independently of unrelated GUC values');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.input_id(303),'{"schedule":"일 06:00-07:00"}'::jsonb,pg_temp.input_id(627),null)$$,
+ 'restore the synthetic boundary target for subsequent direct-write guards');
 select throws_ok($$select public.update_class_operational_v1(pg_temp.input_id(303),'{"schedule":"화 19:30-21:30","schedule_plan":{"sessions":[]}}'::jsonb,pg_temp.input_id(622),'{}'::jsonb)$$,
- '23P01','timetable_resource_conflict','mixed schedule plus plan patch remains on the strict path');
+ '23P01','timetable_resource_conflict','mixed schedule plus plan patch remains on the separate strict path');
 select throws_ok($$select public.save_class_schedule_defaults_v1(pg_temp.input_id(305),0,
  jsonb_build_array(jsonb_build_object('id',pg_temp.input_id(401),'weekday',4,'startTime','19:30','endTime','21:30',
  'teacherCatalogId',pg_temp.input_id(101),'classroomCatalogId',pg_temp.input_id(201),'sortOrder',0)),pg_temp.input_id(626),null)$$,

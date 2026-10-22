@@ -791,9 +791,9 @@ select throws_ok(
       null
     )
   $$,
-  '23P01',
-  'timetable_resource_conflict',
-  'a newly introduced unknown is still rejected after the owner fixture boundary'
+  '22023',
+  'class_schedule_validation',
+  'malformed newly entered time is rejected before historic occupancy lookup'
 );
 set local role postgres;
 select ok(
