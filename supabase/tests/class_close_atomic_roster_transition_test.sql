@@ -1360,5 +1360,19 @@ select ok(
   'student-side invalid-roster refusal leaves both asymmetric projections unchanged'
 );
 
+select throws_ok(
+  $$select public.update_class_operational_v1(
+    '87000000-0000-4000-8000-000000000101',
+    '{"status":"수강"}'::jsonb,
+    '87000000-0000-4000-8000-000000000798', null)$$,
+  '42501', 'class_close_requires_rpc',
+  'ordinary basic status edits cannot reopen a closed class or bypass its roster guard'
+);
+select ok(
+  (select status = '종강' and closed_at is not null
+   from public.classes where id = '87000000-0000-4000-8000-000000000101'),
+  'rejected reopening leaves the completed close intact'
+);
+
 select * from finish();
 rollback;

@@ -44,7 +44,7 @@ select ok(not (pg_temp.api('class',jsonb_build_object('classId',pg_temp.aid(301)
 select ok(not (pg_temp.api('class',jsonb_build_object('classId',pg_temp.aid(301)))::text like '%privateNote%'),'no private notes returned');
 select throws_ok($q$select pg_temp.api('class',jsonb_build_object('classId',pg_temp.aid(302)),'read')$q$,'P0002','agent_not_found','out-of-grant class cannot be read');
 select throws_ok($q$select pg_temp.api('preview',pg_temp.input(301,600,660),'read')$q$,'42501','agent_scope_forbidden','read key cannot preview writes');
-select throws_ok($q$select pg_temp.api('preview',pg_temp.input(301,660,720))$q$,'23P01','timetable_resource_conflict','preview uses exact SQLSTATE from final timetable guard');
+select lives_ok($q$select pg_temp.api('preview',pg_temp.input(301,660,720))$q$,'legacy weekly preview accepts entered times under the basic-information policy');
 insert into ev values('preview',pg_temp.api('preview',pg_temp.input(301,600,660)));
 reset role;
 select is((select schedule from public.classes where id=pg_temp.aid(301)),'월 09:00-10:00','preview rolled back business writes');
@@ -78,16 +78,22 @@ select is(pg_temp.api('commit',jsonb_build_object('previewToken',(select v#>>'{d
 reset role;
 select is((select start_time::text from public.class_schedule_slots where id=pg_temp.aid(401)),'10:00:00','normalized time persisted');
 select is((select sort_order from public.class_schedule_slots where id=pg_temp.aid(401)),7,'unrelated sort order preserved');
--- A new conflict between preview and commit must be checked again.
+-- Legacy weekly edits share the ordinary basic-information input policy.
+-- Another class changing resources does not invalidate the target's version.
 set local role service_role;
 insert into ev values('race',pg_temp.api('preview',pg_temp.input(301,840,900)));
 reset role;
 update public.classes set schedule='월 14:00-15:00' where id=pg_temp.aid(302);
 set constraints all immediate;set constraints all deferred;
 set local role service_role;
-select is(pg_temp.api('commit',jsonb_build_object('previewToken',(select v#>>'{data,previewToken}' from ev where k='race'),'requestKey',pg_temp.aid(505)))#>>'{data,error,sqlstate}','23P01','commit rechecks concurrent resource change with exact SQLSTATE');
+select is(pg_temp.api('commit',jsonb_build_object('previewToken',(select v#>>'{data,previewToken}' from ev where k='race'),'requestKey',pg_temp.aid(505)))#>>'{data,state}','applied','legacy weekly commit accepts the input despite another class resource change');
+select is(pg_temp.api('commit',jsonb_build_object('previewToken',(select v#>>'{data,previewToken}' from ev where k='race'),'requestKey',pg_temp.aid(505)))#>>'{data,replayed}','true','accepted overlapping weekly input still replays one durable operation');
 reset role;
-select is((select schedule from public.classes where id=pg_temp.aid(301)),'월 13:00-14:00 (Agent T, Agent R)','conflicted commit rolled back fully');
+select is((select schedule from public.classes where id=pg_temp.aid(301)),'월 14:00-15:00 (Agent T, Agent R)','exact requested weekly time is persisted');
+select is((select schedule_plan from public.classes where id=pg_temp.aid(301)),(select schedule_plan from baseline),'overlapping weekly edit preserves original lesson history');
+select is((select student_ids from public.classes where id=pg_temp.aid(301)),(select student_ids from baseline),'overlapping weekly edit preserves enrolled students');
+select is((select count(*) from dashboard_private.agent_operations where request_key=pg_temp.aid(505)),1::bigint,'overlapping input and its replay create exactly one operation');
+select is((select count(*) from dashboard_private.class_schedule_mutation_receipts where request_key=pg_temp.aid(505) and operation='update_class_operational_v1'),1::bigint,'accepted weekly input has one domain receipt after replay');
 -- Expiry, suspension, and rate limits are checked by the final gateway.
 update auth.users set banned_until=now()+interval '1 day' where id=pg_temp.aid(1);
 set local role service_role;

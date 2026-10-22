@@ -142,7 +142,7 @@ export const ACADEMIC_CALENDAR_MOVE_MIGRATION=Object.freeze({fileName:'202610191
 export const WORD_RETEST_COMPLETED_FAILED_MIGRATION=Object.freeze({fileName:'20261020001626_word_retest_completed_failed_retry.sql',status:'final',sha256:'7b964368c629ac92e1655513783147a985b9dc659f818c1148e765eb11dfa35b'});
 export const OPTIONAL_CLASSROOM_MIGRATION=Object.freeze({fileName:'20261020134458_timetable_optional_classroom_occupancy.sql',status:'final',sha256:'31cd689964a52b5f084a8a167cb41a0b61b12403a88d4dff7b20d9106e29a8b6'});
 export const CLASS_LESSON_INPUT_MIGRATION=Object.freeze({fileName:'20261021155723_class_lesson_input_policy.sql',status:'final',sha256:'ffd1a50c7c08afbf1e71c65449d29565f93275b3465ec894c3b56ab1e4a65e06'});
-export const CLASS_BASIC_INFO_INPUT_MIGRATION=Object.freeze({fileName:'20261022015000_class_basic_info_input_policy.sql',status:'final',sha256:'9ceff82df3ad1122dd505702320ff733bc0ee1f03782f69347dfda275ed393ff'});
+export const CLASS_BASIC_INFO_INPUT_MIGRATION=Object.freeze({fileName:'20261022015000_class_basic_info_input_policy.sql',status:'final',sha256:'ffaca553cb8905e58f21d83960150646b6eb9cfc58cc58dc01fb4c48d18e0e9b'});
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
  Object.freeze({fileName:'20261009082000_ops_legacy_dispatch_actor_null_guard.sql',status:'final',sha256:'191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3'}),

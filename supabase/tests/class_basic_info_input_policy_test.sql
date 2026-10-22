@@ -100,7 +100,37 @@ set local role authenticated;
 select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"textbook_ids":["synthetic-book"],"textbook_usage":{"synthetic-book":{"title":"Synthetic title","startDate":null,"endDate":null}}}',pg_temp.basic_id(614),null)$$,'existing textbook usage can be entered');
 select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"room":"Synthetic room seven","textbook_ids":[]}',pg_temp.basic_id(615),null)$$,'room edit plus normal textbook retirement preserves trigger behavior');
 select is((select textbook_usage from public.classes where id=pg_temp.basic_id(301)),'{}'::jsonb,'retired textbook usage is pruned by existing contract');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"textbook_ids":["kept"],"textbook_usage":{"kept":{"title":"Kept title","startDate":null,"endDate":null},"retired":{"title":"Retired title","startDate":null,"endDate":null}}}',pg_temp.basic_id(619),null)$$,
+ 'explicit usage and IDs preserve the existing deterministic retirement projection');
+select is((select textbook_usage from public.classes where id=pg_temp.basic_id(301)),
+ '{"kept":{"title":"Kept title","startDate":null,"endDate":null}}'::jsonb,'explicit usage retains only the current textbook');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"textbook_ids":[]}',pg_temp.basic_id(620),null)$$,'retiring the remaining textbook still succeeds');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"textbook_usage":{"retired":{"title":"Retired title","startDate":null,"endDate":null}}}',pg_temp.basic_id(621),null)$$,
+ 'usage-only input is pruned against unchanged IDs exactly as before');
+select is((select textbook_usage from public.classes where id=pg_temp.basic_id(301)),'{}'::jsonb,'usage-only orphan entries do not persist');
+
+-- Both ordinary status directions are basic information. Closing and reopening
+-- a closed class retain their separate atomic roster guard.
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"status":"개강 준비"}',pg_temp.basic_id(622),null)$$,
+ 'changing active to preparation does not inspect incomplete historical lessons');
+select is((select status from public.classes where id=pg_temp.basic_id(301)),'개강 준비','preparation status is actually persisted');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"status":"수강"}',pg_temp.basic_id(623),null)$$,
+ 'status-only activation does not inspect incomplete historical lessons');
+select is((select status from public.classes where id=pg_temp.basic_id(301)),'수강','active status is actually persisted');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"status":"개강 준비","room":"강의실 미정"}',pg_temp.basic_id(624),null)$$,
+ 'preparation and classroom can be changed together without rewriting history');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),
+ '{"name":"Synthetic basic target","class_type":"regular","subject":"수학","subject_area_key":null,"grade":"고2","teacher":"Synthetic basic teacher","schedule":"화 19:30-21:30\n토 16:30-18:00","room":"Synthetic room five","capacity":0,"fee":0,"status":"수강","textbook_ids":[]}',pg_temp.basic_id(625),null)$$,
+ 'full management payload activates and changes classroom despite eighty historical lessons');
+select is((select jsonb_build_object('status',status,'room',room) from public.classes where id=pg_temp.basic_id(301)),
+ '{"status":"수강","room":"Synthetic room five"}'::jsonb,'activation and selected classroom both persist');
+select throws_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"status":"unknown"}',pg_temp.basic_id(626),null)$$,
+ '22023','class_schedule_validation','ordinary status still requires a valid status value');
+select is((select schedule_plan from public.classes where id=pg_temp.basic_id(301)),(select plan from basic_before),'status edits preserve all eighty original lesson objects and metadata');
+select is((select lessons from public.classes where id=pg_temp.basic_id(301)),(select lessons from basic_before),'status edits preserve separate learning data');
 reset role;
+select is((select count(*) from dashboard_private.notification_events),(select events from basic_before),'ordinary status and usage edits do not emit notifications');
+select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from basic_before),'ordinary status and usage edits do not send notifications');
 
 create function pg_temp.basic_trigger_drift() returns trigger language plpgsql as $$begin new.schedule_plan:='{}';return new;end$$;
 create trigger zz_basic_test_mutation before update of room,name on public.classes for each row execute function pg_temp.basic_trigger_drift();
@@ -122,6 +152,10 @@ returns jsonb language plpgsql stable security definer set search_path='' as $$b
 set local role authenticated;
 select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"room":"Synthetic room five","status":"수강"}',pg_temp.basic_id(617),null)$$,
  'ordinary room save does not build any operating weekly or dated comparison set');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"status":"개강 준비"}',pg_temp.basic_id(627),null)$$,
+ 'preparation transition does not call the historical operating reader');
+select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"status":"수강"}',pg_temp.basic_id(628),null)$$,
+ 'activation transition does not call the historical operating reader');
 set constraints all immediate;
 reset role;
 select is((select to_jsonb(c) from public.classes c where id=pg_temp.basic_id(302)),(select peer from basic_before),'other class remains identical after all edits');

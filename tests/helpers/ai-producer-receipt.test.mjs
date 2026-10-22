@@ -379,7 +379,7 @@ test('class lesson input policy extends the exact final inventory and preserves 
  }finally{await rm(root,{recursive:true,force:true});}
 });
 test('class basic info input policy extends the exact final inventory and preserves the earlier 178 migrations',async()=>{
- const pin={fileName:'20261022015000_class_basic_info_input_policy.sql',status:'final',sha256:'9ceff82df3ad1122dd505702320ff733bc0ee1f03782f69347dfda275ed393ff'};
+ const pin={fileName:'20261022015000_class_basic_info_input_policy.sql',status:'final',sha256:'ffaca553cb8905e58f21d83960150646b6eb9cfc58cc58dc01fb4c48d18e0e9b'};
  assert.deepEqual(receiptProtocol.CLASS_BASIC_INFO_INPUT_MIGRATION,pin);
  assert.ok(Object.isFrozen(receiptProtocol.CLASS_BASIC_INFO_INPUT_MIGRATION));
  const current=await snapshotAiSource();

@@ -38,8 +38,9 @@ begin
  if p_patch ? 'status' and p_patch->>'status' not in('수강','개강 준비','종강') then raise exception using errcode='22023',message='class_schedule_validation';end if;
  nextrow:=jsonb_populate_record(oldrow,p_patch);
  -- Ordinary class edits describe input, not a claim about historic occupancy.
- -- Real lifecycle transitions/closing remain with their existing atomic workflow.
- if closure is null and not (p_patch ? 'schedule_plan') and nextrow.status is not distinct from oldrow.status then
+ -- Preparation/active transitions are ordinary input too. Closing still uses
+ -- its atomic workflow above; the existing row trigger guards closed classes.
+ if closure is null and not (p_patch ? 'schedule_plan') then
   -- Validate changed legacy references only; missing historical defaults are
   -- not reinterpreted just because a different field was edited.
   for input_field in select unnest(array['teacher','room']) loop
@@ -71,8 +72,7 @@ begin
   end if;
   -- Account for the existing deterministic textbook retirement trigger in the
   -- exact expected row. Unexpected trigger changes must still fail the guard.
-  if p_patch ?| array['textbook_ids','textbook_usage'] and nextrow.textbook_ids is distinct from oldrow.textbook_ids
-   and nextrow.textbook_usage is not distinct from oldrow.textbook_usage then
+  if p_patch ?| array['textbook_ids','textbook_usage'] and jsonb_typeof(nextrow.textbook_usage)='object' then
    select coalesce(jsonb_object_agg(key,value),'{}') into nextrow.textbook_usage
     from jsonb_each(coalesce(nextrow.textbook_usage,'{}')) where coalesce(nextrow.textbook_ids,'[]') ? key;
   end if;
@@ -82,8 +82,8 @@ begin
     jsonb_build_object(p_class_id::text,jsonb_build_object('before',to_jsonb(oldrow)-'updated_at','after',to_jsonb(nextrow)-'updated_at')));
   execute format('update public.classes set %s where id=$2 returning to_jsonb(classes)',(select string_agg(format('%I=($1).%I',k,k),', ' order by k) from jsonb_object_keys(p_patch||jsonb_build_object('room',nextrow.room)) k)) using nextrow,p_class_id into result;
   perform dashboard_private.end_class_lesson_input_scope_v1();
-  if (oldrow.name,oldrow.subject,oldrow.grade,oldrow.schedule,oldrow.teacher,oldrow.room,oldrow.schedule_plan)
-   is distinct from (nextrow.name,nextrow.subject,nextrow.grade,nextrow.schedule,nextrow.teacher,nextrow.room,nextrow.schedule_plan) then
+  if (oldrow.name,oldrow.subject,oldrow.grade,oldrow.schedule,oldrow.teacher,oldrow.room,oldrow.status,oldrow.schedule_plan)
+   is distinct from (nextrow.name,nextrow.subject,nextrow.grade,nextrow.schedule,nextrow.teacher,nextrow.room,nextrow.status,nextrow.schedule_plan) then
    update public.timetable_invalidation_signals set change_sequence=change_sequence+1,updated_at=clock_timestamp() where id='operating';
   end if;
   return dashboard_private.record_continuous_class_schedule_receipt_v1('update_class_operational_v1',p_request_key,h,jsonb_build_object('classRow',result,'closeResult',null));
