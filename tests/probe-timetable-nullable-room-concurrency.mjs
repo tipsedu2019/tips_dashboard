@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { personalProbeRuntime, lineBefore } from './helpers/ai-personal-probe-runtime.mjs';
 
 // Uses the canonical nonce-scoped, network-isolated runner target only.
+// Basic-info input may overlap; lock serialization and request idempotency remain.
 const runtime = await personalProbeRuntime();
 const actor = randomUUID(), room = randomUUID();
 const classes = [randomUUID(), randomUUID()], teachers = [randomUUID(), randomUUID()];
@@ -34,6 +35,7 @@ ${classes.map((id, index) => `select public.create_class_with_group_memberships_
 commit;`);
   const before = await runtime.query(`select md5(jsonb_build_array(
  (select coalesce(jsonb_agg(to_jsonb(c) order by id),'[]') from public.classes c where id not in(${classes.map(quote)})),
+ (select coalesce(jsonb_agg(to_jsonb(c)-'room'-'updated_at' order by id),'[]') from public.classes c where id in(${classes.map(quote)})),
  (select coalesce(jsonb_agg(to_jsonb(s) order by id),'[]') from public.students s),
  (select coalesce(jsonb_agg(to_jsonb(h) order by id),'[]') from public.student_class_enrollment_history h),
  (select count(*) from dashboard_private.notification_events),
@@ -49,24 +51,35 @@ commit;`);
     assert.equal(await runtime.waitForLock(secondPid, firstPid, { deadlineAt }), true);
     first.end('commit;\n'); runtime.requireComplete(await first.complete);
     assert.deepEqual(JSON.parse((await lineBefore(second, /^OUTCOME:(.*)$/mu, deadlineAt))[1]),
-      { sqlstate: '23P01', message: 'timetable_resource_conflict' });
+      { sqlstate: '00000', message: null });
     second.end('commit;\n'); runtime.requireComplete(await second.complete);
   } finally { await runtime.closeSessions(first, second); }
   const saved = JSON.parse(await runtime.query(`select jsonb_build_object(
- 'winner',(select room from public.classes where id=${quote(classes[0])}),
- 'loser',(select room from public.classes where id=${quote(classes[1])}),
- 'winnerReceipt',(select count(*) from dashboard_private.class_schedule_mutation_receipts where actor_profile_id=${quote(actor)} and request_key=${quote(keys[0])}),
- 'loserReceipt',(select count(*) from dashboard_private.class_schedule_mutation_receipts where actor_profile_id=${quote(actor)} and request_key=${quote(keys[1])}));`));
-  assert.deepEqual(saved, { winner: roomName, loser: '', winnerReceipt: 1, loserReceipt: 0 });
+ 'firstRoom',(select room from public.classes where id=${quote(classes[0])}),
+ 'secondRoom',(select room from public.classes where id=${quote(classes[1])}),
+ 'firstReceipt',(select count(*) from dashboard_private.class_schedule_mutation_receipts where actor_profile_id=${quote(actor)} and request_key=${quote(keys[0])}),
+ 'secondReceipt',(select count(*) from dashboard_private.class_schedule_mutation_receipts where actor_profile_id=${quote(actor)} and request_key=${quote(keys[1])}),
+ 'scopeRows',(select count(*) from dashboard_private.class_lesson_input_scopes));`));
+  assert.deepEqual(saved, { firstRoom: roomName, secondRoom: roomName, firstReceipt: 1, secondReceipt: 1, scopeRows: 0 });
+  for (let index=0;index<classes.length;index+=1) {
+    const replay=JSON.parse(await runtime.query(`begin;set local "request.jwt.claim.sub"=${quote(actor)};set local role authenticated;
+select public.update_class_operational_v1(${quote(classes[index])},${json({ room: roomName })},${quote(keys[index])},null);
+commit;`));
+    assert.equal(replay.classRow.id,classes[index]);
+    assert.equal(replay.classRow.room,roomName);
+  }
+  assert.equal(await runtime.query(`select count(*) from dashboard_private.class_schedule_mutation_receipts where actor_profile_id=${quote(actor)} and request_key in(${keys.map(quote)});`),'2');
   const after = await runtime.query(`select md5(jsonb_build_array(
  (select coalesce(jsonb_agg(to_jsonb(c) order by id),'[]') from public.classes c where id not in(${classes.map(quote)})),
+ (select coalesce(jsonb_agg(to_jsonb(c)-'room'-'updated_at' order by id),'[]') from public.classes c where id in(${classes.map(quote)})),
  (select coalesce(jsonb_agg(to_jsonb(s) order by id),'[]') from public.students s),
  (select coalesce(jsonb_agg(to_jsonb(h) order by id),'[]') from public.student_class_enrollment_history h),
  (select count(*) from dashboard_private.notification_events),
  (select count(*) from dashboard_private.notification_deliveries))::text);`);
   assert.equal(after, before);
-  result = { status: 'passed', lockWaitObserved: true, committedAssignments: 1, rejectedAssignments: 1,
-    loserSqlstate: '23P01', loserRemainsUnassigned: true, partialReceipts: 0,
+  result = { status: 'passed', lockWaitObserved: true, committedAssignments: 2, rejectedAssignments: 0,
+    bothSelectedRoomsPreserved: true, replayedRequests: 2, distinctReceipts: 2, partialReceipts: 0,
+    targetNonRoomValuesUnchanged: true,
     unrelatedHistoryAndNoSendUnchanged: true, providerCalls: 0 };
 } finally {
   // These are audited operational rows. Preserve their normal delete guards and
