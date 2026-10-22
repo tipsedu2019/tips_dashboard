@@ -1546,6 +1546,47 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--execute", "--authorized", "--request-id", "registration-prerequisite-drift-20260908"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_notification_settings_prerequisite_drift/);
 });
 
+test("preset-owned probes stage their real entrypoints and full import closure byte-identically", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const probes = ["tests/probe-timetable-preset-owned-dto.mjs", "tests/probe-timetable-preset-owned-concurrency.mjs"];
+  const paths = [...probes,
+    "tests/helpers/timetable-preset-owned-consumer.mjs", "tests/helpers/timetable-preset-lock-scope.mjs",
+    "tests/helpers/ai-personal-probe-runtime.mjs", "scripts/lib/ai-agent-probe-runtime.mjs",
+    "tests/helpers/rpc-query-fixture.mjs", "supabase/tests/timetable_preset_owned_placements_test.sql",
+    ...["timetable-conflicts.ts", "timetable-placement-adapter.ts", "timetable-plan-contract.ts",
+      "timetable-plan-interaction.ts", "timetable-plan-model.ts", "timetable-plan-placements.ts",
+      "timetable-plan-recovery.ts", "timetable-plan-service.ts", "timetable-subjects.ts"].map(file => "src/features/academic/" + file),
+  ];
+  const original = new Map();
+  for (const path of paths) {
+    const bytes = await readFile(new URL("../" + path, import.meta.url));
+    original.set(path, bytes); await mkdir(dirname(join(root, path)), { recursive: true });
+    await writeFile(join(root, path), bytes);
+  }
+  const launched = [];
+  const result = await runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
+    root, argv: ["--execute", "--authorized", "--request-id", "preset-owned-staging", ...probes.flatMap(p => ["--probe", p])],
+    allocatePort: (() => { let port = 55500; return () => ++port; })(),
+    executeProcess: async (invocation) => {
+      if (invocation.args[0] === "init") {
+        for (const path of paths) await writeFile(join(root, path), "// mutation after snapshot\n");
+      }
+      if (invocation.command === process.execPath) {
+        const path = probes.find(p => invocation.args[0].endsWith("/" + p));
+        assert.ok(path); launched.push(path);
+        for (const [file, bytes] of original) {
+          if (!probes.includes(file) || file === path) assert.deepEqual(await readFile(join(invocation.cwd, file)), bytes, file);
+        }
+      }
+      if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:55502/postgres" }), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(result.status, "passed"); assert.deepEqual(launched, probes);
+});
+
 test("runner stages each requested SQL file after init and before target pgtap", async (t) => {
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t);

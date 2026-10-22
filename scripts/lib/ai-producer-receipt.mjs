@@ -24,6 +24,20 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'scripts/generate-ai-agent-probe-runtime.mjs',
  'scripts/lib/ai-agent-probe-runtime.mjs',
  AI_CREDENTIAL_PREFIX.test,
+ 'src/features/academic/timetable-conflicts.ts',
+ 'src/features/academic/timetable-placement-adapter.ts',
+ 'src/features/academic/timetable-plan-contract.ts',
+ 'src/features/academic/timetable-plan-interaction.ts',
+ 'src/features/academic/timetable-plan-model.ts',
+ 'src/features/academic/timetable-plan-placements.ts',
+ 'src/features/academic/timetable-plan-recovery.ts',
+ 'src/features/academic/timetable-plan-service.ts',
+ 'src/features/academic/timetable-subjects.ts',
+ 'tests/helpers/rpc-query-fixture.mjs',
+ 'tests/helpers/timetable-preset-lock-scope.mjs',
+ 'tests/helpers/timetable-preset-owned-consumer.mjs',
+ 'tests/probe-timetable-preset-owned-concurrency.mjs',
+ 'tests/probe-timetable-preset-owned-dto.mjs',
  'package.json','package-lock.json',
  'supabase/test-baselines/dashboard-free-tier-v1.manifest.json',
  'supabase/migrations/20261007135140_textbook_latest_count_read_aggregation.sql',
@@ -44,6 +58,8 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261020134458_timetable_optional_classroom_occupancy.sql',
  'supabase/migrations/20261021155723_class_lesson_input_policy.sql',
  'supabase/migrations/20261022015000_class_basic_info_input_policy.sql',
+ 'supabase/migrations/20261022041000_timetable_preset_owned_placements.sql',
+ 'supabase/tests/timetable_preset_owned_placements_test.sql',
  'supabase/tests/timetable_nullable_classroom_test.sql',
  'supabase/tests/class_lesson_input_policy_test.sql',
  'supabase/tests/class_basic_info_input_policy_test.sql',
@@ -143,6 +159,7 @@ export const WORD_RETEST_COMPLETED_FAILED_MIGRATION=Object.freeze({fileName:'202
 export const OPTIONAL_CLASSROOM_MIGRATION=Object.freeze({fileName:'20261020134458_timetable_optional_classroom_occupancy.sql',status:'final',sha256:'31cd689964a52b5f084a8a167cb41a0b61b12403a88d4dff7b20d9106e29a8b6'});
 export const CLASS_LESSON_INPUT_MIGRATION=Object.freeze({fileName:'20261021155723_class_lesson_input_policy.sql',status:'final',sha256:'ffd1a50c7c08afbf1e71c65449d29565f93275b3465ec894c3b56ab1e4a65e06'});
 export const CLASS_BASIC_INFO_INPUT_MIGRATION=Object.freeze({fileName:'20261022015000_class_basic_info_input_policy.sql',status:'final',sha256:'ffaca553cb8905e58f21d83960150646b6eb9cfc58cc58dc01fb4c48d18e0e9b'});
+export const TIMETABLE_PRESET_OWNED_MIGRATION=Object.freeze({fileName:'20261022041000_timetable_preset_owned_placements.sql',status:'final',sha256:'11ab457c63c06a1055e4d152af4b6b607864cb9c00c7a7c6744b44b33ef19c77'});
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
  Object.freeze({fileName:'20261009082000_ops_legacy_dispatch_actor_null_guard.sql',status:'final',sha256:'191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3'}),
@@ -197,12 +214,12 @@ export async function snapshotAiSource(root=ROOT){
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
  const withdrawalNames=CURRENT_WITHDRAWAL_MIGRATIONS.map(m=>m.fileName);
  const integratedNames=[...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].map(m=>m.fileName);
- const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && !integratedNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==REGISTRATION_ENROLLMENT_MIGRATION.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName && m.fileName!==ACADEMIC_CALENDAR_MOVE_MIGRATION.fileName && m.fileName!==WORD_RETEST_COMPLETED_FAILED_MIGRATION.fileName && m.fileName!==OPTIONAL_CLASSROOM_MIGRATION.fileName && m.fileName!==CLASS_LESSON_INPUT_MIGRATION.fileName && m.fileName!==CLASS_BASIC_INFO_INPUT_MIGRATION.fileName);
+ const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && !integratedNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==REGISTRATION_ENROLLMENT_MIGRATION.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName && m.fileName!==ACADEMIC_CALENDAR_MOVE_MIGRATION.fileName && m.fileName!==WORD_RETEST_COMPLETED_FAILED_MIGRATION.fileName && m.fileName!==OPTIONAL_CLASSROOM_MIGRATION.fileName && m.fileName!==CLASS_LESSON_INPUT_MIGRATION.fileName && m.fileName!==CLASS_BASIC_INFO_INPUT_MIGRATION.fileName && m.fileName!==TIMETABLE_PRESET_OWNED_MIGRATION.fileName);
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,179,'AI canonical manifest inventory');
- const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS,REGISTRATION_ENROLLMENT_MIGRATION,TIMETABLE_BATCH_SAVE_MIGRATION,ACADEMIC_CALENDAR_MOVE_MIGRATION,WORD_RETEST_COMPLETED_FAILED_MIGRATION,OPTIONAL_CLASSROOM_MIGRATION,CLASS_LESSON_INPUT_MIGRATION,CLASS_BASIC_INFO_INPUT_MIGRATION].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
+ assert.equal(manifest.orderedNewMigrations.length,180,'AI canonical manifest inventory');
+ const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS,REGISTRATION_ENROLLMENT_MIGRATION,TIMETABLE_BATCH_SAVE_MIGRATION,ACADEMIC_CALENDAR_MOVE_MIGRATION,WORD_RETEST_COMPLETED_FAILED_MIGRATION,OPTIONAL_CLASSROOM_MIGRATION,CLASS_LESSON_INPUT_MIGRATION,CLASS_BASIC_INFO_INPUT_MIGRATION,TIMETABLE_PRESET_OWNED_MIGRATION].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');
  for(const m of CURRENT_WITHDRAWAL_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed withdrawal migration source drift');
@@ -216,6 +233,7 @@ export async function snapshotAiSource(root=ROOT){
  assert.equal(hash(await readFile(join(root,'supabase/migrations',OPTIONAL_CLASSROOM_MIGRATION.fileName))),OPTIONAL_CLASSROOM_MIGRATION.sha256,'optional classroom migration source drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',CLASS_LESSON_INPUT_MIGRATION.fileName))),CLASS_LESSON_INPUT_MIGRATION.sha256,'class lesson input migration source drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',CLASS_BASIC_INFO_INPUT_MIGRATION.fileName))),CLASS_BASIC_INFO_INPUT_MIGRATION.sha256,'class basic info input migration source drift');
+ assert.equal(hash(await readFile(join(root,'supabase/migrations',TIMETABLE_PRESET_OWNED_MIGRATION.fileName))),TIMETABLE_PRESET_OWNED_MIGRATION.sha256,'timetable preset owned migration source drift');
  assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
  for(const m of CURRENT_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
  const sourceHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}}).trim();
@@ -307,6 +325,7 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_plan_permissions_test.sql",
   "supabase/tests/timetable_plan_storage_test.sql",
   "supabase/tests/timetable_plan_batch_save_test.sql",
+  "supabase/tests/timetable_preset_owned_placements_test.sql",
   "supabase/tests/timetable_plan_transfers_test.sql",
   "supabase/tests/timetable_schedule_mutation_safety_test.sql",
   "supabase/tests/timetable_scoped_occupancy_test.sql",
@@ -390,6 +409,8 @@ export const AI_PROBES = Object.freeze([
   "tests/probe-curriculum-scheduling-dto.mjs",
   "tests/probe-operations-annual-board-http.mjs",
   "tests/probe-timetable-batch-save-dto.mjs",
+  "tests/probe-timetable-preset-owned-dto.mjs",
+  "tests/probe-timetable-preset-owned-concurrency.mjs",
   "tests/probe-timetable-batch-save-concurrency.mjs",
   "tests/probe-makeup-approval-collision-dto.mjs",
   "tests/probe-textbook-stock-count-concurrency.mjs",

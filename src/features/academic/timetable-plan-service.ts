@@ -371,8 +371,11 @@ export function watchTimetablePlan({ client, actorScope, planId, onInvalidate, o
   const channel = client.channel(`timetable-signals:${actorScope}:${planId}`);
   const onSignal = (payload: SignalPayload) => {
     const row = payload.new;
-    if (record(row) && (row.id === planId || row.id === 'operating')
-      && integer(row.change_sequence)) onInvalidate();
+    if (!record(row) || !integer(row.change_sequence)) return;
+    if (row.id === planId) onInvalidate();
+    // Catalog changes share the operating signal. Check the catalog/revision
+    // token before loading the full preset; unrelated classes do not refresh it.
+    else if (row.id === 'operating') onPoll();
   };
   for (const event of ['INSERT', 'UPDATE'] as const) {
     channel.on('postgres_changes', { event, schema: 'public', table: 'timetable_invalidation_signals', filter: `id=eq.${planId}` }, onSignal);

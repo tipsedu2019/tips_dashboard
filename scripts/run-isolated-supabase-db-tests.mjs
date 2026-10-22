@@ -84,6 +84,8 @@ const PROBE_DEPENDENCIES = Object.freeze({
   "tests/probe-curriculum-scheduling-dto.mjs": ["src/features/academic/academic-read-service.js", "src/lib/numbered-pagination.ts"],
   "tests/probe-dashboard-workload-dto.mjs": ["src/features/dashboard/workload-contract.ts"],
   "tests/probe-timetable-batch-save-dto.mjs": ["supabase/tests/timetable_plan_batch_save_test.sql", "src/features/academic/timetable-plan-contract.ts", "src/features/academic/timetable-plan-service.ts"],
+  "tests/probe-timetable-preset-owned-dto.mjs": ["src/features/academic/timetable-conflicts.ts", "src/features/academic/timetable-placement-adapter.ts", "src/features/academic/timetable-plan-contract.ts", "src/features/academic/timetable-plan-interaction.ts", "src/features/academic/timetable-plan-model.ts", "src/features/academic/timetable-plan-placements.ts", "src/features/academic/timetable-plan-recovery.ts", "src/features/academic/timetable-plan-service.ts", "src/features/academic/timetable-subjects.ts", "tests/helpers/rpc-query-fixture.mjs", "tests/helpers/timetable-preset-owned-consumer.mjs", "supabase/tests/timetable_preset_owned_placements_test.sql"],
+  "tests/probe-timetable-preset-owned-concurrency.mjs": ["tests/helpers/timetable-preset-lock-scope.mjs", "tests/helpers/ai-personal-probe-runtime.mjs", "scripts/lib/ai-agent-probe-runtime.mjs"],
   "tests/probe-timetable-batch-save-concurrency.mjs": ["tests/helpers/ai-personal-probe-runtime.mjs", "scripts/lib/ai-agent-probe-runtime.mjs"],
   "tests/probe-timetable-nullable-room-concurrency.mjs": ["tests/helpers/ai-personal-probe-runtime.mjs", "scripts/lib/ai-agent-probe-runtime.mjs"],
   "tests/probe-makeup-approval-collision-dto.mjs": [

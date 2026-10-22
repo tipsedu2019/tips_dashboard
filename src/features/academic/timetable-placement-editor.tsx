@@ -1,4 +1,5 @@
 'use client';
+import { planPlacements } from './timetable-plan-placements.ts';
 import { TIMETABLE_SUBJECTS, timetableTeacherMatchesSubject, timetableTeachers } from './timetable-subjects';
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -66,7 +67,7 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
     const recommend = () => { try {
         const v = form.getValues();
         const fromMinute = parsePlanTime(v.start), toMinute = parsePlanTime(v.end, true);
-        setSuggestions(suggestPlacements({ slots: snapshot.slots.filter(s => s.id !== draft.slotId), shadows: snapshot.shadowSlots, itemId: draft.item.id, planId: draft.item.planId, teacherId: v.teacher, classroomId: v.room, durationMinutes: Number(v.duration), weekdays: v.weekdays.length ? v.weekdays : [1, 2, 3, 4, 5], fromMinute, toMinute, operatingReference: snapshot, period: snapshot.plan.targetStartDate && snapshot.plan.targetEndDate ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null }));
+        setSuggestions(suggestPlacements({ slots: planPlacements(snapshot).filter(s => s.id !== draft.slotId), shadows: [], itemId: draft.item.id, planId: draft.item.planId, teacherId: v.teacher, classroomId: v.room, durationMinutes: Number(v.duration), weekdays: v.weekdays.length ? v.weekdays : [1, 2, 3, 4, 5], fromMinute, toMinute }));
         setError('');
     }
     catch (e) {

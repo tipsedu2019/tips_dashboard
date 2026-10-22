@@ -456,15 +456,20 @@ select is((select source_slot_id from public.timetable_plan_slots where item_id=
 select * from pg_temp.breject(pg_temp.bcommand(10,jsonb_build_array(pg_temp.bsave(10,1001,2,720,780)),'batch-source-clear'),
  '22023','timetable_invalid','client cannot clear existing source provenance');
 
--- Authoritative weekly, scoped unknown and dated reservations still block.
-select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,101,202,6)),'batch-operating-teacher'),
- '23P01','timetable_resource_conflict','changed placement conflicts with an operating teacher');
-select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,102,201,6)),'batch-operating-room'),
- '23P01','timetable_resource_conflict','changed placement conflicts with an operating room');
-select * from pg_temp.breject(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,1080,1140,102,201,3)),'batch-operating-unknown'),
- '23P01','timetable_resource_conflict','unassigned operating room retains its known teacher collision');
-select * from pg_temp.breject(pg_temp.bcommand(12,jsonb_build_array(pg_temp.bsave(12,1201,null,900,960,101,202,2)),'batch-dated'),
- '23P01','timetable_resource_conflict','target-period dated teacher reservation remains authoritative');
+-- Operating weekly, unknown and dated occupancy is not a preset constraint.
+-- Savepoints keep each case independent; internal conflict rejections above remain.
+savepoint independent_operating;
+select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,101,202,6)),'batch-operating-teacher'))$q$,'preset saves independently: changed placement conflicts with an operating teacher');
+rollback to independent_operating;
+savepoint independent_operating;
+select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,540,600,102,201,6)),'batch-operating-room'))$q$,'preset saves independently: changed placement conflicts with an operating room');
+rollback to independent_operating;
+savepoint independent_operating;
+select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.bcommand(4,jsonb_build_array(pg_temp.bsave(4,410,null,1080,1140,102,201,3)),'batch-operating-unknown'))$q$,'preset saves independently: unassigned operating room retains its known teacher collision');
+rollback to independent_operating;
+savepoint independent_operating;
+select lives_ok($q$select public.mutate_timetable_plan_item_v1(pg_temp.bcommand(12,jsonb_build_array(pg_temp.bsave(12,1201,null,900,960,101,202,2)),'batch-dated'))$q$,'preset saves independently: target-period dated teacher reservation remains authoritative');
+rollback to independent_operating;
 
 -- Plan and item lifecycle restrictions do not disappear inside the batch.
 select * from pg_temp.breject(pg_temp.bcommand(6,jsonb_build_array(pg_temp.bsave(6,601,1,660,720)),'batch-applied-save'),
