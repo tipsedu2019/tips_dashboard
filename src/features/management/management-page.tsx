@@ -160,6 +160,7 @@ type Field = {
   type?: string;
   required?: boolean;
   multiline?: boolean;
+  description?: string;
   inputMode?: "text" | "search" | "tel" | "url" | "email" | "numeric" | "decimal";
   autoComplete?: string;
 };
@@ -220,6 +221,7 @@ const FORM_FIELDS: Record<ManagementKind, Field[]> = {
     { name: "classroom", label: "강의실", placeholder: "별5" },
     { name: "capacity", label: "정원", type: "number", placeholder: "12" },
     { name: "fee", label: "수업료", type: "number", placeholder: "320000" },
+    { name: "publicMemo", label: "홈페이지 공개 메모", placeholder: "예: 함수 개념부터 실전 문제까지 함께 공부해요.", multiline: true, description: "입력한 내용은 홈페이지 수업안내에 공개됩니다." },
   ],
   textbooks: [
     { name: "title", label: "교재명", placeholder: "수능특강 영어", required: true },
@@ -741,6 +743,7 @@ function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormStat
       return normalizeClassStatusForForm(raw.status || row?.status || row?.statusValue);
     }
     if (name === "classroom") return text(raw.classroom || raw.room);
+    if (name === "publicMemo") return text(Object.prototype.hasOwnProperty.call(raw, "public_memo") ? raw.public_memo : raw.publicMemo);
     if (name === "subjectAreaKey") return text(raw.subject_area_key || raw.subjectAreaKey);
     if (name === "fee") return text(raw.fee || raw.tuition);
     if (name === "tags") return Array.isArray(raw.tags) ? raw.tags.join(", ") : text(raw.tags);
@@ -780,6 +783,7 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
   }
   if (payload.fee) payload.tuition = payload.fee;
   if (kind === "classes") {
+    if (Object.prototype.hasOwnProperty.call(formState, "publicMemo")) payload.public_memo = formState.publicMemo.trim();
     payload.subject_area_key = text(payload.subjectAreaKey || payload.subject_area_key) || null;
     const textbookIds = parseTextbookIds(formState.textbookIds);
     payload.textbook_ids = textbookIds;
@@ -2613,6 +2617,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   value={value}
                   placeholder={field.placeholder}
                   disabled={fieldsDisabled}
+                  aria-describedby={field.description ? `${id}-description` : undefined}
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               ) : selectOptions.length > 0 || isClassResource ? (
@@ -2653,6 +2658,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               {isClassResource && !classFormReferencesBlocked && selectOptions.length === 0 ? (
                 <p className="text-xs text-muted-foreground">이 과목에 선택 가능한 {field.label === "강의실" ? "강의실이" : "교사가"} 없습니다.</p>
               ) : null}
+              {field.description ? <p id={`${id}-description`} className="text-xs text-muted-foreground">{field.description}</p> : null}
               {invalid && field.name !== "subjectAreaKey" ? (
                 <p id={errorId} role="alert" className="text-xs text-destructive">{field.label} 항목을 입력하세요.</p>
               ) : null}
@@ -3950,6 +3956,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   "capacity",
                   "fee",
                   "status",
+                  "publicMemo",
                 ])}
               </section>
               <section id="class-detail-schedule-section" tabIndex={-1} aria-label="시간표">{renderClassScheduleSlotEditor()}</section>

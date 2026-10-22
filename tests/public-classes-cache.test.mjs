@@ -187,6 +187,7 @@ test("a cold failure falls back to a normalized static summary and never caches 
     room: "",
     classroom: "",
     schedule: "",
+    publicMemo: "",
     status: "수강",
     fee: 0,
     tuition: 0,

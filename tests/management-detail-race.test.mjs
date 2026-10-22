@@ -133,7 +133,8 @@ async function setup(t, options = {}) {
     editField: (id, value) => act(async () => {
       const input = document.getElementById(id);
       assert.ok(input, `field not found: ${id}`);
-      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, value);
+      const prototype = input.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, "value").set.call(input, value);
       input.dispatchEvent(new window.Event("input", { bubbles: true }));
     }),
     escape: () => act(async () => {
@@ -462,6 +463,64 @@ test("class save failure appears once beside save, retains the draft, and retrie
   assert.equal(attempts, 2);
   assert.doesNotMatch(footer.textContent, /합성 저장 실패/);
   assert.match(footer.textContent, /저장 완료/);
+});
+
+test("public memo can be reopened, edited, cleared and retained after a failed save", async t => {
+  const writes = [];
+  let fail = false;
+  const ui = await setup(t, { configureFixture: fixture => {
+    fixture.rows[0].raw.public_memo = "기존 공개 안내";
+    fixture.rows[0].raw.publicMemo = "stale alias";
+    fixture.rows[0].raw.memo = "PRIVATE_NOTE";
+    fixture.service.updateClass = async input => {
+      writes.push(structuredClone(input));
+      if (fail) throw new Error("합성 메모 저장 실패");
+      fixture.rows[0].raw.public_memo = input.public_memo;
+      return input;
+    };
+  } });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  const field = () => document.getElementById("classes-detail-publicMemo");
+  assert.equal(field().tagName, "TEXTAREA");
+  assert.equal(field().value, "기존 공개 안내");
+  assert.match(document.getElementById(field().getAttribute("aria-describedby")).textContent, /홈페이지 수업안내에 공개/);
+  await ui.editField("classes-detail-publicMemo", "함수 진도 ✨ <img src=x onerror=alert(1)> & 안내");
+  await ui.click("저장");
+  assert.equal(writes[0].public_memo, "함수 진도 ✨ <img src=x onerror=alert(1)> & 안내");
+  assert.equal(writes[0].memo, "PRIVATE_NOTE");
+  await ui.click("수업 상세 닫기");
+  await ui.click("A 영어반");
+  await ui.resolve(1, defaultsFor());
+  assert.equal(field().value, writes[0].public_memo);
+  await ui.editField("classes-detail-publicMemo", "");
+  await ui.click("저장");
+  assert.equal(writes[1].public_memo, "", "stale raw and camel values cannot restore a cleared memo");
+  await ui.click("수업 상세 닫기");
+  await ui.click("A 영어반");
+  await ui.resolve(2, defaultsFor());
+  assert.equal(field().value, "");
+  fail = true;
+  await ui.editField("classes-detail-publicMemo", "실패해도 남는 초안");
+  await ui.click("저장");
+  assert.match(ui.text(), /합성 메모 저장 실패/);
+  assert.equal(field().value, "실패해도 남는 초안");
+  assert.equal(ui.rows[0].raw.public_memo, "");
+});
+
+test("new class form sends only explicitly authored public memo", async t => {
+  const ui = await setup(t, { configureFixture: fixture => {
+    deferServices(fixture, ["createClass"]);
+  } });
+  await ui.click("수업 등록");
+  assert.equal(document.getElementById("classes-form-publicMemo").value, "");
+  await ui.editField("classes-form-name", "합성 신규 수업");
+  await ui.editField("classes-form-publicMemo", "한 줄 소개와 진도 안내");
+  await ui.submitTogether();
+  assert.equal(ui.mutations.length, 1);
+  assert.equal(ui.mutations[0].args[0].public_memo, "한 줄 소개와 진도 안내");
+  await act(async () => ui.mutations[0].reject(new Error("합성 생성 실패")));
+  assert.equal(document.getElementById("classes-form-publicMemo").value, "한 줄 소개와 진도 안내");
 });
 
 test("current class loads normalized schedule and saves its own revision and slots", async t => {

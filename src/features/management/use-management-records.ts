@@ -750,6 +750,7 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
       waitlist_ids: waitlistedStudents.map((row) => row.id),
       textbook_ids: assignedTextbookIds,
       textbook_usage: record.textbookUsage || record.textbook_usage || {},
+      public_memo: Object.prototype.hasOwnProperty.call(record, "public_memo") ? record.public_memo : record.publicMemo ?? "",
       textbookIds: assignedTextbookIds,
       registered_count: source.registeredCount,
       waitlist_count: source.waitlistCount,

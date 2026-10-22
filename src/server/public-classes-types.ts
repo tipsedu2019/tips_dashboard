@@ -75,6 +75,7 @@ export interface PublicClassSchedule {
 }
 
 export interface PublicClassItem {
+  publicMemo?: string;
   id: string;
   name: string;
   className: string;

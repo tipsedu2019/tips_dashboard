@@ -197,6 +197,31 @@ test("real Next lookup cache is per class, uses 600 seconds and the full-public 
   assert.equal(attempts, 4);
 });
 
+test("public memo edit and clear refresh through the existing full-public cache tag", async () => {
+  const cache = nextCacheHarness();
+  let memo = '처음 공개 안내';
+  const respond = createPublicClassDetailResponder(createPublicClassDetailLoader({
+    now: cache.now,
+    loadLive: async id => {
+      const data = payload(cache.now(), id);
+      data.classes[0].public_memo = memo;
+      data.classes[0].memo = 'PRIVATE';
+      return normalizePublicClassDetail(data, id, 'live');
+    },
+  }));
+  const read = async () => JSON.parse((await cache.request(respond)).body);
+  assert.equal((await read()).classItem.publicMemo, memo);
+  for (const next of ['새로운 진도 안내', '']) {
+    memo = next;
+    cache.invalidateTag(PUBLIC_CLASSES_FULL_CACHE_TAG);
+    await read(); // Existing stale-while-revalidate contract.
+    const fresh = await read();
+    assert.equal(fresh.classItem.publicMemo, next);
+    assert.equal(fresh.classItem.schedule, '월 17:00-19:00');
+    assert.equal(JSON.stringify(fresh).includes('PRIVATE'), false);
+  }
+});
+
 test("real Next provider outage keeps only bounded explicit snapshots and never caches failures", async (t) => {
   const cache = nextCacheHarness();
   let down = false;

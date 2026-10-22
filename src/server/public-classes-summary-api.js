@@ -4,7 +4,7 @@ import { loadCachedPublicClassesSummary } from "./public-classes-cache.js";
 import { normalizePublicClassesSummaryPayload } from "./public-classes-payload.js";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const textFields = ["name", "className", "subject", "grade", "teacher", "room", "classroom", "schedule", "status"];
+const textFields = ["name", "className", "subject", "grade", "teacher", "room", "classroom", "schedule", "status", "publicMemo"];
 const numericFields = ["fee", "tuition", "capacity"];
 
 // The existing normalizer deliberately tolerates legacy snapshots. Reject a

@@ -904,6 +904,11 @@
       "fileName": "20261022041000_timetable_preset_owned_placements.sql",
       "status": "final",
       "sha256": "11ab457c63c06a1055e4d152af4b6b607864cb9c00c7a7c6744b44b33ef19c77"
+    },
+    {
+      "fileName": "20261022081000_class_public_memo.sql",
+      "status": "final",
+      "sha256": "11c539cce9fcd2838eaf8cf7cf01c61161de7746888e3ed04e8dc05a4b45216b"
     }
   ]
 }

@@ -158,7 +158,7 @@ export function normalizePublicClassDetail(
 function readClass(supabase: PublicClassesClient, classId: string, signal: AbortSignal) {
   // Local projections and literal limits are visible to the query budget
   // analyzer. Tests verify equality with the shared public payload projections.
-  const projection = "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date";
+  const projection = "id,name,subject,grade,teacher,room,schedule,public_memo,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date";
   return supabase.from("classes")
     .select(projection)
     .eq("id", classId)
