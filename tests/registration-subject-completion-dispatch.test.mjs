@@ -15,7 +15,7 @@ function harness(kind, { currentStatus = "payment_in_progress", allowed = true, 
   const context = {
     calls, track,
     canManageRegistrationWorkflow: allowed, canManageCase: allowed, saving: false, workflowStatusSaving: false,
-    activeGenericTrack: track, notificationSessionToken: "session-token", notificationToken: "session-token",
+    activeGenericTrack: track, activeTrack: track, notificationSessionToken: "session-token", notificationToken: "session-token",
     workflowStatusOptions: ["registered", "consultation_completed"].map(value => ({ value })),
     useCallback: fn => fn,
     crypto: { randomUUID: () => "request-id" },

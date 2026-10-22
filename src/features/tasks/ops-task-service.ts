@@ -2919,7 +2919,7 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
     if (hasManagementReference(input.studentId)) assertResolvedManagementRecord(student, "등록 완료 전에 학생 정보를 다시 선택하세요.")
     assertResolvedManagementRecord(classRow, "등록 완료 전에 등록할 수업을 다시 선택하세요.")
     if (hasManagementReference(input.textbookId)) assertResolvedManagementRecord(textbook, "등록 완료 전에 등록 교재를 다시 선택하세요.")
-    const selectedScheduleExists = getSelectableRegistrationScheduleSessions(recordValue(classRow.schedule_plan)).some((session) => (
+    const selectedScheduleExists = getSelectableRegistrationScheduleSessions(recordValue(classRow.schedule_plan), { normalized: false }).some((session) => (
       session.dateKey === text(input.registration?.classStartDate).slice(0, 10)
       && session.sessionLabel === text(input.registration?.classStartSession)
     ))

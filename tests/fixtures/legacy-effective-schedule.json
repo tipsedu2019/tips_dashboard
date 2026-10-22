@@ -461,7 +461,7 @@
     }
   },
   {
-    "name": "ordinary date map wins over raw row override",
+    "name": "explicit row time wins while the date map supplies absent fields",
     "input": {
       "session": {
         "id": "specific",
@@ -515,13 +515,13 @@
       "state": "active",
       "kind": "resolved",
       "values": {
-        "startTime": "14:00",
+        "startTime": "16:00",
         "endTime": "18:00",
         "teacherCatalogId": "teacher-a",
         "classroomCatalogId": "room-a"
       },
       "provenance": {
-        "startTime": "date_override",
+        "startTime": "session",
         "endTime": "date_override",
         "teacherCatalogId": "basic_weekday",
         "classroomCatalogId": "basic_weekday"
@@ -531,7 +531,7 @@
     }
   },
   {
-    "name": "date map replaces whole ordinary override object",
+    "name": "date map preserves explicit row time and resource ID",
     "input": {
       "session": {
         "id": "stale-raw",
@@ -585,15 +585,15 @@
       "state": "active",
       "kind": "resolved",
       "values": {
-        "startTime": "15:30",
+        "startTime": "16:00",
         "endTime": "18:00",
-        "teacherCatalogId": "teacher-a",
+        "teacherCatalogId": "teacher-b",
         "classroomCatalogId": "room-a"
       },
       "provenance": {
-        "startTime": "basic_weekday",
+        "startTime": "session",
         "endTime": "date_override",
-        "teacherCatalogId": "basic_weekday",
+        "teacherCatalogId": "session",
         "classroomCatalogId": "basic_weekday"
       },
       "missing": [],
@@ -601,7 +601,7 @@
     }
   },
   {
-    "name": "empty date map resets ordinary row to basics",
+    "name": "empty date map does not erase an explicit row time",
     "input": {
       "session": {
         "id": "stale-raw",
@@ -652,13 +652,13 @@
       "state": "active",
       "kind": "resolved",
       "values": {
-        "startTime": "15:30",
+        "startTime": "16:00",
         "endTime": "17:00",
         "teacherCatalogId": "teacher-a",
         "classroomCatalogId": "room-a"
       },
       "provenance": {
-        "startTime": "basic_weekday",
+        "startTime": "session",
         "endTime": "basic_weekday",
         "teacherCatalogId": "basic_weekday",
         "classroomCatalogId": "basic_weekday"
@@ -742,7 +742,7 @@
     }
   },
   {
-    "name": "invalid request tag does not bypass ordinary date map",
+    "name": "invalid request tag keeps ordinary field-level inheritance",
     "input": {
       "session": {
         "id": "makeup-request:11111111-1111-4111-8111-111111111111:0",
@@ -798,13 +798,13 @@
       "state": "makeup",
       "kind": "resolved",
       "values": {
-        "startTime": "14:00",
+        "startTime": "16:00",
         "endTime": "17:00",
         "teacherCatalogId": "teacher-a",
         "classroomCatalogId": "room-a"
       },
       "provenance": {
-        "startTime": "date_override",
+        "startTime": "session",
         "endTime": "basic_weekday",
         "teacherCatalogId": "basic_weekday",
         "classroomCatalogId": "basic_weekday"
@@ -2129,7 +2129,7 @@
     }
   },
   {
-    "name": "date override cannot identify two same-day lessons",
+    "name": "same-day distinct IDs may share a date fallback",
     "input": {
       "session": {
         "id": "synthetic:2026-10-02:active",
@@ -2181,11 +2181,11 @@
     "expected": {
       "date": "2026-10-02",
       "state": "active",
-      "kind": "unresolved",
+      "kind": "resolved",
       "values": {
         "startTime": "15:30",
         "endTime": "17:00",
-        "teacherCatalogId": null,
+        "teacherCatalogId": "teacher-b",
         "classroomCatalogId": "room-a"
       },
       "provenance": {
@@ -2194,12 +2194,8 @@
         "teacherCatalogId": "date_override",
         "classroomCatalogId": "basic_weekday"
       },
-      "missing": [
-        "teacherCatalogId"
-      ],
-      "errors": [
-        "teacherCatalogId:ambiguous_date_override"
-      ]
+      "missing": [],
+      "errors": []
     }
   },
   {

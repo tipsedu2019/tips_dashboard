@@ -56,12 +56,30 @@ select throws_ok($q$select public.activate_class_schedule_storage_v1('ad240000-0
 select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),pg_temp.fixture_date(0)) x where x->>'classId'='ad240000-0000-4000-8000-000000000301'),0,'skipped source-slot/date replaces weekly default with no reservation');
 select lives_ok($q$select pg_temp.direct_write($w$insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,teacher_catalog_id,classroom_catalog_id,origin) values('ad240000-0000-4000-8000-000000000602','ad240000-0000-4000-8000-000000000302','safe-skipped',pg_temp.fixture_date(0),'makeup','09:30','10:00','ad240000-0000-4000-8000-000000000101','ad240000-0000-4000-8000-000000000202','manual')$w$)$q$,'actual makeup can use a date released by skipped authoritative session');
 select throws_ok($q$select pg_temp.direct_write($w$delete from public.class_lesson_sessions where id='ad240000-0000-4000-8000-000000000601'$w$)$q$,'23P01','timetable_resource_conflict','removing skipped override cannot expose a conflicting default');
-select throws_ok($q$select public.save_class_lesson_session_v1('ad240000-0000-4000-8000-000000000601',0,'active',pg_temp.fixture_date(0),'09:00','10:00','ad240000-0000-4000-8000-000000000101','ad240000-0000-4000-8000-000000000201','','','','ad240000-0000-4000-8000-000000000508')$q$,'23P01','timetable_resource_conflict','session RPC restoration rejects actual dated occupancy before returning');
+-- Isolate the accepted manual input so later preset and makeup fixtures keep
+-- their original source rows and revisions; those workflows remain strict.
+savepoint manual_session_input;
+select lives_ok($q$select public.save_class_lesson_session_v1('ad240000-0000-4000-8000-000000000601',0,'active',pg_temp.fixture_date(0),'09:00','10:00','ad240000-0000-4000-8000-000000000101','ad240000-0000-4000-8000-000000000201','','','','ad240000-0000-4000-8000-000000000508')$q$,'session RPC accepts the requested dated restoration despite another occupancy');
+select ok((select schedule_state='active' and start_time='09:00'::time and end_time='10:00'::time
+ and teacher_catalog_id='ad240000-0000-4000-8000-000000000101'::uuid
+ and classroom_catalog_id='ad240000-0000-4000-8000-000000000201'::uuid and revision=1
+ from public.class_lesson_sessions where id='ad240000-0000-4000-8000-000000000601'),
+ 'accepted restoration keeps the exact input and advances its existing revision');
+set constraints all immediate;set constraints all deferred;
+rollback to manual_session_input;
+release savepoint manual_session_input;
 select lives_ok($q$select public.save_class_lesson_session_v1('ad240000-0000-4000-8000-000000000601',0,'exception',pg_temp.fixture_date(0),'08:00','09:00','ad240000-0000-4000-8000-000000000101','ad240000-0000-4000-8000-000000000201','','','','ad240000-0000-4000-8000-000000000509')$q$,'exception session uses exact half-open safe interval');
 select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),pg_temp.fixture_date(0)) x where x->>'classId'='ad240000-0000-4000-8000-000000000301'),1,'actual exception replaces weekly source reservation once');
 set constraints all immediate; set constraints all deferred;
 select lives_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule":"금 15:00-16:00","teacher":"운영 B","room":"운영 2","status":"수강"}','ad240000-0000-4000-8000-000000000510')$q$,'gateway updates legacy defaults and status atomically');
-select throws_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303',pg_temp.fixture_jsonb('{"schedule_plan":{"sessions":[{"id":"l1","date":"@date(1)@","startTime":"11:30","endTime":"12:30","teacherName":"운영 B","classroomName":"운영 1"}]}}'),'ad240000-0000-4000-8000-000000000511','{}')$q$,'23P01','timetable_resource_conflict','legacy schedule_plan gateway checks dated teacher collision');
+savepoint manual_legacy_input;
+select lives_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303',pg_temp.fixture_jsonb('{"schedule_plan":{"sessions":[{"id":"l1","date":"@date(1)@","startTime":"11:30","endTime":"12:30","teacherName":"운영 B","classroomName":"운영 1"}]}}'),'ad240000-0000-4000-8000-000000000511','{}')$q$,'legacy schedule_plan-only input accepts the selected dated teacher despite a collision');
+select is((select schedule_plan from public.classes where id='ad240000-0000-4000-8000-000000000303'),
+ pg_temp.fixture_jsonb('{"sessions":[{"id":"l1","date":"@date(1)@","startTime":"11:30","endTime":"12:30","teacherName":"운영 B","classroomName":"운영 1"}]}'),
+ 'legacy schedule-plan input reads back exactly as submitted');
+set constraints all immediate;set constraints all deferred;
+rollback to manual_legacy_input;
+release savepoint manual_legacy_input;
 select throws_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule_plan":{"sessions":[]}}','ad240000-0000-4000-8000-000000000512','{"changed":true}')$q$,'P0001','class_schedule_stale','legacy gateway detects stale source JSON');
 select throws_ok($q$select public.update_class_operational_v1('ad240000-0000-4000-8000-000000000303','{"schedule":"판독 불가"}','ad240000-0000-4000-8000-000000000513')$q$,'23P01','timetable_resource_conflict','new unresolved active legacy occupancy fails closed');
 select throws_ok($q$select public.save_class_schedule_defaults_v1('ad240000-0000-4000-8000-000000000301',0,'[{"id":"ad240000-0000-4000-8000-000000000401","weekday":1,"startTime":"09:00","endTime":"10:00","teacherCatalogId":null,"classroomCatalogId":null,"sortOrder":0}]','ad240000-0000-4000-8000-000000000514')$q$,'23P01','timetable_resource_conflict','active normalized defaults cannot introduce unresolved resources');
@@ -98,10 +116,18 @@ reset role;
 insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule_plan) values('ad240000-0000-4000-8000-000000000304','준비 생성','영어','개강 준비','normalized','{}');
 insert into public.class_schedule_slots(id,class_id,weekday,start_time,end_time,teacher_catalog_id,classroom_catalog_id) values('ad240000-0000-4000-8000-000000000404','ad240000-0000-4000-8000-000000000304',1,'09:30','10:30','ad240000-0000-4000-8000-000000000101','ad240000-0000-4000-8000-000000000202');
 set constraints all immediate;set constraints all deferred;
-select throws_ok($q$select public.generate_class_lesson_sessions_v1('ad240000-0000-4000-8000-000000000304',0,pg_temp.fixture_date(7),pg_temp.fixture_date(7),'ad240000-0000-4000-8000-000000000519')$q$,'23P01','timetable_resource_conflict','generation under preparing class checks actual dated occupancy');
+savepoint manual_generation_input;
+select lives_ok($q$select public.generate_class_lesson_sessions_v1('ad240000-0000-4000-8000-000000000304',0,pg_temp.fixture_date(7),pg_temp.fixture_date(7),'ad240000-0000-4000-8000-000000000519')$q$,'generation accepts the requested class dates despite another dated occupancy');
+select ok((select count(*)=1 and bool_and(session_date=pg_temp.fixture_date(7)
+ and start_time='09:30'::time and end_time='10:30'::time)
+ from public.class_lesson_sessions where class_id='ad240000-0000-4000-8000-000000000304'),
+ 'accepted generation preserves the requested date and source times');
+set constraints all immediate;set constraints all deferred;
+rollback to manual_generation_input;
+release savepoint manual_generation_input;
 update public.class_schedule_slots set start_time='12:00',end_time='13:00' where id='ad240000-0000-4000-8000-000000000404';
 select lives_ok($q$select public.generate_class_lesson_sessions_v1('ad240000-0000-4000-8000-000000000304',0,pg_temp.fixture_date(7),pg_temp.fixture_date(7),'ad240000-0000-4000-8000-000000000520')$q$,'safe generation retains existing projection and receipt behavior');
-select is((select count(*)::int from public.class_lesson_sessions where class_id='ad240000-0000-4000-8000-000000000304'),1,'failed generation rolled back all inserted sessions');
+select is((select count(*)::int from public.class_lesson_sessions where class_id='ad240000-0000-4000-8000-000000000304'),1,'safe generation creates exactly one session after the isolated input case');
 -- Dated closed-class sessions remain authoritative.
 select set_config('app.class_close_mutation','v1',true);
 update public.classes set status='종강' where id='ad240000-0000-4000-8000-000000000302';

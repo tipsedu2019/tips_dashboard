@@ -81,15 +81,17 @@ create function pg_temp.next_plan() returns jsonb language sql as $$
  array['sessionStates',pg_temp.past_day()::text],(plan#>array['sessionStates',pg_temp.past_day()::text])||'{"state":"active"}'::jsonb)
  from before_class
 $$;
-create function pg_temp.ordinary_save() returns jsonb language sql as $$
- select public.update_class_operational_v1(pg_temp.pid(301),jsonb_build_object('schedule_plan',pg_temp.next_plan()),pg_temp.pid(501),(select plan from before_class))
+-- A mixed class patch remains strict; a schedule-plan-only save now follows the
+-- manual input policy tested separately in class_lesson_input_policy_test.sql.
+create function pg_temp.strict_mixed_save() returns jsonb language sql as $$
+ select public.update_class_operational_v1(pg_temp.pid(301),jsonb_build_object('name',(select name from public.classes where id=pg_temp.pid(301)),'schedule_plan',pg_temp.next_plan()),pg_temp.pid(501),(select plan from before_class))
 $$;
 select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'date'=pg_temp.past_day()::text),23,'actual reader reproduces twenty-three historical incomplete blockers');
 select ok((select bool_and(b->>'startMinute' is null and b->>'endMinute' is null and b->>'teacherId' is null and b->>'classroomId' is null)
  from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'date'=pg_temp.past_day()::text),'uncertainty fixture has no historical time or resource identity');
 select set_config('request.jwt.claim.sub',pg_temp.pid(901)::text,true);
 set local role authenticated;
-select throws_ok('select pg_temp.ordinary_save()','23P01','timetable_resource_conflict','ordinary authenticated full-plan restoration remains fail closed');
+select throws_ok('select pg_temp.strict_mixed_save()','23P01','timetable_resource_conflict','authenticated mixed class restoration remains fail closed');
 insert into ev values('browser-review',pg_temp.review());
 reset role;
 select is((select schedule_plan from public.classes where id=pg_temp.pid(301)),(select plan from before_class),'unacknowledged review cannot change the class');
@@ -405,11 +407,11 @@ set local role authenticated;
 select throws_ok($q$select * from dashboard_private.past_lesson_state_correction_contexts$q$,'42501',null,'authenticated cannot inspect private guard context');
 select throws_ok($q$insert into dashboard_private.past_lesson_state_correction_contexts default values$q$,'42501',null,'authenticated cannot manufacture a guard context');
 select throws_ok($q$select public.update_class_operational_v1(pg_temp.pid(301),
- jsonb_build_object('schedule_plan',jsonb_set(schedule_plan,'{sessions,0,startTime}','"18:00"')),pg_temp.pid(606),schedule_plan)
- from public.classes where id=pg_temp.pid(301)$q$,'23P01','timetable_resource_conflict','an applied correction and public GUC cannot authorize a later time edit');
+ jsonb_build_object('name',name,'schedule_plan',jsonb_set(schedule_plan,'{sessions,0,startTime}','"18:00"')),pg_temp.pid(606),schedule_plan)
+ from public.classes where id=pg_temp.pid(301)$q$,'23P01','timetable_resource_conflict','an applied correction and public GUC cannot authorize a strict mixed time edit');
 select throws_ok($q$select public.update_class_operational_v1(pg_temp.pid(301),
- jsonb_build_object('schedule_plan',jsonb_set(schedule_plan,'{sessions,0}',(schedule_plan#>'{sessions,0}')-'teacherCatalogId'-'teacherName')),
- pg_temp.pid(607),schedule_plan) from public.classes where id=pg_temp.pid(301)$q$,'23P01','timetable_resource_conflict','the narrow exception never permits a newly unknown occupancy');
+ jsonb_build_object('name',name,'schedule_plan',jsonb_set(schedule_plan,'{sessions,0}',(schedule_plan#>'{sessions,0}')-'teacherCatalogId'-'teacherName')),
+ pg_temp.pid(607),schedule_plan) from public.classes where id=pg_temp.pid(301)$q$,'23P01','timetable_resource_conflict','the narrow correction exception never permits unknown occupancy in a strict mixed patch');
 reset role;
 set constraints all immediate;
 select is((select schedule_plan from public.classes where id=pg_temp.pid(301)),pg_temp.next_plan(),'deferred guard accepts exactly the attested state-only correction');

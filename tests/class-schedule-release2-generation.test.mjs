@@ -59,3 +59,26 @@ test("normalized session save input keeps revision and sends blank optional valu
     correctionReason: null,
   });
 });
+
+test("normalized read and save preserve all three notes including whitespace and line breaks", () => {
+  const notes = { memo: "  memo\nsecond line  ", publicNote: "\n  public note\n", teacherNote: " \tteacher note\n  " };
+  const source = { id: "session-1", session_key: "legacy-1", session_date: "2026-10-01", revision: 4,
+    memo: notes.memo, public_note: notes.publicNote, teacher_note: notes.teacherNote };
+  const merged = mergeNormalizedLessonSessions({ sessions: [{ id: "legacy-1", memo: "old memo", publicNote: "old public", teacherNote: "old teacher" }] }, [source]).sessions[0];
+  for (const [key, value] of Object.entries(notes)) {
+    assert.equal(merged[key], value, `${key} survives normalized read projection`);
+    assert.equal(buildNormalizedLessonSessionSaveInput(source)[key], value, `${key} survives a no-edit save from the DTO`);
+    assert.equal(buildNormalizedLessonSessionSaveInput(merged)[key], value, `${key} survives a no-edit save from the projected row`);
+  }
+  assert.equal(source.public_note, notes.publicNote, "read input is unchanged");
+});
+
+test("normalized empty notes remain intentional values instead of falling back to stale aliases", () => {
+  const merged = mergeNormalizedLessonSessions({}, [{ id: "session-1", memo: "", public_note: "", teacher_note: "",
+    publicNote: "stale public", teacherNote: "stale teacher" }]).sessions[0];
+  const input = buildNormalizedLessonSessionSaveInput({ ...merged, public_note: "stale public", teacher_note: "stale teacher" });
+  for (const key of ["memo", "publicNote", "teacherNote"]) {
+    assert.equal(merged[key], "");
+    assert.equal(input[key], "");
+  }
+});

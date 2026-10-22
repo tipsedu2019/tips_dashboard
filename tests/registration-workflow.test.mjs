@@ -1121,3 +1121,42 @@ test("R78 linked textbook default requires current class-change intent and respe
   assert.equal(resolveRegistrationLinkedTextbookDefault({ ...base, pendingClassId: "class-b", clearedClassId: "class-b" }), "", "an explicit current-class clear must persist");
   assert.equal(resolveRegistrationLinkedTextbookDefault({ ...base, pendingClassId: "class-b", clearedClassId: "", textbookId: "textbook-1" }), "", "a manual valid selection must not be replaced");
 });
+
+for(const identityField of ['id','session_id','sessionKey','session_key']) test(`PR161 P2: registration uses unique ${identityField} without inventing a learning number`,()=>{
+  const original={date:'2026-10-01',sessionNumber:null,[identityField]:'  authored  ',memo:' preserved '};
+  const before=structuredClone(original);
+  assert.deepEqual(getSelectableRegistrationScheduleSessions({sessions:[original]}, {normalized:false}),
+    [{value:'legacy:authored',dateKey:'2026-10-01',sessionNumber:0,sessionLabel:'수업',state:'active'}]);
+  assert.deepEqual(original,before);
+});
+
+test('PR161 P2: same-date number collisions use unique IDs, duplicate IDs never select a null-number lesson',()=>{
+  const sessions=[{id:'a',date:'2026-10-01',sessionNumber:1},{id:'b',date:'2026-10-01',sessionNumber:1},
+    {id:'old',date:'2026-10-06',sessionNumber:2}, {id:'duplicate',date:'2026-10-08',sessionNumber:null},
+    {id:'duplicate',date:'2026-10-09',sessionNumber:null,scheduleState:'exception'}];
+  const before=structuredClone(sessions);
+  assert.deepEqual(getSelectableRegistrationScheduleSessions({sessions},{normalized:false}).map(row=>row.value),
+    ['legacy:a','legacy:b','2026-10-06:2']);
+  assert.deepEqual(sessions,before);
+  assert.deepEqual(getSelectableRegistrationScheduleSessions({sessions},{normalized:false,afterDateKey:'2026-10-01'}).map(row=>row.value),['2026-10-06:2']);
+});
+
+test('PR161 P2: raw-plan completion and word-retest consumers include authored null-number lessons',async()=>{
+  const {default:ts}=await import('typescript'),{default:vm}=await import('node:vm');
+  const classRow={schedule_plan:{sessions:[{id:'authored',date:'2026-10-01',sessionNumber:null,sessionKey:'',scheduleState:'active'}]}};
+  const load=(source,start,end,name,dependencies)=>{
+    const first=source.indexOf(start),last=source.indexOf(end,first);assert.ok(first>=0&&last>first);
+    const context={...dependencies};vm.runInNewContext(ts.transpileModule(source.slice(first,last)+`\nthis.run=${name};`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+    return context.run;
+  };
+  const service=await readFile(new URL('../src/features/tasks/ops-task-service.ts',import.meta.url),'utf8');
+  const ready=load(service,'async function assertManagementSyncRecordsReady','function assertResolvedManagementRecord','assertManagementSyncRecordsReady',{
+    getSelectableRegistrationScheduleSessions,recordValue:value=>value||{},text:value=>String(value||'').trim(),
+    isRegistrationWaitlistPipelineStatus:()=>false,isRegistrationWorkflowComplete:()=>true,hasManagementReference:()=>false,
+    selectOpsRowById:async()=>classRow,assertResolvedManagementRecord:row=>assert.ok(row),
+  });
+  await assert.doesNotReject(ready({type:'registration',classId:'synthetic',registration:{classStartDate:'2026-10-01',classStartSession:'수업'}}));
+  const workspace=await readFile(new URL('../src/features/tasks/ops-task-workspace.tsx',import.meta.url),'utf8');
+  const items=load(workspace,'function getWordRetestClassScheduleItems','const WITHDRAWAL_WEEKDAY_ENTRIES','getWordRetestClassScheduleItems',{getSelectableRegistrationScheduleSessions});
+  assert.deepEqual(JSON.parse(JSON.stringify(items({schedulePlan:classRow.schedule_plan}))),[{dateKey:'2026-10-01',label:'수업',state:'active'}]);
+});

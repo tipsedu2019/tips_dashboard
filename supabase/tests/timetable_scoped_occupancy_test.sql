@@ -69,8 +69,10 @@ create function pg_temp.makeup_with(t int,r int,k int) returns jsonb language sq
 $$;
 set local role authenticated;
 select lives_ok($q$select pg_temp.makeup_with(101,201,601);set constraints all immediate;set constraints all deferred$q$,'unrelated teacher AND room can save against closed-class unknown time');
-select throws_ok($q$select pg_temp.makeup_with(102,201,602)$q$,'23P01','timetable_resource_conflict','same teacher remains blocked at every time on the uncertain date');
-select throws_ok($q$select pg_temp.makeup_with(101,202,603)$q$,'23P01','timetable_resource_conflict','same room remains blocked at every time on the uncertain date');
+select lives_ok($q$select pg_temp.makeup_with(102,201,602)$q$,'manual dated input accepts the selected teacher despite another class with unknown time');
+select lives_ok($q$select pg_temp.makeup_with(101,202,603)$q$,'manual dated input accepts the selected room despite another class with unknown time');
+select is((select schedule_plan#>>'{sessions,0,classroomCatalogId}' from public.classes where id=pg_temp.sid(303)),
+ pg_temp.sid(202)::text,'manual input retains the exact selected room; makeup approval is a separate path');
 reset role;
 select is((select to_jsonb(c) from public.classes c where id=pg_temp.sid(305)),(select row from off_weekday_original),'uncertainty refinement never rewrites the closed class');
 -- Mixed-resource schedules must not choose one of the resource pairs.

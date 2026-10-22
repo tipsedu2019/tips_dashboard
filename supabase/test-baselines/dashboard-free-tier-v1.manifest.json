@@ -889,6 +889,11 @@
       "fileName": "20261020134458_timetable_optional_classroom_occupancy.sql",
       "status": "final",
       "sha256": "31cd689964a52b5f084a8a167cb41a0b61b12403a88d4dff7b20d9106e29a8b6"
+    },
+    {
+      "fileName": "20261021155723_class_lesson_input_policy.sql",
+      "status": "final",
+      "sha256": "ffd1a50c7c08afbf1e71c65449d29565f93275b3465ec894c3b56ab1e4a65e06"
     }
   ]
 }
