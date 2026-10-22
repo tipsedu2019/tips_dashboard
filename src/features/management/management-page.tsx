@@ -2207,6 +2207,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     const nextSlots = getClassScheduleSlotsFromForm().filter((_, slotIndex) => slotIndex !== index);
     syncClassScheduleSlots(nextSlots.length > 0 ? nextSlots : [createEmptyClassScheduleSlot()]);
   };
+  const detailScheduleOwnedSeparately = kind === "classes" && Boolean(selectedRow && isNormalizedClassRow(selectedRow));
   const classScheduleDefaultsDirty = Boolean(normalizedScheduleDefaults) && JSON.stringify(
     toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
   ) !== JSON.stringify(toContinuousClassScheduleSlots(normalizedScheduleDefaults?.slots || []));
@@ -2521,7 +2522,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     if (!missing) {
       // An unplaced class is valid. Once a placement is entered, creation and
       // edits use the same timing/teacher contract; its room may stay unassigned.
-      if (kind === "classes" && (scope === "form" || (!normalizedScheduleDefaults && scheduleDraft !== savedScheduleDraft))) {
+      if (kind === "classes" && (scope === "form" || (!detailScheduleOwnedSeparately && scheduleDraft !== savedScheduleDraft))) {
         const slots = getClassScheduleSlotsFromForm();
         const scheduleError = (scope === "form" ? classScheduleTextValidationError(form.schedule) : '')
           || classScheduleSlotsValidationError(slots);
@@ -3103,7 +3104,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       return;
     }
     if (!pending && !validateRequiredFields("detail")) return;
-    const isCurrent = beginSaving(pending ? undefined : { form: formDraft, ...(!normalizedScheduleDefaults ? { schedule: scheduleDraft } : {}) });
+    const isCurrent = beginSaving(pending ? undefined : { form: formDraft, ...(!detailScheduleOwnedSeparately ? { schedule: scheduleDraft } : {}) });
     if (!isCurrent) return;
     setOperationError(null);
     setSaveNotice("");
@@ -3123,7 +3124,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             isCurrent: () => pageActiveRef.current && isCurrent(),
             onChecking: () => { if (isCurrent()) setCheckingClassClose(true); },
           },
-          ...(normalizedScheduleDefaults ? { scheduleOwnership: "normalized" as const } : {}),
+          // Schedule ownership comes from the saved row, not whether its
+          // separately loaded defaults have arrived. Metadata never owns slots.
+          ...(detailScheduleOwnedSeparately ? { scheduleOwnership: "normalized" as const } : {}),
         });
         savedResult = updated;
       } else {
@@ -3135,7 +3138,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       if (isCurrent()) {
         setPendingClassClose(null);
         setCheckingClassClose(false);
-        setSavedForm(submittedForm);
+        setSavedForm((current) => detailScheduleOwnedSeparately ? {
+          ...submittedForm,
+          schedule: current.schedule,
+          teacher: current.teacher,
+          classroom: current.classroom,
+        } : submittedForm);
         setSaveNotice(successNotice);
         if (confirmedState && result?.publicClassesCacheRefresh?.status === "pending") {
           setSaveNotice(`${successNotice} · 공개 수업 캐시 갱신 대기 중`);
