@@ -1666,6 +1666,13 @@ function scrollLessonDesignPeriodSessionToCalendar(
   periodSidebar.scrollTo({ top: nextTop, behavior: "auto" });
 }
 
+function findLessonDesignCalendarSessionCell(sessionId: string) {
+  const sessionTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
+  const calendarCell = sessionTarget?.closest("[data-lesson-calendar-date]");
+
+  return calendarCell && calendarCell.getClientRects().length > 0 ? calendarCell : null;
+}
+
 function scrollLessonDesignPeriodSessionToCalendarAfterRender(
   sessionId: string,
   preservedDialogScrollTop: number | null = null,
@@ -1689,7 +1696,7 @@ function scrollLessonDesignPeriodSessionToCalendarAfterRender(
 
     const periodTarget = findLessonDesignElementByDataAttribute("data-lesson-period-session-id", sessionId);
     const periodSidebar = document.querySelector('[data-lesson-period-sidebar="true"]') as HTMLElement | null;
-    const calendarTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
+    const calendarTarget = findLessonDesignCalendarSessionCell(sessionId);
     const canAlignDesktopPair =
       Boolean(periodTarget && periodSidebar?.contains(periodTarget) && calendarTarget) &&
       typeof window !== "undefined" &&
@@ -1725,7 +1732,7 @@ function scrollLessonDesignSessionPair(sessionId: string) {
 
   const periodTarget = findLessonDesignElementByDataAttribute("data-lesson-period-session-id", sessionId);
   const periodSidebar = document.querySelector('[data-lesson-period-sidebar="true"]');
-  const calendarTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
+  const calendarTarget = findLessonDesignCalendarSessionCell(sessionId);
   const dialogScroller = calendarTarget?.closest('[data-testid="lesson-design-dialog-scroll"]') as HTMLElement | null;
   const isDesktopPair =
     Boolean(periodTarget && periodSidebar?.contains(periodTarget) && dialogScroller) &&
@@ -5076,6 +5083,7 @@ export function ClassScheduleWorkspace() {
                                           {daySessions.filter((session) => session.id !== primarySession.id).map((session) => (
                                             <p
                                               key={session.id}
+                                              data-lesson-calendar-session-id={session.id}
                                               className={cn(
                                                 "text-[11px]",
                                                 getScheduleStateSurface(session.scheduleState)?.mutedClassName,

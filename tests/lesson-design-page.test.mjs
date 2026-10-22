@@ -99,6 +99,9 @@ test("schedule mode keeps monthly sessions and calendar cells mutually aligned",
   const sessionPair = source.match(
     /function scrollLessonDesignSessionPair\(sessionId: string\) \{([\s\S]*?)\r?\n\}/,
   );
+  const calendarSessionCell = source.match(
+    /function findLessonDesignCalendarSessionCell\(sessionId: string\) \{([\s\S]*?)\r?\n\}/,
+  );
   const periodToCalendar = source.match(
     /function scrollLessonDesignPeriodSessionToCalendar\([\s\S]*?\) \{([\s\S]*?)\r?\n\}/,
   );
@@ -117,6 +120,7 @@ test("schedule mode keeps monthly sessions and calendar cells mutually aligned",
 
   assert.ok(periodSession, "period-only scrolling helper should exist");
   assert.ok(sessionPair, "session-pair scrolling helper should exist");
+  assert.ok(calendarSessionCell, "every displayed session should resolve to its whole date cell");
   assert.ok(periodToCalendar, "calendar boundary correction helper should exist");
   assert.ok(periodToCalendarAfterRender, "calendar-origin sidebar alignment helper should exist");
   assert.ok(calendarSection, "calendar section should exist");
@@ -124,11 +128,16 @@ test("schedule mode keeps monthly sessions and calendar cells mutually aligned",
   assert.ok(focusSession, "monthly session focus handler should exist");
   assert.match(periodSession[1], /scrollElementInsideContainerToCenter\(periodSidebar, periodTarget, \{[\s\S]*fallbackToDocument: false/);
   assert.doesNotMatch(periodSession[1], /data-lesson-calendar-session-id/);
-  assert.match(sessionPair[1], /const calendarTarget = findLessonDesignElementByDataAttribute\("data-lesson-calendar-session-id", sessionId\)/);
+  assert.match(calendarSessionCell[1], /findLessonDesignElementByDataAttribute\("data-lesson-calendar-session-id", sessionId\)/);
+  assert.match(calendarSessionCell[1], /sessionTarget\?\.closest\("\[data-lesson-calendar-date\]"\)/);
+  assert.match(calendarSessionCell[1], /calendarCell\.getClientRects\(\)\.length > 0 \? calendarCell : null/);
+  assert.match(source, /key=\{session\.id\}\s+data-lesson-calendar-session-id=\{session\.id\}/);
+  assert.match(sessionPair[1], /const calendarTarget = findLessonDesignCalendarSessionCell\(sessionId\)/);
   assert.match(sessionPair[1], /scrollLessonDesignCalendarSessionToPeriod\(dialogScroller, periodTarget, calendarTarget\)/);
   assert.match(source, /periodTarget\.closest\('\[data-lesson-period-sidebar="true"\]'\) as HTMLElement \| null/);
   assert.match(source, /scrollLessonDesignPeriodSessionToCalendar\(periodSidebar, periodTarget, calendarTarget\)/);
   assert.match(periodToCalendarAfterRender[1], /scrollLessonDesignPeriodSessionToCalendar\(periodSidebar, periodTarget, calendarTarget\)/);
+  assert.match(periodToCalendarAfterRender[1], /const calendarTarget = findLessonDesignCalendarSessionCell\(sessionId\)/);
   assert.match(periodToCalendarAfterRender[1], /preservedDialogScrollTop/);
   assert.match(periodToCalendarAfterRender[1], /dialogScroller\?\.scrollTo\(\{ top: preservedDialogScrollTop, behavior: "auto" \}\)/);
   assert.match(source, /function getLessonDesignDialogScrollTop\(\)/);
