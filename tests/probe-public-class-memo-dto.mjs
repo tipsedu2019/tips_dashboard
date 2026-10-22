@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { createManagementReadService } from "../src/features/management/management-service.js";
-import { normalizePublicClassesFullPayload, normalizePublicClassesSummaryPayload } from "../src/server/public-classes-payload.js";
+import { registerHooks } from "node:module";
 
 const url = new URL(process.env.TASK_LOCAL_DB_URL || "https://invalid.invalid");
 assert.equal(url.hostname, "127.0.0.1");
@@ -11,6 +10,20 @@ const config = await readFile("supabase/config.toml", "utf8");
 const project = config.match(/^project_id = "(tips_supabase_db_qa_[a-f0-9]+)"/m)?.[1];
 assert.ok(project);
 assert.ok(config.includes(`[db]\nport = ${url.port}\n`));
+// The staged probe consumes actual SQL output through the unchanged app modules.
+// It injects the captured RPC response below; any external connector use is a
+// test failure. Do not copy packages or credentials into the isolated runtime.
+const connector = "data:text/javascript," + encodeURIComponent(
+  'export function createClient() { throw new Error("public_memo_probe_external_connector_forbidden"); }',
+);
+const hooks = registerHooks({ resolve(specifier, context, nextResolve) {
+  return specifier === "@supabase/supabase-js"
+    ? { url: connector, shortCircuit: true }
+    : nextResolve(specifier, context);
+} });
+const { createManagementReadService } = await import("../src/features/management/management-service.js");
+const { normalizePublicClassesFullPayload, normalizePublicClassesSummaryPayload } = await import("../src/server/public-classes-payload.js");
+hooks.deregister();
 const fixture = await readFile("supabase/tests/class_public_memo_test.sql", "utf8");
 const capture = `
 select set_config('request.jwt.claim.sub',pg_temp.memo_id(900)::text,true);
