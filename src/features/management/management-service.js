@@ -1256,7 +1256,7 @@ async function updateClassMetadataRows(client, payload) {
     const { data, error } = await client.from("classes")
       .update(stripPayloadFields(value, ["id"]))
       .eq("id", payload.id)
-      .select("id,name,subject,grade,status,capacity,fee,teacher,room,schedule,student_ids,waitlist_ids,textbook_ids,closed_at,closed_by,color,created_at,end_date,lessons,period,schedule_plan,schedule_revision,schedule_storage_mode,start_date,term_id,textbook_info")
+      .select("id,name,subject,grade,status,capacity,fee,teacher,room,schedule,public_memo,student_ids,waitlist_ids,textbook_ids,closed_at,closed_by,color,created_at,end_date,lessons,period,schedule_plan,schedule_revision,schedule_storage_mode,start_date,term_id,textbook_info")
       .limit(1).order("id")
       .abortSignal(AbortSignal.timeout(8_000)).retry(false);
     if (error) throw error;
@@ -1499,6 +1499,9 @@ export function buildClassPayload(record = {}, options = {}) {
     grade,
     teacher: trimText(record.teacher || record.teacherName || record.teacher_name),
     schedule: trimText(record.schedule),
+    ...(Object.hasOwn(record, "public_memo") || Object.hasOwn(record, "publicMemo")
+      ? { public_memo: trimText(Object.hasOwn(record, "public_memo") ? record.public_memo : record.publicMemo) }
+      : {}),
     room: classroom,
     capacity: toNumberOrNull(record.capacity) ?? 0,
     fee: toNumberOrNull(record.fee || record.tuition) ?? 0,

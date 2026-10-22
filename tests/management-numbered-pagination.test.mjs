@@ -726,6 +726,30 @@ test("class detail totals remain exact beyond the 30-row relation page and missi
 });
 
 
+test("public memo detail hydration preserves explicit empty values and supports legacy DTOs", async t => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'https://test.invalid/admin/classes' });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  const io = transport(), rpc = io.supabase.rpc;
+  let record, state;
+  io.supabase.rpc = (name, args) => name === 'get_management_detail_v1' ? {
+    abortSignal() { return this; }, retry: async () => ({ error: null, data: { kind: 'classes', record: { id: args.p_id, name: '합성 수업', status: '수강', ...record }, registeredStudents: { rows: [] }, waitlistedStudents: { rows: [] } } }),
+  } : rpc(name, args);
+  const { useManagementRecords } = loadHook(io.supabase);
+  function Probe() {
+    const value = useManagementRecords('classes', { kind: 'classes', search: '', periodId: 'period', status: '수강', subject: null, grade: null, teacher: null, classroom: null }, { pageSize: 10, authorizationScope: 'synthetic:memo' });
+    useEffect(() => { state = value; }, [value]); return null;
+  }
+  const root = createRoot(document.getElementById('root'));
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  await act(async () => root.render(createElement(Probe)));
+  for (const [fields, expected] of [[{ publicMemo: '공개 안내 ✨' }, '공개 안내 ✨'], [{ public_memo: '', publicMemo: 'stale' }, ''], [{ memo: 'PRIVATE' }, '']]) {
+    record = fields;
+    let detail;
+    await act(async () => { detail = await state.loadDetail('class'); });
+    assert.equal(detail.raw.public_memo, expected);
+  }
+});
+
 test("metadata survives paging cancellation, expires and invalidates on filter, refresh and actor changes", async (t) => {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid" });
   globalThis.window = dom.window; globalThis.document = dom.window.document;

@@ -174,6 +174,8 @@ jobs:
             --test supabase/tests/management_numbered_pages_test.sql \
             --test supabase/tests/management_page_reads_test.sql \
             --test supabase/tests/class_detail_roster_counts_test.sql \
+            --test supabase/tests/class_public_memo_test.sql \
+            --probe tests/probe-public-class-memo-dto.mjs \
             --test supabase/tests/class_period_membership_optional_test.sql \
             --test supabase/tests/curriculum_scheduling_textbook_usage_test.sql \
             --probe tests/probe-curriculum-scheduling-dto.mjs \

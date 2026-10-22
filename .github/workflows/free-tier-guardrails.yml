@@ -91,6 +91,7 @@ jobs:
             tests/continuous-class-schedule-consumer-parity.test.mjs \
             tests/public-classes-privacy.test.mjs \
             tests/public-classes-summary-loading.test.mjs \
+            tests/class-public-memo.test.mjs \
             tests/public-class-renewal-data.test.mjs \
             tests/internal-dashboard-routes.test.mjs
       - run: node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/free-tier-operational-guardrails.test.mjs

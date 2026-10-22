@@ -172,7 +172,7 @@ test("public classes summary mode reads and returns only fields required by the 
     {
       table: "classes",
       columns:
-        "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date",
+        "id,name,subject,grade,teacher,room,schedule,public_memo,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date",
     },
   ]);
   assert.deepEqual(payload, {
@@ -189,6 +189,7 @@ test("public classes summary mode reads and returns only fields required by the 
         room: "본관 1강",
         classroom: "본관 1강",
         schedule: "월수금 17:00-19:00",
+        publicMemo: "",
         status: "수강",
         fee: 270000,
         tuition: 270000,
@@ -272,7 +273,7 @@ test("public classes full mode reads only production columns and keeps compatibi
     {
       table: "classes",
       columns:
-        "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date",
+        "id,name,subject,grade,teacher,room,schedule,public_memo,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date",
       abortSignalApplied: true,
       retry: false,
     },

@@ -2,6 +2,7 @@ const detailFields: Record<string, string> = {
   name: "name", class_type: "classType", subject: "subject", subject_area_key: "subjectAreaKey",
   grade: "grade", teacher: "teacher", schedule: "schedule", room: "classroom",
   capacity: "capacity", fee: "fee", status: "status", textbook_ids: "textbookIds", textbook_usage: "textbookUsage",
+  public_memo: "publicMemo",
 };
 
 function sameJson(left: unknown, right: unknown): boolean {

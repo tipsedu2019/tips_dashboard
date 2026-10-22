@@ -31,6 +31,7 @@ test("summary uses the existing public aggregate projection and omits full sched
       id: "class-1", name: "초6 중등과정반", className: "초6 중등과정반", subject: "수학", grade: "초6",
       teacher: "담당 선생님", room: "본관 1강", classroom: "본관 1강", schedule: "월금 17:00-19:00",
       status: "수강", fee: 0, tuition: 0, capacity: 10, enrolledCount: 2, waitlistCount: 1,
+      publicMemo: "",
     }],
   });
   assert.doesNotMatch(response.body, /PRIVATE_|student_ids|waitlist_ids|schedule_plan|schedulePlan|textbooks|lessons|progressLogs|memo/u);

@@ -18,9 +18,9 @@ const appRoot = path.resolve(__dirname, "../..");
 
 export const PUBLIC_CLASSES_QUERY_TIMEOUT_MS = 8_000;
 export const PUBLIC_CLASSES_SUMMARY_PROJECTION =
-  "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date";
+  "id,name,subject,grade,teacher,room,schedule,public_memo,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date";
 export const PUBLIC_CLASSES_FULL_CLASS_PROJECTION =
-  "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date";
+  "id,name,subject,grade,teacher,room,schedule,public_memo,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date";
 export const PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION =
   "id,title,name,publisher,price,tags,lessons,updated_at";
 export const PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION =
@@ -177,6 +177,7 @@ function mapPublicClassSummary(row) {
     room,
     classroom: room,
     schedule: text(row.schedule),
+    publicMemo: text(Object.hasOwn(row, "public_memo") ? row.public_memo : row.publicMemo),
     status: getClassStatus(row),
     fee,
     tuition: fee,

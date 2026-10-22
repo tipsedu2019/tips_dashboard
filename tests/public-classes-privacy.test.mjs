@@ -132,6 +132,12 @@ test("tracked public snapshot contains only normalized public data", async () =>
   assertPrivateFieldsAbsent(normalized);
   assert.deepEqual(normalizePublicClassesFullPayload(normalized), normalized, "new public projection is idempotent");
   const compatible = structuredClone(normalized);
+  compatible.classes.forEach((row, classIndex) => {
+    if (!Object.hasOwn(snapshot.classes[classIndex], "publicMemo")) {
+      assert.equal(row.publicMemo, "", "legacy snapshots must not invent a public memo");
+      delete row.publicMemo;
+    }
+  });
   compatible.classes.forEach((row, classIndex) => row.schedulePlan?.sessions.forEach((session, sessionIndex) => {
     assert.ok(session.displaySessionNumber === null || (Number.isInteger(session.displaySessionNumber) && session.displaySessionNumber > 0));
     const source = snapshot.classes[classIndex].schedulePlan.sessions[sessionIndex];
