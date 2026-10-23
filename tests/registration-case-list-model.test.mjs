@@ -74,6 +74,31 @@ function registrationCase({
   }
 }
 
+test("only accepted numbered inquiry parents may appear without an active subject", () => {
+  const parent = { ...registrationCase({ id: "empty", studentName: "합성 문의", registration: { requestNote: "상담 요청" } }), type: "registration" }
+  const items = buildRegistrationCaseListItems([parent])
+  const options = { includeServerSelectedInquiryParents: true }
+  assert.deepEqual(filterRegistrationCaseListItems(items, "inquiry"), [], "full/fixture mode has no server membership evidence")
+  const [shown] = filterRegistrationCaseListItems(items, "inquiry", "", options)
+  assert.ok(shown, "the server-selected parent remains presentable")
+  assert.equal(shown.task, parent)
+  assert.deepEqual(shown.matchingTracks, [])
+  assert.deepEqual(shown.task.registrationTracks, [])
+  assert.equal(shown.representativeTrack, null)
+  assert.equal(canOpenRegistrationCaseListItem(shown), true)
+  assert.equal(filterRegistrationCaseListItems(items, "inquiry", "상담", options).length, 1)
+  assert.equal(filterRegistrationCaseListItems(items, "inquiry", "없음", options).length, 0)
+  for (const view of ["completed", "waiting", "consultation_requested", "observation", "enrollment", "payment", "level_test"]) {
+    assert.deepEqual(filterRegistrationCaseListItems(items, view, "", options), [])
+  }
+  const wrongStage = buildRegistrationCaseListItems([{ ...parent, registrationTracks: [track({ id: "waiting", status: "waiting", workflowStatus: "waiting_current_class" })] }])
+  assert.deepEqual(filterRegistrationCaseListItems(wrongStage, "inquiry", "", options), [], "another stage must not become a parent-only inquiry")
+  assert.deepEqual(filterRegistrationCaseListItems(buildRegistrationCaseListItems([{ ...parent, type: "general" }]), "inquiry", "", options), [])
+  for (const status of ["done", "canceled"]) {
+    assert.equal(filterRegistrationCaseListItems(buildRegistrationCaseListItems([{ ...parent, status }]), "inquiry", "", options).length, 1, "retain SQL membership; do not invent a terminal-parent filter")
+  }
+})
+
 test("one parent task projects to one case item while retaining every subject track", () => {
   const items = buildRegistrationCaseListItems([
     registrationCase({
