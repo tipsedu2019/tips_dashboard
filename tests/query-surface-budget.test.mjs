@@ -3309,3 +3309,23 @@ test("actual past-correction transport aborts at 20s and never automatically dup
   assert.equal(fixture.calls[0].retryEnabled, false)
   assert.equal(fixture.calls[0].parameters, parameters)
 })
+
+
+test("operational common RPC budgets distinguish exact contexts from numbered pages", () => {
+  const inspect = (name, args, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/tasks/common-read-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map(item => item.reason)
+  for (const name of ["get_operational_common_detail_v1", "get_word_retest_reference_data_v1"]) {
+    assert.deepEqual(inspect(name, "{p_id:request.id}"), [])
+    assert.deepEqual(inspect(name + "_other", "{}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{}", ".retry(false)").includes("list_abort_signal_missing"))
+  }
+  const rpc = "read_operational_common_v1"
+  for (const args of ['{p_operation:"options",p_args:{}}','{p_operation:"book_detail",p_args:{p_anchor:request.id}}']) assert.deepEqual(inspect(rpc,args),[])
+  for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(rpc,`{p_operation:"book_page",p_args:{p_page_size:${size}}}`),[])
+  for (const size of ["30", "null"]) assert.deepEqual(inspect(rpc,`{p_operation:"book_page",p_args:{p_page_size:${size}}}`),["rpc_page_limit_invalid"])
+  assert.deepEqual(inspect(rpc,'{p_operation:"book_page",p_args:{}}'),["rpc_page_limit_missing"])
+  for (const args of ['{p_operation:request.operation,p_args:{}}','{p_operation:"unreviewed",p_args:{}}','{p_operation:"options",p_args:{all:true}}','{...request,p_operation:"options",p_args:{}}']) assert.ok(inspect(rpc,args).some(reason=>reason.startsWith("rpc_page_limit_")))
+  assert.ok(inspect(rpc,'{p_operation:"options",p_args:{}}',".retry(false)").includes("list_abort_signal_missing"))
+})

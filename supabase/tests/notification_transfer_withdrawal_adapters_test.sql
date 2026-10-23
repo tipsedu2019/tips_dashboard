@@ -491,7 +491,7 @@ select throws_ok($$
     ),
     '72000000-0000-4000-8000-000000000027'::uuid
   )
-$$, '40001', 'ops_transition_closed', '완료된 전반은 일반 상태 RPC로 다시 열 수 없다');
+$$, '23514', 'ops_transition_closed', '완료된 전반은 일반 상태 RPC로 다시 열 수 없다');
 
 select lives_ok($$
   select public.create_ops_task_v2(

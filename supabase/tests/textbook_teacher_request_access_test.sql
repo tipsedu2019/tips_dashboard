@@ -73,6 +73,17 @@ values
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{"fixture":"textbook-teacher-request-access"}'::jsonb,
     pg_catalog.now(), pg_catalog.now()
+  ),
+  (
+    '83000000-0000-4000-8000-000000000004',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated',
+    'textbook-request-staff@runtime.invalid',
+    crypt('textbook-request-runtime-only', gen_salt('bf')),
+    pg_catalog.now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"fixture":"textbook-teacher-request-access"}'::jsonb,
+    pg_catalog.now(), pg_catalog.now()
   );
 
 insert into public.profiles(id, role, name, email, created_at, updated_at)
@@ -90,6 +101,11 @@ values
   (
     '83000000-0000-4000-8000-000000000003', 'assistant',
     '교재 요청 조교', 'textbook-request-assistant@runtime.invalid',
+    pg_catalog.now(), pg_catalog.now()
+  ),
+  (
+    '83000000-0000-4000-8000-000000000004', 'staff',
+    '교재 요청 프로필 관리자', 'textbook-request-staff@runtime.invalid',
     pg_catalog.now(), pg_catalog.now()
   )
 on conflict (id) do update set
@@ -111,6 +127,15 @@ values (
   '83000000-0000-4000-8000-000000000001',
   'textbook-request-teacher@runtime.invalid',
   'teacher'
+), (
+  '83000000-0000-4000-8000-000000000102',
+  '교재 런타임 관리자',
+  array['영어팀']::text[],
+  true,
+  9831,
+  '83000000-0000-4000-8000-000000000004',
+  'textbook-request-staff@runtime.invalid',
+  'staff'
 )
 on conflict (profile_id) where profile_id is not null do update set
   name = excluded.name,
@@ -142,8 +167,8 @@ end;
 $$;
 
 select pg_temp.textbook_request_set_actor(
-  '83000000-0000-4000-8000-000000000001',
-  'textbook-request-teacher@runtime.invalid'
+  '83000000-0000-4000-8000-000000000004',
+  'textbook-request-staff@runtime.invalid'
 );
 set local role authenticated;
 
@@ -159,7 +184,7 @@ select lives_ok(
       '교재 런타임 메모'
     )
   $$,
-  'teacher can create a textbook request through the RPC'
+  'staff can create a textbook request through the RPC'
 );
 
 reset role;
@@ -168,16 +193,16 @@ select results_eq(
   $$
     select status, requested_by, created_by
     from public.textbook_purchase_orders
-    where created_by = '83000000-0000-4000-8000-000000000001'::uuid
+    where created_by = '83000000-0000-4000-8000-000000000004'::uuid
   $$,
   $$
     values (
       'requested'::text,
-      '교재 런타임 교사'::text,
-      '83000000-0000-4000-8000-000000000001'::uuid
+      '교재 런타임 관리자'::text,
+      '83000000-0000-4000-8000-000000000004'::uuid
     )
   $$,
-  'teacher RPC stores the server-owned requester and creator'
+  'staff RPC stores the server-owned requester and creator'
 );
 
 select results_eq(
@@ -194,7 +219,7 @@ select results_eq(
     from public.textbook_purchase_order_lines as line
     join public.textbook_purchase_orders as purchase_order
       on purchase_order.id = line.purchase_order_id
-    where purchase_order.created_by = '83000000-0000-4000-8000-000000000001'::uuid
+    where purchase_order.created_by = '83000000-0000-4000-8000-000000000004'::uuid
     order by line.copy_scope
   $$,
   $$
@@ -202,7 +227,7 @@ select results_eq(
       ('requested'::text, 'student'::text, '교재 런타임 요청'::text, 2, 0, 0, 0, 0),
       ('requested'::text, 'teacher'::text, '교재 런타임 요청'::text, 1, 0, 0, 0, 0)
   $$,
-  'teacher RPC creates requested-only zero-fulfillment lines'
+  'staff RPC creates requested-only zero-fulfillment lines'
 );
 
 select is(
@@ -214,11 +239,65 @@ select is(
       from public.textbook_purchase_order_lines as line
       join public.textbook_purchase_orders as purchase_order
         on purchase_order.id = line.purchase_order_id
-      where purchase_order.created_by = '83000000-0000-4000-8000-000000000001'::uuid
+      where purchase_order.created_by = '83000000-0000-4000-8000-000000000004'::uuid
     )
   ),
   0::bigint,
-  'teacher RPC creates no stock moves'
+  'staff RPC creates no stock moves'
+);
+
+-- Restricted roles retain their original identities; the normal creation above
+-- uses a separate staff actor so quantities/ownership/stock assertions survive.
+create temporary table textbook_request_denial_baseline as
+select
+  (select count(*) from public.textbook_purchase_orders) as orders,
+  (select count(*) from public.textbook_purchase_order_lines) as lines,
+  (select count(*) from public.textbook_stock_moves) as stock_moves;
+
+select pg_temp.textbook_request_set_actor(
+  '83000000-0000-4000-8000-000000000001',
+  'textbook-request-teacher@runtime.invalid'
+);
+set local role authenticated;
+
+select throws_ok(
+  $$select public.create_textbook_request_v1(null, 'teacher denied', null, null, 1, 0, '')$$,
+  '42501', 'textbook_request_access_denied',
+  'teacher cannot create an operational textbook request'
+);
+
+select is(
+  (public.read_operational_common_v1('book_page',
+    '{"p_search":"교재 런타임 요청","p_page":1,"p_page_size":15}'::jsonb)->>'totalCount')::bigint,
+  1::bigint,
+  'teacher reads the existing staff request through the common book reader'
+);
+select ok(
+  (select
+    data#>>'{rows,0,bookTitle}' = '교재 런타임 요청'
+    and (data#>>'{rows,0,studentQuantity}')::integer = 2
+    and (data#>>'{rows,0,teacherQuantity}')::integer = 1
+    and not ((data#>'{rows,0}') ?| array['memo','requestedBy','createdBy','supplier','unitPrice','purchasePrice'])
+    and data::text not like '%교재 런타임 메모%'
+   from (select public.read_operational_common_v1('book_page',
+     '{"p_search":"교재 런타임 요청","p_page":1,"p_page_size":15}'::jsonb) data) response),
+  'teacher common book DTO preserves requested quantities and excludes private order fields'
+);
+
+select results_eq(
+  $$select
+    (select count(*) from public.textbook_purchase_orders where created_by='83000000-0000-4000-8000-000000000004'::uuid),
+    (select count(*) from public.textbook_purchase_order_lines)$$,
+  $$values (0::bigint, 0::bigint)$$,
+  'teacher raw request and line SELECT remain fenced despite common read access'
+);
+reset role;
+select results_eq(
+  $$select (select count(*) from public.textbook_purchase_orders),
+           (select count(*) from public.textbook_purchase_order_lines),
+           (select count(*) from public.textbook_stock_moves)$$,
+  $$select orders, lines, stock_moves from textbook_request_denial_baseline$$,
+  'teacher denial and common reads add no order, line, or stock movement'
 );
 
 select pg_temp.textbook_request_set_actor(
@@ -256,7 +335,20 @@ select throws_ok(
   'assistant cannot call the textbook request RPC'
 );
 
+select throws_ok(
+  $$select public.read_operational_common_v1('book_page',
+      '{"p_search":"교재 런타임 요청","p_page":1,"p_page_size":15}'::jsonb)$$,
+  '42501', 'operational_common_read_forbidden',
+  'assistant cannot enter the operational common book reader'
+);
 reset role;
+select results_eq(
+  $$select (select count(*) from public.textbook_purchase_orders),
+           (select count(*) from public.textbook_purchase_order_lines),
+           (select count(*) from public.textbook_stock_moves)$$,
+  $$select orders, lines, stock_moves from textbook_request_denial_baseline$$,
+  'assistant denial adds no order, line, or stock movement'
+);
 select pg_temp.textbook_request_set_actor(
   '83000000-0000-4000-8000-000000000001',
   'textbook-request-teacher@runtime.invalid'
@@ -268,7 +360,7 @@ select results_eq(
     with changed as (
       update public.textbook_purchase_orders
       set status = 'ordered'
-      where created_by = '83000000-0000-4000-8000-000000000001'::uuid
+      where created_by = '83000000-0000-4000-8000-000000000004'::uuid
       returning id
     )
     select pg_catalog.count(*) from changed
@@ -285,7 +377,7 @@ select results_eq(
       where purchase_order_id in (
         select purchase_order.id
         from public.textbook_purchase_orders as purchase_order
-        where purchase_order.created_by = '83000000-0000-4000-8000-000000000001'::uuid
+        where purchase_order.created_by = '83000000-0000-4000-8000-000000000004'::uuid
       )
       returning id
     )
@@ -299,7 +391,7 @@ select results_eq(
   $$
     with deleted as (
       delete from public.textbook_purchase_orders
-      where created_by = '83000000-0000-4000-8000-000000000001'::uuid
+      where created_by = '83000000-0000-4000-8000-000000000004'::uuid
       returning id
     )
     select pg_catalog.count(*) from deleted
@@ -315,7 +407,7 @@ select results_eq(
       where purchase_order_id in (
         select purchase_order.id
         from public.textbook_purchase_orders as purchase_order
-        where purchase_order.created_by = '83000000-0000-4000-8000-000000000001'::uuid
+        where purchase_order.created_by = '83000000-0000-4000-8000-000000000004'::uuid
       )
       returning id
     )
@@ -333,10 +425,10 @@ select results_eq(
       pg_catalog.count(*)::bigint,
       pg_catalog.count(*) filter (where status = 'requested')::bigint
     from public.textbook_purchase_orders
-    where created_by = '83000000-0000-4000-8000-000000000001'::uuid
+    where created_by = '83000000-0000-4000-8000-000000000004'::uuid
   $$,
   $$values (1::bigint, 1::bigint)$$,
-  'denied callers and direct writes leave the teacher request unchanged'
+  'denied callers and teacher raw writes leave the existing staff request unchanged'
 );
 
 select * from finish();

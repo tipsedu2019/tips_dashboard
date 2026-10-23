@@ -1691,8 +1691,8 @@ async function readOpsTaskWorkspaceOptionData(
   }
 
   try {
-    if (options.taskType === "word_retest" && options.viewerRole === "assistant") {
-      const refs = await readWordRetestReferenceData(supabase)
+    if (options.viewerRole === "teacher" || (options.taskType === "word_retest" && options.viewerRole === "assistant")) {
+      const refs = await readWordRetestReferenceData(supabase, options.viewerRole === "teacher" && options.taskType !== "word_retest")
       return {
         ...buildOpsTaskWorkspaceOptionData(refs.profiles, refs.students, refs.classes, refs.textbooks, refs.teachers),
         schemaReady: true, error: null,
@@ -2077,6 +2077,17 @@ async function readOpsTaskWorkspaceData(
       error: error instanceof Error ? error.message : "할 일 데이터를 불러오지 못했습니다.",
     }
   }
+}
+
+export async function loadOperationalCommonTaskById(taskId: string): Promise<OpsTask | null> {
+  if (!supabase || !text(taskId)) return null
+  const { data, error } = await supabase.rpc("get_operational_common_detail_v1", { p_id: taskId })
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  if (error) throw error
+  if (data === null) return null
+  if (!data || typeof data !== "object" || Array.isArray(data) || data.id !== taskId
+    || !["registration", "transfer", "withdrawal"].includes(data.type)) throw new Error("운영 공통정보를 확인할 수 없습니다.")
+  return mapOpsTaskPageRow(data as Row)
 }
 
 export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {

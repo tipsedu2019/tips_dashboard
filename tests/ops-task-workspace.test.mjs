@@ -904,8 +904,8 @@ test("registration create follows management-role permissions in production and 
 
   assert.match(workspaceSource, /const canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/);
   assert.match(createGate, /\(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
-  assert.match(createGate, /const showEmptyCreate = !numberedPage.error && \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
-  assert.match(createGate, /const showToolbarCreate = \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
+  assert.match(createGate, /const showEmptyCreate = !operationalReadOnly && !numberedPage\.error && \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
+  assert.match(createGate, /const showToolbarCreate = !operationalReadOnly && \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
   assert.doesNotMatch(createGate, /!registrationFixtureEnabled \|\| canManageRegistrationWorkflow/);
   assert.match(createGate, /!isTodoWorkspace && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace \|\| !showEmptyCreate\)/);
   assert.match(openCreate, /if \(type === "registration" && !canManageRegistrationWorkflow\) return/);
@@ -945,7 +945,7 @@ test("registration mutation handlers and legacy controls fail closed for teacher
   assert.match(secondaryStatuses, /if \(task\.type === "registration"\) return \[\]/);
   assert.match(legacyDetail, /selectedTaskFresh\.type === "registration" && !isCanonicalRegistrationTrackDetail && canManageRegistrationWorkflow/);
   assert.match(legacyDetail, /\(!isRegistrationDetail \|\| canManageRegistrationWorkflow\) && !isProcessDetail && getSecondaryTaskStatusOptions/);
-  assert.match(source, /const selectedTaskCanEdit = selectedTaskFresh \? \(!isRegistrationDetail \|\| canManageRegistrationWorkflow\)/);
+  assert.match(source, /const selectedTaskCanEdit = selectedTaskFresh \? !isTeacherReadOnlyTask\(resolvedViewerRole, selectedTaskFresh\.type\) && \(!isRegistrationDetail \|\| canManageRegistrationWorkflow\)/);
   assert.match(source, /!isProcessDetail && \(!isRegistrationDetail \|\| canManageRegistrationWorkflow\) && \(\s*<CompletionBlockerActionPanel/);
 });
 
@@ -974,7 +974,7 @@ test("registration fact edits and status mutations never auto-dispatch legacy pr
   assert.match(legacyStatus, /if \(task\.type === "registration"\) return[\s\S]*?dispatchLegacyOpsTaskSources/);
   assert.doesNotMatch(legacyPipeline, /loadRegistrationLegacyNotificationSourceIds|dispatchLegacyOpsTaskSources/);
   assert.doesNotMatch(undoStatus, /loadRegistrationLegacyNotificationSourceIds/);
-  assert.match(undoStatus, /if \(currentTask\.type === "registration"\)[\s\S]*?return[\s\S]*?dispatchLegacyOpsTaskSources/);
+  assert.match(undoStatus, /if \(isTeacherReadOnlyTask\(resolvedViewerRole, currentTask\.type\) \|\| currentTask\.type === "registration"\)[\s\S]*?return[\s\S]*?dispatchLegacyOpsTaskSources/);
   assert.doesNotMatch(source, /retryPendingRegistrationVisitNotifications|pendingRegistrationVisitNotificationTargets/);
   assert.doesNotMatch(source, /dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/);
 });
@@ -4553,7 +4553,7 @@ test("completed operational task details are locked after management sync", asyn
   assertIncludesAll(workspaceSource, [
     "function canEditTaskDetails(task: Pick<OpsTask, \"type\" | \"status\">)",
     "task.type === \"general\" || task.status !== \"done\"",
-    "const selectedTaskCanEdit = selectedTaskFresh ? (!isRegistrationDetail || canManageRegistrationWorkflow)",
+    "const selectedTaskCanEdit = selectedTaskFresh ? !isTeacherReadOnlyTask(resolvedViewerRole, selectedTaskFresh.type) && (!isRegistrationDetail || canManageRegistrationWorkflow)",
     "&& canEditTaskDetails(selectedTaskFresh) : false",
     "canEditTaskDetails(task) &&",
     "selectedTaskCanEdit &&",
@@ -5045,10 +5045,19 @@ test("an off-page task-only registration deep link opens canonical case detail a
   const deepLinkStart = source.indexOf("useEffect(() => {\n    if (deleteTarget) return");
   const deepLinkEnd = source.indexOf("\n  function handleDetailOpenChange", deepLinkStart);
   const deepLink = source.slice(deepLinkStart, deepLinkEnd);
-  const exactLoadStart = deepLink.indexOf("void loadOpsTaskById(deepLinkedTaskId)");
+  const exactLoadStart = deepLink.indexOf("void (operationalReadOnly ? loadOperationalCommonTaskById : loadOpsTaskById)(deepLinkedTaskId)");
   const exactLoadEnd = deepLink.indexOf(".catch(() =>", exactLoadStart);
   const exactLoad = deepLink.slice(exactLoadStart, exactLoadEnd);
+  const openCase = source.slice(
+    source.indexOf("const openRegistrationCase = useCallback"),
+    source.indexOf("const editRegistrationTrack = useCallback"),
+  );
 
+  assert.ok(exactLoadStart >= 0 && exactLoadEnd > exactLoadStart, "the exact detail read must choose the role-scoped reader before any transport");
+  assertInOrder(openCase, [
+    "if (operationalReadOnly) return openCommonRegistrationDetail(taskId)",
+    "loadRegistrationCaseForWorkspace(taskId)",
+  ]);
   assert.match(exactLoad, /exactTask\.type === "registration"/);
   assert.match(exactLoad, /openRegistrationCase\(exactTask\.id, \{ allowDirectLoad: true \}\)\s*return/);
   assert.match(exactLoad, /return[\s\S]*?setSelectedTask\(exactTask\)/);

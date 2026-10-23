@@ -147,3 +147,12 @@ test("canonical scope is already closed when a failed-read snapshot is published
   pending.reject(new Error("offline")); await loaded;
   assert.equal(lateResult, false, "error observers must not rewrite an already settled retry scope");
 });
+
+for (const denial of [{code:'42501'}, {status:401}, {status:403}]) test(`permission denial discards the entire accepted page before explicit retry (${JSON.stringify(denial)})`,async()=>{
+ const {controller,requests,snapshots,result}=await harness();
+ const accepted=controller.load({scope:'same-actor',page:1,pageSize:10});result(0,1);await accepted;
+ const pending=controller.retry();requests[1].reject(denial);await pending;
+ assert.deepEqual(snapshots.at(-1).rows,[]);assert.equal(snapshots.at(-1).totalCount,null);assert.equal(snapshots.at(-1).scope,null);assert.equal(snapshots.at(-1).error,denial);
+ const retry=controller.retry();assert.deepEqual(snapshots.at(-1).rows,[],'previously accepted rows never reappear during retry');result(2,1);await retry;
+ assert.equal(snapshots.at(-1).rows.length,1);controller.dispose();
+});

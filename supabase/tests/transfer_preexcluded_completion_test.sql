@@ -206,8 +206,8 @@ select is((select count(*)::integer from public.ops_task_events e join transfer_
 drop trigger synthetic_transfer_failure on public.ops_tasks;
 set local role authenticated;
 select lives_ok(format('select public.complete_ops_transfer_roster_transition_v2(%L,%L)',task_id,request_id),'failed request can retry unchanged ID') from transfer_cases where label='rollback';
-select throws_ok(format('select public.transition_ops_task_status_v2(%L,%L,%L,%L)',c.task_id,'in_progress',t.updated_at,gen_random_uuid()),'40001','ops_transition_closed','completed transfer cannot be reopened') from transfer_cases c join public.ops_tasks t on t.id=c.task_id where c.label='normal';
-select throws_ok(format('select public.transition_ops_task_status_v2(%L,%L,%L,%L)',c.task_id,'canceled',t.updated_at,gen_random_uuid()),'40001','ops_transition_closed','completed transfer cannot be canceled') from transfer_cases c join public.ops_tasks t on t.id=c.task_id where c.label='normal';
+select throws_ok(format('select public.transition_ops_task_status_v2(%L,%L,%L,%L)',c.task_id,'in_progress',t.updated_at,gen_random_uuid()),'23514','ops_transition_closed','completed transfer cannot be reopened') from transfer_cases c join public.ops_tasks t on t.id=c.task_id where c.label='normal';
+select throws_ok(format('select public.transition_ops_task_status_v2(%L,%L,%L,%L)',c.task_id,'canceled',t.updated_at,gen_random_uuid()),'23514','ops_transition_closed','completed transfer cannot be canceled') from transfer_cases c join public.ops_tasks t on t.id=c.task_id where c.label='normal';
 select lives_ok(format('select public.transition_ops_task_status_v2(%L,%L,%L,%L)',c.task_id,'canceled',t.updated_at,gen_random_uuid()),'pending transfer can cancel without roster mutation') from transfer_cases c join public.ops_tasks t on t.id=c.task_id where c.label='unpaid';
 select lives_ok(format('select public.transition_ops_task_status_v2(%L,%L,%L,%L)',c.task_id,'in_progress',t.updated_at,gen_random_uuid()),'canceled transfer can reopen without roster mutation') from transfer_cases c join public.ops_tasks t on t.id=c.task_id where c.label='canceled';
 select pg_temp.actor(3);

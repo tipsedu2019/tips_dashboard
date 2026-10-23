@@ -960,7 +960,7 @@ test("영어·수학 레거시 토글은 공통 과목팀 canonical rule 한 건
 test("pgTAP 패킷은 single-writer 경계·원본 계보·스냅샷·최종 parity를 검증한다", async () => {
   const sql = await optionalSource(pgTapUrl)
 
-  assert.match(sql, /select plan\(85\)/)
+  assert.match(sql, /select plan\(92\)/)
   assert.match(sql, /mirror_makeup_notification_template_v1/)
   assert.match(sql, /hasnt_trigger\([\s\S]*?reconcile_makeup_notification_settings_after_write_v1/)
   assert.match(sql, /authenticated direct legacy setting writers remain closed/)

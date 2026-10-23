@@ -11,9 +11,11 @@ const fields = {
 
 // This projection has no internal memo/contact/account fallbacks. The server
 // separately enforces the actual role and retest-related reference scope.
-export async function readWordRetestReferenceData(client: SupabaseClient) {
-  const { data, error } = await client.rpc("get_word_retest_reference_data_v1")
-    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+export async function readWordRetestReferenceData(client: SupabaseClient, commonOperations = false) {
+  const read = commonOperations
+    ? client.rpc("read_operational_common_v1", { p_operation: "options", p_args: {} }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+    : client.rpc("get_word_retest_reference_data_v1").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  const { data, error } = await read
   if (error) throw error
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("재시험 선택 정보 형식을 확인할 수 없습니다.")
   const payload = data as Row

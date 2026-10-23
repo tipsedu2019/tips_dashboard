@@ -22,7 +22,7 @@ import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-
 import { useDataTableColumns } from "@/components/data-table/data-table-columns"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
-import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller"
+import { createNumberedPageController, isNumberedPagePermissionError, type NumberedPageSnapshot } from "@/lib/numbered-page-controller"
 import { normalizePage } from "@/lib/numbered-pagination"
 import { readMakeupNumberedPage, readMakeupDetail, readMakeupReservationContext, type MakeupNumberedFilters, type MakeupNumberedPage, type MakeupReservationContext } from "./makeup-numbered-service"
 
@@ -50,6 +50,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
+import { commonMakeupFilters, MAKEUP_COMMON_COLUMNS } from "./makeup-numbered-service"
 import {
   APPROVER_NAMES_BY_GROUP,
   buildRoomAvailability,
@@ -784,6 +785,8 @@ function MakeupRequestDetailCard({
   onOpenDetail?: () => void
   variant?: "full" | "compact" | "detail"
 }) {
+  const { role } = useAuth()
+  const commonRead = role === "teacher"
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
   const isCompact = variant === "compact"
   const detailColumns = getVisibleMakeupRequestCardColumns(request).filter(column => !isCompact || ["reason", "cancelDate", "makeupAt", "makeupRoom", "returnedReason", "rejectedReason", "finalNote"].includes(column.columnKey))
@@ -808,7 +811,7 @@ function MakeupRequestDetailCard({
             </div>
           ) : null}
           <dl className="grid gap-3 text-sm md:grid-cols-2">
-            <MakeupDetailInfo label="사유" value={request.reason || "-"} />
+            {!commonRead && <MakeupDetailInfo label="사유" value={request.reason || "-"} />}
             <MakeupDetailInfo label="휴강일" value={request.cancelDate || "-"} />
             <MakeupDetailInfo label="보강일시" value={formatRequestSlotsTime(request)} />
             <MakeupDetailInfo label="보강 강의실" value={formatRequestSlotsRooms(request)} />
@@ -824,13 +827,13 @@ function MakeupRequestDetailCard({
             <MakeupDetailInfo label="신청자" value={request.requesterLabel || "-"} />
             <MakeupDetailInfo label="상신일시" value={formatRequestEventDateTime(request, ["submitted", "resubmitted"], request.createdAt)} />
             <MakeupDetailInfo label="보완요청일시" value={formatRequestEventDateTime(request, ["revision_requested"])} />
-            <MakeupDetailInfo label="보완 사유" value={request.returnedReason || "-"} />
+            {!commonRead && <MakeupDetailInfo label="보완 사유" value={request.returnedReason || "-"} />}
             <MakeupDetailInfo label="승인일시" value={formatRequestEventDateTime(request, ["approved"], request.approvedAt)} />
-            <MakeupDetailInfo label="승인 메모" value={getMakeupApprovalNoteValue(request)} />
+            {!commonRead && <MakeupDetailInfo label="승인 메모" value={getMakeupApprovalNoteValue(request)} />}
             <MakeupDetailInfo label="반려일시" value={formatRequestEventDateTime(request, ["rejected"])} />
-            <MakeupDetailInfo label="반려 사유" value={request.rejectedReason || "-"} />
+            {!commonRead && <MakeupDetailInfo label="반려 사유" value={request.rejectedReason || "-"} />}
             <MakeupDetailInfo label="승인취소일시" value={formatRequestEventDateTime(request, ["approval_canceled", "completed_canceled"], request.canceledAt)} />
-            <MakeupDetailInfo label="승인취소 메모" value={getRequestEvent(request, ["approval_canceled", "completed_canceled"])?.note || "-"} />
+            {!commonRead && <MakeupDetailInfo label="승인취소 메모" value={getRequestEvent(request, ["approval_canceled", "completed_canceled"])?.note || "-"} />}
             <MakeupDetailInfo label="결재자" value={request.approverLabel || "-"} />
           </dl>
         </details>
@@ -1199,6 +1202,8 @@ function MakeupRequestDataTable({
   subjectFilterOptions: MakeupRequestSelectFilterOption[]
   teacherFilterOptions: MakeupRequestSelectFilterOption[]
 }) {
+  const { role } = useAuth()
+  const tableColumns = useMemo(() => MAKEUP_REQUEST_TABLE_COLUMNS.filter(column => role !== "teacher" || column.columnKey === "action" || MAKEUP_COMMON_COLUMNS.some(key => key === column.columnKey)), [role])
   const [columnWidths, setColumnWidths] = useState<Record<MakeupRequestTableColumnKey, number>>(MAKEUP_REQUEST_TABLE_COLUMN_WIDTHS)
   const makeupTableSort: MakeupRequestTableSort = filters.sortColumn && filters.sortDirection ? { columnKey: filters.sortColumn, direction: filters.sortDirection } : null
   const filterColumnKey = filters.filterColumn
@@ -1209,16 +1214,16 @@ function MakeupRequestDataTable({
   const makeupPeriodFilter = filters.period
   const makeupPeriodStartDate = filters.dateFrom
   const makeupPeriodEndDate = filters.dateTo
-  const columnDefinitions = useMemo(() => MAKEUP_REQUEST_TABLE_COLUMNS.map(column => ({
+  const columnDefinitions = useMemo(() => tableColumns.map(column => ({
     id: column.columnKey, label: column.label, required: ["className", "action"].includes(column.columnKey),
     defaultVisible: ["className", "status", "teacher", "cancelDate", "makeupAt", "action"].includes(column.columnKey)
       || filters.view === "closed" && column.columnKey === "approvedAt",
-  })), [filters.view])
+  })), [filters.view, tableColumns])
   const { isColumnVisible, columnSettingsControl } = useDataTableColumns(`tips:makeup:${filters.view}:columns`, columnDefinitions)
-  const visibleColumns = MAKEUP_REQUEST_TABLE_COLUMNS.filter(column => isColumnVisible(column.columnKey))
+  const visibleColumns = tableColumns.filter(column => isColumnVisible(column.columnKey))
   const gridTemplateColumns = getMakeupRequestTableGridTemplate(columnWidths, visibleColumns)
   const gridTemplateStyle = { "--makeup-request-grid-template": gridTemplateColumns } as CSSProperties
-  const filterColumn = MAKEUP_REQUEST_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || MAKEUP_REQUEST_TABLE_COLUMNS[1]
+  const filterColumn = tableColumns.find((column) => column.columnKey === filterColumnKey) || tableColumns[1]
   const visibleRequests = requests
 
   function handleHeaderSelect(columnKey: MakeupRequestTableColumnKey) {
@@ -1251,7 +1256,7 @@ function MakeupRequestDataTable({
       <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
         <DataTableToolbar aria-label="휴보강 전체 필터">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <MakeupRequestFilterSelect ariaLabel="휴보강 검색 범위" includeAll={false} value={filterColumnKey} allLabel="수업" options={MAKEUP_REQUEST_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({value: column.columnKey, label: column.label, count: 0}))} onChange={value => onFiltersChange({filterColumn: value as MakeupNumberedFilters["filterColumn"]})} />
+            <MakeupRequestFilterSelect ariaLabel="휴보강 검색 범위" includeAll={false} value={filterColumnKey} allLabel="수업" options={tableColumns.filter(column => column.columnKey !== "action").map(column => ({value: column.columnKey, label: column.label, count: 0}))} onChange={value => onFiltersChange({filterColumn: value as MakeupNumberedFilters["filterColumn"]})} />
             <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="휴보강 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
             {columnSettingsControl}
           </div>
@@ -1639,7 +1644,7 @@ function createMakeupClassSchedulePlanLoadCache(
 const EMPTY_NUMBERED_FILTERS: MakeupNumberedFilters = { view: "mine", subject: "all", teacher: "all", period: "all", dateFrom: "", dateTo: "", filterColumn: "className", search: "", sortColumn: null, sortDirection: null }
 type MakeupPageState = NumberedPageSnapshot<MakeupRequest> & Partial<Pick<MakeupNumberedPage, "viewCounts" | "subjectOptions" | "teacherOptions">>
 
-function makeupNavigationFromUrl(params: URLSearchParams) {
+function makeupNavigationFromUrl(params: URLSearchParams, commonRead = false) {
   let filters = { ...EMPTY_NUMBERED_FILTERS }
   try {
     const serialized = params.get("makeupFilters")
@@ -1647,7 +1652,7 @@ function makeupNavigationFromUrl(params: URLSearchParams) {
   } catch { /* Invalid navigation starts at the default scope. */ }
   const view = params.get("view")
   if (MAKEUP_REQUEST_VIEW_TABS.some((tab) => tab.id === view)) filters.view = view as MakeupRequestView
-  return { filters, page: normalizePage(Number(params.get("page"))) }
+  return { filters: commonMakeupFilters(filters, commonRead), page: normalizePage(Number(params.get("page"))) }
 }
 
 function makeupCustomDatesFromUrl(params: URLSearchParams, filters: MakeupNumberedFilters) {
@@ -1674,7 +1679,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   // One location watermark deduplicates Next/native events and acknowledges
   // our own accepted-state writes; another location makes old URLs usable again.
   const handledQuery = useRef(searchParamString)
-  const [navigation, setNavigation] = useState(() => makeupNavigationFromUrl(new URLSearchParams(searchParams.toString())))
+  const [navigation, setNavigation] = useState(() => makeupNavigationFromUrl(new URLSearchParams(searchParams.toString()), role === "teacher"))
   const [pageState, setPageState] = useState<MakeupPageState>({ scope: null, requestedPage: 1, page: 1, pageSize: 10, totalCount: null, rows: [], loading: false, error: null })
   const latestPageState = useRef(pageState)
   const pageSize = useDataTablePageSize("makeup:requests")
@@ -1695,7 +1700,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const customDates = useRef(makeupCustomDatesFromUrl(new URLSearchParams(searchParams.toString()), navigation.filters))
   const changeFilters = useCallback((patch: Partial<MakeupNumberedFilters>) => {
     setNavigation((current) => {
-      const filters = { ...current.filters, ...patch }
+      const filters = commonMakeupFilters({ ...current.filters, ...patch }, role === "teacher")
       if (patch.dateFrom !== undefined || patch.dateTo !== undefined) customDates.current = { dateFrom: patch.dateFrom ?? customDates.current.dateFrom, dateTo: patch.dateTo ?? customDates.current.dateTo }
       if (patch.period) {
         const range = filters.period === "week" ? getMakeupRequestWeekRange(todayKey) : filters.period === "month" ? getMakeupRequestMonthRange(todayKey) : { start: todayKey, end: todayKey }
@@ -1703,7 +1708,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       }
       return { filters, page: 1 }
     })
-  }, [todayKey])
+  }, [todayKey, role])
   const setView = useCallback((view: MakeupRequestView) => changeFilters({ view }), [changeFilters])
   const [catalogData, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,
@@ -1750,17 +1755,18 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   })
   const { requestLocalAction } = draftNavigation
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
+  const detailReadAbort = useRef<AbortController | null>(null)
   const [detailId, setDetailId] = useState(() => searchParams.get("requestId") || searchParams.get("request") || "")
   const adoptLocationQuery = useCallback((query: string) => {
     if (handledQuery.current === query) return
     handledQuery.current = query
     const params = new URLSearchParams(query)
-    const restored = makeupNavigationFromUrl(params)
+    const restored = makeupNavigationFromUrl(params, role === "teacher")
     customDates.current = makeupCustomDatesFromUrl(params, restored.filters)
     // Detail-only links must not replay a list read or reset an editor draft.
     setNavigation((current) => current.page === restored.page && JSON.stringify(current.filters) === JSON.stringify(restored.filters) ? current : restored)
     setDetailId(params.get("requestId") || params.get("request") || "")
-  }, [])
+  }, [role])
   // Next query-only navigation does not emit native popstate. Adopt it before
   // effects can read or persist the previous location.
   if (observedQuery !== searchParamString) {
@@ -1801,7 +1807,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   // Preserve the existing viewer workflow; only teacher/assistant are changed here.
   const canProcessRequest = isManager || role === "viewer"
   const approverEffectiveYear = getMakeupApproverEffectiveYear(editingRequest?.createdAt)
-  const detailRequest = selectedDetailRequest
+  const detailRequest = role === "teacher" && isNumberedPagePermissionError(pageState.error) ? null : selectedDetailRequest
   const actionNoteConfig = actionNoteRequest ? MAKEUP_ACTION_NOTE_CONFIG[actionNoteRequest.kind] : MAKEUP_ACTION_NOTE_CONFIG.revision
 
   const refresh = useCallback(async () => {
@@ -1820,11 +1826,18 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     createLifetimeAbort.current = createAbort
     const controller = createNumberedPageController<MakeupRequest>({
       loadPage: ({ scope, page, pageSize, signal }) => readMakeupNumberedPage({ filters: JSON.parse(scope).filters, page, pageSize, signal }),
-      onChange: (snapshot) => { if (lifetime.current) { latestPageState.current = snapshot; setPageState(snapshot) } },
+      onChange: (snapshot) => { if (lifetime.current) {
+        if (role === "teacher" && isNumberedPagePermissionError(snapshot.error)) {
+          detailReadAbort.current?.abort()
+          setDetailId("")
+          setSelectedDetailRequest(null)
+        }
+        latestPageState.current = snapshot; setPageState(snapshot)
+      } },
     })
     controllerRef.current = controller
     return () => { lifetime.current = false; createAbort.abort(); controller.dispose(); schedulePlanLoadCacheRef.current?.reset() }
-  }, [])
+  }, [role])
   useEffect(() => {
     if (pageSize.ready) void controllerRef.current?.load({ scope: JSON.stringify({ actorScope, filters: navigation.filters }), page: navigation.page, pageSize: pageSize.pageSize })
   }, [actorScope, navigation, pageSize.ready, pageSize.pageSize])
@@ -1911,12 +1924,16 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setSelectedDetailRequest(null)
     if (!requestedRequestId) return
     const abort = new AbortController()
+    detailReadAbort.current = abort
     consumedDeepLinkRequestIdRef.current = requestedRequestId
     void readMakeupDetail({ id: requestedRequestId, signal: abort.signal }).then((request) => {
       if (!abort.signal.aborted && lifetime.current) { setSelectedDetailRequest(request); if (!request) setError("신청서를 찾을 수 없습니다.") }
-    }, (failure) => { if (!abort.signal.aborted && lifetime.current) setError(getMakeupActionErrorMessage(failure, "상세를 불러오지 못했습니다.")) })
+    }, (failure) => { if (!abort.signal.aborted && lifetime.current) {
+      if (role === "teacher" && isNumberedPagePermissionError(failure)) controllerRef.current?.invalidatePermission(failure)
+      setError(getMakeupActionErrorMessage(failure, "상세를 불러오지 못했습니다."))
+    } })
     return () => abort.abort()
-  }, [detailId, catalogGeneration])
+  }, [detailId, catalogGeneration, role])
 
   const clearRequestDeepLink = useCallback(() => {
     consumedDeepLinkRequestIdRef.current = ""

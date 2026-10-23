@@ -85,7 +85,7 @@ reset role;
 update public.students set class_ids=jsonb_build_array(pg_temp.scope_id(102)),waitlist_class_ids='[]' where id=pg_temp.scope_id(101);
 select pg_temp.scope_actor(3);
 set local role authenticated;
-select throws_ok($q$select public.get_word_retest_reference_data_v1()$q$,'42501','word_retest_reference_access_denied','assistant reference endpoint does not change teacher reference scope');
+select ok(public.get_word_retest_reference_data_v1()::text not like '%CANARY%','teacher retest options use the same minimal reference projection after raw management reads close');
 select throws_ok($q$update public.profiles set role='staff' where id=pg_temp.scope_id(3)$q$,'42501',null,'teacher cannot change its own authorization role');
 select is((select role from public.profiles where id=pg_temp.scope_id(3)),'teacher','teacher can still read its authentication profile');
 reset role;

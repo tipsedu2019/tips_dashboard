@@ -147,9 +147,9 @@ test("textbook teacher request pgTAP covers RPC and direct-write authorization",
   assert.match(sql, /select no_plan\(\)/);
   assert.match(sql, /set local role authenticated/);
   assert.match(sql, /public\.create_textbook_request_v1\(/);
-  assert.match(sql, /teacher RPC stores the server-owned requester and creator/);
-  assert.match(sql, /teacher RPC creates requested-only zero-fulfillment lines/);
-  assert.match(sql, /teacher RPC creates no stock moves/);
+  assert.match(sql, /staff RPC stores the server-owned requester and creator/);
+  assert.match(sql, /staff RPC creates requested-only zero-fulfillment lines/);
+  assert.match(sql, /staff RPC creates no stock moves/);
   assert.match(sql, /viewer cannot call the textbook request RPC/);
   assert.match(sql, /assistant cannot call the textbook request RPC/);
   assert.match(sql, /teacher cannot directly update a textbook request/);

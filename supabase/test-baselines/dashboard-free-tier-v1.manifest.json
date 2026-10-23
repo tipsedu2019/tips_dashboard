@@ -917,8 +917,8 @@
     },
     {
       "fileName": "20261023091500_dashboard_operational_role_scope.sql",
-      "status": "candidate",
-      "sha256": "e18600ba1d24af956364a3f001b57a3a6cceb0bcd65bdfb5e99e23c68a807473"
+      "status": "final",
+      "sha256": "8078668dda91bae75d099428a8012e65acb5d4f70c1d025c7e0966bcf962b711"
     }
   ]
 }

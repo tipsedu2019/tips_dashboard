@@ -20,6 +20,7 @@ import { getOpsTaskPeriodDraftError, useOpsTaskPeriodFilters } from "./use-ops-t
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
 import { readOpsTaskListNavigation, writeOpsTaskListNavigation } from "./ops-task-list-navigation"
 import type { DataTablePageSize } from "@/lib/numbered-pagination"
+import { isNumberedPagePermissionError } from "@/lib/numbered-page-controller"
 import { Button } from "@/components/ui/button"
 import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs"
 import {
@@ -51,7 +52,7 @@ import {
 import { supabase } from "@/lib/supabase"
 import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard"
 import { pushLocalHistoryState } from "@/lib/unsaved-history-fallback"
-import { isTeacherReadOnlyTask } from "./operational-task-access"
+import { isOperationalCommonColumn, isTeacherReadOnlyTask, sanitizeOperationalCommonControls } from "./operational-task-access"
 import { useAuth } from "@/providers/auth-provider"
 
 function DateControlLoading() {
@@ -118,6 +119,7 @@ import {
   clearOpsTaskPageStatsCache,
   loadOpsRegistrationCaseDetail,
   loadOpsTaskById,
+  loadOperationalCommonTaskById,
   loadOpsRegistrationClassDetail,
   loadOpsTaskWorkspaceOptionData,
   startOpsTaskPageStatsSupplementLoad,
@@ -6130,6 +6132,7 @@ function getRegistrationMobileSectionData(task: OpsTask, registration: OpsTask["
 
 function WithdrawalDataTable({
   tasks,
+  commonReadOnly = false,
   todayKey,
   loading,
   readError = false,
@@ -6150,6 +6153,7 @@ function WithdrawalDataTable({
   onPageControlsChange,
   initialControls = EMPTY_OPERATION_TABLE_PAGE_CONTROLS,
 }: {
+  commonReadOnly?: boolean
   tasks: OpsTask[]
   todayKey: string
   loading: boolean
@@ -6171,17 +6175,18 @@ function WithdrawalDataTable({
   onPageControlsChange?: (controls: OperationTablePageControls) => void
   initialControls?: OperationTablePageControls
 }) {
+  const safeInitialControls = sanitizeOperationalCommonControls("withdrawal", initialControls, commonReadOnly)
   const [columnWidths, setColumnWidths] = useState<Record<WithdrawalTableColumnKey, number>>(WITHDRAWAL_TABLE_COLUMN_WIDTHS)
-  const [withdrawalTableSort, setWithdrawalTableSort] = useState<WithdrawalTableSort>(() => initialControls.sortColumn && initialControls.sortDirection ? { columnKey: initialControls.sortColumn as WithdrawalTableColumnKey, direction: initialControls.sortDirection } : null)
-  const [filterColumnKey, setFilterColumnKey] = useState<WithdrawalTableColumnKey>((initialControls.filterColumn || "student") as WithdrawalTableColumnKey)
-  const [filterValue, setFilterValue] = useState(initialControls.search)
-  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState(initialControls.subject || "all")
-  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState(initialControls.teacher || "all")
-  const [withdrawalPeriodFilter, setWithdrawalPeriodFilter] = useState<WithdrawalPeriodFilter>(initialControls.period)
-  const [withdrawalPeriodStartDate, setWithdrawalPeriodStartDate] = useState(initialControls.dateFrom || "")
-  const [withdrawalPeriodEndDate, setWithdrawalPeriodEndDate] = useState(initialControls.dateTo || "")
-  const { isColumnVisible, columnSettingsControl } = useDataTableColumns("tips:withdrawal:columns", WITHDRAWAL_COLUMN_SETTINGS)
-  const visibleColumns = [...WITHDRAWAL_TABLE_COLUMNS].sort((a, b) => (a.columnKey === "student" ? -1 : b.columnKey === "student" ? 1 : 0)).filter((column) => isColumnVisible(column.columnKey))
+  const [withdrawalTableSort, setWithdrawalTableSort] = useState<WithdrawalTableSort>(() => safeInitialControls.sortColumn && safeInitialControls.sortDirection ? { columnKey: safeInitialControls.sortColumn as WithdrawalTableColumnKey, direction: safeInitialControls.sortDirection } : null)
+  const [filterColumnKey, setFilterColumnKey] = useState<WithdrawalTableColumnKey>((safeInitialControls.filterColumn || "student") as WithdrawalTableColumnKey)
+  const [filterValue, setFilterValue] = useState(safeInitialControls.search)
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState(safeInitialControls.subject || "all")
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState(safeInitialControls.teacher || "all")
+  const [withdrawalPeriodFilter, setWithdrawalPeriodFilter] = useState<WithdrawalPeriodFilter>(safeInitialControls.period)
+  const [withdrawalPeriodStartDate, setWithdrawalPeriodStartDate] = useState(safeInitialControls.dateFrom || "")
+  const [withdrawalPeriodEndDate, setWithdrawalPeriodEndDate] = useState(safeInitialControls.dateTo || "")
+  const { isColumnVisible, columnSettingsControl } = useDataTableColumns("tips:withdrawal:columns", WITHDRAWAL_COLUMN_SETTINGS.filter(column => !commonReadOnly || isOperationalCommonColumn("withdrawal", column.id)))
+  const visibleColumns = [...WITHDRAWAL_TABLE_COLUMNS].sort((a, b) => (a.columnKey === "student" ? -1 : b.columnKey === "student" ? 1 : 0)).filter((column) => isColumnVisible(column.columnKey) && (!commonReadOnly || isOperationalCommonColumn("withdrawal", column.columnKey)))
   const gridTemplateColumns = getWithdrawalTableGridTemplate(columnWidths, visibleColumns)
   const gridTemplateStyle = { "--withdrawal-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = WITHDRAWAL_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || WITHDRAWAL_TABLE_COLUMNS[3]
@@ -6286,7 +6291,7 @@ function WithdrawalDataTable({
     <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
       <DataTableToolbar aria-label="퇴원 전체 필터">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <WithdrawalFilterSelect label="퇴원 검색 범위" includeAll={false} value={filterColumnKey} allLabel="학생" options={WITHDRAWAL_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as WithdrawalTableColumnKey)} />
+          <WithdrawalFilterSelect label="퇴원 검색 범위" includeAll={false} value={filterColumnKey} allLabel="학생" options={WITHDRAWAL_TABLE_COLUMNS.filter(column => column.columnKey !== "action" && (!commonReadOnly || isOperationalCommonColumn("withdrawal", column.columnKey))).map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as WithdrawalTableColumnKey)} />
           <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="퇴원 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
           {columnSettingsControl}
         </div>
@@ -6580,6 +6585,7 @@ function WithdrawalDataTable({
 
 function TransferDataTable({
   tasks,
+  commonReadOnly = false,
   todayKey,
   loading,
   readError = false,
@@ -6600,6 +6606,7 @@ function TransferDataTable({
   onPageControlsChange,
   initialControls = EMPTY_OPERATION_TABLE_PAGE_CONTROLS,
 }: {
+  commonReadOnly?: boolean
   tasks: OpsTask[]
   todayKey: string
   loading: boolean
@@ -6621,17 +6628,18 @@ function TransferDataTable({
   onPageControlsChange?: (controls: OperationTablePageControls) => void
   initialControls?: OperationTablePageControls
 }) {
+  const safeInitialControls = sanitizeOperationalCommonControls("transfer", initialControls, commonReadOnly)
   const [columnWidths, setColumnWidths] = useState<Record<TransferTableColumnKey, number>>(TRANSFER_TABLE_COLUMN_WIDTHS)
-  const [transferTableSort, setTransferTableSort] = useState<TransferTableSort>(() => initialControls.sortColumn && initialControls.sortDirection ? { columnKey: initialControls.sortColumn as TransferTableColumnKey, direction: initialControls.sortDirection } : null)
-  const [filterColumnKey, setFilterColumnKey] = useState<TransferTableColumnKey>((initialControls.filterColumn || "student") as TransferTableColumnKey)
-  const [filterValue, setFilterValue] = useState(initialControls.search)
-  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState(initialControls.subject || "all")
-  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState(initialControls.teacher || "all")
-  const [transferPeriodFilter, setTransferPeriodFilter] = useState<WithdrawalPeriodFilter>(initialControls.period)
-  const [transferPeriodStartDate, setTransferPeriodStartDate] = useState(initialControls.dateFrom || "")
-  const [transferPeriodEndDate, setTransferPeriodEndDate] = useState(initialControls.dateTo || "")
-  const { isColumnVisible, columnSettingsControl } = useDataTableColumns("tips:transfer:columns", TRANSFER_COLUMN_SETTINGS)
-  const visibleColumns = [...TRANSFER_TABLE_COLUMNS].sort((a, b) => (a.columnKey === "student" ? -1 : b.columnKey === "student" ? 1 : 0)).filter((column) => isColumnVisible(column.columnKey))
+  const [transferTableSort, setTransferTableSort] = useState<TransferTableSort>(() => safeInitialControls.sortColumn && safeInitialControls.sortDirection ? { columnKey: safeInitialControls.sortColumn as TransferTableColumnKey, direction: safeInitialControls.sortDirection } : null)
+  const [filterColumnKey, setFilterColumnKey] = useState<TransferTableColumnKey>((safeInitialControls.filterColumn || "student") as TransferTableColumnKey)
+  const [filterValue, setFilterValue] = useState(safeInitialControls.search)
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState(safeInitialControls.subject || "all")
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState(safeInitialControls.teacher || "all")
+  const [transferPeriodFilter, setTransferPeriodFilter] = useState<WithdrawalPeriodFilter>(safeInitialControls.period)
+  const [transferPeriodStartDate, setTransferPeriodStartDate] = useState(safeInitialControls.dateFrom || "")
+  const [transferPeriodEndDate, setTransferPeriodEndDate] = useState(safeInitialControls.dateTo || "")
+  const { isColumnVisible, columnSettingsControl } = useDataTableColumns("tips:transfer:columns", TRANSFER_COLUMN_SETTINGS.filter(column => !commonReadOnly || isOperationalCommonColumn("transfer", column.id)))
+  const visibleColumns = [...TRANSFER_TABLE_COLUMNS].sort((a, b) => (a.columnKey === "student" ? -1 : b.columnKey === "student" ? 1 : 0)).filter((column) => isColumnVisible(column.columnKey) && (!commonReadOnly || isOperationalCommonColumn("transfer", column.columnKey)))
   const gridTemplateColumns = getTransferTableGridTemplate(columnWidths, visibleColumns)
   const gridTemplateStyle = { "--transfer-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = TRANSFER_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || TRANSFER_TABLE_COLUMNS[3]
@@ -6740,7 +6748,7 @@ function TransferDataTable({
     <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
       <DataTableToolbar aria-label="전반 전체 필터">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <WithdrawalFilterSelect label="전반 검색 범위" includeAll={false} value={filterColumnKey} allLabel="학생" options={TRANSFER_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as TransferTableColumnKey)} />
+          <WithdrawalFilterSelect label="전반 검색 범위" includeAll={false} value={filterColumnKey} allLabel="학생" options={TRANSFER_TABLE_COLUMNS.filter(column => column.columnKey !== "action" && (!commonReadOnly || isOperationalCommonColumn("transfer", column.columnKey))).map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as TransferTableColumnKey)} />
           <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="전반 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
           {columnSettingsControl}
         </div>
@@ -7925,7 +7933,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const registrationViewTabs = useMemo(() => REGISTRATION_VIEW_TABS, [])
   const registrationCalendarKindTabs = useMemo(() => REGISTRATION_CALENDAR_KIND_TABS, [])
   const [registrationMode, setRegistrationMode] = useState<RegistrationWorkspaceMode>("list")
-  const [registrationConsultationOwnerScope, setRegistrationConsultationOwnerScope] = useState<RegistrationConsultationOwnerScope>("mine")
+  const [registrationConsultationOwnerScope, setRegistrationConsultationOwnerScope] = useState<RegistrationConsultationOwnerScope>(() => resolvedViewerRole === "teacher" ? "all" : "mine")
   const [registrationCalendarKind, setRegistrationCalendarKind] = useState<RegistrationAppointmentCalendarKindFilter>("all")
   const [registrationCalendarKindCounts, setRegistrationCalendarKindCounts] = useState<RegistrationAppointmentCalendarKindCounts>({
     all: 0,
@@ -8130,19 +8138,20 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
     }
     if (scopedTaskType === "withdrawal" || scopedTaskType === "transfer") {
+      const controls = sanitizeOperationalCommonControls(scopedTaskType, operationTablePageControls, operationalReadOnly)
       return {
         taskType: scopedTaskType,
-        search: operationTablePageControls.search,
+        search: controls.search,
         statuses: [],
         view: withdrawalView,
-        subject: operationTablePageControls.subject,
-        teacher: operationTablePageControls.teacher,
-        period: operationTablePageControls.period,
-        dateFrom: operationTablePageControls.period === "custom" ? operationTablePageControls.dateFrom : null,
-        dateTo: operationTablePageControls.period === "custom" ? operationTablePageControls.dateTo : null,
-        filterColumn: operationTablePageControls.filterColumn as never,
-        sortColumn: operationTablePageControls.sortColumn as never,
-        sortDirection: operationTablePageControls.sortDirection,
+        subject: controls.subject,
+        teacher: controls.teacher,
+        period: controls.period,
+        dateFrom: controls.period === "custom" ? controls.dateFrom : null,
+        dateTo: controls.period === "custom" ? controls.dateTo : null,
+        filterColumn: controls.filterColumn as never,
+        sortColumn: controls.sortColumn as never,
+        sortDirection: controls.sortDirection,
       } as OpsTaskPageFilters
     }
     if (scopedTaskType === "word_retest") {
@@ -8179,6 +8188,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     assigneeTeamFilter,
     deferredQuery,
     operationTablePageControls,
+    operationalReadOnly,
     registrationConsultationOwnerScope,
     registrationView,
     registrationViewerId,
@@ -8233,6 +8243,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       const view = params.get("flow") || ""
       if (isWithdrawalViewKey(view)) filters = { ...filters, view }
     }
+    if (filters && (filters.taskType === "transfer" || filters.taskType === "withdrawal")) {
+      filters = sanitizeOperationalCommonControls(filters.taskType, filters, operationalReadOnly)
+    }
     const routeChanged = Boolean(saved && JSON.stringify(filters) !== JSON.stringify(saved.filters))
     if (filters) {
       setQuery(filters.search)
@@ -8269,7 +8282,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     restoreScrollRef.current = saved?.scrollY ?? null
     pendingNavigationRestoreRef.current = false
     setNavigationRestore((current) => ({ key: current.key + 1, page, filtersKey: filters ? JSON.stringify(filters) : "", ready: true }))
-  }, [currentUserId, isAssistant, navigationActorScope, pathname, scopedTaskType, wordRetestViewerRole])
+  }, [currentUserId, isAssistant, navigationActorScope, operationalReadOnly, pathname, scopedTaskType, wordRetestViewerRole])
   useEffect(() => { restoreListNavigation() }, [restoreListNavigation])
   const filtersReady = !navigationRestore.filtersKey || navigationRestore.filtersKey === JSON.stringify(taskPageFilters)
   useEffect(() => {
@@ -8293,6 +8306,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     restorationKey: String(navigationRestore.key),
     onPageCommit: commitListPage,
   })
+  const commonReadDenied = operationalReadOnly && isNumberedPagePermissionError(numberedPage.error)
+  useEffect(() => {
+    if (!commonReadDenied) return
+    // Revoke both accepted detail and any read already in flight with this page.
+    selectedDetailLoadRef.current += 1
+    workspaceLoadGenerationRef.current += 1
+    workspaceLoadAbortControllerRef.current?.abort()
+    setSelectedTask(null)
+    setDetailOpen(false)
+    setRegistrationApplicationHost({ kind: "closed" })
+    setData(null)
+  }, [commonReadDenied])
   const loading = (numberedServerPage ? numberedPage.totalCount === null && numberedPage.loading : workspaceLoading) || registrationFixtureTransitioning
   const data = useMemo(() => {
     if (!numberedServerPage) return workspaceData
@@ -8390,7 +8415,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [refreshNumberedPage, registrationFixtureEnabled, registrationFixtureRequested, wordRetestFixtureRequested, wordRetestFixtureViewer])
 
   useEffect(() => {
-    if (!numberedServerPage || authLoading || !currentUserId) return
+    if (!numberedServerPage || authLoading || !currentUserId || commonReadDenied) return
     const controller = new AbortController()
     workspaceLoadAbortControllerRef.current = controller
     const generation = ++workspaceLoadGenerationRef.current
@@ -8411,7 +8436,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       if (registrationRuntime && current()) setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { registrationRuntime }))
     })
     return () => { controller.abort(); workspaceLoadGenerationRef.current += 1 }
-  }, [authLoading, currentUserId, numberedServerPage, supplementRevision, taskPageFilters])
+  }, [authLoading, commonReadDenied, currentUserId, numberedServerPage, supplementRevision, taskPageFilters])
 
   const refreshFirstTaskPageAfterMutation = useCallback(async () => {
     await reload(true, false)
@@ -9812,13 +9837,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [currentUserId, currentUserTaskTeam, syncTaskDeepLink])
 
   const loadRegistrationCaseForWorkspace = useCallback((taskId: string, force = false) => {
+    if (operationalReadOnly) return Promise.reject(new Error("operational_common_read_required"))
     if (registrationFixtureEnabled && registrationFixtureModule && registrationFixtureStateRef.current) {
       const detail = registrationFixtureModule.getRegistrationSubjectTrackFixtureCase(registrationFixtureStateRef.current, taskId)
       if (!detail) return Promise.reject(new Error("registration_subject_track_fixture_case_not_found"))
       return Promise.resolve(toObservationAwareCaseDetail(detail))
     }
     return loadOpsRegistrationCaseDetail(taskId, registrationViewerId, { force })
-  }, [registrationFixtureEnabled, registrationFixtureModule, registrationViewerId])
+  }, [operationalReadOnly, registrationFixtureEnabled, registrationFixtureModule, registrationViewerId])
 
   const rehydrateCommittedRegistrationCase = useCallback(async (committed: RegistrationCommittedReceipt) => {
     const selectionKey = `committed:${committed.taskId}`
@@ -9922,7 +9948,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }, [])
 
-  const openDetail = useCallback((task: OpsTask, trackId: string | null = null) => {
+  const openDetail = useCallback((task: OpsTask, trackId: string | null = null, options: { skipCommonRefresh?: boolean } = {}) => {
     const nextTrackId = task.type === "registration" ? trackId : null
     registrationTrackSelectionRef.current = nextTrackId ? `${task.id}:${nextTrackId}` : ""
     setRegistrationCaseDetail(null)
@@ -9945,8 +9971,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       void readGeneralTaskDetail(task.id)
       return
     }
+    if (options.skipCommonRefresh && isTeacherReadOnlyTask(resolvedViewerRole, task.type)) return
     const detailLoad = ++selectedDetailLoadRef.current
-    void loadOpsTaskById(task.id).then((exactTask) => {
+    void (isTeacherReadOnlyTask(resolvedViewerRole, task.type) ? loadOperationalCommonTaskById : loadOpsTaskById)(task.id).then((exactTask) => {
       if (!exactTask || selectedDetailLoadRef.current !== detailLoad) return
       setSelectedTask(exactTask)
       setData((current) => {
@@ -9957,7 +9984,32 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         }
       })
     }).catch(() => undefined)
-  }, [readGeneralTaskDetail, syncTaskDeepLink])
+  }, [readGeneralTaskDetail, resolvedViewerRole, syncTaskDeepLink])
+
+  const invalidateCommonPagePermission = numberedPage.invalidatePermission
+  const openCommonRegistrationDetail = useCallback(async (taskId: string) => {
+    if (commonReadDenied) return null
+    const requestId = ++selectedDetailLoadRef.current
+    const viewerId = currentUserId
+    registrationTrackSelectionRef.current = `case:${taskId}`
+    syncTaskDeepLink(taskId, null, null, "push")
+    setRegistrationApplicationHost({ kind: "loading_detail", taskId, focusTrackId: null, appointmentId: null })
+    const ownsRead = () => workspaceMountedRef.current && selectedDetailLoadRef.current === requestId
+      && latestWorkspaceViewerIdRef.current === viewerId
+      && new URLSearchParams(window.location.search).get("taskId") === taskId
+    try {
+      const task = await loadOperationalCommonTaskById(taskId)
+      if (!ownsRead() || !task) return null
+      openDetail(task, null, { skipCommonRefresh: true })
+      return { task, track: task.registrationTracks?.[0] || null, detail: null }
+    } catch (error) {
+      if (ownsRead()) {
+        if (isNumberedPagePermissionError(error)) invalidateCommonPagePermission(error)
+        else setRegistrationApplicationHost({ kind: "refresh_failed", taskId, focusTrackId: null, appointmentId: null, message: "운영 공통정보를 불러오지 못했습니다." })
+      }
+      return null
+    }
+  }, [commonReadDenied, currentUserId, invalidateCommonPagePermission, openDetail, syncTaskDeepLink])
 
   const openWordRetestEditor = useCallback((
     task: OpsTask,
@@ -10026,6 +10078,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       syncTaskDeepLink(taskId, null)
       return { task, track: task.registrationTracks?.find((item) => item.id === trackId) || null, detail: null }
     }
+
+    if (operationalReadOnly) return openCommonRegistrationDetail(taskId)
 
     const selectionKey = `${taskId}:${trackId}`
     registrationTrackSelectionRef.current = selectionKey
@@ -10101,7 +10155,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       return null
     }
-  }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, openDetail, syncTaskDeepLink, taskById])
+  }, [operationalReadOnly, openCommonRegistrationDetail, canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, openDetail, syncTaskDeepLink, taskById])
 
   const openRegistrationCase = useCallback(async (
     taskId: string,
@@ -10113,6 +10167,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setMessage("선택한 등록 업무를 찾을 수 없습니다. 목록을 다시 불러오세요.")
       return null
     }
+
+    if (operationalReadOnly) return openCommonRegistrationDetail(taskId)
 
     const selectionKey = `case:${taskId}`
     registrationTrackSelectionRef.current = selectionKey
@@ -10179,7 +10235,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       return null
     }
-  }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
+  }, [operationalReadOnly, openCommonRegistrationDetail, canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
 
   const editRegistrationTrack = useCallback(async (taskId: string, trackId: string) => {
     const selection = await openRegistrationTrack(taskId, trackId)
@@ -10202,6 +10258,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setMessage("선택한 등록 예약을 찾을 수 없습니다. 달력을 다시 불러오세요.")
       return null
     }
+
+    if (operationalReadOnly) return openCommonRegistrationDetail(taskId)
 
     const selectionKey = `appointment:${taskId}:${appointmentId}`
     registrationTrackSelectionRef.current = selectionKey
@@ -10278,11 +10336,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       return null
     }
-  }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
+  }, [operationalReadOnly, openCommonRegistrationDetail, canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
 
   const openRegistrationObservation = useCallback(async (
     target: RegistrationObservationDirectTarget,
   ) => {
+    if (operationalReadOnly) { await openCommonRegistrationDetail(target.taskId); return null }
     if (registrationObservationRuntime.runtimeVersion !== 1) return null
     const task = taskById.get(target.taskId)
     if (task && task.type !== "registration") return null
@@ -10400,7 +10459,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       return null
     }
-  }, [canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, registrationObservationRuntime.runtimeVersion, syncTaskDeepLink, taskById])
+  }, [operationalReadOnly, openCommonRegistrationDetail, canManageRegistrationWorkflow, currentUserId, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, registrationObservationRuntime.runtimeVersion, syncTaskDeepLink, taskById])
 
   const rejectRegistrationObservationRoute = useCallback((currentSearchParams: URLSearchParams) => {
     registrationObservationLoadOwnershipRef.current.invalidate()
@@ -10800,6 +10859,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const deepLinkedAppointmentId = currentSearchParams.get("appointmentId") || ""
     const generalRead = generalTaskDetailReadRef.current
     if (generalRead.kind !== "closed" && generalRead.taskId !== deepLinkedTaskId) invalidateGeneralTaskDetailRead()
+    if (operationalReadOnly && detailOpen && selectedTask?.id === deepLinkedTaskId) return
     const directRegistrationTarget = isRegistrationWorkspace ? getRegistrationDirectDeepLinkTarget({
       viewerId: registrationViewerId,
       searchParams: currentSearchParams,
@@ -10881,7 +10941,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (!deepLinkedTask) {
       if (deepLinkTaskLoadRef.current === deepLinkedTaskId) return
       deepLinkTaskLoadRef.current = deepLinkedTaskId
-      void loadOpsTaskById(deepLinkedTaskId).then((exactTask) => {
+      void (operationalReadOnly ? loadOperationalCommonTaskById : loadOpsTaskById)(deepLinkedTaskId).then((exactTask) => {
         if (!workspaceMountedRef.current || deepLinkTaskLoadRef.current !== deepLinkedTaskId) return
         if (!exactTask) {
           syncTaskDeepLink(null)
@@ -10958,7 +11018,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
     if (deepLinkedTask.type === "general") void readGeneralTaskDetail(deepLinkedTask.id)
-  }, [data, deleteTarget, isRegistrationWorkspace, detailOpen, closeRegistrationApplicationHost, invalidateGeneralTaskDetailRead, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, readGeneralTaskDetail, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, isRegistrationWorkspace, operationalReadOnly, detailOpen, closeRegistrationApplicationHost, invalidateGeneralTaskDetailRead, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, readGeneralTaskDetail, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -12340,7 +12400,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }
 
-  const selectedTaskFresh = workspaceDataBelongsToCurrentViewer && selectedTask
+  const selectedTaskFresh = !commonReadDenied && workspaceDataBelongsToCurrentViewer && selectedTask
     ? numberedServerPage || (selectedTask.type === "registration" && selectedRegistrationTrackId)
       ? selectedTask
       : taskById.get(selectedTask.id) || selectedTask
@@ -12353,6 +12413,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const isRegistrationDetail = selectedTaskFresh?.type === "registration"
   const isCanonicalRegistrationTrackDetail = Boolean(
     isRegistrationDetail
+    && !operationalReadOnly
     && (
       selectedRegistrationAppointmentId
       || (selectedRegistrationTrackId && !isLegacyRegistrationTrackId(selectedRegistrationTrackId))
@@ -12386,7 +12447,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	    ? getWordRetestPrimaryActions(selectedTaskFresh, wordRetestMode, completionBlockers)
 	    : []
 	  const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
-	  const detailPrimaryAction = selectedTaskFresh?.type === "word_retest" ? null : selectedRegistrationAction || nextAction
+	  const detailPrimaryAction = operationalReadOnly || selectedTaskFresh?.type === "word_retest" ? null : selectedRegistrationAction || nextAction
   const detailPrimaryActionBlocked = selectedRegistrationAction
     ? selectedRegistrationAction.pipelineStatus.startsWith("7.") && completionBlockers.length > 0
     : nextActionBlocked
@@ -12955,6 +13016,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             )
 	        ) : isWithdrawalWorkspace ? (
 	          <WithdrawalDataTable
+              commonReadOnly={operationalReadOnly}
 	            key={`withdrawal:${navigationRestore.key}`}
 	            initialControls={operationTablePageControls}
 	            tasks={visibleTasks}
@@ -12979,6 +13041,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	          />
 	        ) : isTransferWorkspace ? (
 	          <TransferDataTable
+              commonReadOnly={operationalReadOnly}
 	            key={`transfer:${navigationRestore.key}`}
 	            initialControls={operationTablePageControls}
 	            tasks={visibleTasks}
@@ -13680,7 +13743,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               className={selectedTaskFresh.type === "registration" || selectedTaskFresh.type === "withdrawal" || selectedTaskFresh.type === "transfer" ? "grid gap-4" : selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}
             >
               <div className={isProcessDetail || isRegistrationDetail ? "flex flex-col gap-3" : "flex flex-col gap-3 rounded-lg border p-4"}>
-                {selectedTaskFresh.type === "general" ? (
+                {isTeacherReadOnlyTask(resolvedViewerRole, selectedTaskFresh.type) ? (
+                  <OperationalCommonDetailPanel task={selectedTaskFresh} />
+                ) : selectedTaskFresh.type === "general" ? (
                   <GeneralTaskDetailPanel task={selectedTaskFresh} />
                 ) : selectedTaskFresh.type === "word_retest" ? (
                   <WordRetestDetailPanel
@@ -16964,6 +17029,20 @@ function DetailInfoTile({ label, value, children }: { label: string; value?: str
       </dd>
     </div>
   )
+}
+
+function OperationalCommonDetailPanel({ task }: { task: OpsTask }) {
+  const registration = task.registration
+  return <div className="grid gap-3 sm:grid-cols-2">
+    <DetailInfoTile label="학생" value={task.studentName} />
+    <DetailInfoTile label="수업" value={task.className} />
+    <DetailInfoTile label="과목" value={task.subject} />
+    <DetailInfoTile label="상태" value={getTaskStatusLabel(task.status)} />
+    <DetailInfoTile label="담당자" value={task.assigneeLabel || task.requestedByLabel} />
+    {registration && <><DetailInfoTile label="학교" value={registration.schoolName} /><DetailInfoTile label="학년" value={registration.schoolGrade} /></>}
+    {task.withdrawal && <DetailInfoTile label="퇴원 예정일" value={task.withdrawal.withdrawalDate || "-"} />}
+    {task.transfer && <><DetailInfoTile label="전 수업" value={task.transfer.fromClassName} /><DetailInfoTile label="후 수업" value={task.transfer.toClassName} /><DetailInfoTile label="수강 시작일" value={task.transfer.toClassStartDate || "-"} /></>}
+  </div>
 }
 
 function GeneralTaskDetailPanel({ task }: { task: OpsTask }) {

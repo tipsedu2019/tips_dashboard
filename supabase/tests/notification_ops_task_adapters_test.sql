@@ -320,6 +320,16 @@ select pg_catalog.set_config(
   true
 );
 
+select throws_ok($$
+  select public.update_ops_task_v2(
+    (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'general'),
+    '{"priority":"high"}'::jsonb,
+    (select fixture.original_updated_at from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'general'),
+    '71000000-0000-4000-8000-000000000016'::uuid
+  )
+$$, '42501', 'ops_task_access_denied', '조교는 일반 업무를 수정할 수 없다');
+select set_config('request.jwt.claim.sub','71000000-0000-4000-8000-000000000001',true);
+select set_config('request.jwt.claims','{"sub":"71000000-0000-4000-8000-000000000001","role":"authenticated"}',true);
 select lives_ok($$
   select public.update_ops_task_v2(
     (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'general'),
@@ -327,7 +337,7 @@ select lives_ok($$
     (select fixture.original_updated_at from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'general'),
     '71000000-0000-4000-8000-000000000016'::uuid
   )
-$$, '조교는 기존 운영 권한과 동일하게 일반 업무를 수정할 수 있다');
+$$, '관리팀은 일반 업무 수정 기능을 유지한다');
 
 select throws_ok($$
   select public.update_ops_task_v2(
@@ -339,7 +349,7 @@ select throws_ok($$
     ),
     '71000000-0000-4000-8000-000000000017'::uuid
   )
-$$, '40001', 'ops_task_stale_write', '오래된 갱신 시각으로는 덮어쓸 수 없다');
+$$, '23514', 'ops_task_stale_write', '오래된 갱신 시각으로는 덮어쓸 수 없다');
 
 select lives_ok($$
   select public.update_ops_task_v2(
@@ -351,7 +361,7 @@ select lives_ok($$
     ),
     '71000000-0000-4000-8000-000000000022'::uuid
   )
-$$, '조교가 주 담당자와 담당팀을 지정할 수 있다');
+$$, '관리팀이 주 담당자와 담당팀을 지정할 수 있다');
 
 select lives_ok($$
   select public.update_ops_task_v2(
@@ -390,6 +400,8 @@ select is(
   '담당자 변경 후 보조 담당자 위치가 정확히 남는다'
 );
 
+select set_config('request.jwt.claim.sub','71000000-0000-4000-8000-000000000003',true);
+select set_config('request.jwt.claims','{"sub":"71000000-0000-4000-8000-000000000003","role":"authenticated"}',true);
 select lives_ok($$
   select public.transition_ops_task_status_v2(
     (select fixture.task_id from ops_task_adapter_fixtures fixture where fixture.fixture_key = 'word'),
@@ -1585,17 +1597,14 @@ select pg_catalog.set_config(
 );
 set local role authenticated;
 
-select lives_ok($$
+select throws_ok($$
   select public.update_ops_task_v2(
     '73000000-0000-4000-8000-000000000104'::uuid,
     '{"priority":"high"}'::jsonb,
-    (
-      select task.updated_at from public.ops_tasks task
-      where task.id = '73000000-0000-4000-8000-000000000104'::uuid
-    ),
+    now(),
     '73000000-0000-4000-8000-000000000216'::uuid
   )
-$$, '조교의 기존 일반 업무 수정 권한은 유지된다');
+$$, '42501', 'ops_task_access_denied', '조교의 일반 업무 수정은 재시험 전용 범위에서 거절한다');
 
 create temporary table assistant_word_retest_results (
   attempt_key text primary key,

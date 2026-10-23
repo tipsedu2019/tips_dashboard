@@ -60,8 +60,15 @@ select throws_ok($q$select public.ai_agent_space_policy_api_v1('get',jsonb_build
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.sp_id(4)::text,true);
 set local role authenticated;
-select is(jsonb_array_length(public.ai_agent_space_policy_api_v1('catalog','{}')->'items'),7,'assistant catalog includes fixed seven slots');
-select is((select x->>'reason' from jsonb_array_elements(public.ai_agent_space_policy_api_v1('catalog','{}')->'items')x where x->>'key'='space_3'),'space_not_allowed','assistant cannot inherit teacher permission');
+select throws_ok($q$select public.ai_agent_space_policy_api_v1('catalog','{}')$q$,'42501','ai_agent_forbidden','assistant cannot read AI catalog');
+reset role;
+select set_config('request.jwt.claim.sub',pg_temp.sp_id(8)::text,true);
+set local role authenticated;
+select is(jsonb_array_length(public.ai_agent_space_policy_api_v1('catalog','{}')->'items'),7,'allowed staff catalog includes fixed seven slots');
+select is((select x->>'reason' from jsonb_array_elements(public.ai_agent_space_policy_api_v1('catalog','{}')->'items')x where x->>'key'='space_3'),'space_not_allowed','staff cannot inherit teacher permission');
+reset role;
+select set_config('request.jwt.claim.sub',pg_temp.sp_id(4)::text,true);
+set local role authenticated;
 select throws_ok($q$select pg_temp.sp_set(4,'1','[]',106)$q$,'42501','ai_agent_forbidden','assistant cannot set policy');
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.sp_id(1)::text,true);

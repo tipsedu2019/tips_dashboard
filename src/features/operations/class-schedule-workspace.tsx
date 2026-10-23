@@ -16,6 +16,7 @@ import { legacyLessonMonthRange, newLegacyLessonMonthError, prepareLegacyLessonM
 import { resolveLegacyLessonDetails, snapshotNewLegacyLessonDetails } from "./legacy-lesson-defaults";
 import { projectLegacyEffectivePlan, resolveEffectiveSchedule } from "./legacy-effective-schedule.js";
 import { useAuth } from "@/providers/auth-provider";
+import { isNumberedPagePermissionError } from "@/lib/numbered-page-controller";
 import { useCommittedSearch } from "@/hooks/use-committed-search";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
@@ -2638,11 +2639,20 @@ export function ClassScheduleWorkspace() {
   );
   const scheduleReadSnapshotRef = useRef<{ owner: string; source: "normalized" | "legacy"; data: Record<string, unknown> | null } | null>(null);
   const scheduleReadOwner = `${actorScope || ""}:${requestedClassId}`;
+  const scheduleReadDeniedOwnerRef = useRef("");
+  if (scheduleReadSnapshotRef.current?.owner !== scheduleReadOwner && scheduleReadDeniedOwnerRef.current !== scheduleReadOwner) scheduleReadDeniedOwnerRef.current = "";
+  if (actorRole === "teacher" && normalizedScheduleRead.status === "ready" && normalizedScheduleRead.value.source === "error"
+    && isNumberedPagePermissionError(normalizedScheduleRead.value.error)) {
+    scheduleReadSnapshotRef.current = null;
+    scheduleReadDeniedOwnerRef.current = scheduleReadOwner;
+  }
   if (scheduleReadSnapshotRef.current?.owner !== scheduleReadOwner) scheduleReadSnapshotRef.current = null;
   if (normalizedScheduleRead.status === "ready" && (normalizedScheduleRead.value.source === "normalized" || normalizedScheduleRead.value.source === "legacy")) {
+    scheduleReadDeniedOwnerRef.current = "";
     scheduleReadSnapshotRef.current = { owner: scheduleReadOwner, source: normalizedScheduleRead.value.source,
       data: normalizedScheduleRead.value.source === "normalized" ? normalizedScheduleRead.value.data : normalizedScheduleRead.value.effectiveScheduleContext || null };
   }
+  const teacherScheduleReadDenied = actorRole === "teacher" && scheduleReadDeniedOwnerRef.current === scheduleReadOwner;
   const normalizedScheduleData = scheduleReadSnapshotRef.current?.source === "normalized" ? scheduleReadSnapshotRef.current.data : null;
   const isNormalizedLessonSchedule = Boolean(normalizedScheduleData);
   const legacyEffectiveContext = scheduleReadSnapshotRef.current?.source === "legacy" ? scheduleReadSnapshotRef.current.data : null;
@@ -2779,6 +2789,7 @@ export function ClassScheduleWorkspace() {
     return ordinals;
   }, [isNormalizedLessonSchedule, lessonPlanForSave]);
   const lessonDesignSnapshot = useMemo(() => {
+    if (teacherScheduleReadDenied) return null;
     if (!normalizedScheduleData || !lessonPlanForSave) {
       // Invalid historical elements are retained in the write; only object rows
       // can be rendered as editable lessons.
@@ -2819,7 +2830,7 @@ export function ClassScheduleWorkspace() {
     return buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, { ...displayPlan, billingPeriods: periods.map((period) => ({ ...period,
       totalSessions: (displayPlan.sessions as Record<string, unknown>[] || []).filter((session) => isDateWithinRange(text(session.date), text(period.startDate), text(period.endDate))).length,
     })) });
-  }, [isNormalizedLessonSchedule, legacyEffectiveContext, lessonDesignEditorTextbooks, lessonDisplayOrdinals, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, selectedRow, selectedRowClassItem]);
+  }, [isNormalizedLessonSchedule, legacyEffectiveContext, lessonDesignEditorTextbooks, lessonDisplayOrdinals, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, selectedRow, selectedRowClassItem, teacherScheduleReadDenied]);
   useEffect(() => {
     const owner = isLessonDesignRouteActive ? requestedClassId : text(selectedRow?.id);
     const ownerChanged = lessonPlanOwnerRef.current !== owner;
@@ -5584,9 +5595,9 @@ export function ClassScheduleWorkspace() {
               {lessonDesignActions}
             </div>
           </div>
-          {lessonDesignDetailError ? (
+          {lessonDesignDetailError || teacherScheduleReadDenied ? (
             <Alert variant="destructive">
-              <AlertDescription>{lessonDesignDetailError}</AlertDescription>
+              <AlertDescription>{teacherScheduleReadDenied ? "수업계획 조회 권한 또는 로그인 상태를 확인해 주세요." : lessonDesignDetailError}</AlertDescription>
             </Alert>
           ) : lessonDesignDetailLoading ? (
             <div className="space-y-3 py-6">

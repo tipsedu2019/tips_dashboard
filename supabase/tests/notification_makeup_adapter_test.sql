@@ -1,6 +1,6 @@
 begin;
 
-select plan(85);
+select plan(92);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -297,6 +297,48 @@ insert into public.makeup_request_events(
     '2026-07-16 09:01:02+09'::timestamptz
   );
 
+-- The catalog baseline omits notification business data. Preserve the retired
+-- in-app delivery's historical channel and recipient shape with one disabled,
+-- transaction-local rule/template; do not activate dispatch or fanout.
+do $makeup_retained_rule_fixture$
+declare
+  v_rule_id uuid;
+begin
+  select rule_row.id into v_rule_id
+  from dashboard_private.notification_rules rule_row
+  where rule_row.scope_key = 'global'
+    and rule_row.workflow_key = 'makeup_requests'
+    and rule_row.event_key = 'makeup.submitted'
+    and rule_row.channel_key = 'in_app'
+    and rule_row.audience_key = 'management_team'
+    and rule_row.rule_variant_key = 'immediate';
+
+  if v_rule_id is null then
+    v_rule_id := '91000000-0000-4000-8000-000000000501'::uuid;
+    insert into dashboard_private.notification_rules(
+      id, scope_key, workflow_key, event_key, channel_key, audience_key,
+      rule_variant_key, delivery_mode, enabled, active_template_id,
+      created_actor_kind, updated_actor_kind
+    ) values (
+      v_rule_id, 'global', 'makeup_requests', 'makeup.submitted', 'in_app',
+      'management_team', 'immediate', 'immediate', false,
+      '91000000-0000-4000-8000-000000000502', 'system', 'system'
+    );
+    insert into dashboard_private.notification_templates(
+      id, rule_id, version, title_template, body_template, allowed_variables,
+      payload_schema_version, checksum, created_actor_kind
+    ) values (
+      '91000000-0000-4000-8000-000000000502', v_rule_id, 1,
+      '보관 이력 제목', '보관 이력 본문', '[]'::jsonb, 1,
+      pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+        'makeup-retained-lineage-template-fixture-v1', 'UTF8'
+      )), 'hex'),
+      'system'
+    );
+  end if;
+end;
+$makeup_retained_rule_fixture$;
+
 insert into public.makeup_notification_deliveries(
   id,
   request_id,
@@ -487,6 +529,13 @@ begin
 end;
 $$;
 
+-- Seed the catalog before signup so the final email-linking trigger reuses
+-- its stable synthetic ID and maintains profiles.teacher_catalog_id normally.
+insert into public.teacher_catalogs(id, name, subjects, account_email)
+values
+  ('92000000-0000-4000-8000-000000000901', '휴보강 생산자 담당', array['english'], 'makeup-requester@test.invalid'),
+  ('92000000-0000-4000-8000-000000000902', '휴보강 생산자 결재', array['english'], 'makeup-approver@test.invalid');
+
 insert into auth.users(
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
   raw_app_meta_data, raw_user_meta_data, created_at, updated_at
@@ -515,6 +564,22 @@ values
     crypt('makeup-test-only', gen_salt('bf')), now(),
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{"fixture":"makeup-producer"}'::jsonb, now(), now()
+  ),
+  (
+    '92000000-0000-4000-8000-000000000007',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated', 'makeup-processing-staff@test.invalid',
+    crypt('makeup-test-only', gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"fixture":"makeup-processing-staff"}'::jsonb, now(), now()
+  ),
+  (
+    '92000000-0000-4000-8000-000000000008',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated', 'makeup-null-fk-viewer@test.invalid',
+    crypt('makeup-test-only', gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"fixture":"makeup-null-fk-viewer"}'::jsonb, now(), now()
   )
 on conflict (id) do update
 set email = excluded.email,
@@ -533,6 +598,14 @@ values
   (
     '92000000-0000-4000-8000-000000000003', 'teacher',
     '휴보강 비참여자', 'makeup-viewer@test.invalid', now(), now()
+  ),
+  (
+    '92000000-0000-4000-8000-000000000007', 'staff',
+    '휴보강 처리 운영자', 'makeup-processing-staff@test.invalid', now(), now()
+  ),
+  (
+    '92000000-0000-4000-8000-000000000008', 'viewer',
+    '휴보강 NULL FK 비참여자', 'makeup-null-fk-viewer@test.invalid', now(), now()
   )
 on conflict (id) do update
 set role = excluded.role,
@@ -540,18 +613,6 @@ set role = excluded.role,
     email = excluded.email,
     updated_at = excluded.updated_at;
 
-insert into public.teacher_catalogs(id, name, subjects, profile_id)
-values
-  (
-    '92000000-0000-4000-8000-000000000901',
-    '휴보강 생산자 담당', array['english'],
-    '92000000-0000-4000-8000-000000000001'
-  ),
-  (
-    '92000000-0000-4000-8000-000000000902',
-    '휴보강 생산자 결재', array['english'],
-    '92000000-0000-4000-8000-000000000002'
-  );
 
 insert into public.makeup_requests(
   id, status, request_kind, subject, approval_group, requester_id,
@@ -574,7 +635,8 @@ create temporary table makeup_adapter_transition_results(
 ) on commit drop;
 grant select, insert on makeup_adapter_transition_results to authenticated;
 
-select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000002');
+-- Keep teacher requester/approver relations; a staff actor processes the workflow.
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000007');
 set local role authenticated;
 select throws_ok($$
   select public.transition_makeup_request_v2(
@@ -673,7 +735,8 @@ values
     null, null, '삭제된 결재자 fixture', 'NULL 권한 검증', '[]'::jsonb
   );
 
-select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000003');
+-- A non-manager viewer still reaches the NULL relationship predicates.
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000008');
 set local role authenticated;
 select throws_ok($$
   select public.transition_makeup_request_v2(
@@ -717,21 +780,35 @@ select throws_ok($$
 $$, '42501', 'makeup_legacy_dispatch_forbidden', '원본 actor와 참여자 FK가 NULL이어도 비참여자 발송 계획은 거절한다');
 reset role;
 
-insert into public.classes(id, name, subject, teacher, schedule_plan)
+-- Complete dated legacy lessons keep the real timetable validator active.
+-- Distinct dates/resources leave no conflicting or unresolved occupancy; the
+-- exact before/after/rollback snapshots below still exercise the same writer.
+insert into public.classroom_catalogs(id, name, subjects)
+values
+  ('92000000-0000-4000-8000-000000000903', '휴보강 어댑터 합성 강의실 301', array['영어']),
+  ('92000000-0000-4000-8000-000000000904', '휴보강 어댑터 합성 강의실 302', array['영어']);
+
+insert into public.classes(id, name, subject, status, schedule_storage_mode, teacher, room, schedule_plan)
 values
   (
     '92000000-0000-4000-8000-000000000301',
     '휴보강 원자 승인 수업',
     'english',
+    '수강',
+    'legacy',
     '휴보강 생산자 담당',
-    '{"sessions":[{"day":"월","startTime":"17:00"}]}'::jsonb
+    '휴보강 어댑터 합성 강의실 301',
+    '{"sessions":[{"id":"makeup-adapter-original-301","date":"2026-07-24","scheduleState":"active","state":"active","startTime":"17:00","endTime":"18:00","teacherCatalogId":"92000000-0000-4000-8000-000000000901","classroomCatalogId":"92000000-0000-4000-8000-000000000903"}]}'::jsonb
   ),
   (
     '92000000-0000-4000-8000-000000000302',
     '휴보강 롤백 수업',
     'english',
+    '수강',
+    'legacy',
     '휴보강 생산자 담당',
-    '{"sessions":[{"day":"화","startTime":"18:00"}]}'::jsonb
+    '휴보강 어댑터 합성 강의실 302',
+    '{"sessions":[{"id":"makeup-adapter-original-302","date":"2026-07-25","scheduleState":"active","state":"active","startTime":"18:00","endTime":"19:00","teacherCatalogId":"92000000-0000-4000-8000-000000000901","classroomCatalogId":"92000000-0000-4000-8000-000000000904"}]}'::jsonb
   );
 insert into public.makeup_requests(
   id, status, request_kind, subject, approval_group, requester_id,
@@ -787,29 +864,29 @@ insert into public.makeup_requests(
   '["92000000-0000-4000-8000-000000000504","92000000-0000-4000-8000-000000000505"]'::jsonb
 );
 
-select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000002');
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000007');
 set local role authenticated;
 select throws_ok($$
   select public.transition_makeup_request_v2(
     '92000000-0000-4000-8000-000000000401',
     'approve',
-    '{"actor_profile_id":"92000000-0000-4000-8000-000000000002","final_note":"브라우저 우회"}'::jsonb,
+    '{"actor_profile_id":"92000000-0000-4000-8000-000000000007","final_note":"브라우저 우회"}'::jsonb,
     'approval_pending',
     '92000000-0000-4000-8000-000000000600'
   )
 $$, '42501', 'makeup_approval_server_required', '브라우저의 공개 RPC approve 직접 호출은 거절한다');
 reset role;
 
-select pg_temp.makeup_set_service_actor('92000000-0000-4000-8000-000000000002');
+select pg_temp.makeup_set_service_actor('92000000-0000-4000-8000-000000000007');
 set local role service_role;
 select lives_ok($$
   select public.transition_makeup_request_v2(
     '92000000-0000-4000-8000-000000000401',
     'approve',
     '{
-      "actor_profile_id":"92000000-0000-4000-8000-000000000002",
+      "actor_profile_id":"92000000-0000-4000-8000-000000000007",
       "final_note":"승인 완료",
-      "schedule_plan_before":{"sessions":[{"day":"월","startTime":"17:00"}]},
+      "schedule_plan_before":{"sessions":[{"id":"makeup-adapter-original-301","date":"2026-07-24","scheduleState":"active","state":"active","startTime":"17:00","endTime":"18:00","teacherCatalogId":"92000000-0000-4000-8000-000000000901","classroomCatalogId":"92000000-0000-4000-8000-000000000903"}]},
       "schedule_plan_after":{"sessions":[]},
       "cancel_academic_event_id":"92000000-0000-4000-8000-000000000501",
       "makeup_academic_event_id":"",
@@ -828,11 +905,11 @@ select lives_ok($$
   )
 $$, '승인은 수업 일정·학사 캘린더·업무·알림 원본을 한 RPC로 확정한다');
 reset role;
-select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000002');
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000007');
 select ok(
   (
     select request.status = 'makeup_pending'
-      and request.schedule_plan_before = '{"sessions":[{"day":"월","startTime":"17:00"}]}'::jsonb
+      and request.schedule_plan_before = '{"sessions":[{"id":"makeup-adapter-original-301","date":"2026-07-24","scheduleState":"active","state":"active","startTime":"17:00","endTime":"18:00","teacherCatalogId":"92000000-0000-4000-8000-000000000901","classroomCatalogId":"92000000-0000-4000-8000-000000000903"}]}'::jsonb
       and request.schedule_plan_after = '{"sessions":[]}'::jsonb
     from public.makeup_requests request
     where request.id = '92000000-0000-4000-8000-000000000401'
@@ -860,7 +937,7 @@ select ok(
   '승인 성공 뒤 수업·캘린더·업무·canonical 상태가 모두 함께 보인다'
 );
 
-select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000001');
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000007');
 set local role authenticated;
 select lives_ok($$
   select public.transition_makeup_request_v2(
@@ -873,14 +950,14 @@ select lives_ok($$
 $$, '환불 요청은 기존 승인 일정·캘린더 스냅샷을 유지한 채 재승인 대기로 전환한다');
 reset role;
 
-select pg_temp.makeup_set_service_actor('92000000-0000-4000-8000-000000000002');
+select pg_temp.makeup_set_service_actor('92000000-0000-4000-8000-000000000007');
 set local role service_role;
 select lives_ok($$
   select public.transition_makeup_request_v2(
     '92000000-0000-4000-8000-000000000403',
     'approve',
     '{
-      "actor_profile_id":"92000000-0000-4000-8000-000000000002",
+      "actor_profile_id":"92000000-0000-4000-8000-000000000007",
       "final_note":"환불 재승인 완료"
     }'::jsonb,
     'approval_pending',
@@ -888,7 +965,7 @@ select lives_ok($$
   )
 $$, '환불 재승인은 새 일정 효과 없이 기존 승인 스냅샷을 그대로 사용한다');
 reset role;
-select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000002');
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000007');
 select ok(
   (
     select request.status = 'refund_pending'
@@ -928,16 +1005,16 @@ create trigger reject_makeup_canonical_fixture
 before insert on dashboard_private.notification_events
 for each row execute function pg_temp.reject_makeup_canonical_fixture();
 
-select pg_temp.makeup_set_service_actor('92000000-0000-4000-8000-000000000002');
+select pg_temp.makeup_set_service_actor('92000000-0000-4000-8000-000000000007');
 set local role service_role;
 select throws_ok($$
   select public.transition_makeup_request_v2(
     '92000000-0000-4000-8000-000000000402',
     'approve',
     '{
-      "actor_profile_id":"92000000-0000-4000-8000-000000000002",
+      "actor_profile_id":"92000000-0000-4000-8000-000000000007",
       "final_note":"롤백되어야 함",
-      "schedule_plan_before":{"sessions":[{"day":"화","startTime":"18:00"}]},
+      "schedule_plan_before":{"sessions":[{"id":"makeup-adapter-original-302","date":"2026-07-25","scheduleState":"active","state":"active","startTime":"18:00","endTime":"19:00","teacherCatalogId":"92000000-0000-4000-8000-000000000901","classroomCatalogId":"92000000-0000-4000-8000-000000000904"}]},
       "schedule_plan_after":{"sessions":[]},
       "cancel_academic_event_id":"92000000-0000-4000-8000-000000000502",
       "makeup_academic_event_id":"",
@@ -956,7 +1033,7 @@ select throws_ok($$
   )
 $$, 'P0001', 'forced_makeup_canonical_failure', 'canonical 기록 실패는 승인 전체를 실패시킨다');
 reset role;
-select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000002');
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000007');
 select ok(
   (
     select request.status = 'approval_pending'
@@ -964,7 +1041,7 @@ select ok(
     where request.id = '92000000-0000-4000-8000-000000000402'
   )
   and (
-    select class_row.schedule_plan = '{"sessions":[{"day":"화","startTime":"18:00"}]}'::jsonb
+    select class_row.schedule_plan = '{"sessions":[{"id":"makeup-adapter-original-302","date":"2026-07-25","scheduleState":"active","state":"active","startTime":"18:00","endTime":"19:00","teacherCatalogId":"92000000-0000-4000-8000-000000000901","classroomCatalogId":"92000000-0000-4000-8000-000000000904"}]}'::jsonb
     from public.classes class_row
     where class_row.id = '92000000-0000-4000-8000-000000000302'
   )
@@ -997,7 +1074,7 @@ select ok(
     where request.id = '92000000-0000-4000-8000-000000000401'
   )
   and (
-    select class_row.schedule_plan = '{"sessions":[{"day":"월","startTime":"17:00"}]}'::jsonb
+    select class_row.schedule_plan = '{"sessions":[{"id":"makeup-adapter-original-301","date":"2026-07-24","scheduleState":"active","state":"active","startTime":"17:00","endTime":"18:00","teacherCatalogId":"92000000-0000-4000-8000-000000000901","classroomCatalogId":"92000000-0000-4000-8000-000000000903"}]}'::jsonb
     from public.classes class_row
     where class_row.id = '92000000-0000-4000-8000-000000000301'
   )
@@ -1190,6 +1267,98 @@ values ('{
 }'::jsonb);
 grant select on assistant_makeup_guard_create_input to authenticated;
 
+-- Teacher is read-only even when requester or designated approver. Keep the
+-- successful staff workflow above and assistant boundaries below independent.
+create temporary table teacher_makeup_guard_before as
+select jsonb_build_object(
+  'requests', (select coalesce(jsonb_agg(to_jsonb(r) order by r.id), '[]'::jsonb) from public.makeup_requests r),
+  'events', (select coalesce(jsonb_agg(to_jsonb(e) order by e.id), '[]'::jsonb) from public.makeup_request_events e),
+  'classes', (select coalesce(jsonb_agg(to_jsonb(c) order by c.id), '[]'::jsonb) from public.classes c),
+  'academicEvents', (select coalesce(jsonb_agg(to_jsonb(e) order by e.id), '[]'::jsonb) from public.academic_events e),
+  'canonicalEvents', (select coalesce(jsonb_agg(to_jsonb(e) order by e.id), '[]'::jsonb) from dashboard_private.notification_events e),
+  'deliveries', (select coalesce(jsonb_agg(to_jsonb(d) order by d.id), '[]'::jsonb) from dashboard_private.notification_deliveries d),
+  'ledger', (select coalesce(jsonb_agg(to_jsonb(l) order by l.request_id), '[]'::jsonb) from dashboard_private.notification_request_ledger l)
+) as snapshot;
+
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000001');
+set local role authenticated;
+select throws_ok($$
+  select public.create_makeup_request_v2(
+    (select input from assistant_makeup_guard_create_input),
+    '92000000-0000-4000-8000-000000000731'
+  )
+$$, '42501', 'makeup_request_transition_forbidden',
+  'teacher requester cannot create a valid makeup request');
+select throws_ok($$
+  select public.delete_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000401',
+    '92000000-0000-4000-8000-000000000732'
+  )
+$$, '42501', 'makeup_request_delete_forbidden',
+  'teacher requester cannot delete a closed makeup request');
+reset role;
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000002');
+set local role authenticated;
+select throws_ok($$
+  select public.transition_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000402', 'revision_requested',
+    '{"note":"teacher designated approver denied"}'::jsonb,
+    'approval_pending', '92000000-0000-4000-8000-000000000733'
+  )
+$$, '42501', 'makeup_request_transition_forbidden',
+  'teacher designated approver cannot request revision');
+reset role;
+select pg_temp.makeup_set_service_actor('92000000-0000-4000-8000-000000000002');
+set local role service_role;
+select throws_ok($$
+  select public.transition_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000402', 'approve',
+    '{
+      "actor_profile_id":"92000000-0000-4000-8000-000000000002",
+      "final_note":"teacher service approval denied",
+      "schedule_plan_before":{"sessions":[{"id":"makeup-adapter-original-302","date":"2026-07-25","scheduleState":"active","state":"active","startTime":"18:00","endTime":"19:00","teacherCatalogId":"92000000-0000-4000-8000-000000000901","classroomCatalogId":"92000000-0000-4000-8000-000000000904"}]},
+      "schedule_plan_after":{"sessions":[]},
+      "cancel_academic_event_id":"92000000-0000-4000-8000-000000000502",
+      "makeup_academic_event_id":"",
+      "makeup_academic_event_ids":[],
+      "calendar_events":[{
+        "id":"92000000-0000-4000-8000-000000000502",
+        "title":"[휴강] 휴보강 롤백 수업", "date":"2026-07-25",
+        "type":"팁스", "grade":"all",
+        "note":"[[TIPS_MAKEUP]] {\"kind\":\"cancel\",\"requestId\":\"92000000-0000-4000-8000-000000000402\"}"
+      }]
+    }'::jsonb,
+    'approval_pending', '92000000-0000-4000-8000-000000000734'
+  )
+$$, '42501', 'makeup_request_transition_forbidden',
+  'service approval cannot promote a teacher designated approver');
+reset role;
+select is(
+  jsonb_build_object(
+    'requests', (select coalesce(jsonb_agg(to_jsonb(r) order by r.id), '[]'::jsonb) from public.makeup_requests r),
+    'events', (select coalesce(jsonb_agg(to_jsonb(e) order by e.id), '[]'::jsonb) from public.makeup_request_events e),
+    'classes', (select coalesce(jsonb_agg(to_jsonb(c) order by c.id), '[]'::jsonb) from public.classes c),
+    'academicEvents', (select coalesce(jsonb_agg(to_jsonb(e) order by e.id), '[]'::jsonb) from public.academic_events e),
+    'canonicalEvents', (select coalesce(jsonb_agg(to_jsonb(e) order by e.id), '[]'::jsonb) from dashboard_private.notification_events e),
+    'deliveries', (select coalesce(jsonb_agg(to_jsonb(d) order by d.id), '[]'::jsonb) from dashboard_private.notification_deliveries d),
+    'ledger', (select coalesce(jsonb_agg(to_jsonb(l) order by l.request_id), '[]'::jsonb) from dashboard_private.notification_request_ledger l)
+  ),
+  (select snapshot from teacher_makeup_guard_before),
+  'teacher denials preserve complete source, schedule, calendar, notification and receipt state'
+);
+select is((select count(*) from public.makeup_request_events where mutation_request_id in (
+  '92000000-0000-4000-8000-000000000731'::uuid,
+  '92000000-0000-4000-8000-000000000732'::uuid,
+  '92000000-0000-4000-8000-000000000733'::uuid,
+  '92000000-0000-4000-8000-000000000734'::uuid
+)), 0::bigint, 'teacher denials create no makeup events');
+select is((select count(*) from dashboard_private.notification_request_ledger where request_id in (
+  '92000000-0000-4000-8000-000000000731'::uuid,
+  '92000000-0000-4000-8000-000000000732'::uuid,
+  '92000000-0000-4000-8000-000000000733'::uuid,
+  '92000000-0000-4000-8000-000000000734'::uuid
+)), 0::bigint, 'teacher denials create no success receipts');
+
 create temporary table assistant_makeup_guard_results(
   result_key text primary key,
   payload jsonb not null
@@ -1222,8 +1391,8 @@ select results_eq(
       and '92000000-0000-4000-8000-000000000644'::uuid
     order by notification.id
   $$,
-  $$ values ('92000000-0000-4000-8000-000000000644'::uuid) $$,
-  '조교의 직접 알림 조회는 휴보강 세 형식을 숨기고 일반 업무 알림을 유지한다'
+  $$ select null::uuid where false $$,
+  '조교의 직접 알림 조회는 휴보강과 일반 업무 알림을 모두 숨긴다'
 );
 select results_eq(
   $$
@@ -1236,8 +1405,8 @@ select results_eq(
       and '92000000-0000-4000-8000-000000000644'::uuid
     order by item ->> 'id'
   $$,
-  $$ values ('92000000-0000-4000-8000-000000000644'::text) $$,
-  '조교 공개 알림함 응답에도 일반 업무 알림만 남는다'
+  $$ select null::text where false $$,
+  '조교 공개 알림함에도 재시험 외 휴보강·일반 업무 알림은 남지 않는다'
 );
 select throws_ok($$
   insert into public.dashboard_notifications(
@@ -1247,7 +1416,7 @@ select throws_ok($$
     'makeup_request', '조교 휴보강 알림 직접 생성 우회',
     '/admin/makeup-requests', '{}'::jsonb
   )
-$$, '42501', 'new row violates row-level security policy "dashboard_notifications_assistant_makeup_hard_deny" for table "dashboard_notifications"',
+$$, '42501', 'new row violates row-level security policy "dashboard_notifications_assistant_insert_deny_v1" for table "dashboard_notifications"',
   '조교는 휴보강 알림을 직접 생성할 수도 없다');
 select throws_ok($$
   insert into public.makeup_notification_deliveries(
@@ -1297,8 +1466,8 @@ select results_eq(
       and '92000000-0000-4000-8000-000000000644'::uuid
     order by visible.id
   $$,
-  $$ values ('92000000-0000-4000-8000-000000000644'::uuid) $$,
-  '조교 알림함 SECURITY DEFINER 내부 경로도 휴보강 알림을 숨긴다'
+  $$ select null::uuid where false $$,
+  '조교 알림함 SECURITY DEFINER 내부 경로도 재시험 외 알림을 숨긴다'
 );
 
 select throws_ok($$
@@ -1490,15 +1659,30 @@ reset role;
 select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000001');
 set local role authenticated;
 select ok(
-  exists (
+  not exists (
     select 1 from public.makeup_requests request
     where request.id = '92000000-0000-4000-8000-000000000401'
   )
-  and exists (
+  and not exists (
     select 1 from public.makeup_request_events event_row
     where event_row.request_id = '92000000-0000-4000-8000-000000000401'
+  )
+  and (
+    select detail ->> 'id' = '92000000-0000-4000-8000-000000000401'
+      and detail ->> 'status' = 'canceled'
+      and detail ->> 'reason' = ''
+      and detail ->> 'returnedReason' = ''
+      and detail ->> 'rejectedReason' = ''
+      and detail ->> 'finalNote' = ''
+      and detail -> 'events' = '[]'::jsonb
+      and detail -> 'schedulePlanBefore' = '{}'::jsonb
+      and detail -> 'schedulePlanAfter' = '{}'::jsonb
+      and not detail ? 'rawMakeupSlots'
+    from (select public.get_makeup_detail_v1(
+      '92000000-0000-4000-8000-000000000401'
+    ) as detail) response
   ),
-  '선생님의 기존 참여 휴보강 신청·이력 조회 권한은 유지된다'
+  'teacher keeps common makeup detail while raw private history, notes and snapshots remain hidden'
 );
 reset role;
 

@@ -1,4 +1,5 @@
 "use client";
+import { TeacherTextbookRequestWorkspace } from "./teacher-textbook-request-workspace";
 import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
 import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
@@ -885,7 +886,8 @@ function useTextbookFormDraft<T>(initial: T) {
 export function TextbookOperationsWorkspace({ mode = "management" }: { mode?: "management" | "requests" }) {
   const { user, role, loading } = useAuth();
   if (loading || !user?.id || !role) return <div role="status">로그인 정보를 확인하는 중입니다.</div>;
-  const requestsOnly = mode === "requests" || role === "teacher";
+  if (role === "teacher") return <TeacherTextbookRequestWorkspace key={`${user.id}:${role}`} />;
+  const requestsOnly = mode === "requests";
   return <TextbookOperationsWorkspaceContent key={`${user.id}:${role}:${requestsOnly}`} requestsOnly={requestsOnly} />;
 }
 

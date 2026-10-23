@@ -6,6 +6,7 @@ import ts from "typescript"
 
 const service = await readFile(new URL("../src/features/tasks/ops-task-service.ts", import.meta.url), "utf8")
 const workspace = await readFile(new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url), "utf8")
+const operationalAccess = await readFile(new URL("../src/features/tasks/operational-task-access.ts", import.meta.url), "utf8")
 
 function declarations(source, names) {
   const parsed = ts.createSourceFile("actual.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -32,6 +33,9 @@ function load(source, names, mocks) {
   vm.runInNewContext(compiled, { module: sandboxModule, exports: sandboxModule.exports, AbortSignal, ...mocks })
   return sandboxModule.exports
 }
+
+// Use the real newly imported role guard; manager latency coverage stays on staff.
+const { isTeacherReadOnlyTask } = load(operationalAccess, ["isTeacherReadOnlyTask"], {})
 
 const readerNames = ["text", "numberText", "bool", "normalizeType", "normalizeStatus", "normalizePriority",
   "isMissingRelationError", "profileLabel", "buildProfileLookup", "byTaskId", "singleByTaskId", "mapWithdrawal",
@@ -141,6 +145,7 @@ function workspaceHarness(kind, { type = "withdrawal", status = "done" } = {}) {
     registrationNotificationSessionToken: "synthetic-token",
     getOpsTaskActionErrorMessage: (error) => error.message,
     form: { ...task, status }, editingTask: task, currentUserId: "synthetic-viewer",
+    isTeacherReadOnlyTask, resolvedViewerRole: "staff",
     workspaceViewerGenerationRef: { current: 1 }, workspaceMountedRef: { current: true }, latestWorkspaceViewerIdRef: { current: "synthetic-viewer" },
     isRegistrationSubmissionOwnershipCurrent: () => ownership.current,
     getTransferRequiredInputBlockers: () => [], formCompletionIntent: null,
