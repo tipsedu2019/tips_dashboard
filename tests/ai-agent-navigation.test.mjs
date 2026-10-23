@@ -17,7 +17,7 @@ for(const role of ['admin','staff','teacher','assistant','viewer'])test(`${role}
 for(const path of ['/admin/ai-agent','/admin/ai-agent/20000000-0000-4000-8000-000000000001','/admin/ai-agent-other','/admin/settings/agent-access'])test(`real assistant AuthGuard boundary ${path}`,()=>{
  const {AuthGuard}=loadNotificationComponent('src/components/auth/auth-guard.tsx',new Map([['next/navigation',{useRouter:()=>({replace(){}}),usePathname:()=>path,useSearchParams:()=>new URLSearchParams()}],['@/providers/auth-provider',{useAuth:()=>({user:{id:'assistant'},loading:false,canAccessDashboard:true,canUseAssistantOperations:true,defaultAdminPath:'/admin/word-retests'})}]]));
  const html=renderToStaticMarkup(createElement(AuthGuard,null,createElement('span',null,'protected request detail')));
- assert.equal(html.includes('protected request detail'),path==='/admin/ai-agent'||path.startsWith('/admin/ai-agent/'));
+ assert.equal(html.includes('protected request detail'),false);
 });
 test('sidebar/search use same verified provider capability and no shortcuts added',()=>{
  for(const path of ['src/components/app-sidebar.tsx','src/components/command-search.tsx'])assert.match(readFileSync(new URL('../'+path,import.meta.url),'utf8'),/buildAdminNavGroups\(\{[^}]*canUseAiAgentRequests/);

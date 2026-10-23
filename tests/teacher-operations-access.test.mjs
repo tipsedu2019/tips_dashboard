@@ -45,11 +45,12 @@ test("teacher can read operational planning but only managers may edit it", () =
   }
 });
 
-test("assistant navigation is preserved until its separate scope is decided", () => {
+test("assistant navigation contains only its approved word-retest workflow", () => {
   const groups = nav("assistant");
-  assert.deepEqual(groups.map(group => group.label), ["운영", "영어"]);
-  assert.deepEqual(groups[0].items.map(item => item.url), ["/admin/academic-calendar", "/admin/timetable"]);
-  assert.deepEqual(groups[1].items.map(item => item.url), ["/admin/word-retests", "https://tipsedu.co.kr/test-gen"]);
+  assert.deepEqual(groups.map(group => group.label), ["영어"]);
+  assert.deepEqual(groups.flatMap(group => group.items).map(item => item.url), ["/admin/word-retests"]);
+  assert.equal(getRoleCapabilities("assistant").defaultAdminPath, "/admin/word-retests");
+  assert.equal(getRoleCapabilities("assistant").canUseAiAgentRequests, false);
 });
 
 test("viewer navigation is not expanded by the teacher policy", () => {

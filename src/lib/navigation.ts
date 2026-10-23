@@ -313,18 +313,12 @@ export function buildAdminNavGroups({
   isAdmin?: boolean
   canUseAiAgentRequests?: boolean
 }): NavGroup[] {
-  const assistantOverviewItems: NavItem[] = [
-    {
-      title: "학사일정",
-      url: "/admin/academic-calendar",
-      icon: CalendarDays,
-      items: [
-        { title: "캘린더", url: "/admin/academic-calendar" },
-        { title: "학교 연간 일정표", url: "/admin/academic-calendar/annual-board" },
-      ],
-    },
-    { title: "시간표", url: "/admin/timetable", icon: LayoutGrid },
-  ]
+  if (canUseAssistantOperations) {
+    return [{
+      label: "영어",
+      items: [{ title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck }],
+    }]
+  }
   const fullOverviewItems: NavItem[] = [
     { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
     { title: "등록", url: "/admin/registration", icon: UserPlus },
@@ -344,7 +338,7 @@ export function buildAdminNavGroups({
   ]
   const overview: NavGroup = {
     label: "운영",
-    items: canUseAssistantOperations ? assistantOverviewItems : fullOverviewItems,
+    items: fullOverviewItems,
   }
 
   if (canReadOperations) {
