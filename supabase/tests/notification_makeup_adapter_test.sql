@@ -1620,8 +1620,44 @@ select ok(
   '조교로 바뀐 뒤 거절된 exact replay는 기존 행·이벤트·원장을 중복하지 않는다'
 );
 
+select diag('MAKEUP_READ_ACCESS_OWNER=' || pg_catalog.jsonb_build_object(
+  'requests', (select count(*) from public.makeup_requests),
+  'events', (select count(*) from public.makeup_request_events),
+  'settings', (select count(*) from public.makeup_notification_settings),
+  'adminDirectNotificationFixtureCount', (
+    select count(*) from public.dashboard_notifications
+    where id between '92000000-0000-4000-8000-000000000641'::uuid
+      and '92000000-0000-4000-8000-000000000644'::uuid
+  ),
+  'adminInboxNotificationFixtureCount', (
+    select count(*) from public.dashboard_notifications
+    where id between '92000000-0000-4000-8000-000000000645'::uuid
+      and '92000000-0000-4000-8000-000000000648'::uuid
+  )
+)::text);
+
 select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000005');
 set local role authenticated;
+select diag('MAKEUP_READ_ACCESS_ADMIN=' || pg_catalog.jsonb_build_object(
+  'isExpectedRole', public.current_dashboard_role() = 'admin',
+  'requests', (select count(*) from public.makeup_requests),
+  'events', (select count(*) from public.makeup_request_events),
+  'settings', (select count(*) from public.makeup_notification_settings),
+  'directNotificationCount', (
+    select count(*) from public.dashboard_notifications
+    where id between '92000000-0000-4000-8000-000000000641'::uuid
+      and '92000000-0000-4000-8000-000000000644'::uuid
+  ),
+  'inboxNotificationCount', (
+    select count(*)
+    from pg_catalog.jsonb_array_elements(
+      public.get_dashboard_notification_inbox_v1(100, null, null) -> 'items'
+    ) item
+    where (item ->> 'id')::uuid between
+      '92000000-0000-4000-8000-000000000645'::uuid
+      and '92000000-0000-4000-8000-000000000648'::uuid
+  )
+)::text);
 select ok(
   exists (select 1 from public.makeup_requests)
   and exists (select 1 from public.makeup_request_events)
@@ -1648,6 +1684,12 @@ reset role;
 
 select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000006');
 set local role authenticated;
+select diag('MAKEUP_READ_ACCESS_STAFF=' || pg_catalog.jsonb_build_object(
+  'isExpectedRole', public.current_dashboard_role() = 'staff',
+  'requests', (select count(*) from public.makeup_requests),
+  'events', (select count(*) from public.makeup_request_events),
+  'settings', (select count(*) from public.makeup_notification_settings)
+)::text);
 select ok(
   exists (select 1 from public.makeup_requests)
   and exists (select 1 from public.makeup_request_events)

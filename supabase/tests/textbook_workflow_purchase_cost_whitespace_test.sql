@@ -12,11 +12,12 @@ create temp table send_before as select
  (select count(*) from dashboard_private.notification_event_fanout_jobs) jobs,
  (select count(*) from dashboard_private.notification_deliveries) deliveries;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
-select pg_temp.wid(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','task3b-cost-'||n||'@example.invalid',crypt('local-only',gen_salt('bf')),now(),'{"provider":"email","providers":["email"]}','{}',now(),now() from generate_series(901,903)n;
+select pg_temp.wid(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','task3b-cost-'||n||'@example.invalid',crypt('local-only',gen_salt('bf')),now(),'{"provider":"email","providers":["email"]}','{}',now(),now() from generate_series(901,904)n;
 insert into public.profiles(id,role,name,email) values
 (pg_temp.wid(901),'admin','합성 관리자','task3b-cost-901@example.invalid'),
 (pg_temp.wid(902),'staff','합성 직원','task3b-cost-902@example.invalid'),
-(pg_temp.wid(903),'teacher','합성 교사','task3b-cost-903@example.invalid') on conflict(id) do update set role=excluded.role;
+(pg_temp.wid(903),'staff','합성 요청 담당자','task3b-cost-903@example.invalid'),
+(pg_temp.wid(904),'teacher','합성 조회 교사','task3b-cost-904@example.invalid') on conflict(id) do update set role=excluded.role;
 insert into public.textbook_suppliers(id,name) values
 (pg_temp.wid(352),U&'팁스\FEFF서점'),
 (pg_temp.wid(353),U&'팁스\200B서점'),
@@ -65,13 +66,18 @@ select diag('TASK3B_WIRE '||jsonb_build_object('actorId',auth.uid(),'method',met
 select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000902',true);
 select is(public.get_textbook_purchase_detail_v1(pg_temp.wid(10302),'order')#>>'{row,references,unitCost}','0','staff supplier FEFF zero cost');
 select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000903',true);
-select is(auth.uid(),pg_temp.wid(903),'actual teacher fixture actor');
-select is(public.list_textbook_purchase_page_v1(pg_temp.cost_filters(1,'request'),'status-event',1,10)#>>'{rows,0,references,unitCost}','0','teacher publisher FEFF request zero cost');
+select is(auth.uid(),pg_temp.wid(903),'actual staff request-mode fixture actor');
+select is(public.list_textbook_purchase_page_v1(pg_temp.cost_filters(1,'request'),'status-event',1,10)#>>'{rows,0,references,unitCost}','0','staff publisher FEFF request zero cost');
 select is(public.get_textbook_purchase_detail_v1(pg_temp.wid(10302),'request')#>>'{row,references,unitCost}','9000','request never hydrates supplier for cost');
 select is(public.get_textbook_purchase_detail_v1(pg_temp.wid(10302),'request')#>'{row,references,supplier}','null'::jsonb,'request supplier catalog stays absent');
 select is(public.get_textbook_purchase_detail_v1(pg_temp.wid(10302),'request')#>>'{row,references,configuredSupplierId}',pg_temp.wid(352)::text,'request retains raw configured supplier ID');
-select throws_ok($$select public.get_textbook_purchase_detail_v1(pg_temp.wid(10302),'order')$$,'42501','textbook_workflow_read_forbidden','teacher order detail still forbidden');
-select throws_ok($$select public.list_textbook_purchase_page_v1(pg_temp.cost_filters(1),'status-event',1,10)$$,'42501','textbook_workflow_read_forbidden','teacher order page still forbidden');
+-- Teachers use the dedicated common DTO; full cost/supplier APIs stay closed.
+select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000904',true);
+select throws_ok($$select public.get_textbook_purchase_detail_v1(pg_temp.wid(10302),'request')$$,'42501','operational_common_read_required','teacher full request detail is closed');
+select throws_ok($$select public.list_textbook_purchase_page_v1(pg_temp.cost_filters(1,'request'),'status-event',1,10)$$,'42501','operational_common_read_required','teacher full request page is closed');
+select throws_ok($$select public.get_textbook_purchase_detail_v1(pg_temp.wid(10302),'order')$$,'42501','operational_common_read_required','teacher order detail remains closed');
+select throws_ok($$select public.list_textbook_purchase_page_v1(pg_temp.cost_filters(1),'status-event',1,10)$$,'42501','operational_common_read_required','teacher order page remains closed');
+select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000903',true);
 select diag('TASK3B_WIRE '||jsonb_build_object('actorId',auth.uid(),'method',method,'input',input,'data',data)::text)from(values
 ('listTextbookPurchasePage',jsonb_build_object('page',1,'pageSize',10,'sort','status-event','filters',pg_temp.cost_filters(1,'request')),public.list_textbook_purchase_page_v1(pg_temp.cost_filters(1,'request'),'status-event',1,10)),
 ('getTextbookPurchaseDetail',jsonb_build_object('anchorLineId',pg_temp.wid(10302),'mode','request'),public.get_textbook_purchase_detail_v1(pg_temp.wid(10302),'request'))

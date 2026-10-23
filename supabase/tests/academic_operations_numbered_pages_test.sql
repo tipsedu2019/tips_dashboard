@@ -202,7 +202,17 @@ select is(public.get_operations_class_schedule_numbered_page_v1(pg_temp.of(),214
 reset role;
 update public.profiles set role='teacher' where id=pg_temp.fid(900);
 set local role authenticated;
-select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af(),11,10)->>'totalCount','111','teacher sees classes under final authenticated SELECT policy');
+-- The actual curriculum UI uses v2 common-info reads; v1 remains raw and
+-- must not bypass the teacher class-row privacy fence.
+select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af(),11,10)->>'totalCount','0','teacher legacy academic reader cannot expose raw class metadata');
+create temp table teacher_academic_eleven as select public.get_academic_curriculum_numbered_page_v2(pg_temp.af(),11,10,true) data;
+select is(data->>'totalCount','111','teacher actual v2 common list retains all111 matching classes') from teacher_academic_eleven;
+select is(data#>>'{stats,total}','111','teacher actual v2 common stats retain the same full scope') from teacher_academic_eleven;
+select is(
+  (select jsonb_agg(entry.row_data->>'id' order by entry.ordinal) from jsonb_array_elements(data->'rows') with ordinality as entry(row_data,ordinal)),
+  (select jsonb_agg(pg_temp.fid(n)::text order by n) from generate_series(101,110) n),
+  'teacher actual v2 direct page11 retains exact class101 through110 IDs'
+) from teacher_academic_eleven;
 select is(public.get_operations_class_schedule_numbered_page_v1(pg_temp.of(),11,10)->>'totalCount','111','planning teacher RLS parity');
 reset role;
 select set_config('request.jwt.claim.sub','',true);

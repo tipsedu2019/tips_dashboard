@@ -37,6 +37,9 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   // reference DTO. Neither exemption applies to the mixed common-read gateway.
   "get_operational_common_detail_v1",
   "get_word_retest_reference_data_v1",
+  // Final role-scope SQL: four UUID references produce one authenticated
+  // boolean preflight, never rows or a page. Deadline/retry guards still apply.
+  "validate_word_retest_references_v1",
   // Purpose-complete reservation context is nonpageable, not a scalar count.
   "get_makeup_reservation_context_v1",
   // 20261004160000 + makeup_legacy_approval_occupancy_test.sql: complete
