@@ -522,7 +522,8 @@ export function RegistrationCaseList({
         <>
           <div data-testid="registration-case-mobile-list" className="grid min-w-0 gap-2 p-2 lg:hidden" role="list" aria-label="등록 신청 모바일 목록">
             {items.map((item) => {
-              const entryAvailable = canOpenItem(item)
+              const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
+                && (!item.parentOnlyInquiry || Boolean(onOpenCase))
               return <article
                 key={item.taskId}
                 data-registration-case-row=""
@@ -543,7 +544,8 @@ export function RegistrationCaseList({
               {showActionColumn ? <div className="py-2 text-right" role="columnheader">관리</div> : null}
             </div>
             {items.map((item) => {
-              const entryAvailable = canOpenItem(item)
+              const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
+                && (!item.parentOnlyInquiry || Boolean(onOpenCase))
               return <div
                 key={item.taskId}
                 data-registration-case-row=""
