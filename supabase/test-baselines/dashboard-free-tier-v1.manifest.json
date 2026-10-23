@@ -909,6 +909,11 @@
       "fileName": "20261022081000_class_public_memo.sql",
       "status": "final",
       "sha256": "11c539cce9fcd2838eaf8cf7cf01c61161de7746888e3ed04e8dc05a4b45216b"
+    },
+    {
+      "fileName": "20261022133155_management_class_schedule_ownership.sql",
+      "status": "final",
+      "sha256": "3f0e7b641157f46ebadfacd9b097c7bfd14f91521635afd476681ed7d45f4cd3"
     }
   ]
 }
