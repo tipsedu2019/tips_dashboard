@@ -2,8 +2,8 @@
 
 import { isClassCloseConfirmationError, type ClassCloseConfirmationError } from "./class-close-confirmation";
 import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
-import { Fragment, type FormEvent, type ReactNode, type TouchEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Plus, Trash2, X } from "lucide-react";
+import { Fragment, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import type { ClassFormReferences, ManagementKind, ManagementListFilters, ManagementRow } from "@/features/management/use-management-records";
@@ -11,7 +11,6 @@ import { useManagementRecords } from "@/features/management/use-management-recor
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TimePickerControl } from "@/components/ui/date-time-picker";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {ClassAmountInput, ClassInformationFields, ClassScheduleRows} from "@/components/classes/class-form-fields";
 import { DataTableSearchField } from "@/components/data-table/data-table-search-field";
 import { DataTableRowActions } from "@/components/data-table/data-table-row-actions";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -168,8 +168,6 @@ type DeleteRequest = { rows: ManagementRow[] };
 const CLASS_STATUS_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 const CLASS_SCHEDULE_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
 const CLASS_ROSTER_GRID_CLASS_NAME = "grid gap-3 px-3 lg:grid-cols-[minmax(8rem,1.1fr)_minmax(6.5rem,.7fr)_minmax(4rem,.45fr)_minmax(8rem,.85fr)_minmax(8rem,.85fr)_9.5rem] lg:items-center";
-const CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME = "grid gap-2 md:grid-cols-[repeat(5,minmax(0,1fr))_2.5rem]";
-const CLASS_TUITION_UNIT_WON = 10000;
 const CLASS_DETAIL_TABS = [
   { value: "basic", label: "기본" },
   { value: "students", label: "학생" },
@@ -284,120 +282,6 @@ function shouldClearClassResourceSelection(value: unknown, candidates: string[],
   return selections.length > 0
     && (enforceExact || candidates.length > 0)
     && selections.some((selection) => !candidates.includes(selection));
-}
-
-function getClassTuitionManwonValue(value: unknown) {
-  const digits = text(value).replace(/\D/g, "");
-  if (!digits) return "";
-  const amount = Number(digits);
-  if (!Number.isFinite(amount) || amount < 0) return "";
-  return String(amount >= CLASS_TUITION_UNIT_WON ? Math.round(amount / CLASS_TUITION_UNIT_WON) : amount);
-}
-
-function ClassTuitionManwonInput({
-  id,
-  name,
-  value,
-  placeholder,
-  required = false,
-  disabled = false,
-  autoFocus = false,
-  onChange,
-}: {
-  id: string;
-  name: string;
-  value: string;
-  placeholder?: string;
-  required?: boolean;
-  disabled?: boolean;
-  autoFocus?: boolean;
-  onChange: (value: string) => void;
-}) {
-  const touchStartYRef = useRef<number | null>(null);
-  const displayValue = getClassTuitionManwonValue(value);
-
-  const commitManwon = (nextManwon: string | number) => {
-    const nextAmount = Math.max(0, Number(String(nextManwon).replace(/\D/g, "")) || 0);
-    onChange(nextAmount > 0 ? String(nextAmount * CLASS_TUITION_UNIT_WON) : "");
-  };
-  const stepManwon = (delta: number) => {
-    const nextManwon = Math.max(0, (Number(displayValue) || 0) + delta);
-    commitManwon(nextManwon);
-  };
-  const handleWheel = (event: WheelEvent<HTMLInputElement>) => {
-    if (disabled || document.activeElement !== event.currentTarget || event.deltaY === 0) return;
-    event.preventDefault();
-    stepManwon(event.deltaY < 0 ? 1 : -1);
-  };
-  const handleTouchMove = (event: TouchEvent<HTMLInputElement>) => {
-    if (disabled) return;
-    const currentY = event.touches[0]?.clientY;
-    const startY = touchStartYRef.current;
-    if (typeof currentY !== "number" || typeof startY !== "number") return;
-    const deltaY = startY - currentY;
-    if (Math.abs(deltaY) < 18) return;
-    event.preventDefault();
-    stepManwon(deltaY > 0 ? 1 : -1);
-    touchStartYRef.current = currentY;
-  };
-
-  return (
-    <div className={cn("flex h-10 overflow-hidden rounded-md border bg-background focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50", disabled && "bg-muted/30 opacity-75")}>
-      <div className="relative min-w-0 flex-1">
-        <Input
-          id={id}
-          name={name}
-          type="text"
-          inputMode="numeric"
-          autoComplete="off"
-          autoFocus={autoFocus}
-          data-testid="class-tuition-manwon-input"
-          value={displayValue}
-          placeholder={getClassTuitionManwonValue(placeholder) || "35"}
-          required={required}
-          disabled={disabled}
-          className="h-full rounded-none border-0 pr-12 shadow-none focus-visible:ring-0"
-          onChange={(event) => {
-            const nextManwon = event.target.value.replace(/\D/g, "");
-            commitManwon(nextManwon);
-          }}
-          onWheel={handleWheel}
-          onTouchStart={(event) => {
-            touchStartYRef.current = event.touches[0]?.clientY ?? null;
-          }}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={() => {
-            touchStartYRef.current = null;
-          }}
-        />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">만원</span>
-      </div>
-      <div className="grid w-8 shrink-0 border-l">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="수업료 1만원 올리기"
-          className="h-5 w-8 rounded-none"
-          disabled={disabled}
-          onClick={() => stepManwon(1)}
-        >
-          <ChevronUp className="size-3" aria-hidden="true" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="수업료 1만원 내리기"
-          className="h-5 w-8 rounded-none"
-          disabled={disabled || !displayValue}
-          onClick={() => stepManwon(-1)}
-        >
-          <ChevronDown className="size-3" aria-hidden="true" />
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 function ClassCapacityInput({
@@ -1255,37 +1139,6 @@ function getSaveErrorStatusLabel(message: string) {
   return `저장 실패 · 기존 데이터 유지 · ${message}`;
 }
 
-function FieldClearButton({
-  "aria-label": ariaLabel,
-  disabled = false,
-  onClick,
-  show,
-}: {
-  "aria-label": string;
-  disabled?: boolean;
-  onClick: () => void;
-  show: boolean;
-}) {
-  if (!show) return null;
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      className="absolute right-8 top-1/2 z-10 size-6 -translate-y-1/2 rounded-full bg-background/90"
-      disabled={disabled}
-      aria-label={ariaLabel}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onClick();
-      }}
-    >
-      <X className="size-3.5" aria-hidden="true" />
-    </Button>
-  );
-}
 
 export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const { user, role } = useAuth();
@@ -1371,6 +1224,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   }, []);
   const navigateToManagementDestination = useCallback((href: string) => router.push(href), [router]);
   const [classScheduleSlots, setClassScheduleSlots] = useState<ClassScheduleSlot[]>([]);
+  const classScheduleRowKeysRef = useRef<string[]>([]);
   const [normalizedScheduleDefaults, setNormalizedScheduleDefaults] = useState<NormalizedClassScheduleDefaults | null>(null);
   const scheduleDefaultsPendingRef = useRef(new Set<string>());
   const scheduleDefaultsDraftsRef = useRef(new Map<string, PendingManagementDraft>());
@@ -2102,7 +1956,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       const classroomOptions = getClassClassroomOptionsForSubject(rawRows, normalizedValue);
       // A subject change must clear incompatible resources even when its catalog is empty.
       const enforceExactCandidates = true;
-      const nextSlots = (dialogMode !== "create" && classScheduleSlots.length > 0 ? classScheduleSlots : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom)).map((slot) => ({
+      const nextSlots = (classScheduleSlots.length > 0 ? classScheduleSlots : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom)).map((slot) => ({
         ...slot,
         teacher: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactCandidates) ? "" : slot.teacher,
         teacherCatalogId: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactCandidates) ? null : slot.teacherCatalogId,
@@ -2162,15 +2016,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   };
 
   const getClassScheduleSlotsFromForm = () => {
-    // Creation uses the free-text form, whereas detail editing owns slot state.
-    // Resolve the submitted labels against the same loaded subject catalogs.
-    if (dialogMode === "create") {
-      return parseClassScheduleSlots(form.schedule, form.teacher, form.classroom).map((slot) => ({
-        ...slot,
-        teacherCatalogId: getClassTeacherCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.teacher),
-        classroomCatalogId: getClassClassroomCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.classroom),
-      }));
-    }
     return classScheduleSlots.length > 0
       ? classScheduleSlots
       : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom);
@@ -2183,8 +2028,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       selectedRow && isNormalizedClassRow(selectedRow) && !normalizedScheduleDefaults
         ? {
           ...slot,
-          teacherCatalogId: getClassTeacherCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.teacher),
-          classroomCatalogId: getClassClassroomCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.classroom),
+          teacherCatalogId: slot.teacherCatalogId || getClassTeacherCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.teacher),
+          classroomCatalogId: slot.classroomCatalogId || getClassClassroomCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.classroom),
         }
         : slot
     ));
@@ -2204,19 +2049,23 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     syncClassScheduleSlots(slots.map((slot, slotIndex) => slotIndex === index ? { ...slot, ...patch } : slot));
   };
   const removeClassScheduleSlot = (index: number) => {
+    classScheduleRowKeysRef.current.splice(index, 1);
     const nextSlots = getClassScheduleSlotsFromForm().filter((_, slotIndex) => slotIndex !== index);
     syncClassScheduleSlots(nextSlots.length > 0 ? nextSlots : [createEmptyClassScheduleSlot()]);
   };
+  const detailScheduleOwnedSeparately = kind === "classes" && Boolean(selectedRow && isNormalizedClassRow(selectedRow));
   const classScheduleDefaultsDirty = Boolean(normalizedScheduleDefaults) && JSON.stringify(
     toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
   ) !== JSON.stringify(toContinuousClassScheduleSlots(normalizedScheduleDefaults?.slots || []));
   const formDraft = serializeManagementDraft(form, kind, dialogMode === "create");
   const savedFormDraft = serializeManagementDraft(savedForm, kind, dialogMode === "create");
-  const scheduleDraft = kind !== "classes" || dialogMode === "create" ? undefined : JSON.stringify(normalizedScheduleDefaults
-    ? toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm())
+  const scheduleDraft = kind !== "classes" ? undefined : JSON.stringify(dialogMode === "create"
+    ? getClassScheduleSlotsFromForm()
+    : normalizedScheduleDefaults ? toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm())
     : formatClassScheduleSlots(getClassScheduleSlotsFromForm()));
-  const savedScheduleDraft = kind !== "classes" || dialogMode === "create" ? undefined : JSON.stringify(normalizedScheduleDefaults
-    ? toContinuousClassScheduleSlots(normalizedScheduleDefaults.slots)
+  const savedScheduleDraft = kind !== "classes" ? undefined : JSON.stringify(dialogMode === "create"
+    ? parseClassScheduleSlots(savedForm.schedule, savedForm.teacher, savedForm.classroom)
+    : normalizedScheduleDefaults ? toContinuousClassScheduleSlots(normalizedScheduleDefaults.slots)
     : formatClassScheduleSlots(parseClassScheduleSlots(savedForm.schedule, savedForm.teacher, savedForm.classroom)));
   const selectedRowId = selectedRow?.id;
   const requiresDraftConfirmation = useCallback(() => {
@@ -2327,166 +2176,34 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     return (
       <section data-testid="class-schedule-slot-editor" className="class-schedule-fields space-y-3 rounded-md border bg-background p-3 sm:col-span-2">
         <h3 className="text-sm font-semibold">기본 시간표</h3>
-        <div
-          data-testid="class-schedule-slot-header"
-          className={cn("hidden px-2 text-[11px] font-medium text-muted-foreground md:grid", CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME)}
-        >
-          <div>요일</div>
-          <div>시작시각</div>
-          <div>종료시각</div>
-          <div>선생님</div>
-          <div>강의실</div>
-          <div className="sr-only">관리</div>
-        </div>
-        <div className="grid gap-2">
-          {slots.map((slot, index) => {
-            const teacherOptions = getEditableFieldOptions("teacher", slot.teacher);
-            const classroomOptions = getEditableFieldOptions("classroom", slot.classroom);
-            const rowId = `class-schedule-slot-${index}`;
-
-            return (
-	              <div
-	                key={rowId}
-	                data-testid="class-schedule-slot-row"
-		                className={cn(CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME, "px-2 py-1")}
-	              >
-		                <div className="grid min-w-0 gap-1">
-		                  <Label htmlFor={`${rowId}-day`} className="text-[11px] font-medium text-muted-foreground md:sr-only">요일</Label>
-		                  <Select
-		                    value={slot.day || "__none__"}
-		                    onValueChange={(value) => updateClassScheduleSlot(index, { day: value === "__none__" ? "" : value })}
-		                    disabled={!canMutateRows || classFormReferencesBlocked}
-	                  >
-	                    <SelectTrigger id={`${rowId}-day`} className="w-full min-w-0">
-	                      <SelectValue placeholder="요일" />
-	                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">선택 안 함</SelectItem>
-                      {CLASS_SCHEDULE_DAYS.map((day) => (
-                        <SelectItem key={day} value={day}>{day}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-	                </div>
-		                <div className="grid min-w-0 gap-1">
-		                  <Label className="text-[11px] font-medium text-muted-foreground md:sr-only">시작시각</Label>
-		                  <div className="relative">
-		                    <TimePickerControl
-		                      value={slot.startTime}
-	                      onChange={(value) => updateClassScheduleSlot(index, { startTime: value })}
-	                      placeholder="시작"
-	                      ariaLabel={`수업시간 ${index + 1} 시작시각`}
-	                      disabled={!canMutateRows || classFormReferencesBlocked}
-	                      className={cn("min-w-0", slot.startTime ? "pr-14" : "")}
-	                    />
-                    <FieldClearButton
-                      aria-label={`수업시간 ${index + 1} 시작시각 초기화`}
-                      show={Boolean(slot.startTime)}
-                      onClick={() => updateClassScheduleSlot(index, { startTime: "" })}
-                      disabled={!canMutateRows || classFormReferencesBlocked}
-                    />
-                  </div>
-	                </div>
-		                <div className="grid min-w-0 gap-1">
-		                  <Label className="text-[11px] font-medium text-muted-foreground md:sr-only">종료시각</Label>
-		                  <div className="relative">
-		                    <TimePickerControl
-	                      value={slot.endTime}
-	                      onChange={(value) => updateClassScheduleSlot(index, { endTime: value })}
-	                      placeholder="종료"
-	                      ariaLabel={`수업시간 ${index + 1} 종료시각`}
-	                      disabled={!canMutateRows || classFormReferencesBlocked}
-	                      className={cn("min-w-0", slot.endTime ? "pr-14" : "")}
-	                    />
-                    <FieldClearButton
-                      aria-label={`수업시간 ${index + 1} 종료시각 초기화`}
-                      show={Boolean(slot.endTime)}
-                      onClick={() => updateClassScheduleSlot(index, { endTime: "" })}
-                      disabled={!canMutateRows || classFormReferencesBlocked}
-                    />
-                  </div>
-	                </div>
-		                <div className="grid min-w-0 gap-1">
-		                  <Label htmlFor={`${rowId}-teacher`} className="text-[11px] font-medium text-muted-foreground md:sr-only">선생님</Label>
-	                  <Select
-	                    value={slot.teacher || "__none__"}
-	                    onValueChange={(value) => {
-                          const teacher = value === "__none__" ? "" : value;
-                          updateClassScheduleSlot(index, {
-                            teacher,
-                            teacherCatalogId: normalizedScheduleDefaults || dialogMode === "create"
-                              ? getClassTeacherCatalogIdForSubject(classResourceRows, selectedClassSubject, teacher)
-                              : null,
-                          });
-                        }}
-	                    disabled={!canMutateRows || classFormReferencesBlocked}
-	                  >
-	                    <SelectTrigger id={`${rowId}-teacher`} className="w-full min-w-0">
-	                      <SelectValue placeholder="선생님" />
-	                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">선택 안 함</SelectItem>
-                      {teacherOptions.map((option) => (
-                        <SelectItem key={`${rowId}-teacher-${option}`} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-	                </div>
-		                <div className="grid min-w-0 gap-1">
-		                  <Label htmlFor={`${rowId}-classroom`} className="text-[11px] font-medium text-muted-foreground md:sr-only">강의실</Label>
-	                  <Select
-	                    value={slot.classroom || "__none__"}
-	                    onValueChange={(value) => {
-                          const classroom = value === "__none__" ? "" : value;
-                          updateClassScheduleSlot(index, {
-                            classroom,
-                            classroomCatalogId: normalizedScheduleDefaults || dialogMode === "create"
-                              ? getClassClassroomCatalogIdForSubject(classResourceRows, selectedClassSubject, classroom)
-                              : null,
-                          });
-                        }}
-	                    disabled={!canMutateRows || classFormReferencesBlocked}
-	                  >
-	                    <SelectTrigger id={`${rowId}-classroom`} className="w-full min-w-0">
-	                      <SelectValue placeholder="강의실" />
-	                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">선택 안 함</SelectItem>
-                      {classroomOptions.map((option) => (
-                        <SelectItem key={`${rowId}-classroom-${option}`} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-	                <div className="flex min-w-0 items-end justify-end">
-                  <Button
-                    type="button"
-                    variant="destructive-ghost"
-                    size="icon"
-                    className="h-10 w-10"
-                    onClick={() => removeClassScheduleSlot(index)}
-                    disabled={!canMutateRows || classFormReferencesBlocked || slots.length <= 1}
-                    aria-label="시간표 행 삭제"
-                    title="시간표 행 삭제"
-                  >
-                    <Trash2 className="size-4" aria-hidden="true" />
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-9"
-          onClick={addClassScheduleSlot}
-          disabled={!canMutateRows || classFormReferencesBlocked}
-        >
-          <Plus className="mr-1.5 size-4" aria-hidden="true" />
-          시간 추가
-        </Button>
+        <ClassScheduleRows
+          rows={slots.map((slot,index)=>({key:slot.id || (classScheduleRowKeysRef.current[index] ||= crypto.randomUUID()),day:slot.day,startTime:slot.startTime,endTime:slot.endTime,teacher:slot.teacherCatalogId||slot.teacher,classroom:slot.classroomCatalogId||slot.classroom}))}
+          disabled={!canMutateRows||classFormReferencesBlocked||(dialogMode === "create" && saving)}
+          minimumRows={1}
+          teacherOptions={index=>{
+            const slot=slots[index],selected=slot.teacherCatalogId||slot.teacher;
+            const options=getClassTeacherCatalogRows(classResourceRows).filter(catalog=>catalog.is_visible!==false&&catalog.isVisible!==false&&isClassTeacherCatalogForSubject(catalog,selectedClassSubject)).map(catalog=>({value:text(catalog.id)||text(catalog.name),label:text(catalog.name),disabled:false}));
+            if(selected&&!options.some(option=>option.value===selected))options.push({value:selected,label:slot.teacher||'기존 선생님',disabled:true});
+            return options;
+          }}
+          classroomOptions={index=>{
+            const slot=slots[index],selected=slot.classroomCatalogId||slot.classroom;
+            const options=getClassClassroomCatalogRows(classResourceRows).filter(catalog=>catalog.is_visible!==false&&catalog.isVisible!==false&&isClassroomCatalogForClassSubject(catalog,selectedClassSubject)).map(catalog=>({value:text(catalog.id)||text(catalog.name),label:text(catalog.name),disabled:false}));
+            if(selected&&!options.some(option=>option.value===selected))options.push({value:selected,label:slot.classroom||'기존 강의실',disabled:true});
+            return options;
+          }}
+          onChange={(index,patch)=>{
+            const next:Partial<ClassScheduleSlot>={};
+            if('day' in patch)next.day=patch.day;
+            if('startTime' in patch)next.startTime=patch.startTime;
+            if('endTime' in patch)next.endTime=patch.endTime;
+            if('teacher' in patch){const catalog=getClassTeacherCatalogRows(classResourceRows).find(row=>text(row.id)===patch.teacher);next.teacher=text(catalog?.name)||patch.teacher||'';next.teacherCatalogId=text(catalog?.id)||null;}
+            if('classroom' in patch){const catalog=getClassClassroomCatalogRows(classResourceRows).find(row=>text(row.id)===patch.classroom);next.classroom=text(catalog?.name)||patch.classroom||'';next.classroomCatalogId=text(catalog?.id)||null;}
+            updateClassScheduleSlot(index,next);
+          }}
+          onAdd={addClassScheduleSlot}
+          onRemove={removeClassScheduleSlot}
+        />
         {normalizedScheduleDefaults ? (
           <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
             <p className="text-xs text-muted-foreground">새로 생성하는 일정부터 적용 · 기존 일정은 유지</p>
@@ -2518,10 +2235,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       && (kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject))
       && !text(form[field.name])
     ));
+    if (!missing && kind === "classes" && [form.capacity,form.fee].some(value=>text(value)!==''&&(!Number.isFinite(Number(value))||Number(value)<0))) {
+      setValidationAttempted(true);setOperationError("정원과 수업료는 0 이상의 숫자로 입력해 주세요.");return false;
+    }
     if (!missing) {
       // An unplaced class is valid. Once a placement is entered, creation and
       // edits use the same timing/teacher contract; its room may stay unassigned.
-      if (kind === "classes" && (scope === "form" || (!normalizedScheduleDefaults && scheduleDraft !== savedScheduleDraft))) {
+      if (kind === "classes" && (scope === "form" || (!detailScheduleOwnedSeparately && scheduleDraft !== savedScheduleDraft))) {
         const slots = getClassScheduleSlotsFromForm();
         const scheduleError = (scope === "form" ? classScheduleTextValidationError(form.schedule) : '')
           || classScheduleSlotsValidationError(slots);
@@ -2544,12 +2264,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       ? fieldNames.map((fieldName) => FORM_FIELDS[kind].find((field) => field.name === fieldName)).filter((field): field is Field => Boolean(field))
       : FORM_FIELDS[kind];
     const fieldsToRender = requestedFields.filter((field) => (
-      kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject)
+      (kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject))
+      && !(kind === "classes" && scope === "form" && ["teacher", "schedule", "classroom"].includes(field.name))
     ));
 
-    return (
-      <div className={cn("grid gap-3", kind === "students" ? "student-fields" : kind === "classes" ? "class-fields sm:grid-cols-2" : "sm:grid-cols-2")}>
-        {fieldsToRender.map((field) => {
+    const content = fieldsToRender.map((field) => {
           const id = `${kind}-${scope}-${field.name}`;
           const value = form[field.name] || "";
           const invalid = validationAttempted && Boolean(field.required) && !text(value);
@@ -2600,7 +2319,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   onChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
                 />
               ) : kind === "classes" && field.name === "fee" ? (
-                <ClassTuitionManwonInput
+                <ClassAmountInput
                   id={id}
                   name={field.name}
                   value={value}
@@ -2608,7 +2327,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   required={field.required}
                   disabled={fieldsDisabled}
                   autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
-                  onChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
+                  onChange={(event) => handleEditableFieldChange(field.name, event.target.value)}
                 />
               ) : field.multiline ? (
                 <Textarea
@@ -2665,10 +2384,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               </div>
             </Fragment>
           );
-        })}
-
-      </div>
-    );
+        });
+    if (kind === "classes") return <ClassInformationFields className="class-fields" fields={fieldsToRender.map((field,index)=>({name:field.name,content:content[index]}))}/>;
+    return <div className={cn("grid gap-3",kind === "students" ? "student-fields" : "sm:grid-cols-2")}>{content}</div>;
   };
 
   const openRow = useCallback(async (
@@ -2699,6 +2417,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     setValidationAttempted(false);
     setSavedForm(nextForm);
     setDiscardConfirmationOpen(false);
+    classScheduleRowKeysRef.current = [];
     setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
     setNormalizedScheduleDefaults(null);
     setScheduleDefaultsRequestKey("");
@@ -2943,7 +2662,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setValidationAttempted(false);
         setSavedForm(nextForm);
         setDiscardConfirmationOpen(false);
-        setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
+        classScheduleRowKeysRef.current = [];
+    setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
         setPendingClassScheduleInitialization(null);
         setPendingRelationMode(null);
         setPendingClassStudentDetailId("");
@@ -3103,7 +2823,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       return;
     }
     if (!pending && !validateRequiredFields("detail")) return;
-    const isCurrent = beginSaving(pending ? undefined : { form: formDraft, ...(!normalizedScheduleDefaults ? { schedule: scheduleDraft } : {}) });
+    const isCurrent = beginSaving(pending ? undefined : { form: formDraft, ...(!detailScheduleOwnedSeparately ? { schedule: scheduleDraft } : {}) });
     if (!isCurrent) return;
     setOperationError(null);
     setSaveNotice("");
@@ -3123,7 +2843,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             isCurrent: () => pageActiveRef.current && isCurrent(),
             onChecking: () => { if (isCurrent()) setCheckingClassClose(true); },
           },
-          ...(normalizedScheduleDefaults ? { scheduleOwnership: "normalized" as const } : {}),
+          // Schedule ownership comes from the saved row, not whether its
+          // separately loaded defaults have arrived. Metadata never owns slots.
+          ...(detailScheduleOwnedSeparately ? { scheduleOwnership: "normalized" as const } : {}),
         });
         savedResult = updated;
       } else {
@@ -3135,7 +2857,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       if (isCurrent()) {
         setPendingClassClose(null);
         setCheckingClassClose(false);
-        setSavedForm(submittedForm);
+        setSavedForm((current) => detailScheduleOwnedSeparately ? {
+          ...submittedForm,
+          schedule: current.schedule,
+          teacher: current.teacher,
+          classroom: current.classroom,
+        } : submittedForm);
         setSaveNotice(successNotice);
         if (confirmedState && result?.publicClassesCacheRefresh?.status === "pending") {
           setSaveNotice(`${successNotice} · 공개 수업 캐시 갱신 대기 중`);
@@ -4064,6 +3791,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           ) : (
             <form className="space-y-4" onSubmit={handleSubmit}>
               {renderEditableFields("form")}
+              {kind === "classes" ? renderClassScheduleSlotEditor() : null}
               <DialogFooter className={cn("items-center gap-3", kind === "students" && "student-sheet-actions", kind === "classes" && "class-sheet-actions")}>
                 {renderSaveStatus()}
                 <Button type="button" size={kind === "classes" ? "form" : "default"} variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>취소</Button>

@@ -9215,7 +9215,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const visibleRegistrationCaseItems = useMemo(
     () => numberedServerPage
       ? registrationCaseItems.flatMap((item) => filterRegistrationCaseListItems(
-        [item], displayedRegistrationFilters.view, "", { consultationOwnerId: displayedRegistrationFilters.consultationOwnerId },
+        [item], displayedRegistrationFilters.view, "", {
+          consultationOwnerId: displayedRegistrationFilters.consultationOwnerId,
+          includeServerSelectedInquiryParents: numberedPage.scope !== null,
+        },
       ))
       : filterRegistrationCaseListItems(
         registrationCaseItems,
@@ -9223,7 +9226,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         deferredQuery,
         { consultationOwnerId },
       ),
-    [consultationOwnerId, numberedServerPage, deferredQuery, displayedRegistrationFilters, registrationCaseItems, registrationView],
+    [consultationOwnerId, numberedPage.scope, numberedServerPage, deferredQuery, displayedRegistrationFilters, registrationCaseItems, registrationView],
   )
   const registrationConsultationScopeCounts = useMemo(() => hasAuthoritativeTaskStats ? ({
     mine: authoritativeTaskStats?.metrics.consultationMine || 0,
@@ -12930,6 +12933,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              loading={loading}
 	              disabled={saving}
 	              onOpen={(taskId, trackId) => void openRegistrationTrack(taskId, trackId)}
+                onOpenCase={(taskId) => void openRegistrationCase(taskId)}
 	              onEdit={(taskId, trackId) => void editRegistrationTrack(taskId, trackId)}
 	              onStatusChange={(track, workflowStatus) => void handleRegistrationWorkflowStatusChange(track, workflowStatus)}
 	              canDelete={(item) => canDeleteTask(item.task)}
