@@ -1326,6 +1326,7 @@ function operationalCommonRpcLimitViolation(argument) {
   if (operation === "options" && input.properties.length === 0) return null
   if (operation === "book_detail" && input.properties.length === 1 && optionName(input.properties[0]) === "p_anchor") return null
   if (operation === "book_page") return numberedRpcLimitViolation(input, { parameter: "p_page_size", sizes: [10, 15, 20] })
+  if (operation === "book_request_options") return numberedRpcLimitViolation(input, { parameter: "pageSize", sizes: [15] })
   return "rpc_page_limit_missing"
 }
 

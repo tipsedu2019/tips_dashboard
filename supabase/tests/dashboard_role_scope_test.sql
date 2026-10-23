@@ -41,7 +41,7 @@ select pg_temp.scope_actor(3);
 set local role authenticated;
 select throws_ok($q$select public.create_ops_task_v2('{"type":"transfer","title":"금지 교사 전반","status":"requested"}',pg_temp.scope_id(303))$q$,'42501','ops_task_access_denied','teacher operational create is denied before type detail validation');
 select throws_ok($q$select public.add_ops_task_comment_v2(pg_temp.scope_id(203),'금지 댓글',pg_temp.scope_id(304))$q$,'42501','ops_task_access_denied','teacher own operation comment is a write and denied');
-select throws_ok($q$select public.create_textbook_request_v1(null,'금지 교재',null,null,1,0,'')$q$,'42501','textbook_request_access_denied','teacher textbook request is read only');
+select lives_ok($q$select public.create_textbook_request_v1(null,'신규 요청 교재',null,null,1,0,'')$q$,'teacher may submit a new request without enabling other operational writes');
 reset role;
 select is((select count(*) from dashboard_private.notification_request_ledger),(select ledger from effects_before),'denied operations create zero mutation receipts');
 select is((select count(*) from dashboard_private.notification_events),(select events from effects_before),'denied operations create zero notification events');

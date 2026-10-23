@@ -26,7 +26,8 @@ test('teacher actual caller renders only common read rows and local read-only de
   const title = '<img src=x onerror=alert(1)> 한글 📘';
   await h.resolve(first, envelope(first, [row(101, title)]));
   assert.equal(document.querySelector('form'), null);
-  assert.equal([...document.querySelectorAll('button')].some(b => /요청 추가|요청 등록|요청 수정|삭제|처리|주문서/.test(b.textContent)), false);
+  assert.ok(button('요청 추가'), 'the explicitly approved new-request exception is available');
+  assert.equal([...document.querySelectorAll('button')].some(b => /요청 수정|삭제|처리|주문서/.test(b.textContent)), false);
   const before = h.requests.length;
   await h.act(() => button(title).click());
   assert.ok(document.querySelector('[role="dialog"]'));

@@ -10,6 +10,7 @@ import { DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_TABLE_CLASS_NAME, DataTableToo
 import { isNumberedPagePermissionError } from "@/lib/numbered-page-controller"
 import type { DataTablePageSize, NumberedPage } from "@/lib/numbered-pagination"
 import { readTeacherTextbookRequestDetail, readTeacherTextbookRequests, type TeacherTextbookRequest } from "./teacher-textbook-request-read"
+import { TeacherTextbookRequestCreate } from "./teacher-textbook-request-create"
 
 export function TeacherTextbookRequestWorkspace() {
   const [search, setSearch] = useState("")
@@ -81,6 +82,7 @@ export function TeacherTextbookRequestWorkspace() {
     <DataTableToolbar>
       <DataTableSearchField ref={searchInput} label="교재요청 검색" placeholder="교재·수업·신청자 검색" value={search} onValueChange={value => { setSearch(value); setPage(1) }} className="w-full sm:max-w-sm" />
       <span role="status" className="text-sm text-muted-foreground">{loading ? "조회 중…" : `전체 ${accepted?.totalCount ?? 0}건`}</span>
+      <TeacherTextbookRequestCreate onSaved={() => { setSearch(""); setPage(1); setReload(value => value + 1) }} />
     </DataTableToolbar>
     {detailError && <div role="alert" className="flex items-center gap-3 px-3 py-4 text-sm"><span>{detailError}</span><Button variant="outline" size="sm" onClick={() => setDetailRetry(value => value + 1)}>상세 다시 조회</Button></div>}
     {error && <div role="alert" className="flex items-center gap-3 px-3 py-4 text-sm"><span>{error}</span><Button variant="outline" size="sm" onClick={() => { setReload(value => value + 1); setDetailRetry(value => value + 1) }}>다시 조회</Button></div>}

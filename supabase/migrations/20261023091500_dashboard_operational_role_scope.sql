@@ -225,7 +225,11 @@ declare
   v_order public.textbook_purchase_orders%rowtype;
   v_lines jsonb := '[]'::jsonb;
 begin
-  if v_actor_id is null or v_role not in ('admin', 'staff') then
+  if v_actor_id is null or v_role not in ('admin', 'staff', 'teacher')
+    or (v_role = 'teacher' and not exists (
+      select 1 from auth.users u where u.id=v_actor_id and u.deleted_at is null
+        and (u.banned_until is null or u.banned_until<=now())
+    )) then
     raise exception 'textbook_request_access_denied' using errcode = '42501';
   end if;
 
@@ -324,6 +328,43 @@ begin
 end;
 $function$
 ;
+
+-- A new teacher submission is the only operational write exception. Reuse the
+-- existing atomic request ledger; this does not create an ops task or send alerts.
+create function public.submit_teacher_textbook_request_v1(p_request_id uuid,p_input jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $f$
+declare fingerprint text; replay jsonb; result jsonb;
+begin
+ if not exists(select 1 from public.profiles p join auth.users u on u.id=p.id
+   where p.id=auth.uid() and p.role='teacher' and u.deleted_at is null
+     and (u.banned_until is null or u.banned_until<=now())) then
+  raise exception 'textbook_request_access_denied' using errcode='42501';
+ end if;
+ if p_request_id is null or jsonb_typeof(p_input) is distinct from 'object'
+   or not (p_input ?& array['title','textbookId','classId','locationId','studentQuantity','teacherQuantity','memo'])
+   or (select count(*) from jsonb_object_keys(p_input))<>7
+   or jsonb_typeof(p_input->'title') is distinct from 'string'
+   or jsonb_typeof(p_input->'memo') is distinct from 'string'
+   or exists(select 1 from unnest(array['textbookId','classId','locationId'])k
+     where jsonb_typeof(p_input->k) not in('string','null'))
+   or exists(select 1 from unnest(array['studentQuantity','teacherQuantity'])k
+     where jsonb_typeof(p_input->k) is distinct from 'number'
+       or (p_input->>k)!~'^(0|[1-9][0-9]*)$'
+       or (p_input->>k)::numeric>2147483647) then
+  raise exception 'textbook_request_input_invalid' using errcode='22023';
+ end if;
+ fingerprint:=md5(jsonb_build_object('actor',auth.uid(),'input',p_input)::text);
+ replay:=dashboard_private.ops_task_request_replay_v2(p_request_id,'submit_teacher_textbook_request_v1',fingerprint);
+ if replay is not null then return replay;end if;
+ result:=public.create_textbook_request_v1((p_input->>'textbookId')::uuid,p_input->>'title',
+   (p_input->>'classId')::uuid,(p_input->>'locationId')::uuid,
+   (p_input->>'studentQuantity')::integer,(p_input->>'teacherQuantity')::integer,p_input->>'memo');
+ return dashboard_private.finish_ops_task_request_v2(p_request_id,'submit_teacher_textbook_request_v1',fingerprint,
+   jsonb_build_object('orderId',result#>>'{order,id}'));
+end $f$;
+alter function public.submit_teacher_textbook_request_v1(uuid,jsonb) owner to postgres;
+revoke all on function public.submit_teacher_textbook_request_v1(uuid,jsonb) from public,anon,authenticated,service_role;
+grant execute on function public.submit_teacher_textbook_request_v1(uuid,jsonb) to authenticated;
 
 -- Reuse the existing canonical/legacy in-app projection identity. A metadata
 -- workflow tag alone is not proof that an alert belongs to the retest workflow.
@@ -3624,6 +3665,22 @@ elsif p_operation='options' then
   'classes',coalesce((select jsonb_agg(jsonb_build_object('id',id,'name',name,'subject',subject,'grade',grade,'teacher',teacher,'room',room,'student_ids',student_ids,'waitlist_ids',waitlist_ids,'textbook_ids',textbook_ids) order by id) from public.classes),'[]'),
   'textbooks',coalesce((select jsonb_agg(jsonb_build_object('id',id,'name',name,'title',title,'subject',subject,'publisher',publisher,'status',status) order by id) from public.textbooks),'[]'),
   'teachers',coalesce((select jsonb_agg(jsonb_build_object('id',id,'name',name,'subjects',subjects,'profile_id',profile_id,'is_visible',is_visible,'sort_order',sort_order) order by id) from public.teacher_catalogs),'[]'));
+elsif p_operation='book_request_options' then
+ if coalesce(p_args->>'scope','') not in('textbooks','classes','locations')
+   or jsonb_typeof(p_args->'search') is distinct from 'string'
+   or (p_args->>'page')::integer is null or (p_args->>'page')::integer<1
+   or p_args->>'pageSize' is distinct from '15' then
+  raise exception 'operational_common_read_invalid' using errcode='22023';
+ end if;
+ with options as (
+  select id,coalesce(nullif(title,''),name,'') label from public.textbooks where p_args->>'scope'='textbooks'
+  union all select id,coalesce(name,'') from public.classes where p_args->>'scope'='classes'
+  union all select id,coalesce(name,'') from public.textbook_inventory_locations where p_args->>'scope'='locations'
+ ),eligible as materialized(select * from options where label ilike '%'||btrim(p_args->>'search')||'%'),page as (
+  select * from eligible order by label,id offset (((p_args->>'page')::bigint-1)*15) limit 15
+ ) select jsonb_build_object('rows',coalesce((select jsonb_agg(jsonb_build_object('id',id,'label',label) order by label,id) from page),'[]'),
+  'page',(p_args->>'page')::integer,'pageSize',15,'totalCount',(select count(*) from eligible)) into result;
+ return result;
 elsif p_operation in('book_page','book_detail') then
  if p_operation='book_detail' then
   task_id:=(p_args->>'p_anchor')::uuid;

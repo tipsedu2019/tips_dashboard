@@ -260,10 +260,9 @@ select pg_temp.textbook_request_set_actor(
 );
 set local role authenticated;
 
-select throws_ok(
-  $$select public.create_textbook_request_v1(null, 'teacher denied', null, null, 1, 0, '')$$,
-  '42501', 'textbook_request_access_denied',
-  'teacher cannot create an operational textbook request'
+select lives_ok(
+  $$select public.create_textbook_request_v1(null, 'teacher new request', null, null, 1, 0, '')$$,
+  'teacher can create a new request through the narrow existing RPC'
 );
 
 select is(
@@ -296,9 +295,12 @@ select results_eq(
   $$select (select count(*) from public.textbook_purchase_orders),
            (select count(*) from public.textbook_purchase_order_lines),
            (select count(*) from public.textbook_stock_moves)$$,
-  $$select orders, lines, stock_moves from textbook_request_denial_baseline$$,
-  'teacher denial and common reads add no order, line, or stock movement'
+  $$select orders+1, lines+1, stock_moves from textbook_request_denial_baseline$$,
+  'teacher submission adds exactly one requested order and line with no stock movement'
 );
+update textbook_request_denial_baseline set
+ orders=(select count(*) from public.textbook_purchase_orders),
+ lines=(select count(*) from public.textbook_purchase_order_lines);
 
 select pg_temp.textbook_request_set_actor(
   '83000000-0000-4000-8000-000000000002',
@@ -430,6 +432,49 @@ select results_eq(
   $$values (1::bigint, 1::bigint)$$,
   'denied callers and teacher raw writes leave the existing staff request unchanged'
 );
+
+-- Latest approved exception: new teacher requests are atomic and replay-safe;
+-- raw management, ownership, status and fulfillment are still server-controlled.
+create function pg_temp.teacher_submission(title text default '멱등 교재') returns jsonb language sql as $$
+ select jsonb_build_object('title',title,'textbookId',null,'classId',null,'locationId',null,
+   'studentQuantity',2,'teacherQuantity',1,'memo','보존할 요청 메모')
+$$;
+select pg_temp.textbook_request_set_actor('83000000-0000-4000-8000-000000000001','textbook-request-teacher@runtime.invalid');
+set local role authenticated;
+select is(
+ public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000901',pg_temp.teacher_submission()),
+ public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000901',pg_temp.teacher_submission()),
+ 'same teacher request id and input replay the exact result');
+select is((select count(*) from jsonb_object_keys(public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000901',pg_temp.teacher_submission()))),1::bigint,'submission response exposes only its own order id');
+select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000901',pg_temp.teacher_submission('다른 내용'))$$,'22023','idempotency_key_reused','same key with different input is rejected');
+select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000902',pg_temp.teacher_submission()||'{"created_by":"83000000-0000-4000-8000-000000000004"}')$$,'22023','textbook_request_input_invalid','teacher cannot inject another requester or management fields');
+select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000902',pg_temp.teacher_submission()||'{"studentQuantity":-1}')$$,'22023','textbook_request_input_invalid','negative quantity is not silently changed');
+select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000902',pg_temp.teacher_submission()||'{"classId":"83000000-0000-4000-8000-000000000999"}')$$,'23503',null,'invalid references roll back the complete submission');
+select results_eq($$with x as(update public.textbook_purchase_orders set status='ordered' where created_by='83000000-0000-4000-8000-000000000001' returning id)select count(*)from x$$,$$values(0::bigint)$$,'teacher cannot edit even its own submitted request');
+select results_eq($$with x as(delete from public.textbook_purchase_order_lines returning id)select count(*)from x$$,$$values(0::bigint)$$,'teacher cannot delete own or other submitted lines');
+select throws_ok($$insert into public.textbook_purchase_orders(status,created_by)values('requested','83000000-0000-4000-8000-000000000001')$$,'42501',null,'direct insert cannot bypass server-owned request creation');
+select ok((public.read_operational_common_v1('book_request_options','{"scope":"classes","search":"","page":1,"pageSize":15}')#>'{rows}') is not null,'new form can read bounded minimal class options');
+select throws_ok($$select public.read_operational_common_v1('book_request_options','{"scope":"profiles","search":"","page":1,"pageSize":15}')$$,'22023','operational_common_read_invalid','options cannot select private relations');
+select throws_ok($$select public.read_operational_common_v1('book_request_options','{"scope":"classes","search":"","page":1,"pageSize":100}')$$,'22023','operational_common_read_invalid','options are bounded to fifteen rows');
+reset role;
+select results_eq($$select o.status,o.created_by,l.copy_scope,l.requested_quantity,l.ordered_quantity,l.received_quantity,l.memo from public.textbook_purchase_orders o join public.textbook_purchase_order_lines l on l.purchase_order_id=o.id where l.requested_textbook_title='멱등 교재' order by l.copy_scope$$,
+ $$values('requested'::text,'83000000-0000-4000-8000-000000000001'::uuid,'student'::text,2,0,0,'보존할 요청 메모'::text),('requested'::text,'83000000-0000-4000-8000-000000000001'::uuid,'teacher'::text,1,0,0,'보존할 요청 메모'::text)$$,
+ 'one request owns exactly two requested-only lines after repeated submissions and denied changes');
+select is((select count(*) from dashboard_private.notification_request_ledger where request_kind='submit_teacher_textbook_request_v1'),1::bigint,'only one successful request receipt, no receipt for failed input or FK failure');
+select is((select count(*) from public.textbook_stock_moves),(select stock_moves from textbook_request_denial_baseline),'teacher submission never purchases, fulfills, or moves inventory');
+select pg_temp.textbook_request_set_actor('83000000-0000-4000-8000-000000000003','textbook-request-assistant@runtime.invalid');
+set local role authenticated;
+select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000901',pg_temp.teacher_submission())$$,'42501','textbook_request_access_denied','assistant is rejected before existing receipt replay');
+reset role;
+select pg_temp.textbook_request_set_actor('83000000-0000-4000-8000-000000000002','textbook-request-viewer@runtime.invalid');
+set local role authenticated;
+select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000901',pg_temp.teacher_submission())$$,'42501','textbook_request_access_denied','viewer remains unable to submit or replay a teacher request');
+reset role;
+update public.profiles set role='assistant' where id='83000000-0000-4000-8000-000000000001';
+select pg_temp.textbook_request_set_actor('83000000-0000-4000-8000-000000000001','textbook-request-teacher@runtime.invalid');
+set local role authenticated;
+select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000901',pg_temp.teacher_submission())$$,'42501','textbook_request_access_denied','changed role loses submission and replay immediately with the same JWT identity');
+reset role;
 
 select * from finish();
 rollback;
