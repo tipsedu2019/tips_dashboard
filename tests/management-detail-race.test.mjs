@@ -10,6 +10,7 @@ import { configureSnapshotFixture, snapshotStudentId } from "./helpers/managemen
 import { classRow, createManagementDetailFixture, defaultsFor } from "./helpers/management-detail-fixture.mjs";
 import { requestAppNavigation } from "../src/lib/guarded-navigation.ts";
 import { extractManagementReconcile } from "../scripts/measure-management-refresh.mjs";
+import { withRpcQueryControls } from "./helpers/rpc-query-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 const repo = new URL("../", import.meta.url);
@@ -507,6 +508,89 @@ test("public memo can be reopened, edited, cleared and retained after a failed s
   assert.equal(field().value, "실패해도 남는 초안");
   assert.equal(ui.rows[0].raw.public_memo, "");
 });
+
+function bindPublicMemoWriter(fixture, writes) {
+      fixture.bindProduction = load => {
+        const { createManagementService } = load(new URL("src/features/management/management-service.js", repo));
+        const service = createManagementService({
+          supabase: withRpcQueryControls({ async rpc(name, args) {
+            assert.equal(name, "update_class_operational_v1");
+            writes.push(structuredClone(args));
+            return { data: { classRow: { id: args.p_class_id, ...args.p_patch } }, error: null };
+          } }),
+          probeRegistrationRuntime: async () => ({ mode: "ready" }),
+          refreshPublicClassesCache: async () => ({ status: "complete" }),
+        });
+        fixture.service.updateClass = service.updateClass;
+      };
+}
+
+for (const defaultsState of ["pending", "failed", "loaded", "legacy-authority"]) {
+  test(`public memo metadata excludes normalized schedule fields when defaults are ${defaultsState}`, async t => {
+    const writes = [];
+    const ui = await setup(t, { configureFixture: fixture => {
+      fixture.rows[0].raw.public_memo = "";
+      bindPublicMemoWriter(fixture, writes);
+    } });
+    await ui.click("A 영어반");
+    if (defaultsState === "failed") await ui.reject(0, "합성 시간표 조회 실패");
+    if (defaultsState === "loaded") await ui.resolve(0, defaultsFor());
+    if (defaultsState === "legacy-authority") await ui.resolve(0, { ...defaultsFor(), authoritativeSource: "legacy", storageMode: "normalized" });
+    await ui.editField("classes-detail-publicMemo", "함수 진도 안내 ✨");
+    await ui.click("저장");
+    assert.equal(writes.length, 1);
+    const patch = writes[0].p_patch;
+    if (defaultsState === "pending") t.diagnostic(`public-memo-metadata-wire:${JSON.stringify(patch)}`);
+    assert.equal(patch.public_memo, "함수 진도 안내 ✨");
+    for (const key of ["schedule", "teacher", "room", "schedule_plan"]) {
+      assert.equal(Object.hasOwn(patch, key), false, `metadata save must not own ${key}`);
+    }
+    assert.match(ui.text(), /저장 완료/);
+  });
+}
+
+test("public memo SQL detail DTO selects normalized ownership through actual row consumer", async t => {
+  const writes = [];
+  const fallback = { ...classRow("a", "Synthetic DTO class").raw, scheduleStorageMode: "normalized", publicMemo: "" };
+  delete fallback.schedule_storage_mode;
+  const dto = process.env.TASK_PUBLIC_MEMO_SQL_DTO
+    ? JSON.parse(readFileSync(process.env.TASK_PUBLIC_MEMO_SQL_DTO, "utf8"))
+    : { record: fallback };
+  const ui = await setup(t, { configureFixture: fixture => {
+    bindPublicMemoWriter(fixture, writes);
+    const bindWriter = fixture.bindProduction;
+    fixture.bindProduction = load => {
+      bindWriter(load);
+      const { normalizeClassManagementRecord } = load(new URL("src/features/management/records.js", repo));
+      fixture.rows[0] = normalizeClassManagementRecord(dto.record);
+    };
+  } });
+  await ui.click(ui.rows[0].title);
+  assert.equal(ui.requests.length, 1, "detail discriminator must start the normalized defaults reader");
+  await ui.editField("classes-detail-publicMemo", "실제 DTO 경유 안내");
+  await ui.click("저장");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].p_patch.public_memo, "실제 DTO 경유 안내");
+  for (const key of ["schedule", "teacher", "room", "schedule_plan"]) assert.equal(key in writes[0].p_patch, false);
+  assert.match(ui.text(), /저장 완료/);
+});
+
+for (const defaultsState of ["pending", "failed"]) {
+  test(`public memo save preserves an unsaved normalized schedule when defaults are ${defaultsState}`, async t => {
+    const writes = [];
+    const ui = await setup(t, { configureFixture: fixture => bindPublicMemoWriter(fixture, writes) });
+    await ui.click("A 영어반");
+    if (defaultsState === "failed") await ui.reject(0, "합성 시간표 조회 실패");
+    await ui.editTime("23:00"); // Invalid draft belongs to the separate schedule writer.
+    await ui.editField("classes-detail-publicMemo", "일정 초안과 별개인 안내");
+    await ui.click("저장");
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].p_patch.public_memo, "일정 초안과 별개인 안내");
+    assert.equal(ui.time(), "23:00");
+    await ui.click("수업 상세 닫기");
+    assert.ok(document.querySelector('[data-testid="management-discard-confirm-dialog"]'), "metadata receipt cannot mark the schedule draft saved");
+  });
+}
 
 test("new class form sends only explicitly authored public memo", async t => {
   const ui = await setup(t, { configureFixture: fixture => {
