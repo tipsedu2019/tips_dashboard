@@ -30,12 +30,13 @@ exception when others then
  return jsonb_build_object('code',code,'message',message,'details',nullif(detail,''),'detail',case when detail<>'' then detail::jsonb end);
 end$$;
 create function pg_temp.try_direct(sessions jsonb,clear_actor boolean default false) returns jsonb language plpgsql as $$
-declare code text; message text; detail text;
+declare code text; message text; detail text; affected integer;
 begin
  update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions}',sessions) where id=pg_temp.sid(301);
+ get diagnostics affected=row_count;
  if clear_actor then perform set_config('request.jwt.claim.sub','',true);perform set_config('request.jwt.claims','{}',true);end if;
  set constraints all immediate;set constraints all deferred;
- return jsonb_build_object('ok',true);
+ return jsonb_build_object('ok',true,'affected',affected);
 exception when others then
  get stacked diagnostics code=RETURNED_SQLSTATE,message=MESSAGE_TEXT,detail=PG_EXCEPTION_DETAIL;
  return jsonb_build_object('code',code,'message',message,'details',nullif(detail,''),'detail',case when detail<>'' then detail::jsonb end);
@@ -151,9 +152,10 @@ reset role;
 select set_config('request.jwt.claim.sub',pg_temp.sid(903)::text,true);
 set local role authenticated;
 insert into ev values('teacher-denied',pg_temp.try_direct(jsonb_build_array(pg_temp.lesson('teacher-direct',pg_temp.day(2),101,201))));
-select is((select v->>'code' from ev where k='teacher-denied'),'23P01','existing teacher direct-write path still reaches deferred conflict guard');
-select ok((select v->'detail'='null'::jsonb from ev where k='teacher-denied'),'teacher direct write cannot disclose other class names');
+select is((select v->>'affected' from ev where k='teacher-denied'),'0','teacher direct UPDATE is filtered before any row can change');
+select ok((select not(v ? 'detail') and not(v ? 'details') from ev where k='teacher-denied'),'filtered teacher write cannot disclose other class names');
 reset role;
+select is((select schedule_plan from public.classes where id=pg_temp.sid(301)),(select plan from original),'teacher direct write preserves the exact original schedule');
 select set_config('request.jwt.claim.sub',pg_temp.sid(904)::text,true);
 set local role authenticated;
 insert into ev values('banned',pg_temp.try_save(jsonb_build_array(pg_temp.lesson('banned-draft',pg_temp.day(2),101,201))));

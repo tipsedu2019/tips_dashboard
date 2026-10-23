@@ -429,7 +429,7 @@ test("primary request read failure stays in its toolbar and retry restores contr
   assert.equal(document.querySelector('[aria-label="요청 검색"][type="search"]'), search)
   assert.equal(document.activeElement, search)
   assert.ok(document.querySelector('[data-prepared-surface="requests-desktop"]'))
-  assert.ok(document.querySelector('[aria-label="교재 요청 추가"]'))
+  assert.equal(Boolean(document.querySelector('[aria-label="교재 요청 추가"]')), true, 'authorized manager creation controls return after the primary read recovers')
   assert.equal(requestList.textContent.includes("교재 목록을 불러오지 못했습니다"), false)
   await h.assertNoLegacyReads()
 })
@@ -993,15 +993,14 @@ test("paired purchase columns preserve all six quantities, authoritative totals 
   await h.assertNoLegacyReads()
 })
 
-test("teachers retain request creation without purchase row management menus", async (t) => {
+test("teachers read requests without creation or purchase row management menus", async (t) => {
   const h = await setup(t, { search: '?textbookTab=requests', auth: { role: 'teacher', isTeacher: true, isAdmin: false, isStaff: false, canManageAll: false } })
-  await h.resolve(h.requests.find(request => request.name === 'list_textbook_purchase_page_v1'), { rows: [purchaseRow('request')], page: 1, pageSize: 10, totalCount: 1 })
-  await h.resolve(h.requests.find(request => request.name === 'get_textbook_purchase_summary_v1'), purchaseSummary('request'))
-  assert.ok(document.querySelector('[aria-label="교재 요청 추가"]'))
+  await h.resolve(h.requests.find(request => request.name === 'read_operational_common_v1'), { rows: [{id:'a'.repeat(32),anchorLineId:purchaseRow('request').anchorLineId,bookTitle:'교재 101',className:'공통 수업',requesterLabel:'담당자',requestedAt:'2026-10-23',studentQuantity:2,teacherQuantity:3}],page:1,pageSize:15,totalCount:1 })
+  assert.equal(document.querySelector('[aria-label="교재 요청 추가"]'), null)
   assert.equal(document.querySelector('[aria-label="교재 101 요청 더보기"]'), null)
   assert.equal(document.querySelector('[aria-label="교재 101 요청 수정"]'), null)
   assert.equal(document.querySelector('[aria-label="주문 문서 메뉴"]'), null)
-  await h.assertNoLegacyReads()
+  assert.equal(h.requests.some(request => request.name === "get_textbook_purchase_summary_v1"), false)
 })
 
 test("purchase aggregate badges use only authoritative summary quantities", async (t) => {

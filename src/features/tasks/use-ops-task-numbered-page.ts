@@ -103,6 +103,7 @@ export function useOpsTaskNumberedPage({ viewerId, viewerRole, filters, enabled,
   }, [actor, enabled, preference.pageSize, preference.ready, scope])
   const snapshot = actor && display.actor === actor ? display.snapshot : EMPTY
   const retry = useCallback(() => controllerRef.current?.retry() ?? Promise.resolve(), [])
+  const invalidatePermission = useCallback((error: unknown) => controllerRef.current?.invalidatePermission(error), [])
   const refresh = useCallback(() => {
     if (!enabled || !actor || !preference.ready) return Promise.resolve()
     // A retained page belongs to its accepted scope, not the pending filters.
@@ -112,5 +113,5 @@ export function useOpsTaskNumberedPage({ viewerId, viewerRole, filters, enabled,
   }, [actor, enabled, goToPage, preference.ready, retry, scope, snapshot.page, snapshot.scope])
   const setPageSizePreference = preference.setPreference
   return { ...snapshot, loading: Boolean(actor) && (!preference.ready || snapshot.loading || (snapshot.scope === null && !snapshot.error)),
-    goToPage, retry, refresh, setPageSizePreference }
+    goToPage, retry, refresh, invalidatePermission, setPageSizePreference }
 }

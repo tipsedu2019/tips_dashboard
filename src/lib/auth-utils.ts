@@ -60,22 +60,33 @@ export function getRoleCapabilities(role: string | null | undefined) {
   const normalizedRole = normalizeDashboardRole(role);
   const canManageAll = normalizedRole === "admin" || normalizedRole === "staff";
   const canUseAssistantOperations = normalizedRole === "assistant";
-  const canEditCurriculumPlanning =
-    canManageAll || normalizedRole === "teacher";
-  const canEditClassSchedulePlanning =
-    canManageAll || normalizedRole === "teacher";
+  const canReadOperations = canManageAll || normalizedRole === "teacher";
+  const canEditCurriculumPlanning = canManageAll;
+  const canEditClassSchedulePlanning = canManageAll;
 
   return {
     canAccessDashboard: true,
-    canUseAiAgentRequests: ["admin", "staff", "teacher", "assistant"].includes(normalizedRole),
+    canUseAiAgentRequests: ["admin", "staff", "teacher"].includes(normalizedRole),
     canViewAllAiAgentRequests: normalizedRole === "admin",
     canManageAll,
+    canReadOperations,
     canEditCurriculumPlanning,
     canEditClassSchedulePlanning,
     canEditClassSchedule: canManageAll,
     canUseAssistantOperations,
     defaultAdminPath: canUseAssistantOperations ? "/admin/word-retests" : "/admin/dashboard",
   };
+}
+
+// Keep the teacher's read-only operational workspace separate from management.
+// Server readers and producers enforce the corresponding data/action boundary.
+export function canTeacherAccessPath(pathname: string) {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  return ![
+    "/admin/students", "/admin/classes", "/admin/textbooks",
+    "/admin/public-content", "/admin/recruiting", "/admin/statistics",
+    "/admin/settings", "/admin/schools", "/admin/teachers", "/admin/classrooms",
+  ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
 export function shouldForcePasswordChange(user: unknown) {

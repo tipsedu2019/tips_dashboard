@@ -1,3 +1,4 @@
+import { readWordRetestReferenceData, validateWordRetestReferences } from "./word-retest-reference-data"
 import { supabase } from "@/lib/supabase"
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js"
 import { ACTIVE_STUDENT_STATUS } from "@/lib/student-status.js"
@@ -533,6 +534,7 @@ type OpsTaskWorkspaceOptionLoadOptions = {
   force?: boolean
   taskType?: OpsTaskType
   viewerId?: string
+  viewerRole?: string
 }
 const opsTaskWorkspaceDataCache = new Map<string, { data: OpsTaskWorkspaceData; expiresAt: number }>()
 const opsTaskPageStatsCache = createOpsTaskPageStatsCache<OpsTaskPageStats | undefined>({
@@ -561,7 +563,7 @@ function getOpsTaskWorkspaceCacheKey(options: OpsTaskWorkspaceLoadOptions = {}) 
 }
 
 function getOpsTaskWorkspaceOptionCacheKey(options: OpsTaskWorkspaceOptionLoadOptions = {}) {
-  return [options.taskType || "all", options.viewerId || "anonymous"].join(":")
+  return [options.taskType || "all", options.viewerId || "anonymous", options.viewerRole || "unresolved"].join(":")
 }
 
 function getOpsRegistrationClassDetailCacheKey(classId: string, options: { viewerId?: string } = {}) {
@@ -1689,6 +1691,13 @@ async function readOpsTaskWorkspaceOptionData(
   }
 
   try {
+    if (options.viewerRole === "teacher" || (options.taskType === "word_retest" && options.viewerRole === "assistant")) {
+      const refs = await readWordRetestReferenceData(supabase, options.viewerRole === "teacher" && options.taskType !== "word_retest")
+      return {
+        ...buildOpsTaskWorkspaceOptionData(refs.profiles, refs.students, refs.classes, refs.textbooks, refs.teachers),
+        schemaReady: true, error: null,
+      }
+    }
     const [profileRows, studentRows, classRows, textbookRows, teacherRows] = await Promise.all([
       readTable("profiles", "id,name,email,role,login_id", true),
       readTableWithFallback("students", "id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids", "id,name,grade,school,contact,parent_contact,status", true),
@@ -2068,6 +2077,17 @@ async function readOpsTaskWorkspaceData(
       error: error instanceof Error ? error.message : "할 일 데이터를 불러오지 못했습니다.",
     }
   }
+}
+
+export async function loadOperationalCommonTaskById(taskId: string): Promise<OpsTask | null> {
+  if (!supabase || !text(taskId)) return null
+  const { data, error } = await supabase.rpc("get_operational_common_detail_v1", { p_id: taskId })
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  if (error) throw error
+  if (data === null) return null
+  if (!data || typeof data !== "object" || Array.isArray(data) || data.id !== taskId
+    || !["registration", "transfer", "withdrawal"].includes(data.type)) throw new Error("운영 공통정보를 확인할 수 없습니다.")
+  return mapOpsTaskPageRow(data as Row)
 }
 
 export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
@@ -2948,17 +2968,11 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
   }
 
   if (input.type === "word_retest" && input.status === "done") {
-    const wordRetest = input.wordRetest || {}
-    const student = await selectOpsRowById("students", input.studentId || "")
-    const classRow = await selectOpsRowById("classes", input.classId || "")
-    const textbook = await selectOpsRowById("textbooks", input.textbookId || "")
-    const teacher = await selectOpsRowById("teacher_catalogs", wordRetest.teacherId || "")
-
-    assertResolvedManagementRecord(student, "단어 재시험 완료 전에 기존 학생을 다시 선택하세요.")
-    assertResolvedManagementRecord(classRow, "단어 재시험 완료 전에 기존 수업을 다시 선택하세요.")
-    assertResolvedManagementRecord(textbook, "단어 재시험 완료 전에 기존 교재를 다시 선택하세요.")
-    assertResolvedManagementRecord(teacher, "단어 재시험 완료 전에 담당 선생님을 다시 선택하세요.")
-    assertOpsStudentInClass(student, classRow, "단어 재시험 완료 전에 학생이 해당 수업 명단에 있는지 확인하세요.")
+    if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+    await validateWordRetestReferences(supabase, {
+      studentId: input.studentId || "", classId: input.classId || "",
+      textbookId: input.textbookId || "", teacherId: input.wordRetest?.teacherId || "",
+    })
   }
 }
 

@@ -618,7 +618,7 @@ select pg_temp.registration_observation_booking_set_actor('99100000-0000-4000-80
 set local role authenticated;
 select throws_ok(
   $$select public.enter_registration_observation_v1('99100000-0000-4000-8000-000000000106', 1, 'unrelated-enter')$$,
-  'P0002', 'registration_observation_not_found',
+  '42501', 'registration_access_denied',
   'a teacher cannot enter an observation track because registration writes are manager-only'
 );
 reset role;

@@ -57,6 +57,8 @@ export function canTransitionMakeupRequest(
   nextStatus: MakeupRequestStatus,
   context?: { isRequester?: boolean; isApprover?: boolean; isManager?: boolean },
 ): boolean;
+
+export function canManagerTransitionMakeupRequest(status: unknown, nextStatus: unknown): boolean;
 export function timeRangesOverlap(startA: string, endA: string, startB: string, endB: string): boolean;
 export function buildRoomOptions(
   classrooms?: unknown[],

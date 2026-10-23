@@ -153,10 +153,94 @@ reset role;
 create function pg_temp.same_page(patch jsonb,p integer,size integer) returns boolean language sql stable as $$
  select public.list_makeup_numbered_page_v1(pg_temp.filters(patch),p,size)=pg_temp.original_makeup_list(pg_temp.filters(patch),p,size)
 $$;
+-- Freeze public DTO expectations from the synthetic source rows before role reads.
+-- No candidate detail RPC/projector supplies the expected result. The unchanged
+-- pure slot normalizer remains covered by the manager's frozen whole-body oracle.
+set local timezone='UTC';
+create temp table teacher_common_fixture_rows as
+select r.id,r.status,r.requester_id,r.teacher_profile_id,r.approver_profile_id,r.created_at,r.subject,
+ jsonb_build_object(
+  'id',coalesce(to_jsonb(r)->>'id',''),
+  'status',coalesce(to_jsonb(r)->>'status',''),
+  'approvalGroup',coalesce(to_jsonb(r)->>'approval_group',''),
+  'requestKind',coalesce(to_jsonb(r)->>'request_kind',''),
+  'requesterId',coalesce(to_jsonb(r)->>'requester_id',''),
+  'teacherCatalogId',coalesce(to_jsonb(r)->>'teacher_catalog_id',''),
+  'teacherProfileId',coalesce(to_jsonb(r)->>'teacher_profile_id',''),
+  'classId',coalesce(to_jsonb(r)->>'class_id',''),
+  'className',coalesce(to_jsonb(r)->>'class_name',''),
+  'subject',coalesce(to_jsonb(r)->>'subject',''),
+  'cancelDate',coalesce(to_jsonb(r)->>'cancel_date',''),
+  'makeupStartAt',coalesce(to_jsonb(r)->>'makeup_start_at',''),
+  'makeupEndAt',coalesce(to_jsonb(r)->>'makeup_end_at',''),
+  'makeupClassroom',coalesce(to_jsonb(r)->>'makeup_classroom',''),
+  'approverTeacherCatalogId',coalesce(to_jsonb(r)->>'approver_teacher_catalog_id',''),
+  'approverProfileId',coalesce(to_jsonb(r)->>'approver_profile_id',''),
+  'approvedBy',coalesce(to_jsonb(r)->>'approved_by',''),
+  'approvedAt',coalesce(to_jsonb(r)->>'approved_at',''),
+  'completedBy',coalesce(to_jsonb(r)->>'completed_by',''),
+  'completedAt',coalesce(to_jsonb(r)->>'completed_at',''),
+  'canceledBy',coalesce(to_jsonb(r)->>'canceled_by',''),
+  'canceledAt',coalesce(to_jsonb(r)->>'canceled_at',''),
+  'cancelAcademicEventId',coalesce(to_jsonb(r)->>'cancel_academic_event_id',''),
+  'makeupAcademicEventId',coalesce(to_jsonb(r)->>'makeup_academic_event_id',''),
+  'createdAt',coalesce(to_jsonb(r)->>'created_at',''),
+  'updatedAt',coalesce(to_jsonb(r)->>'updated_at',''),
+  'requesterLabel',coalesce((select nullif(btrim(name),'') from public.profiles where id=r.requester_id),'신청자'),
+  'teacherLabel',coalesce((select nullif(btrim(name),'') from public.teacher_catalogs where id=r.teacher_catalog_id),(select nullif(btrim(name),'') from public.profiles where id=r.teacher_profile_id),'선생님'),
+  'approverLabel',coalesce((select nullif(btrim(name),'') from public.teacher_catalogs where id=r.approver_teacher_catalog_id),(select nullif(btrim(name),'') from public.profiles where id=r.approver_profile_id),'결재자'),
+  'approvedByLabel',coalesce((select nullif(btrim(name),'') from public.profiles where id=r.approved_by),''),
+  'completedByLabel',coalesce((select nullif(btrim(name),'') from public.profiles where id=r.completed_by),''),
+  'canceledByLabel',coalesce((select nullif(btrim(name),'') from public.profiles where id=r.canceled_by),''),
+  'reason','','returnedReason','','rejectedReason','','finalNote','',
+  'events','[]'::jsonb,'schedulePlanBefore','{}'::jsonb,'schedulePlanAfter','{}'::jsonb,'makeupAcademicEventIds','[]'::jsonb,
+  'makeupSlots',coalesce((select jsonb_agg(jsonb_build_object('startAt',s->'startAt','endAt',s->'endAt','classroom',s->'classroom') order by ord) from jsonb_array_elements(public.makeup_numbered_slots_v1(to_jsonb(r))) with ordinality a(s,ord)),'[]'::jsonb)
+ ) dto
+from public.makeup_requests r where r.id between pg_temp.mid(1) and pg_temp.mid(119);
+grant select on teacher_common_fixture_rows to authenticated;
+set local timezone='Asia/Seoul';
+create function pg_temp.teacher_common_page_matches(actor_n integer,v text,p integer,size integer)
+returns boolean language plpgsql stable security invoker set search_path='' set timezone='UTC' as $$
+declare actual jsonb; expected_rows jsonb; expected_count bigint; expected_views jsonb; expected_subjects jsonb;
+begin
+ actual:=public.list_makeup_numbered_page_v1(pg_temp.filters(jsonb_build_object('view',v)),p,size);
+ select count(*) into expected_count from pg_temp.teacher_common_fixture_rows where case v when 'mine' then status='revision_requested'
+    when 'approvalPending' then status='approval_pending' when 'makeupPending' then status='makeup_pending'
+    when 'refundPending' then status='refund_pending' when 'closed' then status in('completed','rejected','canceled') else false end;
+ select coalesce(jsonb_agg(dto order by created_at desc,id desc),'[]'::jsonb) into expected_rows
+ from (select dto,created_at,id from pg_temp.teacher_common_fixture_rows where case v when 'mine' then status='revision_requested'
+    when 'approvalPending' then status='approval_pending' when 'makeupPending' then status='makeup_pending'
+    when 'refundPending' then status='refund_pending' when 'closed' then status in('completed','rejected','canceled') else false end
+       order by created_at desc,id desc limit size offset (p::bigint-1)*size) selected;
+ select jsonb_build_object(
+  'mine',count(*) filter(where status='revision_requested'),
+  'approvalPending',count(*) filter(where status='approval_pending'),
+  'makeupPending',count(*) filter(where status='makeup_pending'),
+  'refundPending',count(*) filter(where status='refund_pending'),
+  'closed',count(*) filter(where status in('completed','rejected','canceled')))
+ into expected_views from pg_temp.teacher_common_fixture_rows;
+ select jsonb_agg(jsonb_build_object('value',s,'label',s,'count',(
+  select count(*) from pg_temp.teacher_common_fixture_rows where subject=s and (case v when 'mine' then status='revision_requested'
+    when 'approvalPending' then status='approval_pending' when 'makeupPending' then status='makeup_pending'
+    when 'refundPending' then status='refund_pending' when 'closed' then status in('completed','rejected','canceled') else false end))) order by ord)
+ into expected_subjects from unnest(array['영어','수학','과학']) with ordinality subjects(s,ord);
+ -- Every teacher reads the common revision queue, including non-participants.
+ return auth.uid()=pg_temp.mid(actor_n) and public.current_dashboard_role()='teacher'
+  and actual ?& array['page','pageSize','totalCount','viewCounts','subjectOptions','teacherOptions','rows']
+  and actual-array['page','pageSize','totalCount','viewCounts','subjectOptions','teacherOptions','rows']='{}'::jsonb
+  and actual->'page'=to_jsonb(p) and actual->'pageSize'=to_jsonb(size)
+  and actual->'totalCount'=to_jsonb(expected_count) and actual->'viewCounts'=expected_views
+  and actual->'subjectOptions'=expected_subjects and actual->'rows'=expected_rows
+  and jsonb_typeof(actual->'teacherOptions')='array'
+  and not exists(select 1 from jsonb_array_elements(actual->'teacherOptions') item
+   where not item ?& array['value','label','count'] or item-array['value','label','count']<>'{}'::jsonb
+    or jsonb_typeof(item->'value')<>'string' or jsonb_typeof(item->'label')<>'string'
+    or jsonb_typeof(item->'count')<>'number' or item->>'label' like '%@%');
+end $$;
 reset role;select pg_temp.actor(801);set local role authenticated;
-select ok(pg_temp.same_page(jsonb_build_object('view',v),p,size),'whole response parity actor 801 view '||v||' page '||p||' size '||size) from unnest(array['mine','approvalPending','makeupPending','refundPending','closed'])v cross join unnest(array[1,2,12])p cross join unnest(array[10,15,20])size;
+select ok(pg_temp.teacher_common_page_matches(801,v,p,size),'teacher common positive DTO and independent seed scope actor 801 view '||v||' page '||p||' size '||size) from unnest(array['mine','approvalPending','makeupPending','refundPending','closed'])v cross join unnest(array[1,2,12])p cross join unnest(array[10,15,20])size;
 reset role;select pg_temp.actor(802);set local role authenticated;
-select ok(pg_temp.same_page(jsonb_build_object('view',v),p,size),'whole response parity actor 802 view '||v||' page '||p||' size '||size) from unnest(array['mine','approvalPending','makeupPending','refundPending','closed'])v cross join unnest(array[1,2,12])p cross join unnest(array[10,15,20])size;
+select ok(pg_temp.teacher_common_page_matches(802,v,p,size),'teacher common positive DTO and independent seed scope actor 802 view '||v||' page '||p||' size '||size) from unnest(array['mine','approvalPending','makeupPending','refundPending','closed'])v cross join unnest(array[1,2,12])p cross join unnest(array[10,15,20])size;
 reset role;select pg_temp.actor(804);set local role authenticated;
 select ok(pg_temp.same_page(jsonb_build_object('view',v),p,size),'whole response parity actor 804 view '||v||' page '||p||' size '||size) from unnest(array['mine','approvalPending','makeupPending','refundPending','closed'])v cross join unnest(array[1,2,12])p cross join unnest(array[10,15,20])size;
 reset role;select pg_temp.actor(805);set local role authenticated;

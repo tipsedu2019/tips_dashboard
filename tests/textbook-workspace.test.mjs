@@ -385,7 +385,7 @@ test("textbook workspace fixes the main operational friction found in browser us
   assert.match(dataTableSearchFieldSource, /aria-label=\{label\}/);
   assert.match(workspaceSource, /placeholder="교재명, 출판사, ISBN, 바코드"/);
   assert.ok(
-    workspaceSource.indexOf('aria-label="교재관리 업무 탭"') <
+    workspaceSource.indexOf('aria-label={requestsOnly ? "교재요청" : "교재관리 업무 탭"}') <
       workspaceSource.indexOf('label="교재 검색"'),
   );
   assert.match(workspaceSource, /activeTab === "master"[\s\S]*신규 등록/);
@@ -410,7 +410,7 @@ test("textbook workspace uses searchable selectors and tab-scoped inventory cont
   assert.match(workspaceSource, /searchPlaceholder="교재명, 출판사, ISBN"/);
   assert.match(workspaceSource, /getTextbookSubjectWriteValue/);
   assert.match(workspaceSource, /getSubjectLabel\(row\.subject\)/);
-  assert.match(workspaceSource, /const \[activeTab, setActiveTab\] = useState<TextbookTab>\(initialNavigationRef\.current\.tab\)/);
+  assert.match(workspaceSource, /const \[storedActiveTab, setActiveTab\] = useState<TextbookTab>\(initialNavigationRef\.current\.tab\)/);
   assert.match(workspaceSource, /classificationControls=\{\(locationControl\) => <TextbookListControls extraFilters=\{locationControl\}/);
   assert.match(workspaceSource, /function changeActiveTab/);
   assert.match(workspaceSource, /재고 실사/);
@@ -556,7 +556,7 @@ test("textbook workspace resolves reviewed master and inventory UX issues", asyn
     workspaceSource.indexOf("function TextbookSelectionActions"),
   );
 
-  assert.match(workspaceSource, /TabsList[\s\S]*aria-label="교재관리 업무 탭"/);
+  assert.match(workspaceSource, /TabsList[\s\S]*aria-label=\{requestsOnly \? "교재요청" : "교재관리 업무 탭"\}/);
   assert.match(workspaceSource, /TextbookListControls/);
   assert.match(listControlsSource, /aria-label="교재 분류 필터"/);
   assert.match(listControlsSource, /<DataTableFilters/);
@@ -1830,7 +1830,7 @@ test("textbook workspace keeps list and process controls responsive and focused"
     "utf8",
   );
 
-  assert.match(workspaceSource, /canManageTextbookOperations \? "grid-cols-3 lg:grid-cols-6" : "grid-cols-1"/);
+  assert.match(workspaceSource, /canManageTextbookOperations && !requestsOnly \? "grid-cols-3 lg:grid-cols-6" : "grid-cols-1"/);
   assert.match(workspaceSource, /data-testid="textbook-master-mobile-list"/);
   assert.match(workspaceSource, /data-testid=\{`textbook-master-mobile-card-\$\{rowId\}`\}/);
   assert.match(workspaceSource, /aria-label="교재 재고 스크롤"/);
@@ -2219,7 +2219,7 @@ test("textbook workspace third-pass polish tightens navigation and action ergono
     "utf8",
   );
 
-  assert.match(workspaceSource, /aria-label="교재관리 업무 탭"/);
+  assert.match(workspaceSource, /aria-label=\{requestsOnly \? "교재요청" : "교재관리 업무 탭"\}/);
   assert.match(dataTableSearchFieldSource, /type="search"/);
   assert.match(dataTableSearchFieldSource, /autoComplete="off"/);
   assert.match(dataTableSearchFieldSource, /enterKeyHint="search"/);
@@ -2290,13 +2290,13 @@ test("textbook workspace keeps teacher request access separate from management d
 
   assertPreparedWorkspaceReads(workspaceSource);
   assert.match(workspaceSource, /canManageTextbookOperations/);
-  assert.match(workspaceSource, /if \(!canManageTextbookOperations && value !== "requests"\)/);
-  assert.match(workspaceSource, /canManageTextbookOperations \? "grid-cols-3 lg:grid-cols-6" : "grid-cols-1"/);
+  assert.match(workspaceSource, /if \(\(requestsOnly \|\| !canManageTextbookOperations\) && value !== "requests"\)/);
+  assert.match(workspaceSource, /canManageTextbookOperations && !requestsOnly \? "grid-cols-3 lg:grid-cols-6" : "grid-cols-1"/);
   assert.match(serviceSource, /create_textbook_request_v1/);
   assert.doesNotMatch(workspaceSource, /listTextbookOperationsData/);
 });
 
-test("teachers can add requests but cannot manage existing textbook requests", async () => {
+test("textbook request writes belong to managers while teachers use read-only details", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
     "utf8",
@@ -2308,8 +2308,8 @@ test("teachers can add requests but cannot manage existing textbook requests", a
   );
   const requestDialogSource = workspaceSource.slice(requestDialogStart, requestDialogEnd);
 
-  assert.match(workspaceSource, /const \{ user, role, canManageAll, isAdmin, isStaff, isTeacher \} = useAuth\(\)/);
-  assert.match(workspaceSource, /const canCreateTextbookRequest = isTeacher \|\| canManageTextbookOperations/);
+  assert.match(workspaceSource, /const \{ user, role, canManageAll, isAdmin, isStaff \} = useAuth\(\)/);
+  assert.match(workspaceSource, /const canCreateTextbookRequest = canManageTextbookOperations/);
   assert.match(workspaceSource, /requestBy: currentUserLabel/);
   assert.match(workspaceSource, /purchaseForm\.requestStage === "request"[\s\S]*textbookService\.createTextbookRequest/);
   assert.match(workspaceSource, /canManageRequestLines=\{canManageTextbookOperations\}/);
@@ -2329,7 +2329,7 @@ test("teacher request save stays on the unfiltered request tab synchronously", a
     workspaceSource.indexOf("function toggleTextbookGroup"),
   );
 
-  assert.match(savedPurchaseFlowSource, /setActiveTab\(canManageTextbookOperations \? "purchase" : "requests"\)/);
+  assert.match(savedPurchaseFlowSource, /setActiveTab\(canManageTextbookOperations && !requestsOnly \? "purchase" : "requests"\)/);
   assert.match(
     savedPurchaseFlowSource,
     /setPurchaseRequestFilter\(canManageTextbookOperations\s*\? getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\)\s*:\s*"all"\)/,
@@ -2765,7 +2765,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /function getSavedPurchaseBoardScope/,
     /return stage === "receive" \? "recent" : "active"/,
     /function showSavedPurchaseFlow/,
-    /setActiveTab\(canManageTextbookOperations \? "purchase" : "requests"\)/,
+    /setActiveTab\(canManageTextbookOperations && !requestsOnly \? "purchase" : "requests"\)/,
     /updateOperationSearchQuery\(title\)/,
     /setPurchaseBoardScope\(getSavedPurchaseBoardScope\(stage\)\)/,
     /setPurchaseRequestFilter\(canManageTextbookOperations \? getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\) : "all"\)/,

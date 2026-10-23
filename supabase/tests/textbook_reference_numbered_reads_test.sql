@@ -115,8 +115,8 @@ create function pg_temp.rf(extra jsonb default '{}')returns jsonb language sql i
 create function pg_temp.wire(method text,input jsonb,data jsonb)returns text language sql stable as $$select 'TASK4_WIRE '||jsonb_build_object('method',method,'input',input,'data',data,'actorId',auth.uid())::text$$;
 create temp table sends_before as select(select count(*)from dashboard_private.notification_events)events,(select count(*)from dashboard_private.notification_event_fanout_jobs)jobs,(select count(*)from dashboard_private.notification_deliveries)deliveries;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
-select pg_temp.rid(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','task4-'||n||'@example.invalid',crypt('local-only',gen_salt('bf')),now(),'{"provider":"email","providers":["email"]}','{}',now(),now()from generate_series(901,904)n;
-insert into public.profiles(id,role,name,email)select pg_temp.rid(n),case n when 902 then'staff'when 903 then'teacher'else'admin'end,'합성 역할 '||n,'task4-'||n||'@example.invalid'from generate_series(901,904)n on conflict(id)do update set role=excluded.role;
+select pg_temp.rid(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','task4-'||n||'@example.invalid',crypt('local-only',gen_salt('bf')),now(),'{"provider":"email","providers":["email"]}','{}',now(),now()from generate_series(901,906)n;
+insert into public.profiles(id,role,name,email)select pg_temp.rid(n),case n when 902 then'staff'when 903 then'teacher'when 905 then'staff'when 906 then'assistant'else'admin'end,'합성 역할 '||n,'task4-'||n||'@example.invalid'from generate_series(901,906)n on conflict(id)do update set role=excluded.role;
 insert into public.academic_subject_settings(subject,grade_levels)values('과학',array['고1','고2','고3'])on conflict(subject)do nothing;
 insert into public.academic_subject_areas(subject,area_key,label,sort_order,is_active)values('과학','integrated_science','통합과학',10,true),('과학','physics','물리학',20,true)on conflict(subject,area_key)do update set is_active=true;
 insert into public.textbook_publishers(id,name)select pg_temp.rid(3000+n),'설정 출판사 '||n from generate_series(1,121)n;
@@ -135,11 +135,12 @@ insert into public.classes(id,name,class_type,subject,grade,teacher,room,status,
 insert into public.teacher_catalogs(id,name,is_visible)select pg_temp.rid(2000+n),case n when 121 then'가유일교사'else'교사 '||n end,n%2=0 from generate_series(1,121)n;
 insert into public.textbook_inventory_locations(id,code,name,sort_order,is_active)select pg_temp.rid(5000+n),case n when 121 then'main'when 120 then'annex'else'loc-'||n end,case n when 119 then'유일창고'when 121 then'본관'when 120 then'별관'else'창고 '||n end,n,n%2=0 from generate_series(1,121)n;
 insert into public.textbook_sub_subject_settings(id,subject,name,sort_order,is_visible)values(pg_temp.rid(6001),'math','미적분',1,false),(pg_temp.rid(6002),'math','분류 10',2,true),(pg_temp.rid(6003),'math','분류 2',3,true);
--- Restrictive, transaction-local fixture policies prove invoker RLS. Production
--- migration never creates or changes a policy or table privilege.
-create policy task4_books on public.textbooks as restrictive for select to authenticated using((auth.uid()<>pg_temp.rid(903)or id<>pg_temp.rid(1))and(auth.uid()<>pg_temp.rid(904)or id in(pg_temp.rid(121),pg_temp.rid(501))));
-create policy task4_classes on public.classes as restrictive for select to authenticated using(auth.uid()<>pg_temp.rid(903)or id<>pg_temp.rid(1001));
+-- Keep the original teacher fixture; a separate staff fixture preserves each
+-- original limited-RLS success/DTO contract after teacher raw access is closed.
+create policy task4_books on public.textbooks as restrictive for select to authenticated using((auth.uid()not in(pg_temp.rid(903),pg_temp.rid(905))or id<>pg_temp.rid(1))and(auth.uid()<>pg_temp.rid(904)or id in(pg_temp.rid(121),pg_temp.rid(501))));
+create policy task4_classes on public.classes as restrictive for select to authenticated using(auth.uid()not in(pg_temp.rid(903),pg_temp.rid(905))or id<>pg_temp.rid(1001));
 create policy task4_publishers on public.textbook_publishers as restrictive for select to authenticated using(auth.uid()<>pg_temp.rid(904)or id=pg_temp.rid(3001));
+create function pg_temp.reference_permission_state()returns jsonb language sql stable as $$select jsonb_build_object('textbooks',(select md5(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text)from public.textbooks t),'classes',(select md5(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text)from public.classes t),'teacher_catalogs',(select md5(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text)from public.teacher_catalogs t),'textbook_inventory_locations',(select md5(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text)from public.textbook_inventory_locations t));$$;
 select ok(not has_table_privilege('authenticated','public.academic_subject_areas','select'),'science table direct access remains absent');
 select ok(bool_and(p.provolatile='s'and not p.prosecdef and p.proconfig=array['search_path=""']),'nine public APIs are stable invokers with empty path')from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'and p.proname=any(array['list_textbook_reference_page_v1','list_textbook_class_reference_page_v1','list_textbook_teacher_reference_page_v1','list_textbook_location_reference_page_v1','resolve_textbook_reference_v1','get_textbook_class_reference_v1','get_textbook_location_reference_v1','get_textbook_master_options_v1','get_textbook_inactive_cleanup_context_v1']);
 select ok(bool_and(has_function_privilege('authenticated',p.oid,'execute')and not has_function_privilege('anon',p.oid,'execute')),'authenticated-only exact public execute')from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'and p.proname=any(array['list_textbook_reference_page_v1','list_textbook_class_reference_page_v1','list_textbook_teacher_reference_page_v1','list_textbook_location_reference_page_v1','resolve_textbook_reference_v1','get_textbook_class_reference_v1','get_textbook_location_reference_v1','get_textbook_master_options_v1','get_textbook_inactive_cleanup_context_v1']);
@@ -151,7 +152,7 @@ select is(public.list_textbook_reference_page_v1(pg_temp.rf(),'match-title',10,1
 select is(public.list_textbook_reference_page_v1(pg_temp.rf(),'match-title',11,10)->'rows'->0->>'value',pg_temp.rid(101)::text,'page11 direct canonical book identity');
 select is(public.list_textbook_location_reference_page_v1('{"search":""}','match-order',11,10)->'rows'->0->>'value',pg_temp.rid(5101)::text,'location page11 direct position');
 select is(jsonb_array_length(public.list_textbook_class_reference_page_v1(pg_temp.rf(),'match-name',9,15)->'rows'),1,'class partial final15');
-select is(jsonb_array_length(public.list_textbook_teacher_reference_page_v1('{"search":""}','match-name',7,20)->'rows'),5,'teacher partial final20 includes four signup-linked catalog rows');
+select is(jsonb_array_length(public.list_textbook_teacher_reference_page_v1('{"search":""}','match-name',7,20)->'rows'),7,'teacher partial final20 includes six signup-linked catalog rows');
 create function pg_temp.measure_reference(label text,query text)returns setof text language plpgsql as $$declare started timestamptz:=clock_timestamp();result jsonb;elapsed double precision;begin execute query into result;elapsed:=extract(epoch from clock_timestamp()-started)*1000;return next cmp_ok(elapsed,'<',8000::double precision,label||' below8s');return next diag('TASK4_TIMING '||label||' milliseconds='||elapsed);end $$;
 select * from pg_temp.measure_reference('book_first',$$select public.list_textbook_reference_page_v1(pg_temp.rf(),'match-title',1,10)$$);
 select * from pg_temp.measure_reference('book_middle',$$select public.list_textbook_reference_page_v1(pg_temp.rf(),'match-title',7,10)$$);
@@ -170,8 +171,8 @@ select * from pg_temp.measure_reference('location_middle',$$select public.list_t
 select * from pg_temp.measure_reference('location_final',$$select public.list_textbook_location_reference_page_v1('{"search":""}','match-order',13,10)$$);
 select * from pg_temp.measure_reference('location_search',$$select public.list_textbook_location_reference_page_v1('{"search":"유일창고"}','match-order',1,10)$$);
 select is((public.list_textbook_class_reference_page_v1(pg_temp.rf(),'match-name',1,10)->>'totalCount')::integer,121,'all classes including inactive counted');
-select is((public.list_textbook_teacher_reference_page_v1('{"search":""}','match-name',1,10)->>'totalCount')::integer,125,'teacher names are complete including nonvisible flags and signup-linked rows');
-select is((select array_agg(name order by name)from public.teacher_catalogs where profile_id=any(array[pg_temp.rid(901),pg_temp.rid(902),pg_temp.rid(903),pg_temp.rid(904)])),array['task4-901','task4-902','task4-903','task4-904'],'final handle_new_dashboard_user auth trigger supplies four additional teacher names');
+select is((public.list_textbook_teacher_reference_page_v1('{"search":""}','match-name',1,10)->>'totalCount')::integer,127,'teacher names are complete including nonvisible flags and six signup-linked rows');
+select is((select array_agg(name order by name)from public.teacher_catalogs where profile_id=any(array[pg_temp.rid(901),pg_temp.rid(902),pg_temp.rid(903),pg_temp.rid(904),pg_temp.rid(905),pg_temp.rid(906)])),array['task4-901','task4-902','task4-903','task4-904','task4-905','task4-906'],'final handle_new_dashboard_user auth trigger supplies six additional teacher names');
 select is((public.list_textbook_location_reference_page_v1('{"search":""}','match-order',1,10)->>'totalCount')::integer,121,'all authorized locations including inactive counted');
 select is(public.list_textbook_location_reference_page_v1('{"search":"유일창고"}','match-order',1,10)->'defaultLocation'->>'id',pg_temp.rid(5121)::text,'main default independently resolved outside query and page');
 select is(public.get_textbook_class_reference_v1(pg_temp.rid(1121))->'row'->>'inferredLocation','{"id": "'||pg_temp.rid(5120)::text||'", "code": "annex", "name": "별관"}','selected class infers annex independently');
@@ -210,13 +211,10 @@ select throws_ok($$select public.get_textbook_location_reference_v1(null)$$,'220
 select throws_ok($$select public.get_textbook_master_options_v1('{"subject":"math","listSubject":"all","bulkSubject":"all"}')$$,'22023',null,'invalid bulk scope');
 select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.rid(902),'role','authenticated')::text,true);
 select lives_ok($$select public.get_textbook_inactive_cleanup_context_v1()$$,'staff complete cleanup read permitted');
-select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.rid(903),'role','authenticated')::text,true);
-select is((public.list_textbook_reference_page_v1(pg_temp.rf(),'match-title',1,10)->>'totalCount')::integer,123,'teacher page honors actual restrictive RLS');
+select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.rid(905),'role','authenticated')::text,true);
+select is((public.list_textbook_reference_page_v1(pg_temp.rf(),'match-title',1,10)->>'totalCount')::integer,123,'limited staff page preserves original restrictive RLS');
 select is(public.resolve_textbook_reference_v1(pg_temp.rid(1)::text,false,'request',''),'{"row":null}'::jsonb,'selected book cannot bypass restrictive RLS');
 select is(public.get_textbook_class_reference_v1(pg_temp.rid(1001)),'{"row":null}'::jsonb,'selected class cannot bypass restrictive RLS');
-select throws_ok($$select public.resolve_textbook_reference_v1('',true,'management','')$$,'42501',null,'teacher denied management reference');
-select throws_ok($$select public.get_textbook_master_options_v1('{"subject":"math","listSubject":"all","bulkSubject":"keep"}')$$,'42501',null,'teacher denied management metadata');
-select throws_ok($$select public.get_textbook_inactive_cleanup_context_v1()$$,'42501',null,'teacher denied cleanup');
 select diag(pg_temp.wire('listTextbookReferencePage','{"page":1,"pageSize":10,"sort":"match-title","filters":{"search":"수정","selectedFilters":{}}}',public.list_textbook_reference_page_v1(pg_temp.rf('{"search":"수정"}'),'match-title',1,10)));
 select diag(pg_temp.wire('listTextbookClassReferencePage','{"page":1,"pageSize":10,"sort":"match-name","filters":{"search":"유일선택반","selectedFilters":{}}}',public.list_textbook_class_reference_page_v1(pg_temp.rf('{"search":"유일선택반"}'),'match-name',1,10)));
 select diag(pg_temp.wire('listTextbookTeacherReferencePage','{"page":1,"pageSize":10,"sort":"match-name","filters":{"search":"가유일교사"}}',public.list_textbook_teacher_reference_page_v1('{"search":"가유일교사"}','match-name',1,10)));
@@ -225,6 +223,45 @@ select diag(pg_temp.wire('resolveTextbookReference','{"reference":"수학의 정
 select diag(pg_temp.wire('resolveTextbookReference','{"reference":"unknown","activeOnly":false,"scope":"request","fallbackSupplier":""}',public.resolve_textbook_reference_v1('unknown',false,'request','')));
 select diag(pg_temp.wire('getTextbookClassReference',to_jsonb(pg_temp.rid(1121)),public.get_textbook_class_reference_v1(pg_temp.rid(1121))));
 select diag(pg_temp.wire('getTextbookLocationReference',to_jsonb(pg_temp.rid(5121)),public.get_textbook_location_reference_v1(pg_temp.rid(5121))));
+-- Denied management calls and the permitted common reference path are separate
+-- from the unchanged limited-RLS staff wire/DTO oracle above.
+reset role;
+create temp table reference_permission_before as select pg_temp.reference_permission_state()state;
+set local role authenticated;
+select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.rid(903),'role','authenticated')::text,true);
+select is((select count(*)from public.textbooks),0::bigint,'teacher raw textbooks remain RLS-hidden');
+select is((select count(*)from public.classes),0::bigint,'teacher raw classes remain RLS-hidden');
+select is((select count(*)from public.teacher_catalogs),0::bigint,'teacher raw teacher catalog remains RLS-hidden');
+select is((public.list_textbook_reference_page_v1(pg_temp.rf(),'match-title',1,10)->>'totalCount')::integer,0,'teacher book picker preserves the actual invoker RLS-empty contract');
+select is((public.list_textbook_class_reference_page_v1(pg_temp.rf(),'match-name',1,10)->>'totalCount')::integer,0,'teacher class picker preserves the actual invoker RLS-empty contract');
+select is((public.list_textbook_teacher_reference_page_v1('{"search":""}','match-name',1,10)->>'totalCount')::integer,0,'teacher teacher picker preserves the actual invoker RLS-empty contract');
+select is(public.resolve_textbook_reference_v1(pg_temp.rid(1)::text,false,'request',''),'{"row":null}'::jsonb,'teacher selected raw book stays unavailable');
+select is(public.get_textbook_class_reference_v1(pg_temp.rid(1001)),'{"row":null}'::jsonb,'teacher selected raw class stays unavailable');
+select throws_ok($$select public.resolve_textbook_reference_v1('',true,'management','')$$,'42501',null,'teacher denied management reference');
+select throws_ok($$select public.get_textbook_master_options_v1('{"subject":"math","listSubject":"all","bulkSubject":"keep"}')$$,'42501',null,'teacher denied management metadata');
+select throws_ok($$select public.get_textbook_inactive_cleanup_context_v1()$$,'42501',null,'teacher denied cleanup');
+select is((public.list_textbook_location_reference_page_v1('{"search":"유일창고"}','match-order',1,10)->>'totalCount')::integer,1,'teacher keeps name-only common location reference');
+select is(public.get_textbook_location_reference_v1(pg_temp.rid(5121))#>>'{row,id}',pg_temp.rid(5121)::text,'teacher keeps selected common location reference');
+select ok((with common as materialized(select public.read_operational_common_v1('options','{}')v)select
+ exists(select 1 from jsonb_array_elements(v->'textbooks')b where b->>'id'=pg_temp.rid(1)::text)
+ and exists(select 1 from jsonb_array_elements(v->'classes')c where c->>'id'=pg_temp.rid(1001)::text)
+ and exists(select 1 from jsonb_array_elements(v->'teachers')t where t->>'id'=pg_temp.rid(2001)::text)from common),'teacher common reader supplies required book/class/teacher references despite raw restrictions');
+select is((with common as materialized(select public.read_operational_common_v1('options','{}')v)select array_agg(k order by k)from common cross join lateral jsonb_array_elements(v->'textbooks')b cross join lateral jsonb_object_keys(b)k where b->>'id'=pg_temp.rid(1)::text),array['id','name','publisher','status','subject','title']::text[],'teacher common textbook reference uses only the fixed safe fields');
+select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.rid(906),'role','authenticated')::text,true);
+select throws_ok(sql,'42501','textbook_workflow_read_forbidden','assistant denied request reference: '||label)from(values
+ ('select public.list_textbook_reference_page_v1(pg_temp.rf(),''match-title'',1,10)','book page'),
+ ('select public.list_textbook_class_reference_page_v1(pg_temp.rf(),''match-name'',1,10)','class page'),
+ ('select public.list_textbook_teacher_reference_page_v1(''{"search":""}'',''match-name'',1,10)','teacher page'),
+ ('select public.list_textbook_location_reference_page_v1(''{"search":""}'',''match-order'',1,10)','location page'),
+ ('select public.resolve_textbook_reference_v1(pg_temp.rid(1)::text,true,''request'','''')','selected book'),
+ ('select public.get_textbook_class_reference_v1(pg_temp.rid(1121))','selected class'),
+ ('select public.get_textbook_location_reference_v1(pg_temp.rid(5121))','selected location'))v(sql,label);
+select throws_ok($$select public.get_textbook_master_options_v1('{"subject":"math","listSubject":"all","bulkSubject":"keep"}')$$,'42501','textbook_management_read_forbidden','assistant denied management metadata');
+select throws_ok($$select public.get_textbook_inactive_cleanup_context_v1()$$,'42501','textbook_management_read_forbidden','assistant denied cleanup');
+select throws_ok($$select public.read_operational_common_v1('options','{}')$$,'42501','operational_common_read_forbidden','assistant denied teacher common references');
+reset role;
+select is(pg_temp.reference_permission_state(),(select state from reference_permission_before),'teacher/assistant permission paths leave reference rows unchanged');
+set local role authenticated;
 select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.rid(904),'role','authenticated')::text,true);
 select diag(pg_temp.wire('resolveTextbookReference','{"reference":"수학의 정석 기본","activeOnly":true,"scope":"management","fallbackSupplier":"legacy"}',public.resolve_textbook_reference_v1('수학의 정석 기본',true,'management','legacy')));
 select diag(pg_temp.wire('getTextbookMasterOptions','{"subject":"math","listSubject":"all","bulkSubject":"keep"}',public.get_textbook_master_options_v1('{"subject":"math","listSubject":"all","bulkSubject":"keep"}')));

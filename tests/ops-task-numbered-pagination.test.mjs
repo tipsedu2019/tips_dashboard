@@ -2023,3 +2023,148 @@ test('general stats service shares settled sorts but isolates selecting filters 
   await act(async () => invalidRead.resolve({ data: null, error: { code: '22023', message: 'ops_task_filters_invalid' } }));
   assert.equal(await invalid, undefined);
 });
+
+for (const kind of ['transfer', 'withdrawal']) test(`teacher operational ${kind} shared list has no create or edit action`, async t => {
+  const page = await workspace(t, { workspace: kind, viewerRole: 'teacher' });
+  const numbered = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => numbered.resolve({ data: { rows: [row(1, operationPatch(kind))], page: numbered.args.p_page, pageSize: numbered.args.p_page_size, totalCount: 1 }, error: null }));
+  assert.ok(document.body.textContent.includes("서버 학생"), "actual teacher row renders before asserting read-only controls");
+  const controls = [...document.querySelectorAll('button')];
+  assert.equal(controls.some(b => /추가|수정/.test(b.textContent.trim()) && !/필터/.test(b.getAttribute('aria-label') || '')), false);
+  assert.equal(page.queries.includes('students'), false, 'read-only view never loads editing options');
+});
+
+// Role-specific common-reader regressions use the same real workspace harness.
+const rpc = (h, name) => h.requests.filter(r => r.name === name);
+const commonReads = h => rpc(h, 'get_operational_common_detail_v1');
+const pages = h => rpc(h, 'list_ops_task_numbered_page_v1');
+async function settle(h, request, data) { await act(async()=> { request.resolve({data,error:null}); await Promise.resolve(); }); }
+async function finishOneRegistration(h, name='LIST COMMON') {
+  const request=pages(h).at(-1); assert.ok(request,'numbered registration page starts');
+  await act(async()=>h.finish(h.requests.indexOf(request),1,[registrationPatch(1,name)]));
+}
+function noRawOrWrites(h) {
+  assert.equal(h.tableRequests.length,0,`raw relation reads: ${h.tableRequests.map(r=>r.table).join(',')}`);
+  assert.deepEqual(h.requests.filter(r=>/^(create|save|update|delete|transition|approve|request_|correct|complete|add_)/.test(r.name)).map(r=>r.name),[]);
+}
+async function stabilize(h) { for(let i=0;i<3;i++) { await h.render(); await act(async()=>Promise.resolve()); } }
+
+test('teacher list click uses one safe detail and stays stable without canonical/options/raw reads',async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher'});
+  await finishOneRegistration(h);
+  const target=document.querySelector('[data-registration-case-row]'); assert.ok(target,'real registration row renders');
+  await act(async()=>target.click());
+  assert.equal(commonReads(h).length,1);
+  await settle(h,commonReads(h)[0],row(1,registrationPatch(1,'SAFE DETAIL ONE')));
+  assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/SAFE DETAIL ONE/);
+  assert.equal(new URLSearchParams(window.location.search).get('taskId'),id(1));
+  const stableUrl=window.location.href, before=h.requests.length;
+  await stabilize(h);
+  assert.equal(h.requests.length,before,'rerender/route acknowledgement starts no reads');
+  assert.equal(commonReads(h).length,1); assert.equal(window.location.href,stableUrl);
+  noRawOrWrites(h);
+});
+
+for(const variant of ['case','track','appointment']) test(`teacher ${variant} direct URL resolves once to common dialog`,async t=>{
+  const query=new URLSearchParams({taskId:id(999)});
+  if(variant!=='case')query.set('trackId',id(2999));
+  if(variant==='appointment')query.set('appointmentId',id(3999));
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:`?${query}`});
+  await finishOneRegistration(h);
+  assert.equal(commonReads(h).length,1);
+  await settle(h,commonReads(h)[0],row(999,registrationPatch(999,'OFFPAGE COMMON')));
+  await stabilize(h);
+  assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/OFFPAGE COMMON/);
+  assert.equal(commonReads(h).length,1);
+  const current=new URLSearchParams(window.location.search); assert.equal(current.get('taskId'),id(999));
+  assert.equal(current.has('trackId'),false); assert.equal(current.has('appointmentId'),false);
+  noRawOrWrites(h);
+});
+
+test('late offpage A cannot replace selected common B or its URL',async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:`?taskId=${id(999)}`});
+  await finishOneRegistration(h,'B LIST');
+  const a=commonReads(h)[0];assert.ok(a);
+  await act(async()=>document.querySelector('[data-registration-case-row]').click());
+  const b=commonReads(h).find(r=>r.args.p_id===id(1));assert.ok(b);
+  const nextUrl=window.location.href;
+  await settle(h,a,row(999,registrationPatch(999,'STALE A NEVER DISPLAY')));
+  assert.equal(window.location.href,nextUrl);
+  assert.doesNotMatch(document.body.textContent,/STALE A NEVER DISPLAY/);
+  await settle(h,b,row(1,registrationPatch(1,'CURRENT B')));
+  await stabilize(h);
+  assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/CURRENT B/);
+  assert.equal(new URLSearchParams(window.location.search).get('taskId'),id(1));
+  assert.equal(commonReads(h).length,2);noRawOrWrites(h);
+});
+
+for(const change of ['role','user']) test(`common offpage response is detached after ${change} replacement`,async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:`?taskId=${id(999)}`});
+  await finishOneRegistration(h);
+  const stale=commonReads(h)[0];assert.ok(stale);
+  await h.render(change==='role'?{viewerRole:'staff'}:{viewerId:'actor-b'});
+  const currentUrl=window.location.href;
+  await settle(h,stale,row(999,registrationPatch(999,'DETACHED OLD ACTOR')));
+  assert.equal(window.location.href,currentUrl);assert.doesNotMatch(document.body.textContent,/DETACHED OLD ACTOR/);
+  assert.deepEqual(h.requests.filter(r=>/^(create|save|update|delete|transition|approve)/.test(r.name)).map(r=>r.name),[]);
+});
+
+for(const kind of ['withdrawal','transfer']) test(`restored teacher ${kind} private controls are safe on the first actual request`,async t=>{
+  const {createDefaultOpsTaskPageFilters}=modules(null)('src/features/tasks/ops-task-service.ts');
+  const privateColumn=kind==='withdrawal'?'teacherOpinion':'transferReason';
+  const filters={...createDefaultOpsTaskPageFilters(kind,'actor-a'),search:'공통 검색어',filterColumn:privateColumn,sortColumn:privateColumn,sortDirection:'desc'};
+  const historyState={tipsOpsTaskList:{version:1,actorScope:JSON.stringify(['actor-a','teacher']),pathname:`/admin/${kind}`,filters,page:1,pageSize:15,scrollY:0}};
+  const h=await workspace(t,{workspace:kind,viewerRole:'teacher',historyState});
+  const request=pages(h)[0];assert.ok(request,'safe normalized history must not leave filtersReady permanently false');
+  assert.ok([null,'student'].includes(request.args.p_filters.filterColumn),'wire null is the canonical common-all default, student is UI default');assert.equal(request.args.p_filters.sortColumn,null);assert.equal(request.args.p_filters.sortDirection,null);
+  await stabilize(h);
+  for(const current of pages(h)) { assert.ok([null,'student'].includes(current.args.p_filters.filterColumn));assert.equal(current.args.p_filters.sortColumn,null);assert.equal(current.args.p_filters.sortDirection,null); }
+  assert.equal(h.tableRequests.length,0,'initial readonly filter restore starts no edit catalogs');
+});
+
+for(const kind of ['withdrawal','transfer']) test(`restored manager ${kind} private controls preserve the original permitted contract`,async t=>{
+  const {createDefaultOpsTaskPageFilters}=modules(null)('src/features/tasks/ops-task-service.ts');
+  const privateColumn=kind==='withdrawal'?'teacherOpinion':'transferReason';
+  const filters={...createDefaultOpsTaskPageFilters(kind,'actor-a'),search:'공통 검색어',filterColumn:privateColumn,sortColumn:privateColumn,sortDirection:'desc'};
+  const historyState={tipsOpsTaskList:{version:1,actorScope:JSON.stringify(['actor-a','staff']),pathname:`/admin/${kind}`,filters,page:1,pageSize:15,scrollY:0}};
+  const h=await workspace(t,{workspace:kind,viewerRole:'staff',historyState});
+  assert.ok(pages(h).length,'manager history query starts');
+  await stabilize(h);
+  for(const request of pages(h)) {assert.equal(request.args.p_filters.filterColumn,privateColumn);assert.equal(request.args.p_filters.sortColumn,privateColumn);assert.equal(request.args.p_filters.sortDirection,'desc');}
+});
+
+async function acceptedWithPendingNextPage(t){
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher'});
+  const first=pages(h)[0];assert.ok(first);
+  await act(async()=>h.finish(h.requests.indexOf(first),12,Array.from({length:10},(_,i)=>registrationPatch(i+1,`AUTH OLD STUDENT ${i+1}`))));
+  const stats=rpc(h,'get_ops_task_list_stats_v1').at(-1);
+  if(stats)await settle(h,stats,{total:12,byView:{inquiry:12},byStatus:{requested:12},metrics:{},facets:{}});
+  const next=document.querySelector('[aria-label="2 페이지"]');assert.ok(next,'actual page2 control');
+  await act(async()=>next.click());
+  const pending=pages(h).at(-1);assert.notEqual(pending,first);
+  const rowElement=document.querySelector('[data-registration-case-row]');assert.ok(rowElement,'old accepted rows remain interactive during pending page');
+  await act(async()=>rowElement.click());
+  const detail=commonReads(h).at(-1);assert.ok(detail);
+  return {h,pending,detail};
+}
+for(const denial of [{code:'42501',message:'SYNTHETIC_DENIED'},{status:401,message:'SYNTHETIC_UNAUTHORIZED'},{status:403,message:'SYNTHETIC_FORBIDDEN'}]) test(`final teacher accepted detail and page are cleared after permission error ${JSON.stringify(denial)}`,async t=>{
+  const {h,pending,detail}=await acceptedWithPendingNextPage(t);
+  await settle(h,detail,row(1,registrationPatch(1,'ACCEPTED DETAIL TO REVOKE')));
+  assert.equal(document.body.textContent.includes('ACCEPTED DETAIL TO REVOKE'),true);
+  await act(async()=>pending.resolve({data:null,error:denial}));
+  const seen={rowCount:document.querySelectorAll('[data-registration-case-row]').length,hasOldDetail:document.body.textContent.includes('ACCEPTED DETAIL TO REVOKE'),hasOldCount:document.body.textContent.includes('12건'),alertText:document.querySelector('[role="alert"]')?.textContent||''};
+  console.log('AUTH_REJECTION_STATE',JSON.stringify({denial,...seen}));
+  assert.equal(seen.rowCount,0,'permission denial clears accepted list rows');
+  assert.equal(seen.hasOldDetail,false,'permission denial clears the separately accepted common detail');
+  assert.equal(seen.hasOldCount,false,'permission denial clears accepted count metadata');
+  noRawOrWrites(h);
+});
+test('final teacher page permission denial invalidates an already pending common detail completion',async t=>{
+  const {h,pending,detail}=await acceptedWithPendingNextPage(t);
+  await act(async()=>pending.resolve({data:null,error:{code:'42501',message:'SYNTHETIC_DENIED'}}));
+  await settle(h,detail,row(1,registrationPatch(1,'LATE DETAIL AFTER DENIAL')));
+  await stabilize(h);
+  console.log('AUTH_LATE_DETAIL',JSON.stringify({rowCount:document.querySelectorAll('[data-registration-case-row]').length,hasLate:document.body.textContent.includes('LATE DETAIL AFTER DENIAL'),commonReads:commonReads(h).length}));
+  assert.equal(document.body.textContent.includes('LATE DETAIL AFTER DENIAL'),false,'an old detail completion cannot resurrect data after permission denial');
+  noRawOrWrites(h);
+});

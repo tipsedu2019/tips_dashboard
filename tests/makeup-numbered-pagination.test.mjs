@@ -402,7 +402,7 @@ test('Back restores retained custom input independently of effective preset boun
   assert.equal(p.numbered().at(-1).args.p_filters.dateFrom,custom.dateFrom);assert.equal(p.numbered().at(-1).args.p_filters.dateTo,'');
 });
 
-for(const authority of ['logout','user','role']) test('delayed actual create completion cannot reset next '+authority+' draft or start stale refresh',async(t)=>{
+for(const authority of ['logout','user','role','roleViewer']) test('delayed actual create completion cannot reset next '+authority+' draft or start stale refresh',async(t)=>{
   const p=await setup(t,{search:'?view=approvalPending',clock:'2026-08-31T00:00:00Z'});
   await act(async()=>p.finish(p.numbered()[0]));await p.catalogs();
   await act(async()=>button('휴보강 신청').click());
@@ -413,9 +413,18 @@ for(const authority of ['logout','user','role']) test('delayed actual create com
   await act(async()=>button('상신').click());
   await act(async()=>{for(const r of p.requests.slice(before).filter(r=>r.table))r.resolve({data:rows[r.table]||[],error:null});});
   const mutation=await p.waitFor('create_makeup_request_v2');
-  await p.auth(authority==='logout'?{user:null,role:null}:authority==='role'?{role:'teacher'}:{user:{id:id(803)},role:'admin'});
+  await p.auth(authority==='logout'?{user:null,role:null}:authority==='role'?{role:'teacher'}:authority==='roleViewer'?{role:'viewer'}:{user:{id:id(803)},role:'admin'});
   if(authority==='logout')await p.auth({user:{id:id(803)},role:'admin'});
   await act(async()=>p.finish(p.numbered().at(-1)));
+  if (authority === 'role') {
+    assert.equal(button('휴보강 신청'), undefined, 'teacher cannot begin a new write after its role changes');
+    const nextInput = JSON.stringify(p.observed.input), count = p.numbered().length;
+    await act(async()=>mutation.resolve({data:{request:{id:id(900),...mutation.args.p_input},sourceEventId:id(901)},error:null}));
+    assert.equal(JSON.stringify(p.observed.input), nextInput);
+    assert.equal(p.numbered().length, count);
+    assert.doesNotMatch(document.body.textContent,/신청서를 상신했습니다/);
+    return;
+  }
   await act(async()=>button('휴보강 신청').click());
   await act(async()=>p.observed.patch(input=>({...input,reason:'NEXT ACTOR DRAFT'})));
   const count=p.numbered().length;
@@ -495,7 +504,7 @@ for(const authority of ['logout','user','role']) test('unsent create waits for f
  await act(async()=>{for(const r of p.requests.filter(r=>r.table).slice(3))r.resolve({data:rows[r.table]||[],error:null});});
  await act(async()=>p.observed.patch(()=>({...createInput})));const before=p.requests.length;
  await act(async()=>button('상신').click());const pending=p.requests.slice(before).filter(r=>r.table);assert.equal(pending.length,4);
- await p.auth(authority==='logout'?{user:null,role:null}:authority==='role'?{role:'teacher'}:{user:{id:id(803)},role:'admin'});
+ await p.auth(authority==='logout'?{user:null,role:null}:authority==='role'?{role:'teacher'}:authority==='roleViewer'?{role:'viewer'}:{user:{id:id(803)},role:'admin'});
  await act(async()=>{for(const r of pending)r.resolve({data:rows[r.table]||[],error:null});});
  await act(async()=>Promise.all(digests));
  assert.equal(digests.length,0,'revoked catalog completion must stop before idempotency work');
@@ -601,4 +610,24 @@ test('makeup failed filters identify the accepted search and dates beside retain
   await act(async () => p.numbered().at(-1).reject(new Error('Synthetic unavailable')));
   const alert=document.querySelector('[role="alert"]').textContent;
   assert.match(alert,/기존사유/);assert.match(alert,/2026-09-01/);assert.doesNotMatch(alert,/새사유/);
+});
+
+test('teacher operational makeup view hides writes even when teacher is requester and approver', async t => {
+  const p = await setup(t, { auth: { role: 'teacher' }, search: `?requestId=${id(999)}` });
+  await act(async () => p.finish(p.numbered()[0]));
+  const detail = p.requests.find(r => r.name === 'get_makeup_detail_v1');
+  await act(async () => detail.resolve({ data: row(999, { requesterId: id(804), approverProfileId: id(804) }), error: null }));
+  for (const label of ['휴보강 신청', '승인', '보완 요청', '반려', '승인 취소']) assert.equal(button(label), undefined, label);
+  assert.equal(p.requests.some(r => /create_makeup|transition_makeup|approve_makeup/.test(r.name || '')), false);
+});
+
+for (const owns of [true, false]) test(`unchanged viewer makeup exact approver controls: ${owns}`, async t => {
+  const p = await setup(t, { auth: { role: 'viewer' }, search: `?requestId=${id(999)}` });
+  const entry = row(999, { status: 'approval_pending', requesterId: id(805), approverProfileId: owns ? id(804) : id(805) });
+  await act(async () => p.finish(p.numbered()[0], 1, { rows: [entry] }));
+  const detail = p.requests.find(r => r.name === 'get_makeup_detail_v1');
+  await act(async () => detail.resolve({ data: entry, error: null }));
+  assert.equal(Boolean(button('승인')), owns);
+  assert.equal(Boolean(button('휴보강 신청')), true, 'unchanged pre-existing viewer create entry');
+  assert.equal(p.requests.some(r => /create_makeup|transition_makeup|approve_makeup/.test(r.name || '')), false);
 });
