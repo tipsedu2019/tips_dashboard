@@ -8486,6 +8486,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const enrichmentData = await loadOpsTaskWorkspaceOptionData({
       taskType: scopedTaskType,
       viewerId: currentUserId,
+      viewerRole: resolvedViewerRole,
       force,
     })
     if (
@@ -8504,7 +8505,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setData((current) => mergeOpsTaskWorkspaceOptionData(current || emptyOpsTaskWorkspaceData, enrichmentData))
     setRegistrationOptionsLoading(false)
     return enrichmentData.directorCatalogStatus === "authoritative"
-  }, [currentUserId, isRegistrationWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType])
+  }, [currentUserId, isRegistrationWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType, resolvedViewerRole])
 
   const retryRegistrationOptions = useCallback(async () => {
     registrationOptionsLoadedRef.current = false
@@ -8514,12 +8515,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const ensureTaskOptions = useCallback(async (force = false) => {
     if (isRegistrationWorkspace || !currentUserId) return null
-    const optionsKey = `${scopedTaskType}:${currentUserId}`
+    const optionsKey = `${scopedTaskType}:${currentUserId}:${resolvedViewerRole}`
     if (!force && taskOptionsLoadedKeyRef.current === optionsKey) return taskOptionsDataRef.current
     const loadGeneration = ++taskOptionsLoadGenerationRef.current
     const enrichmentData = await loadOpsTaskWorkspaceOptionData({
       taskType: scopedTaskType,
       viewerId: currentUserId,
+      viewerRole: resolvedViewerRole,
       force,
     })
     if (
@@ -8534,7 +8536,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     taskOptionsDataRef.current = enrichmentData
     setData((current) => mergeOpsTaskWorkspaceOptionData(current || emptyOpsTaskWorkspaceData, enrichmentData))
     return enrichmentData
-  }, [currentUserId, isRegistrationWorkspace, scopedTaskType])
+  }, [currentUserId, isRegistrationWorkspace, scopedTaskType, resolvedViewerRole])
 
   useEffect(() => {
     if (
