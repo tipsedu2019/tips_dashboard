@@ -35,6 +35,7 @@ export type RegistrationCaseListProps = {
   classes?: OpsClassOption[]
   textbooks?: OpsTextbookOption[]
   onOpen: (taskId: string, preferredTrackId: string) => void
+  onOpenCase?: (taskId: string) => void
   onEdit: (taskId: string, preferredTrackId: string) => void
   onStatusChange: (
     track: RegistrationCaseListViewItem["matchingTracks"][number],
@@ -289,6 +290,7 @@ function RegistrationCaseProcessCells({
   const status = (
     <RegistrationCaseCell label="과목 · 진행상태" cellRole={cellRole}>
       <div className={aligned ? "contents" : "grid gap-1"}>
+        {item.parentOnlyInquiry ? <span className="text-muted-foreground">과목 미지정</span> : null}
         {item.matchingTracks.map((track) => (
           <div key={track.trackId} data-registration-track-line={track.trackId} className="flex min-h-8 min-w-0 items-center gap-1.5">
             <span data-registration-subject-anchor className="shrink-0 text-xs font-medium text-primary">{track.subject}</span>
@@ -310,7 +312,7 @@ function RegistrationCaseProcessCells({
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     {status}
     <RegistrationCaseCell label="연락처" cellRole={cellRole}><div>학부모 {registration?.parentPhone || "미정"}</div>{registration?.studentPhone ? <div className="text-muted-foreground">학생 {registration.studentPhone}</div> : null}</RegistrationCaseCell>
-    <RegistrationCaseCell label="문의 일시" cellRole={cellRole}>{formatRegistrationCaseTime(registration?.inquiryAt || item.representativeTrack.stageEnteredAt)}</RegistrationCaseCell>
+    <RegistrationCaseCell label="문의 일시" cellRole={cellRole}>{formatRegistrationCaseTime(registration?.inquiryAt || item.representativeTrack?.stageEnteredAt || "")}</RegistrationCaseCell>
     <RegistrationCaseCell label="요청 사항" cellRole={cellRole}>{registration?.requestNote || "없음"}</RegistrationCaseCell>
   </>
 
@@ -420,7 +422,7 @@ function RegistrationCaseActions({
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      {canDelete(item) ? (
+      {item.matchingTracks.length > 0 && canDelete(item) ? (
         <Button type="button" variant="destructive-ghost" size="sm" className="" aria-label={`${item.studentName} 등록 신청 삭제`} onClick={() => onDelete(item)} disabled={disabled}>삭제</Button>
       ) : null}
     </div>
@@ -469,17 +471,26 @@ export function RegistrationCaseList({
   classes = [],
   textbooks = [],
   onOpen,
+  onOpenCase,
   onEdit,
   onStatusChange,
-  canDelete,
+  canDelete: canDeleteTrackedCase,
   onDelete,
 }: RegistrationCaseListProps) {
   const isEmpty = !loading && items.length === 0
   const columns = items[0] ? REGISTRATION_CASE_VIEW_COLUMNS[items[0].viewKey] : REGISTRATION_CASE_VIEW_COLUMNS.inquiry
+  const canDelete = (item: RegistrationCaseListViewItem) => item.matchingTracks.length > 0 && canDeleteTrackedCase(item)
   const showActionColumn = items.some(canDelete)
   const gridTemplateColumns = `repeat(${columns.length}, minmax(0, 1fr))${showActionColumn ? " minmax(5rem, auto)" : ""}`
+  const canOpenItem = (item: RegistrationCaseListViewItem) => !disabled
+    && canOpenRegistrationCaseListItem(item)
+    && (!item.parentOnlyInquiry || Boolean(onOpenCase))
   const openRegistrationCase = (item: RegistrationCaseListViewItem) => {
-    if (disabled || !canOpenRegistrationCaseListItem(item)) return
+    if (!canOpenItem(item)) return
+    if (item.parentOnlyInquiry) {
+      onOpenCase?.(item.taskId)
+      return
+    }
     const targetTrack = item.viewKey === "observation"
       ? item.matchingTracks.find((track) => track.observationSummaryVisible) || item.representativeTrack
       : item.representativeTrack
@@ -513,6 +524,7 @@ export function RegistrationCaseList({
           <div data-testid="registration-case-mobile-list" className="grid min-w-0 gap-2 p-2 lg:hidden" role="list" aria-label="등록 신청 모바일 목록">
             {items.map((item) => {
               const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
+                && (!item.parentOnlyInquiry || Boolean(onOpenCase))
               return <article
                 key={item.taskId}
                 data-registration-case-row=""
@@ -534,6 +546,7 @@ export function RegistrationCaseList({
             </div>
             {items.map((item) => {
               const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
+                && (!item.parentOnlyInquiry || Boolean(onOpenCase))
               return <div
                 key={item.taskId}
                 data-registration-case-row=""

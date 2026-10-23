@@ -63,12 +63,16 @@ export type RegistrationCaseListItem = {
 export type RegistrationCaseListViewItem = RegistrationCaseListItem & {
   viewKey: RegistrationWorkflowViewKey
   matchingTracks: RegistrationCaseListTrackItem[]
-  representativeTrack: RegistrationCaseListTrackItem
+  representativeTrack: RegistrationCaseListTrackItem | null
+  parentOnlyInquiry?: boolean
   representativeSortValue: string
 }
 
 export type RegistrationCaseListFilterOptions = {
   consultationOwnerId?: string | null
+  // Only the accepted numbered response establishes membership for parents
+  // with no active subjects (including parents whose subjects were archived).
+  includeServerSelectedInquiryParents?: boolean
 }
 
 const REGISTRATION_TRACK_VIEW_KEYS: RegistrationWorkflowViewKey[] = [
@@ -175,9 +179,9 @@ export function getRegistrationObservationListSummary(
 
 export function canOpenRegistrationCaseListItem(input: Pick<
   RegistrationCaseListViewItem,
-  "viewKey" | "matchingTracks"
+  "viewKey" | "matchingTracks" | "parentOnlyInquiry"
 >) {
-  return input.matchingTracks.length > 0
+  return input.matchingTracks.length > 0 || (input.viewKey === "inquiry" && input.parentOnlyInquiry === true)
 }
 
 export function getRegistrationCaseLevelTestAppointments(
@@ -241,17 +245,22 @@ export function filterRegistrationCaseListItems(
     const searchSubjectTracks = options.consultationOwnerId === undefined || !ownerScoped
       ? item.tracks
       : matchingTracks
+    const parentOnlyInquiry = options.includeServerSelectedInquiryParents === true
+      && normalizedViewKey === "inquiry"
+      && item.task.type === "registration"
+      && item.tracks.length === 0
     if (
-      matchingTracks.length === 0
+      (matchingTracks.length === 0 && !parentOnlyInquiry)
       || !matchesRegistrationCaseSearch(item, matchingTracks, normalizedQuery, searchSubjectTracks)
     ) return []
-    const representativeTrack = matchingTracks[0]
+    const representativeTrack = matchingTracks[0] || null
     return [{
       ...item,
       viewKey: normalizedViewKey,
       matchingTracks,
       representativeTrack,
-      representativeSortValue: getRegistrationCaseTrackTimeValue(representativeTrack),
+      parentOnlyInquiry,
+      representativeSortValue: representativeTrack ? getRegistrationCaseTrackTimeValue(representativeTrack) : "",
     }]
   })
 
@@ -280,7 +289,9 @@ function compareConsultationCaseItems(
   left: RegistrationCaseListViewItem,
   right: RegistrationCaseListViewItem,
 ): number {
-  const trackComparison = compareConsultationTrackPriorityAndTime(left.representativeTrack, right.representativeTrack)
+  const trackComparison = left.representativeTrack && right.representativeTrack
+    ? compareConsultationTrackPriorityAndTime(left.representativeTrack, right.representativeTrack)
+    : 0
   if (trackComparison !== 0) return trackComparison
   return left.taskId.localeCompare(right.taskId)
 }
