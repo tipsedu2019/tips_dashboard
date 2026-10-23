@@ -221,6 +221,18 @@ export function assertAnnualContract(body) {
   return { dates, independentDetail: { start: details[0].start, end: details[0].end, dateLabel: details[0].dateLabel, rangeEnd: details[0].displayMeta.rangeEnd } };
 }
 
+
+// The same authenticated transport has two explicit data scopes: the assistant
+// is word-retest-only, while the other four existing roles retain full annual data.
+export function assertAnnualRoleContract(body, role) {
+  requireCondition(HTTP_ACTORS.some(actor => actor.role === role), "role_scope_invalid");
+  if (role !== "assistant") return assertAnnualContract(body);
+  requireCondition(body?.ok === true && body.data?.academicYear === HTTP_YEAR && Array.isArray(body.data.rows), "rpc_shape_invalid");
+  requireCondition(body.data.rows.length === 0 && body.data.summary?.eventCount === 0
+    && body.data.summary?.schoolCount === 0 && body.data.summary?.activeTypeCount === 0, "assistant_scope_mismatch");
+  return null;
+}
+
 async function execute(args, { input = "", extraEnv = {}, allowFailure = false } = {}) {
   // Secrets are supplied on stdin or as inherited env values, never argv or output.
   const child = spawn("docker", args, { env: { ...process.env, ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] });
@@ -328,12 +340,19 @@ export async function runAnnualHttpProbe({ env = process.env, config = null } = 
       requireCondition(resolved.status === 200 && resolved.body === actor.role, "profile_role_mismatch");
       const response = await annual({ token });
       requireCondition(response.status === 200, "authenticated_status_mismatch");
-      const projected = assertAnnualContract(response.body);
-      requireCondition(!dateEvidence || JSON.stringify(projected) === JSON.stringify(dateEvidence), "role_scope_mismatch");
-      dateEvidence = projected;
+      const projected = assertAnnualRoleContract(response.body, actor.role);
+      if (actor.role === "assistant") {
+        const rawRows = await http(`/academic_events?school_id=eq.${HTTP_SCHOOL_ID}&select=id`, { token, method: "GET" });
+        requireCondition(rawRows.status === 200 && Array.isArray(rawRows.body) && rawRows.body.length === 0, "assistant_raw_rls_mismatch");
+      } else {
+        requireCondition(!dateEvidence || JSON.stringify(projected) === JSON.stringify(dateEvidence), "role_scope_mismatch");
+        dateEvidence = projected;
+      }
       const future = await annual({ token, body: { p_academic_year: HTTP_YEAR + 1 } });
       requireCondition(future.status === 200 && future.body?.ok === true && !future.body.data.rows.some(row => row.schoolId === HTTP_SCHOOL_ID), "start_year_filter_mismatch");
-      roleEvidence.push({ role: actor.role, status: response.status, profileUidMatched: true, databaseRoleMatched: true, entries: HTTP_CASES.length + 1 });
+      roleEvidence.push({ role: actor.role, status: response.status, profileUidMatched: true, databaseRoleMatched: true,
+        entries: actor.role === "assistant" ? 0 : HTTP_CASES.length + 1,
+        ...(actor.role === "assistant" ? { visibleBaseEvents: 0 } : {}) });
     }
     const rejected = [];
     const wrongSigningKey = `${target.nonce[0] === "0" ? "1" : "0"}${target.nonce.slice(1)}`;
