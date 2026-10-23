@@ -215,3 +215,20 @@ test("alternating live owners start three requests and retain only the latest re
   await Promise.all(reads);
   assert.deepEqual(await cache.load("general:inbox", () => assert.fail("latest result retained")), { total: 3 });
 });
+
+
+const generalFilters = { taskType: 'general', search: '', statuses: [], queue: 'inbox', requestedById: null, requestedTeam: null, assigneeId: null, assigneeTeam: null, focus: 'none', sort: 'due' };
+test('stats scope normalizes only valid general ordering and preserves every selecting filter', () => {
+  const scope = statsCacheModule.getOpsTaskPageStatsScope;
+  assert.equal(typeof scope, 'function');
+  const expected = JSON.stringify(generalFilters);
+  for (const sort of ['due', 'priority', 'status']) assert.equal(scope({ ...generalFilters, sort }), expected);
+  for (const patch of [
+    { search: '검색' }, { statuses: ['requested'] }, { queue: 'sent' }, { requestedById: 'actor-b' }, { requestedTeam: '영어' },
+    { assigneeId: 'actor-b' }, { assigneeTeam: '수학' }, { focus: 'mine' },
+  ]) assert.equal(scope({ ...generalFilters, ...patch, sort: 'priority' }), JSON.stringify({ ...generalFilters, ...patch }));
+  const registration = { taskType: 'registration', search: '', statuses: [], view: 'inquiry', consultationOwnerId: null };
+  assert.equal(scope(registration), JSON.stringify(registration));
+  const unsupported = { ...generalFilters, sort: 'invalid' };
+  assert.equal(scope(unsupported), JSON.stringify(unsupported), 'invalid sort must still reach its existing validation boundary');
+});

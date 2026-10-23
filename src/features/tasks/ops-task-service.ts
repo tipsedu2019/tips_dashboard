@@ -41,7 +41,7 @@ import {
 } from "./registration-runtime-probe"
 import { loadRegistrationSubjectTrackFixtureClassDetails } from "./registration-track-fixture-runtime"
 import { startOpsTaskPageSupplementLoad } from "./ops-task-page-supplement"
-import { createOpsTaskPageStatsCache } from "./ops-task-page-stats-cache"
+import { createOpsTaskPageStatsCache, getOpsTaskPageStatsScope } from "./ops-task-page-stats-cache"
 
 export type OpsTaskType =
   | "registration"
@@ -1808,7 +1808,7 @@ async function loadOpsTaskPageStats(
 ): Promise<OpsTaskPageStats | undefined> {
   const client = supabase
   if (!client) return undefined
-  const key = `${viewerId}:${JSON.stringify(filters)}`
+  const key = `${viewerId}:${getOpsTaskPageStatsScope(filters)}`
   return opsTaskPageStatsCache.load(key, async () => {
     const statsResult = await client
       .rpc("get_ops_task_list_stats_v1", {

@@ -152,6 +152,7 @@ import {
   type RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
 import { mergeOpsTaskPageSupplement } from "./ops-task-page-supplement"
+import { getOpsTaskPageStatsScope } from "./ops-task-page-stats-cache"
 import { RegistrationTabCountSlot } from "./registration-tab-count-slot"
 import {
   ClassScheduleCalendarSurface,
@@ -8199,6 +8200,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ])
 
   const taskPageFilters = useOpsTaskPeriodFilters(taskPageFilterDraft, JSON.stringify([navigationActorScope, pathname, scopedTaskType]))
+  const taskStatsRequestScope = getOpsTaskPageStatsScope(taskPageFilters)
+  const taskStatsRequestFilters = useMemo<OpsTaskPageFilters>(
+    () => JSON.parse(taskStatsRequestScope), [taskStatsRequestScope],
+  )
   const numberedServerPage = !registrationFixtureRequested && !wordRetestFixtureRequested
   const fixturePageSize = useDataTablePageSize(`ops-task:${scopedTaskType}`)
   const [fixturePage, setFixturePage] = useState(1)
@@ -8394,14 +8399,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const generation = ++workspaceLoadGenerationRef.current
     setTaskStatsFilterScope(null)
     setData((current) => current ? { ...current, stats: undefined } : current)
-    const registration = taskPageFilters.taskType === "registration"
-      ? startOpsRegistrationTaskPageSupplementLoad({ filters: taskPageFilters, viewerId: currentUserId, signal: controller.signal })
+    const registration = taskStatsRequestFilters.taskType === "registration"
+      ? startOpsRegistrationTaskPageSupplementLoad({ filters: taskStatsRequestFilters, viewerId: currentUserId, signal: controller.signal })
       : null
-    const stats = registration?.stats || startOpsTaskPageStatsSupplementLoad({ filters: taskPageFilters, viewerId: currentUserId, signal: controller.signal })
+    const stats = registration?.stats || startOpsTaskPageStatsSupplementLoad({ filters: taskStatsRequestFilters, viewerId: currentUserId, signal: controller.signal })
     const current = () => workspaceMountedRef.current && !controller.signal.aborted && workspaceLoadGenerationRef.current === generation
     void stats.then((stats) => {
       if (stats && current()) {
-        setTaskStatsFilterScope(JSON.stringify(taskPageFilters))
+        setTaskStatsFilterScope(JSON.stringify(taskStatsRequestFilters))
         setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { stats }))
       }
     })
@@ -8409,7 +8414,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       if (registrationRuntime && current()) setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { registrationRuntime }))
     })
     return () => { controller.abort(); workspaceLoadGenerationRef.current += 1 }
-  }, [authLoading, currentUserId, numberedServerPage, supplementRevision, taskPageFilters])
+  }, [authLoading, currentUserId, numberedServerPage, supplementRevision, taskStatsRequestFilters])
 
   const refreshFirstTaskPageAfterMutation = useCallback(async () => {
     await reload(true, false)
