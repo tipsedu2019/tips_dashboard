@@ -468,6 +468,39 @@ test('registration list renders every delivered parent on both mirrors without a
   assert.equal(document.body.textContent.includes('더 보기'), false);
 });
 
+for (const role of ['admin', 'staff', 'teacher']) test('parent-only inquiry opens canonical case without inventing track actions: ' + role, async t => {
+  const { root } = await setup(t);
+  const load = modules(null);
+  const { RegistrationCaseList } = load('src/features/tasks/registration-case-list.tsx');
+  const { buildRegistrationCaseListItems, filterRegistrationCaseListItems } = load('src/features/tasks/registration-case-list-model.ts');
+  const parent = { ...row(1), ...registrationPatch(1, '합성 과목 미지정 문의'), registrationTracks: [] };
+  const items = filterRegistrationCaseListItems(buildRegistrationCaseListItems([parent]), 'inquiry', '', { includeServerSelectedInquiryParents: true });
+  const opened = [], unexpected = [];
+  const props = { items, viewerId: 'actor-a', viewerRole: role, canDelete: () => true,
+    onOpenCase: taskId => opened.push(taskId), onOpen: () => unexpected.push('track-open'), onEdit: () => unexpected.push('edit'),
+    onStatusChange: () => unexpected.push('status'), onDelete: () => unexpected.push('delete') };
+  await act(async () => root.render(createElement(RegistrationCaseList, props)));
+  assert.equal(document.querySelectorAll('[data-registration-case-row]').length, 2);
+  for (const row of document.querySelectorAll('[data-registration-case-row]')) {
+    assert.equal(row.tabIndex, 0);
+    assert.equal(row.querySelector('button'), null, 'even a permissive caller cannot add a parent-only delete/status action');
+    for (const event of [new window.MouseEvent('click', { bubbles: true }), ...['Enter', ' '].map(key => new window.KeyboardEvent('keydown', { key, bubbles: true }))]) {
+      await act(async () => row.dispatchEvent(event));
+    }
+  }
+  assert.deepEqual(opened, Array(6).fill(id(1)));
+  assert.deepEqual(unexpected, []);
+  assert.deepEqual(parent.registrationTracks, []);
+  await act(async () => root.render(createElement(RegistrationCaseList, { ...props, disabled: true })));
+  for (const row of document.querySelectorAll('[data-registration-case-row]')) {
+    assert.equal(row.hasAttribute('tabindex'), false);
+    await act(async () => row.click());
+  }
+  assert.equal(opened.length, 6);
+  await act(async () => root.render(createElement(RegistrationCaseList, { ...props, onOpenCase: undefined })));
+  for (const row of document.querySelectorAll('[data-registration-case-row]')) assert.equal(row.hasAttribute('tabindex'), false, 'no dead keyboard target without a case reader');
+});
+
 test('numbered general page retains authorized textbook parent rows and its count', async (t) => {
   const page = await workspace(t);
   const index = page.requests.findIndex((r) => r.name === 'list_ops_task_numbered_page_v1');
@@ -1543,6 +1576,65 @@ const finishRegistrationStats = (page, total, view = 'completed', byView = { com
   request.resolve({ error: null, data: { total, byStatus: {}, byView, metrics, facets: {} } });
 };
 const assertNoRegistrationFalseEmpty = () => assert.doesNotMatch(document.body.textContent, /단계에 등록 업무가 없습니다/);
+
+for (const order of ['stats-first', 'page-first']) test('registration server-selected inquiry without active subjects remains visible: ' + order, async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?taskPage=1&taskPageType=registration' });
+  await act(async () => currentComponentProps('DataTablePagination').onPageSizeChange(15));
+  const read = registrationReads(page).at(-1);
+  assert.equal(read.args.p_page, 1);
+  assert.equal(read.args.p_page_size, 15);
+  assert.equal(read.args.p_filters.view, 'inquiry');
+  assert.equal(read.args.p_filters.search, '');
+  const patch = registrationPatch(1, '합성 과목 미지정 문의');
+  patch.registrationTracks = []; // The numbered SQL also returns archived-only parents this way.
+  const finishPage = () => page.finish(page.requests.indexOf(read), 1, [patch]);
+  const finishStats = () => finishRegistrationStats(page, 1, 'inquiry', { inquiry: 1 });
+  if (order === 'stats-first') {
+    await act(async () => finishStats());
+    await act(async () => finishPage());
+  } else {
+    await act(async () => finishPage());
+    await act(async () => finishStats());
+  }
+  for (const mirror of ['desktop', 'mobile']) {
+    const rows = document.querySelectorAll('[data-testid="registration-case-' + mirror + '-list"] [data-registration-case-row]');
+    assert.equal(rows.length, 1, 'a server-selected parent does not need a synthetic subject to be visible');
+    assert.match(rows[0].textContent, /합성 과목 미지정 문의/);
+    assert.match(rows[0].textContent, /과목 미지정/);
+    assert.equal(rows[0].querySelector('[data-registration-track-line]'), null);
+    assert.equal(rows[0].querySelector('button'), null, 'no status or delete operation is invented');
+  }
+  assert.equal(document.querySelector('[role="alert"]'), null);
+  assert.match(document.body.textContent, /1건 · 1–1번째/);
+  assert.deepEqual(currentComponentProps('RegistrationCaseList').items[0].task.registrationTracks, []);
+  const readRpcNames = new Set(['list_ops_task_numbered_page_v1', 'get_ops_task_list_stats_v1', 'registration_observation_runtime_version', 'registration_subject_tracks_runtime_version', 'list_registration_subject_capabilities_v1']);
+  assert.deepEqual(page.requests.filter(request => !readRpcNames.has(request.name)).map(request => request.name), [], 'display performs only known read RPCs');
+});
+
+test('parent-only inquiry uses the authorized case reader and retains its permission failure', async t => {
+  const page = await workspace(t, { workspace: 'registration', pendingRpcNames: ['registration_subject_tracks_runtime_version'] });
+  const patch = { ...registrationPatch(1, '합성 조회 전용 문의'), registrationTracks: [] };
+  await act(async () => {
+    page.finish(page.requests.indexOf(registrationReads(page)[0]), 1, [patch]);
+    for (const request of page.requests.filter(request => request.name === 'registration_subject_tracks_runtime_version')) request.resolve({ error: null, data: 1 });
+  });
+  const start = page.tableRequests.length;
+  await act(async () => document.querySelector('[data-testid="registration-case-desktop-list"] [data-registration-case-row]').click());
+  const parentRead = page.tableRequests.slice(start).find(request => request.table === 'ops_tasks');
+  assert.ok(parentRead, 'open uses the canonical case service, not legacy summary detail');
+  assert.ok(parentRead.filters.some(filter => filter[0] === 'eq' && filter[1] === 'id' && filter[2] === id(1)));
+  assert.equal(new URLSearchParams(window.location.search).get('taskId'), id(1));
+  assert.equal(new URLSearchParams(window.location.search).has('trackId'), false);
+  await act(async () => parentRead.resolve({ data: null, error: { code: '42501', message: 'private synthetic denial' } }));
+  const host = document.querySelector('[data-registration-application-host]');
+  assert.equal(host?.getAttribute('data-registration-application-mode'), 'refresh_failed');
+  assert.match(host.textContent, /등록 상세를 불러오지 못했습니다/);
+  assert.doesNotMatch(host.textContent, /private synthetic denial/);
+  const knownReads = /^(list_|get_|read_)|_runtime_version$/;
+  assert.deepEqual(page.requests.filter(request => !knownReads.test(request.name)).map(request => request.name), []);
+  assert.equal(page.tableRequests.some(request => request.filters.some(([method]) => ['insert', 'update', 'delete', 'upsert'].includes(method))), false);
+});
+
 function supportRegistrationRetryFocus() {
   // React was imported before JSDOM; only these synthetic retry/focus cases
   // need its legacy input-event fallback. Leave the shared harness unchanged.
