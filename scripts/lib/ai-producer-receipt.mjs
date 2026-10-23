@@ -183,7 +183,7 @@ export const CLASS_LESSON_INPUT_MIGRATION=Object.freeze({fileName:'2026102115572
 export const CLASS_BASIC_INFO_INPUT_MIGRATION=Object.freeze({fileName:'20261022015000_class_basic_info_input_policy.sql',status:'final',sha256:'ffaca553cb8905e58f21d83960150646b6eb9cfc58cc58dc01fb4c48d18e0e9b'});
 export const TIMETABLE_PRESET_OWNED_MIGRATION=Object.freeze({fileName:'20261022041000_timetable_preset_owned_placements.sql',status:'final',sha256:'11ab457c63c06a1055e4d152af4b6b607864cb9c00c7a7c6744b44b33ef19c77'});
 export const CLASS_PUBLIC_MEMO_MIGRATION=Object.freeze({fileName:'20261022081000_class_public_memo.sql',status:'final',sha256:'11c539cce9fcd2838eaf8cf7cf01c61161de7746888e3ed04e8dc05a4b45216b'});
-export const DASHBOARD_ROLE_SCOPE_MIGRATION=Object.freeze({fileName:'20261023091500_dashboard_operational_role_scope.sql',status:'final',sha256:'8078668dda91bae75d099428a8012e65acb5d4f70c1d025c7e0966bcf962b711'});
+export const DASHBOARD_ROLE_SCOPE_MIGRATION=Object.freeze({fileName:'20261023091500_dashboard_operational_role_scope.sql',status:'final',sha256:'dfa81cdeedcd307d8337235d7b2d2e0bf41eff059e63b66a43295c538ff3bdf5'});
 export const MANAGEMENT_CLASS_OWNERSHIP_MIGRATION=Object.freeze({fileName:'20261022133155_management_class_schedule_ownership.sql',status:'final',sha256:'3f0e7b641157f46ebadfacd9b097c7bfd14f91521635afd476681ed7d45f4cd3'});
 export const CURRENT_PR126_MIGRATIONS=Object.freeze([
  Object.freeze({fileName:'20261009065550_transfer_completion_preexcluded_rosters.sql',status:'final',sha256:'59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099'}),
