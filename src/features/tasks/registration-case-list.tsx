@@ -474,12 +474,13 @@ export function RegistrationCaseList({
   onOpenCase,
   onEdit,
   onStatusChange,
-  canDelete,
+  canDelete: canDeleteTrackedCase,
   onDelete,
 }: RegistrationCaseListProps) {
   const isEmpty = !loading && items.length === 0
   const columns = items[0] ? REGISTRATION_CASE_VIEW_COLUMNS[items[0].viewKey] : REGISTRATION_CASE_VIEW_COLUMNS.inquiry
-  const showActionColumn = items.some((item) => item.matchingTracks.length > 0 && canDelete(item))
+  const canDelete = (item: RegistrationCaseListViewItem) => item.matchingTracks.length > 0 && canDeleteTrackedCase(item)
+  const showActionColumn = items.some(canDelete)
   const gridTemplateColumns = `repeat(${columns.length}, minmax(0, 1fr))${showActionColumn ? " minmax(5rem, auto)" : ""}`
   const canOpenItem = (item: RegistrationCaseListViewItem) => !disabled
     && canOpenRegistrationCaseListItem(item)
