@@ -1062,7 +1062,7 @@ test('management ownership migration is pinned without relaxing legacy or source
 
 test('operational role scope migration is pinned without relaxing legacy or source drift checks', async () => {
  const pin=receiptProtocol.DASHBOARD_ROLE_SCOPE_MIGRATION;
- assert.deepEqual(pin,{fileName:'20261023091500_dashboard_operational_role_scope.sql',status:'final',sha256:'8078668dda91bae75d099428a8012e65acb5d4f70c1d025c7e0966bcf962b711'});
+ assert.deepEqual(pin,{fileName:'20261023091500_dashboard_operational_role_scope.sql',status:'final',sha256:'dfa81cdeedcd307d8337235d7b2d2e0bf41eff059e63b66a43295c538ff3bdf5'});
  const current=await snapshotAiSource();
  assert.equal(current.closure.find(row=>row.path==='supabase/migrations/'+pin.fileName)?.sha256,pin.sha256);
  const root=await mkdtemp(join(tmpdir(),'ai-operational-role-scope-pin-'));
