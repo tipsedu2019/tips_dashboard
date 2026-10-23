@@ -563,7 +563,7 @@ test('resubmit propagates a mutation conflict without notification or retry', as
   assert.equal(notifications(fixture).length, 0);
 });
 
-for (const role of ['teacher', 'assistant', 'viewer']) test(`operational approval rejects ${role} before replay, service reads or effects`, async t => {
+for (const role of ['teacher', 'assistant']) test(`operational approval rejects ${role} before replay, service reads or effects`, async t => {
 
  const keys=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'];
  const before=keys.map(k=>process.env[k]);
@@ -603,7 +603,7 @@ test('management resubmission can keep the original requester instead of imperso
  assert.equal('requester_id' in mutations(fixture)[0].args.p_patch,false);
 });
 
-for (const role of ['teacher', 'assistant', 'viewer']) test(`legacy makeup follow-up rejects ${role} before service construction and body parsing`, async t => {
+for (const role of ['teacher', 'assistant']) test(`legacy makeup follow-up rejects ${role} before service construction and body parsing`, async t => {
   const keys = ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
   const before = keys.map(key => process.env[key]);
   keys.forEach(key => process.env[key] = key.includes('URL') ? 'https://fixture.invalid' : 'fixture');
@@ -616,4 +616,20 @@ for (const role of ['teacher', 'assistant', 'viewer']) test(`legacy makeup follo
   const { POST } = modules(null, { '@supabase/supabase-js': { createClient() { constructions++; assert.equal(constructions, 1, 'no service client before rejecting role'); return client; } } })('src/app/api/notifications/legacy/makeup/route.ts');
   const response = await POST(new Request('https://fixture.invalid/api/notifications/legacy/makeup', { method: 'POST', headers: { authorization: 'Bearer fixture' }, body: '{invalid-json' }));
   assert.equal(response.status, 403); assert.equal(constructions, 1); assert.deepEqual(calls, ['profiles']);
+});
+
+for (const owns of [true, false]) test(`existing viewer approval still requires its exact assignment: ${owns}`, async t => {
+  const keys = ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
+  const before = keys.map(key => process.env[key]);
+  keys.forEach(key => process.env[key] = key.includes('URL') ? 'https://fixture.invalid' : 'fixture');
+  t.after(() => keys.forEach((key, index) => before[index] === undefined ? delete process.env[key] : process.env[key] = before[index]));
+  const p = routeFixture({role:'viewer', approverId:owns ? id(804) : id(805)});
+  const response = await p.run();
+  assert.equal(response.status, owns ? 200 : 403);
+  if (!owns) {
+    const commands = p.calls.filter(call => call.name === 'transition_makeup_request_v2');
+    assert.equal(commands.length, 1, 'unchanged receipt/effects probe only; no second effects-bearing approval');
+    assert.deepEqual(Object.keys(commands[0].args.p_patch).sort(), ['actor_profile_id', 'final_note']);
+    assert.equal(p.calls.some(call => call.table === 'classes'), false);
+  }
 });

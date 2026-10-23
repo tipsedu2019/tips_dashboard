@@ -677,13 +677,13 @@ test("레거시 브리지는 sourceEventId만 받고 권위 원본·공유 소�
   assert.match(sql, /canonical_event\.payload ->> 'makeup_request_id'/)
 })
 
-test("관리팀 외 휴보강 알림 후처리는 actor profile에서 service-role dispatch 전에 거절한다", async () => {
+test("선생님·조교 휴보강 알림 후처리는 actor profile에서 service-role dispatch 전에 거절한다", async () => {
   const route = await optionalSource(routeUrl)
   const postSource = route.slice(route.indexOf("export async function POST"))
   const authIndex = postSource.indexOf("actorClient.auth.getUser(token)")
   const profileLookupIndex = postSource.indexOf('.from("profiles")')
   const lookupFailureIndex = postSource.indexOf("if (actorProfileError || !isRecord(actorProfile))")
-  const assistantDenialIndex = postSource.indexOf('if (!["admin", "staff"].includes(text(actorProfile.role)))')
+  const assistantDenialIndex = postSource.indexOf('if (["teacher", "assistant"].includes(text(actorProfile.role)))')
   const serviceClientIndex = postSource.indexOf("const serverClient = serviceClient()")
   const bodyIndex = postSource.indexOf("request.json()")
   const planIndex = postSource.indexOf("get_makeup_legacy_dispatch_plan_v1")
@@ -698,7 +698,7 @@ test("관리팀 외 휴보강 알림 후처리는 actor profile에서 service-ro
   )
   assert.match(
     postSource,
-    /if \(!\["admin", "staff"\]\.includes\(text\(actorProfile\.role\)\)\) return response\(\{ ok: false, error: "휴보강 접근 권한이 없습니다\." \}, 403\)/,
+    /if \(\["teacher", "assistant"\]\.includes\(text\(actorProfile\.role\)\)\) return response\(\{ ok: false, error: "휴보강 접근 권한이 없습니다\." \}, 403\)/,
   )
   assert.doesNotMatch(postSource, /serverClient\s*\.from\("profiles"\)/)
   assert.ok(authIndex >= 0 && authIndex < profileLookupIndex, "actor authentication must precede the profile role lookup")

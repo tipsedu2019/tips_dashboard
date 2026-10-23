@@ -671,6 +671,7 @@ type MakeupRequestActionControlsProps = {
 function MakeupRequestActionControls({
   request,
   data,
+  currentUserId,
   canManage,
   saving,
   onEditForRevision,
@@ -683,12 +684,16 @@ function MakeupRequestActionControls({
   onFinalCancel,
   align = "end",
 }: MakeupRequestActionControlsProps) {
+  const { role } = useAuth()
+  const legacyViewer = role === "viewer"
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
-  const canRevise = canManage && request.status === "revision_requested"
-  const canApprove = canManage && request.status === "approval_pending"
-  const canHandleMakeupPending = canManage && request.status === "makeup_pending"
+  const requesterAction = canManage || (legacyViewer && request.requesterId === currentUserId)
+  const approverAction = canManage || (legacyViewer && request.approverProfileId === currentUserId)
+  const canRevise = requesterAction && request.status === "revision_requested"
+  const canApprove = approverAction && request.status === "approval_pending"
+  const canHandleMakeupPending = requesterAction && request.status === "makeup_pending"
   const canCompleteRefund = request.status === "refund_pending" && canManage
-  const canCancelApproval = canManage && (request.status === "completed" || request.status === "makeup_pending")
+  const canCancelApproval = approverAction && (request.status === "completed" || request.status === "makeup_pending")
 
   if (!canRevise && !canApprove && !canHandleMakeupPending && !canCompleteRefund && !canCancelApproval) return null
 
@@ -1793,6 +1798,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
   selectedClassIdRef.current = selectedClass?.id || ""
   const isManager = canUserManage(role)
+  // Preserve the existing viewer workflow; only teacher/assistant are changed here.
+  const canProcessRequest = isManager || role === "viewer"
   const approverEffectiveYear = getMakeupApproverEffectiveYear(editingRequest?.createdAt)
   const detailRequest = selectedDetailRequest
   const actionNoteConfig = actionNoteRequest ? MAKEUP_ACTION_NOTE_CONFIG[actionNoteRequest.kind] : MAKEUP_ACTION_NOTE_CONFIG.revision
@@ -1988,7 +1995,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const requestHasCancelDate = Boolean(input.cancelDate)
   const requestHasMakeupSlots = materializedMakeupSlots.length > 0
   const canSubmitRequest = Boolean(
-    isManager && currentUserId &&
+    canProcessRequest && currentUserId &&
     input.classId &&
     input.reason.trim() &&
     input.approverTeacherCatalogId &&
@@ -2106,12 +2113,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [])
 
   const openRequestDialog = useCallback(() => {
-    if (!isManager) return
+    if (!canProcessRequest) return
     requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     resetForm()
     setRequestDialogOpen(true)
-  }, [isManager, resetForm])
+  }, [canProcessRequest, resetForm])
 
   const closeRequestDialog = useCallback(() => {
     if (savingRef.current) return
@@ -2122,7 +2129,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [requestLocalAction, resetForm])
 
   const handleSubmit = useCallback(async () => {
-    if (!isManager) return
+    if (!canProcessRequest) return
     if (!lifetime.current || savingRef.current) return
     if (!currentUserId) {
       setDialogError("로그인 세션을 확인할 수 없습니다.")
@@ -2202,10 +2209,10 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       savingRef.current = false
       if (lifetime.current) setSaving(false)
     }
-  }, [currentUserId, data.teachers, data.collisionContextReady, formCatalogReady, editingRequest?.createdAt, editingRequestId, input, isManager, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision, setView])
+  }, [currentUserId, data.teachers, data.collisionContextReady, formCatalogReady, editingRequest?.createdAt, editingRequestId, input, isManager, canProcessRequest, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision, setView])
 
   const runAction = useCallback(async (action: () => Promise<MakeupRequest>, successMessage: string) => {
-    if (!isManager) return false
+    if (!canProcessRequest) return false
     if (!lifetime.current || savingRef.current) return false
     savingRef.current = true
     setSaving(true)
@@ -2227,7 +2234,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       savingRef.current = false
       if (lifetime.current) setSaving(false)
     }
-  }, [isManager, refresh])
+  }, [canProcessRequest, refresh])
 
   const closeApprovalDialog = useCallback(() => {
     if (savingRef.current) return
@@ -2318,7 +2325,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [closeDetailRequest, currentUserId, finalCancelNote, finalCancelRequest, runAction])
 
   const handleEditForRevision = useCallback((request: MakeupRequest) => {
-    if (!isManager) return
+    if (!canProcessRequest) return
     requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
@@ -2346,10 +2353,10 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setRequestDraftBaseline(JSON.stringify([nextInput, requestClass?.subject || selectedSubject, requestClass ? getClassTeacherKey(requestClass) : selectedTeacherKey]))
     setError(clearMakeupClassSchedulePlanLoadError)
     setRequestDialogOpen(true)
-  }, [isManager, data.classes, selectedSubject, selectedTeacherKey, setView])
+  }, [canProcessRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
 
   const handleSchedulePendingMakeup = useCallback((request: MakeupRequest) => {
-    if (!isManager) return
+    if (!canProcessRequest) return
     requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
@@ -2376,7 +2383,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setRequestDraftBaseline(JSON.stringify([nextInput, requestClass?.subject || selectedSubject, requestClass ? getClassTeacherKey(requestClass) : selectedTeacherKey]))
     setError(clearMakeupClassSchedulePlanLoadError)
     setRequestDialogOpen(true)
-  }, [isManager, closeDetailRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
+  }, [canProcessRequest, closeDetailRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
 
   return (
     <WorkspaceTabs ref={workspaceRef} value={view} onValueChange={(value) => setView(value as MakeupRequestView)} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
@@ -2394,7 +2401,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
             })}
           </WorkspaceTabsList>
           <div className="flex items-center justify-end gap-2">
-            {isManager ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
+            {canProcessRequest ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
               <Plus className="size-4" aria-hidden="true" />
               휴보강 신청
             </Button> : null}
