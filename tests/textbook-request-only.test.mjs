@@ -20,10 +20,12 @@ test("request-only mode rejects management URLs before the first reader and on h
   assert.equal(h.requests.some(request => request.name === "get_textbook_sale_detail_v1"), false);
 });
 
-test("teacher request-only view has no create action and never starts management reads", async t => {
+test("teacher request-only view permits a new submission and never starts management reads", async t => {
   const h = await setup(t, { mode: "requests", auth: { role: "teacher", isTeacher: true, isAdmin: false, isStaff: false, canManageAll: false } });
   assertRequestReadsOnly(h, true);
-  assert.equal([...document.querySelectorAll("button")].some(button => /요청 추가|요청 등록/.test(button.textContent)), false);
+  assert.equal([...document.querySelectorAll("button")].some(button => button.textContent === "요청 추가"), true);
+  assert.equal([...document.querySelectorAll("button")].some(button => /요청 수정|삭제|승인|입고|정산/.test(button.textContent)), false);
+  assert.equal(document.querySelector("form"), null, "an existing row is never opened as an editable request");
 });
 
 test('teacher deep-linked request detail remains a read-only detail and starts no edit references', async t => {

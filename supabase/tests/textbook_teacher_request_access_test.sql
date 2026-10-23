@@ -439,6 +439,17 @@ create function pg_temp.teacher_submission(title text default '멱등 교재') r
  select jsonb_build_object('title',title,'textbookId',null,'classId',null,'locationId',null,
    'studentQuantity',2,'teacherQuantity',1,'memo','보존할 요청 메모')
 $$;
+create function pg_temp.teacher_raw_write(kind text) returns bigint language plpgsql as $$
+declare changed bigint;
+begin
+ if kind='update' then
+  update public.textbook_purchase_orders set status='ordered' where created_by='83000000-0000-4000-8000-000000000001';
+ else
+  delete from public.textbook_purchase_order_lines;
+ end if;
+ get diagnostics changed=row_count;
+ return changed;
+end $$;
 select pg_temp.textbook_request_set_actor('83000000-0000-4000-8000-000000000001','textbook-request-teacher@runtime.invalid');
 set local role authenticated;
 select is(
@@ -450,8 +461,8 @@ select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-00
 select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000902',pg_temp.teacher_submission()||'{"created_by":"83000000-0000-4000-8000-000000000004"}')$$,'22023','textbook_request_input_invalid','teacher cannot inject another requester or management fields');
 select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000902',pg_temp.teacher_submission()||'{"studentQuantity":-1}')$$,'22023','textbook_request_input_invalid','negative quantity is not silently changed');
 select throws_ok($$select public.submit_teacher_textbook_request_v1('83000000-0000-4000-8000-000000000902',pg_temp.teacher_submission()||'{"classId":"83000000-0000-4000-8000-000000000999"}')$$,'23503',null,'invalid references roll back the complete submission');
-select results_eq($$with x as(update public.textbook_purchase_orders set status='ordered' where created_by='83000000-0000-4000-8000-000000000001' returning id)select count(*)from x$$,$$values(0::bigint)$$,'teacher cannot edit even its own submitted request');
-select results_eq($$with x as(delete from public.textbook_purchase_order_lines returning id)select count(*)from x$$,$$values(0::bigint)$$,'teacher cannot delete own or other submitted lines');
+select is(pg_temp.teacher_raw_write('update'),0::bigint,'teacher cannot edit even its own submitted request');
+select is(pg_temp.teacher_raw_write('delete'),0::bigint,'teacher cannot delete own or other submitted lines');
 select throws_ok($$insert into public.textbook_purchase_orders(status,created_by)values('requested','83000000-0000-4000-8000-000000000001')$$,'42501',null,'direct insert cannot bypass server-owned request creation');
 select ok((public.read_operational_common_v1('book_request_options','{"scope":"classes","search":"","page":1,"pageSize":15}')#>'{rows}') is not null,'new form can read bounded minimal class options');
 select throws_ok($$select public.read_operational_common_v1('book_request_options','{"scope":"profiles","search":"","page":1,"pageSize":15}')$$,'22023','operational_common_read_invalid','options cannot select private relations');
