@@ -1868,3 +1868,184 @@ test('PR161 P2: selecting a linked child resolves its exact same-date source in 
  assert.deepEqual(saved.sessions.find(row=>row.id===peer.id),plan.sessions.find(row=>row.id===peer.id));
  assert.deepEqual(saved.sessions.find(row=>row.id===source.id),{...plan.sessions.find(row=>row.id===source.id),makeupDate:''});
 });
+
+function calendarPairDetail(withMakeup) {
+  const payload = detail();
+  if (withMakeup) {
+    payload.classItem.schedulePlan = buildSchedulePlanForSave({
+      selectedDays: [2, 4, 6],
+      billingPeriods: [
+        { id: 'september', label: '9월', month: 9, startDate: '2026-09-01', endDate: '2026-10-01' },
+        { id: 'october', label: '10월', month: 10, startDate: '2026-10-03', endDate: '2026-10-31' },
+      ],
+      sessionStates: {
+        '2026-09-26': { state: 'exception' },
+        '2026-10-10': { state: 'exception', makeupDate: '2026-09-26', makeupMemo: '보강 11:00-13:00' },
+      }, sessions: [],
+    });
+  } else {
+    const plan = payload.classItem.schedulePlan, original = plan.sessions[0];
+    plan.sessions.push(
+      { ...original, id: 'same-date-second', sessionKey: 'same-date-second', memo: '두 번째 메모' },
+      { ...original, id: 'same-date-third', sessionKey: 'same-date-third', memo: '세 번째 메모' },
+    );
+  }
+  return payload;
+}
+
+function recordCalendarPairGeometry({ hidden = false } = {}) {
+  const calendarDates = [], scrollCalls = [];
+  const isSidebar = element => element.matches?.('[data-lesson-period-sidebar="true"]');
+  const isDialog = element => element.getAttribute?.('data-testid') === 'lesson-design-dialog-scroll';
+  const originalStyle = window.getComputedStyle.bind(window);
+  window.getComputedStyle = element => {
+    const styles = originalStyle(element);
+    if (!isSidebar(element)) return styles;
+    return new Proxy(styles, { get(target, key) {
+      if (key === 'position') return hidden ? 'static' : 'sticky';
+      if (key === 'overflowY') return 'auto';
+      return Reflect.get(target, key, target);
+    } });
+  };
+  globalThis.getComputedStyle = window.getComputedStyle;
+  Object.defineProperty(window.HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return isDialog(this) ? 4000 : isSidebar(this) ? 2000 : 100; } });
+  Object.defineProperty(window.HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return isDialog(this) ? 800 : isSidebar(this) ? 500 : 100; } });
+  window.HTMLElement.prototype.getClientRects = function () {
+    return hidden && this.closest('[data-testid="lesson-desktop-calendar"]') ? [] : [{ width: 500, height: 84 }];
+  };
+  window.HTMLElement.prototype.getBoundingClientRect = function () {
+    const date = this.getAttribute('data-lesson-calendar-date');
+    if (date) calendarDates.push(date);
+    const top = date ? 1200 + Number(date.slice(-2)) * 10 : this.hasAttribute('data-lesson-period-session-id') ? 300 : isSidebar(this) ? 100 : 0;
+    const height = date ? 84 : this.hasAttribute('data-lesson-period-session-id') ? 120 : isSidebar(this) ? 500 : 800;
+    return { top, y: top, left: 0, x: 0, width: 500, height, right: 500, bottom: top + height, toJSON() { return {}; } };
+  };
+  window.HTMLElement.prototype.scrollTo = function (options) {
+    scrollCalls.push({ target: isDialog(this) ? 'dialog' : isSidebar(this) ? 'sidebar' : this.tagName, top: options.top });
+    this.scrollTop = options.top || 0;
+  };
+  window.HTMLElement.prototype.scrollIntoView = function () {
+    const date = this.getAttribute('data-lesson-calendar-date');
+    if (date) calendarDates.push(date);
+    scrollCalls.push({ target: date ? 'calendar' : this.tagName, date });
+  };
+  return { calendarDates, scrollCalls };
+}
+
+for (const scenario of [
+  { name: 'primary ordinary session', target: 'primary' },
+  { name: 'second ordinary same-date session', target: 'same-date-second' },
+  { name: 'third ordinary same-date session', target: 'same-date-third' },
+  { name: 'different-date session', target: 'different' },
+  { name: 'same-date linked makeup', target: 'makeup', withMakeup: true },
+  { name: 'primary session in a dialog', target: 'primary', route: 'class-schedule' },
+  { name: 'secondary session in a dialog', target: 'same-date-second', route: 'class-schedule' },
+  { name: 'hidden mobile calendar for primary session', target: 'primary', hidden: true },
+  { name: 'hidden mobile calendar for secondary session', target: 'same-date-second', hidden: true },
+]) test(`calendar pair: ${scenario.name} preserves identity and the draft without saving`, async t => {
+  const page = await editor(t, scenario.route || 'curriculum/lesson-design');
+  const payload = calendarPairDetail(scenario.withMakeup);
+  await refreshDetail(page, payload);
+  const sessions = page.observed.lessonDesignSnapshot.sessions;
+  const firstDate = scenario.withMakeup ? '2026-09-26' : '2026-08-03';
+  const cell = document.querySelector(`[data-lesson-calendar-date="${firstDate}"]`);
+  assert.ok(cell);
+  const primaryId = cell.getAttribute('data-lesson-calendar-session-id');
+  const selected = scenario.target === 'primary' ? sessions.find(row => row.id === primaryId)
+    : scenario.target === 'different' ? sessions.find(row => row.dateValue !== firstDate)
+    : scenario.target === 'makeup' ? sessions.find(row => row.dateValue === firstDate && row.scheduleState === 'makeup')
+    : sessions.find(row => row.id === scenario.target);
+  assert.ok(selected, 'fixture contains the intended distinct lesson');
+  const period = payload.classItem.schedulePlan.billingPeriods.find(row => row.id === selected.periodId)
+    || payload.classItem.schedulePlan.billingPeriods[0];
+  const open = document.querySelector(`button[aria-label="${period.label} 상세 보기"]`);
+  if (open) await act(async () => open.click());
+  await editPlan(page, 'UNSAVED PAIR COLOR');
+  assert.equal(dirty(), true);
+  const before = JSON.stringify(page.observed.lessonPlanDraft);
+  const recorder = recordCalendarPairGeometry(scenario);
+  const trigger = document.querySelector(`[data-lesson-period-session-id="${selected.id}"] button[aria-pressed]`);
+  assert.ok(trigger, 'select via the real monthly-session button');
+  await act(async () => {
+    trigger.dispatchEvent(new window.Event('pointerdown', { bubbles: true }));
+    trigger.click();
+  });
+  for (let step = 0; step < 5; step++) await act(async () => new Promise(resolve => window.setTimeout(resolve, 12)));
+  assert.equal(page.observed.selectedLessonSessionId, selected.id);
+  assert.equal(document.querySelector(`[data-lesson-period-session-id="${selected.id}"] button[aria-pressed]`).getAttribute('aria-pressed'), 'true');
+  assert.equal(JSON.stringify(page.observed.lessonPlanDraft), before, 'selection preserves all lesson IDs, notes, learning, billing and unsaved inputs');
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 0);
+  if (scenario.hidden) {
+    assert.deepEqual(recorder.calendarDates, [], 'never align to the hidden desktop calendar');
+  } else {
+    assert.ok(recorder.calendarDates.length > 0, 'the selected lesson resolves to its displayed calendar date cell');
+    assert.ok(recorder.calendarDates.every(date => date === selected.dateValue), 'never align to a different date');
+    if (scenario.route === 'class-schedule') assert.ok(recorder.scrollCalls.some(call => call.target === 'dialog' && call.top > 200), 'dialog alignment runs with the resolved whole date cell');
+  }
+});
+
+for (const scenario of [
+  { name: 'legacy page mouse', route: 'curriculum/lesson-design', pointerType: 'mouse' },
+  { name: 'legacy dialog touch', route: 'class-schedule', pointerType: 'touch' },
+  { name: 'normalized page mouse', route: 'curriculum/lesson-design', pointerType: 'mouse', normalized: true },
+  { name: 'normalized dialog pen', route: 'class-schedule', pointerType: 'pen', normalized: true },
+]) test(`calendar activation: ${scenario.name} waits for activation and preserves edited input`, async t => {
+  const page = await editor(t, scenario.route);
+  if (scenario.normalized) {
+    await page.normalized({ status: 'ready', value: { source: 'normalized', data: {
+      scheduleRevision: 1, contentHash: 'pointer-fixture', sessions: [
+        { id: id(600), session_key: 'session-one', session_date: '2026-08-03', session_number: 1, revision: 1, schedule_state: 'active', memo: 'ORIGINAL' },
+        { id: id(601), session_key: 'session-two', session_date: '2026-08-03', session_number: 2, revision: 1, schedule_state: 'active', memo: 'PEER' },
+      ],
+    } } });
+    await act(async () => page.observed.setSelectedLessonSessionId(id(600)));
+  } else await refreshDetail(page, calendarPairDetail(false));
+  const originalId = page.observed.selectedLessonSessionId;
+  const targetId = scenario.normalized ? id(601) : 'same-date-second';
+  assert.notEqual(originalId, targetId);
+  const originalSession = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === originalId);
+  const open = document.querySelector('button[aria-label="8월 상세 보기"]');
+  if (open) await act(async () => open.click());
+  const memo = `  unsaved ${scenario.name}\n마지막 입력 보존  `;
+  await changeTextarea(document.querySelector(`textarea[aria-label="${originalSession.label} 메모"]`), memo);
+  const before = {
+    plan: JSON.stringify(page.observed.lessonPlanDraft),
+    normalized: JSON.stringify(page.observed.normalizedLessonSessionDrafts),
+    writes: page.writes.length,
+    editor: document.querySelector('[data-lesson-selected-editor="true"]'),
+  };
+  const geometry = recordCalendarPairGeometry();
+  const trigger = document.querySelector(`[data-lesson-period-session-id="${targetId}"] button[aria-pressed]`);
+  assert.ok(trigger);
+  const pointer = type => {
+    const event = new window.Event(type, { bubbles: true });
+    Object.defineProperty(event, 'pointerType', { value: scenario.pointerType });
+    Object.defineProperty(event, 'button', { value: 0 });
+    return event;
+  };
+  await act(async () => trigger.dispatchEvent(pointer('pointerdown')));
+  assert.equal(page.observed.selectedLessonSessionId, originalId, 'pressing alone must not reflow the editor before pointerup/click');
+  assert.equal(document.querySelector('[data-lesson-selected-editor="true"]'), before.editor);
+  assert.equal(page.writes.length, before.writes, 'pointerdown alone must not navigate');
+  await act(async () => trigger.dispatchEvent(pointer('pointercancel')));
+  assert.equal(page.observed.selectedLessonSessionId, originalId, 'cancelled touch/drag must not select a different lesson');
+  assert.equal(geometry.calendarDates.length, 0);
+  assert.equal(JSON.stringify(page.observed.lessonPlanDraft), before.plan);
+  assert.equal(JSON.stringify(page.observed.normalizedLessonSessionDrafts), before.normalized);
+  await act(async () => trigger.dispatchEvent(pointer('pointerdown')));
+  await act(async () => {
+    trigger.dispatchEvent(pointer('pointerup'));
+    trigger.click();
+  });
+  for (let step = 0; step < 5; step++) await act(async () => new Promise(resolve => window.setTimeout(resolve, 12)));
+  assert.equal(page.observed.selectedLessonSessionId, targetId);
+  assert.ok(geometry.calendarDates.includes('2026-08-03'), 'completed activation pairs the exact lesson with its date cell');
+  assert.equal(JSON.stringify(page.observed.lessonPlanDraft), before.plan);
+  assert.equal(JSON.stringify(page.observed.normalizedLessonSessionDrafts), before.normalized);
+  const originalTrigger = document.querySelector(`[data-lesson-period-session-id="${originalId}"] button[aria-pressed]`);
+  await act(async () => originalTrigger.click());
+  assert.equal(document.querySelector(`textarea[aria-label="${originalSession.label} 메모"]`).value, memo);
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 0);
+});
