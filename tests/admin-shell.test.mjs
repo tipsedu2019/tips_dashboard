@@ -705,19 +705,10 @@ test("assistant navigation only exposes allowed operation surfaces", async () =>
     readSource("src/components/app-sidebar.tsx"),
     readSource("src/components/command-search.tsx"),
   ]);
-  const assistantOverviewBlock = navigationSource.slice(
-    navigationSource.indexOf("const assistantOverviewItems"),
-    navigationSource.indexOf("const fullOverviewItems"),
-  );
-
-  assert.match(navigationSource, /canUseAssistantOperations/);
-  assert.match(navigationSource, /const assistantOverviewItems: NavItem\[\]/);
-  assert.doesNotMatch(assistantOverviewBlock, /title: "할 일"|url: "\/admin\/tasks"/);
-  assert.match(navigationSource, /title: "영어 단어 재시험"[\s\S]*url: "\/admin\/word-retests"/);
-  assert.match(navigationSource, /title: "학사일정"[\s\S]*url: "\/admin\/academic-calendar"/);
-  assert.match(navigationSource, /title: "시간표"[\s\S]*url: "\/admin\/timetable"/);
-  assert.doesNotMatch(assistantOverviewBlock, /url: "\/admin\/dashboard"/);
-  assert.match(navigationSource, /canUseAssistantOperations \? assistantOverviewItems : fullOverviewItems/);
+  const assistantGroups = buildAdminNavGroups(getRoleCapabilities("assistant"));
+  assert.deepEqual(assistantGroups.map(group => group.label), ["영어"]);
+  assert.deepEqual(assistantGroups.flatMap(group => group.items).map(item => ({ title: item.title, url: item.url })), [{ title: "영어 단어 재시험", url: "/admin/word-retests" }]);
+  assert.match(navigationSource, /if \(canUseAssistantOperations\) \{/);
   assert.match(sidebarSource, /buildAdminNavGroups\(\{ canManageAll, canReadOperations, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
   assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canReadOperations, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
 });
