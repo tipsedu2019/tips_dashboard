@@ -288,6 +288,14 @@ export function canTransitionMakeupRequest(status, nextStatus, context = {}) {
   return false;
 }
 
+// State preflight for management processing. The authenticated server/SQL
+// boundary authorizes the actual actor; this helper never grants a role.
+export function canManagerTransitionMakeupRequest(status, nextStatus) {
+  return canTransitionMakeupRequest(status, nextStatus, {
+    isRequester: true, isApprover: true, isManager: true,
+  });
+}
+
 export function timeRangesOverlap(startA, endA, startB, endB) {
   const leftStart = toDate(startA)?.getTime();
   const leftEnd = toDate(endA)?.getTime();

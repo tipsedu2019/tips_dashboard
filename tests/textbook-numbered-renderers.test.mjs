@@ -429,7 +429,7 @@ test("primary request read failure stays in its toolbar and retry restores contr
   assert.equal(document.querySelector('[aria-label="요청 검색"][type="search"]'), search)
   assert.equal(document.activeElement, search)
   assert.ok(document.querySelector('[data-prepared-surface="requests-desktop"]'))
-  assert.ok(document.querySelector('[aria-label="교재 요청 추가"]'))
+  assert.equal(document.querySelector('[aria-label="교재 요청 추가"]'), null)
   assert.equal(requestList.textContent.includes("교재 목록을 불러오지 못했습니다"), false)
   await h.assertNoLegacyReads()
 })
@@ -993,7 +993,7 @@ test("paired purchase columns preserve all six quantities, authoritative totals 
   await h.assertNoLegacyReads()
 })
 
-test("teachers retain request creation without purchase row management menus", async (t) => {
+test("teachers read requests without creation or purchase row management menus", async (t) => {
   const h = await setup(t, { search: '?textbookTab=requests', auth: { role: 'teacher', isTeacher: true, isAdmin: false, isStaff: false, canManageAll: false } })
   await h.resolve(h.requests.find(request => request.name === 'list_textbook_purchase_page_v1'), { rows: [purchaseRow('request')], page: 1, pageSize: 10, totalCount: 1 })
   await h.resolve(h.requests.find(request => request.name === 'get_textbook_purchase_summary_v1'), purchaseSummary('request'))

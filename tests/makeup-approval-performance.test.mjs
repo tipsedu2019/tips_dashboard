@@ -26,8 +26,8 @@ test('approval reads exact detail and preserves labels without loading workspace
   assert.deepEqual(sends.map(s => s.url), ['/api/makeup-requests/approve', '/api/notifications/legacy/makeup']);
 });
 
-function routeFixture({ kind = 'cancel_only', collision = false, denied = false, contextError = null, invalidContext = false, transitionError = null, missingTeacher = false, makeupSlots, effectiveRead } = {}) {
-  const calls = [], request = { id: id(1), status: 'approval_pending', approver_profile_id: id(804), class_id: id(600), class_name: '수업', subject: '영어', request_kind: kind, cancel_date: '2026-10-01', makeup_start_at: '2026-10-02T09:00:00+09:00', makeup_end_at: '2026-10-02T10:00:00+09:00', makeup_classroom: 'A', teacher_catalog_id: id(802) };
+function routeFixture({ role = "admin", approverId = id(804), kind = 'cancel_only', collision = false, denied = false, contextError = null, invalidContext = false, transitionError = null, missingTeacher = false, makeupSlots, effectiveRead } = {}) {
+  const calls = [], request = { id: id(1), status: 'approval_pending', approver_profile_id: approverId, class_id: id(600), class_name: '수업', subject: '영어', request_kind: kind, cancel_date: '2026-10-01', makeup_start_at: '2026-10-02T09:00:00+09:00', makeup_end_at: '2026-10-02T10:00:00+09:00', makeup_classroom: 'A', teacher_catalog_id: id(802) };
   if (makeupSlots) request.makeup_slots = makeupSlots;
   let attempts = 0, effectiveCalls = 0;
   function query(table) {
@@ -36,7 +36,7 @@ function routeFixture({ kind = 'cancel_only', collision = false, denied = false,
     for (const method of ['select','eq','in','like','order','range','abortSignal','retry','single','maybeSingle']) chain[method] = (...args) => { call.steps.push({ method, args }); return chain; };
     chain.then = (resolve, reject) => Promise.resolve().then(() => {
       const byId = call.steps.some(s => s.method === 'eq' && s.args[0] === 'id');
-      const data = table === 'teacher_catalogs' ? (missingTeacher ? null : { id: id(802), name: '요청 교사' }) : table === 'classroom_catalogs' ? [{ id: id(803), name: 'A' }] : table === 'profiles' ? { role: denied ? 'assistant' : 'admin' } : table === 'makeup_request_events' ? []
+      const data = table === 'teacher_catalogs' ? (missingTeacher ? null : { id: id(802), name: '요청 교사' }) : table === 'classroom_catalogs' ? [{ id: id(803), name: 'A' }] : table === 'profiles' ? { role: denied ? 'assistant' : role } : table === 'makeup_request_events' ? []
         : table === 'makeup_requests' && byId ? request : table === 'classes' && byId ? { id: id(600), name: '수업', subject: '영어', schedule_plan: {} }
         : table === 'classes' && collision ? [{ id: id(601), name: '다른 반', schedule: '금 09:00-10:00', classroom: 'A' }] : [];
       return { data, error: null };
@@ -320,10 +320,8 @@ for (const testCase of actionCases) {
     }
   });
 
-  test(`${testCase.method}: fresh ownership/status and detail failures prevent every write and notification`, async t => {
+  test(`${testCase.method}: fresh status and detail failures prevent every write and notification`, async t => {
     for (const options of [
-      { detail: { approverProfileId: id(806) } },
-      { detail: { approverProfileId: '' } },
       { detail: { status: 'rejected' } },
       { missing: true },
       { detail: { id: id(2) } },
@@ -427,9 +425,8 @@ for (const status of ['revision_requested', 'makeup_pending']) {
 }
 
 for (const options of [
-  { actorId: id(805) },
   ...['approval_pending', 'completed', 'rejected', 'canceled'].map(status => ({ detail: { status } })),
-]) test('resubmit rejects unauthorized requester or state before mutation: ' + JSON.stringify(options), async () => {
+]) test('resubmit rejects an invalid processing state before mutation: ' + JSON.stringify(options), async () => {
   const fixture = resubmitFixture(options);
   await assert.rejects(fixture.run(), /재상신 권한/);
   assert.equal(mutations(fixture).length, 0);
@@ -564,4 +561,59 @@ test('resubmit propagates a mutation conflict without notification or retry', as
   await assert.rejects(fixture.run(), error => error.code === 'P0001');
   assert.equal(mutations(fixture).length, 1);
   assert.equal(notifications(fixture).length, 0);
+});
+
+for (const role of ['teacher', 'assistant', 'viewer']) test(`operational approval rejects ${role} before replay, service reads or effects`, async t => {
+
+ const keys=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'];
+ const before=keys.map(k=>process.env[k]);
+ for(const key of keys) process.env[key]=key.includes('URL')?'https://fixture.invalid':'fixture';
+ t.after(()=>keys.forEach((k,i)=>before[i]===undefined?delete process.env[k]:process.env[k]=before[i]));
+ const p=routeFixture({role});
+ const response=await p.run();
+ assert.equal(response.status,403);
+ assert.deepEqual(p.calls.map(c=>c.table||c.name),['profiles']);
+});
+for (const role of ['admin', 'staff']) test(`management ${role} processes another assigned approver without rewriting assignment`, async t => {
+
+ const keys=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'];
+ const before=keys.map(k=>process.env[k]);
+ for(const key of keys) process.env[key]=key.includes('URL')?'https://fixture.invalid':'fixture';
+ t.after(()=>keys.forEach((k,i)=>before[i]===undefined?delete process.env[k]:process.env[k]=before[i]));
+ const p=routeFixture({role,approverId:id(805)});
+ const response=await p.run();
+ assert.equal(response.status,200);
+ const commands=p.calls.filter(c=>c.name==='transition_makeup_request_v2');
+ assert.ok(commands.length>0);
+ assert.equal(commands.at(-1).args.p_patch.actor_profile_id,id(804));
+ assert.equal('approver_profile_id' in commands.at(-1).args.p_patch,false);
+});
+
+for (const testCase of actionCases) for (const approverProfileId of [id(806), '']) test(`${testCase.method}: server authorization still rejects a denied command after management state preflight`, async t => {
+ const fixture=setup(t,testCase,{detail:{approverProfileId},mutationError:{code:'42501',message:'synthetic actual server role denied'}});
+ await assert.rejects(fixture.run());
+ assert.equal(mutations(fixture).length,1);
+ assert.equal(notifications(fixture).length,0);
+ assert.equal('approver_profile_id' in mutations(fixture)[0].args.p_patch,false);
+});
+test('management resubmission can keep the original requester instead of impersonating it', async()=>{
+ const fixture=resubmitFixture({actorId:id(805),actorRole:'staff'});
+ await fixture.run();
+ assert.equal(mutations(fixture).length,1);
+ assert.equal('requester_id' in mutations(fixture)[0].args.p_patch,false);
+});
+
+for (const role of ['teacher', 'assistant', 'viewer']) test(`legacy makeup follow-up rejects ${role} before service construction and body parsing`, async t => {
+  const keys = ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
+  const before = keys.map(key => process.env[key]);
+  keys.forEach(key => process.env[key] = key.includes('URL') ? 'https://fixture.invalid' : 'fixture');
+  t.after(() => keys.forEach((key, index) => before[index] === undefined ? delete process.env[key] : process.env[key] = before[index]));
+  const calls = [];
+  const client = { auth: { getUser: async () => ({ data: { user: { id: id(804) } }, error: null }) },
+    from(table) { calls.push(table); assert.equal(table, 'profiles'); return { select(value) { assert.equal(value, 'role'); return this; }, eq(key, value) { assert.equal(key, 'id'); assert.equal(value, id(804)); return this; }, single: async () => ({ data: { role }, error: null }) }; },
+  };
+  let constructions = 0;
+  const { POST } = modules(null, { '@supabase/supabase-js': { createClient() { constructions++; assert.equal(constructions, 1, 'no service client before rejecting role'); return client; } } })('src/app/api/notifications/legacy/makeup/route.ts');
+  const response = await POST(new Request('https://fixture.invalid/api/notifications/legacy/makeup', { method: 'POST', headers: { authorization: 'Bearer fixture' }, body: '{invalid-json' }));
+  assert.equal(response.status, 403); assert.equal(constructions, 1); assert.deepEqual(calls, ['profiles']);
 });

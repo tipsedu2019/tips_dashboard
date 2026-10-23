@@ -51,6 +51,7 @@ import {
 import { supabase } from "@/lib/supabase"
 import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard"
 import { pushLocalHistoryState } from "@/lib/unsaved-history-fallback"
+import { isTeacherReadOnlyTask } from "./operational-task-access"
 import { useAuth } from "@/providers/auth-provider"
 
 function DateControlLoading() {
@@ -6435,7 +6436,7 @@ function WithdrawalDataTable({
                     {mobileNextActionLabel}
                   </Button>
                 ) : null}
-                {canEditTaskDetails(task) ? (
+                {canManageWorkflow && canEditTaskDetails(task) ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -6530,7 +6531,7 @@ function WithdrawalDataTable({
                             {nextActionBlocked ? blockedActionLabel : nextAction.label}
                           </Button>
                         )}
-                        {canEditTaskDetails(task) && (
+                        {canManageWorkflow && canEditTaskDetails(task) && (
                           <Button
                             type="button"
                             variant="outline"
@@ -6890,7 +6891,7 @@ function TransferDataTable({
                     {mobileNextActionLabel}
                   </Button>
                 ) : null}
-                {canEditTaskDetails(task) ? (
+                {canManageWorkflow && canEditTaskDetails(task) ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -6985,7 +6986,7 @@ function TransferDataTable({
                             {nextActionBlocked ? blockedActionLabel : nextAction.label}
                           </Button>
                         )}
-                        {canEditTaskDetails(task) && (
+                        {canManageWorkflow && canEditTaskDetails(task) && (
                           <Button
                             type="button"
                             variant="outline"
@@ -8096,6 +8097,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     : canManageAll || isStaff
   const canManageWithdrawalWorkflow = canManageAll || isStaff
   const canManageTransferWorkflow = canManageAll || isStaff
+  const operationalReadOnly = isTeacherReadOnlyTask(resolvedViewerRole, scopedTaskType)
   const canDeleteTask = useCallback(
     (task: OpsTask) => {
       if (task.type === "registration" && isRegistrationCompletionImmutable(task.registration?.pipelineStatus)) return false
@@ -9496,8 +9498,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const visibleWorkspaceItemCount = isRegistrationWorkspace
     ? visibleRegistrationCaseItems.length
     : visibleTasks.length
-  const showEmptyCreate = !numberedPage.error && (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
-  const showToolbarCreate = (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
+  const showEmptyCreate = !operationalReadOnly && !numberedPage.error && (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
+  const showToolbarCreate = !operationalReadOnly && (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
   const hasLoadBlocker = Boolean(data && !data.schemaReady)
   const canOpenCreate = isTodoWorkspace || (!loading && !hasLoadBlocker)
   const createActionDisabled = saving || !canOpenCreate
@@ -9612,7 +9614,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const formActionBarClassName = "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end"
 
   async function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
-    if (!canOpenCreate) return
+    if (!canOpenCreate || isTeacherReadOnlyTask(resolvedViewerRole, type)) return
     if (type === "registration" && !canManageRegistrationWorkflow) return
     // Capture before option loading and input autofocus can move focus.
     formOpenerRef.current = document.activeElement instanceof HTMLElement
@@ -9719,6 +9721,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ])
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
+    if (isTeacherReadOnlyTask(resolvedViewerRole, task.type)) return
     if (task.type === "registration" && !canManageRegistrationWorkflow) return
     formOpenerRef.current = document.activeElement instanceof HTMLElement
       ? { element: document.activeElement, pathname: window.location.pathname }
@@ -9749,7 +9752,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     setFormOpen(true)
-  }, [canManageRegistrationWorkflow, ensureRegistrationOptions, ensureTaskOptions, syncTaskDeepLink])
+  }, [resolvedViewerRole, canManageRegistrationWorkflow, ensureRegistrationOptions, ensureTaskOptions, syncTaskDeepLink])
 
   const openWordRetestRetryForm = useCallback((task: OpsTask, retryReason: WordRetestRetryReason) => {
     formOpenerRef.current = document.activeElement instanceof HTMLElement
@@ -11374,6 +11377,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const submitForm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (isTeacherReadOnlyTask(resolvedViewerRole, editingTask?.type || form.type)) return
     const submissionViewerId = currentUserId
     const submissionViewerGeneration = workspaceViewerGenerationRef.current
     const registrationSubmissionStillOwnsWorkspace = () => isRegistrationSubmissionOwnershipCurrent({
@@ -11779,6 +11783,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const changeStatus = async (task: OpsTask, status: OpsTaskStatus) => {
+    if (isTeacherReadOnlyTask(resolvedViewerRole, task.type)) return
     if (task.type === "registration") return
     setSaving(true)
     setMessage("")
@@ -12168,7 +12173,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setStatusUndo(null)
       return
     }
-    if (currentTask.type === "registration") {
+    if (isTeacherReadOnlyTask(resolvedViewerRole, currentTask.type) || currentTask.type === "registration") {
       setStatusUndo(null)
       return
     }
@@ -12199,7 +12204,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const submitComment = async () => {
-    if (!selectedTask || !commentBody.trim()) return
+    if (!selectedTask || isTeacherReadOnlyTask(resolvedViewerRole, selectedTask.type) || !commentBody.trim()) return
     setSaving(true)
     setMessage("")
     setNotice("")
@@ -12223,7 +12228,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const submitAttachment = async () => {
-    if (!selectedTask || !attachmentName.trim() || !attachmentLink.trim()) return
+    if (!selectedTask || isTeacherReadOnlyTask(resolvedViewerRole, selectedTask.type) || !attachmentName.trim() || !attachmentLink.trim()) return
     setSaving(true)
     setMessage("")
     setNotice("")
@@ -12384,7 +12389,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? selectedRegistrationAction.pipelineStatus.startsWith("7.") && completionBlockers.length > 0
     : nextActionBlocked
   const detailBlockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
-  const selectedTaskCanEdit = selectedTaskFresh ? (!isRegistrationDetail || canManageRegistrationWorkflow)
+  const selectedTaskCanEdit = selectedTaskFresh ? !isTeacherReadOnlyTask(resolvedViewerRole, selectedTaskFresh.type) && (!isRegistrationDetail || canManageRegistrationWorkflow)
     && canEditTaskDetails(selectedTaskFresh) : false
   const showRegistrationDetailCompletionBlockers = Boolean(
     isRegistrationDetail && shouldShowRegistrationCompletionBlockers(selectedTaskFresh?.registration?.pipelineStatus),
@@ -13879,7 +13884,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   )}
                 </div>}
                 {!isCanonicalRegistrationTrackDetail && (
-                  <GoogleChatDeliveryControl eventId={latestGoogleChatEventId} onWarning={setMessage} />
+                  <GoogleChatDeliveryControl eventId={latestGoogleChatEventId} onWarning={setMessage} allowRetry={!isTeacherReadOnlyTask(resolvedViewerRole, selectedTaskFresh.type)} />
                 )}
               </div>
 

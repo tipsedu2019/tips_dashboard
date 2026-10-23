@@ -4,6 +4,7 @@ import { useEffect, useSyncExternalStore } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { Skeleton } from "@/components/ui/skeleton"
+import { canTeacherAccessPath } from "@/lib/auth-utils"
 import { shouldEnableRegistrationSubjectTrackFixture } from "@/features/tasks/registration-track-fixture-runtime"
 import { useAuth } from "@/providers/auth-provider"
 
@@ -136,9 +137,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     loading,
     canAccessDashboard,
     canUseAssistantOperations,
+    isTeacher,
     defaultAdminPath,
   } = useAuth()
-  const canAccessCurrentRoute = !canUseAssistantOperations || canAssistantAccessPath(pathname)
+  const canAccessCurrentRoute = (!canUseAssistantOperations || canAssistantAccessPath(pathname))
+    && (!isTeacher || canTeacherAccessPath(pathname))
   const registrationFixtureAuthBypass = pathname === "/admin/registration"
     && searchParams.get("fixtureRole") === "english_admin"
     && shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, searchParams.get("fixture"))

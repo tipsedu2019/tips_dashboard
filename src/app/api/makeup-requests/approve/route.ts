@@ -209,7 +209,7 @@ export async function POST(request: Request) {
     .eq("id", actor.user.id)
     .single()
   if (actorProfileError || !isRecord(actorProfile)) return response({ ok: false, error: "휴보강 권한을 확인할 수 없습니다." }, 503)
-  if (text(actorProfile.role) === "assistant") return response({ ok: false, error: "휴보강 접근 권한이 없습니다." }, 403)
+  if (!["admin", "staff"].includes(text(actorProfile.role))) return response({ ok: false, error: "휴보강 접근 권한이 없습니다." }, 403)
 
   const serverClient = serviceClient()
   if (!serverClient) return response({ ok: false, error: "휴보강 승인 저장소를 사용할 수 없습니다." }, 503)
@@ -243,9 +243,6 @@ export async function POST(request: Request) {
     if (replay.kind === "completed") return completedApprovalResponse(replay.data)
 
     const requestRow = await readOne(serverClient, "makeup_requests", requestId)
-    if (text(requestRow.approver_profile_id) !== actor.user.id) {
-      return response({ ok: false, error: "결재 승인 권한이 없습니다." }, 403)
-    }
     const classId = text(requestRow.class_id)
     if (!UUID.test(classId)) throw new Error("makeup_request_source_changed")
 

@@ -602,3 +602,12 @@ test('makeup failed filters identify the accepted search and dates beside retain
   const alert=document.querySelector('[role="alert"]').textContent;
   assert.match(alert,/기존사유/);assert.match(alert,/2026-09-01/);assert.doesNotMatch(alert,/새사유/);
 });
+
+test('teacher operational makeup view hides writes even when teacher is requester and approver', async t => {
+  const p = await setup(t, { auth: { role: 'teacher' }, search: `?requestId=${id(999)}` });
+  await act(async () => p.finish(p.numbered()[0]));
+  const detail = p.requests.find(r => r.name === 'get_makeup_detail_v1');
+  await act(async () => detail.resolve({ data: row(999, { requesterId: id(804), approverProfileId: id(804) }), error: null }));
+  for (const label of ['휴보강 신청', '승인', '보완 요청', '반려', '승인 취소']) assert.equal(button(label), undefined, label);
+  assert.equal(p.requests.some(r => /create_makeup|transition_makeup|approve_makeup/.test(r.name || '')), false);
+});

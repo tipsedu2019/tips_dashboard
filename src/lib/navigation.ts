@@ -149,7 +149,7 @@ const workspaceMetaEntries: Array<{
   {
     match: "/admin/class-schedule",
     meta: {
-      section: "수업일정",
+      section: "운영",
       title: "수업일정",
       summary: "반 진행 상황과 최근 기록 메모를 빠르게 확인합니다.",
     },
@@ -165,7 +165,7 @@ const workspaceMetaEntries: Array<{
   {
     match: "/admin/curriculum/lesson-design",
     meta: {
-      section: "수업계획",
+      section: "운영",
       title: "수업 설계",
       summary: "월별 회차 생성, 휴강, 보강 일정을 바로 조정합니다.",
     },
@@ -173,7 +173,7 @@ const workspaceMetaEntries: Array<{
   {
     match: "/admin/class-schedule/lesson-design",
     meta: {
-      section: "수업계획",
+      section: "운영",
       title: "수업 설계",
       summary: "월별 회차 생성, 휴강, 보강 일정을 바로 조정합니다.",
     },
@@ -181,7 +181,7 @@ const workspaceMetaEntries: Array<{
   {
     match: "/admin/curriculum",
     meta: {
-      section: "수업계획",
+      section: "운영",
       title: "수업계획",
       summary: "수업 일정과 교재 진도를 연결해 회차별 계획을 관리합니다.",
     },
@@ -224,6 +224,14 @@ const workspaceMetaEntries: Array<{
       section: "관리",
       title: "수업관리",
       summary: "수업 기본정보와 학생 배정 상태를 관리합니다.",
+    },
+  },
+  {
+    match: "/admin/textbook-requests",
+    meta: {
+      section: "운영",
+      title: "교재요청",
+      summary: "수업에 필요한 교재 요청과 처리 상태를 확인합니다.",
     },
   },
   {
@@ -294,12 +302,13 @@ export function resolveAdminWorkspaceMeta(pathname: string): AdminWorkspaceMeta 
 
 export function buildAdminNavGroups({
   canManageAll,
-  canEditCurriculumPlanning,
+  canReadOperations = canManageAll,
   canUseAssistantOperations = false,
   isAdmin = false,
 }: {
   canManageAll: boolean
-  canEditCurriculumPlanning: boolean
+  canReadOperations?: boolean
+  canEditCurriculumPlanning?: boolean
   canUseAssistantOperations?: boolean
   isAdmin?: boolean
   canUseAiAgentRequests?: boolean
@@ -338,22 +347,19 @@ export function buildAdminNavGroups({
     items: canUseAssistantOperations ? assistantOverviewItems : fullOverviewItems,
   }
 
-
-  const managementItems: NavItem[] = []
-
-  if (canEditCurriculumPlanning) {
-    managementItems.push(
-      {
-        title: "수업계획",
-        url: "/admin/curriculum",
-        icon: NotebookPen,
-      },
-      { title: "교재관리", url: "/admin/textbooks", icon: BookOpen },
+  if (canReadOperations) {
+    overview.items.push(
+      { title: "수업계획", url: "/admin/curriculum", icon: NotebookPen },
+      { title: "교재요청", url: "/admin/textbook-requests", icon: BookOpen },
     )
   }
 
+
+  const managementItems: NavItem[] = []
+
   if (canManageAll) {
     managementItems.push(
+      { title: "교재관리", url: "/admin/textbooks", icon: BookOpen },
       {
         title: "학생관리",
         url: "/admin/students",
@@ -372,7 +378,7 @@ export function buildAdminNavGroups({
     { title: "채용 지원서", url: "/admin/recruiting", icon: UserPlus },
   )
 
-  if (!canUseAssistantOperations) {
+  if (!canUseAssistantOperations && (!canReadOperations || canManageAll)) {
     managementItems.push({ title: "통계", url: "/admin/statistics", icon: ChartNoAxesCombined })
   }
 

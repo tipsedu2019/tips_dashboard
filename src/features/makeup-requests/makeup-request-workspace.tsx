@@ -671,7 +671,6 @@ type MakeupRequestActionControlsProps = {
 function MakeupRequestActionControls({
   request,
   data,
-  currentUserId,
   canManage,
   saving,
   onEditForRevision,
@@ -685,11 +684,11 @@ function MakeupRequestActionControls({
   align = "end",
 }: MakeupRequestActionControlsProps) {
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
-  const canRevise = request.status === "revision_requested" && request.requesterId === currentUserId
-  const canApprove = request.status === "approval_pending" && request.approverProfileId === currentUserId
-  const canHandleMakeupPending = request.status === "makeup_pending" && request.requesterId === currentUserId
+  const canRevise = canManage && request.status === "revision_requested"
+  const canApprove = canManage && request.status === "approval_pending"
+  const canHandleMakeupPending = canManage && request.status === "makeup_pending"
   const canCompleteRefund = request.status === "refund_pending" && canManage
-  const canCancelApproval = (request.status === "completed" || request.status === "makeup_pending") && request.approverProfileId === currentUserId
+  const canCancelApproval = canManage && (request.status === "completed" || request.status === "makeup_pending")
 
   if (!canRevise && !canApprove && !canHandleMakeupPending && !canCompleteRefund && !canCancelApproval) return null
 
@@ -1823,6 +1822,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     if (pageSize.ready) void controllerRef.current?.load({ scope: JSON.stringify({ actorScope, filters: navigation.filters }), page: navigation.page, pageSize: pageSize.pageSize })
   }, [actorScope, navigation, pageSize.ready, pageSize.pageSize])
   useEffect(() => {
+    if (role === "teacher") return
     const abort = new AbortController()
     void loadMakeupCollisionCatalogs({ signal: abort.signal }).then((catalogs) => {
       if (!abort.signal.aborted && lifetime.current) {
@@ -1831,7 +1831,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       }
     }, (failure) => { if (!abort.signal.aborted && lifetime.current) setError(getMakeupActionErrorMessage(failure, "강의실 기준정보를 불러오지 못했습니다.")) })
     return () => abort.abort()
-  }, [catalogGeneration])
+  }, [catalogGeneration, role])
   useEffect(() => {
     if (!requestDialogOpen) return
     const abort = new AbortController()
@@ -1841,7 +1841,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     return () => abort.abort()
   }, [requestDialogOpen, catalogGeneration])
   useEffect(() => {
-    if (!catalogReady) return
+    if (role === "teacher" || !catalogReady) return
     const abort = new AbortController(), scope = contextScope
     if (JSON.parse(scope)[2].invalidTargets) {
       setContextState({ scope, error: "예약 대상 일시를 확인할 수 없습니다. 신청서의 보강일시를 확인해 주세요." })
@@ -1851,7 +1851,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       if (!abort.signal.aborted && lifetime.current) setContextState({ scope, context })
     }, (failure) => { if (!abort.signal.aborted && lifetime.current) setContextState({ scope, error: getMakeupActionErrorMessage(failure, "예약 충돌 정보를 불러오지 못했습니다.") }) })
     return () => abort.abort()
-  }, [contextScope, catalogReady])
+  }, [contextScope, catalogReady, role])
   useEffect(() => {
     if (pageState !== latestPageState.current || !pageState.scope || pageState.loading || pageState.error) return
     const params = new URLSearchParams(window.location.search)
@@ -1988,7 +1988,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const requestHasCancelDate = Boolean(input.cancelDate)
   const requestHasMakeupSlots = materializedMakeupSlots.length > 0
   const canSubmitRequest = Boolean(
-    currentUserId &&
+    isManager && currentUserId &&
     input.classId &&
     input.reason.trim() &&
     input.approverTeacherCatalogId &&
@@ -2106,11 +2106,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [])
 
   const openRequestDialog = useCallback(() => {
+    if (!isManager) return
     requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     resetForm()
     setRequestDialogOpen(true)
-  }, [resetForm])
+  }, [isManager, resetForm])
 
   const closeRequestDialog = useCallback(() => {
     if (savingRef.current) return
@@ -2121,6 +2122,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [requestLocalAction, resetForm])
 
   const handleSubmit = useCallback(async () => {
+    if (!isManager) return
     if (!lifetime.current || savingRef.current) return
     if (!currentUserId) {
       setDialogError("로그인 세션을 확인할 수 없습니다.")
@@ -2203,6 +2205,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [currentUserId, data.teachers, data.collisionContextReady, formCatalogReady, editingRequest?.createdAt, editingRequestId, input, isManager, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision, setView])
 
   const runAction = useCallback(async (action: () => Promise<MakeupRequest>, successMessage: string) => {
+    if (!isManager) return false
     if (!lifetime.current || savingRef.current) return false
     savingRef.current = true
     setSaving(true)
@@ -2224,7 +2227,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       savingRef.current = false
       if (lifetime.current) setSaving(false)
     }
-  }, [refresh])
+  }, [isManager, refresh])
 
   const closeApprovalDialog = useCallback(() => {
     if (savingRef.current) return
@@ -2315,6 +2318,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [closeDetailRequest, currentUserId, finalCancelNote, finalCancelRequest, runAction])
 
   const handleEditForRevision = useCallback((request: MakeupRequest) => {
+    if (!isManager) return
     requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
@@ -2342,9 +2346,10 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setRequestDraftBaseline(JSON.stringify([nextInput, requestClass?.subject || selectedSubject, requestClass ? getClassTeacherKey(requestClass) : selectedTeacherKey]))
     setError(clearMakeupClassSchedulePlanLoadError)
     setRequestDialogOpen(true)
-  }, [data.classes, selectedSubject, selectedTeacherKey, setView])
+  }, [isManager, data.classes, selectedSubject, selectedTeacherKey, setView])
 
   const handleSchedulePendingMakeup = useCallback((request: MakeupRequest) => {
+    if (!isManager) return
     requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
@@ -2371,7 +2376,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setRequestDraftBaseline(JSON.stringify([nextInput, requestClass?.subject || selectedSubject, requestClass ? getClassTeacherKey(requestClass) : selectedTeacherKey]))
     setError(clearMakeupClassSchedulePlanLoadError)
     setRequestDialogOpen(true)
-  }, [closeDetailRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
+  }, [isManager, closeDetailRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
 
   return (
     <WorkspaceTabs ref={workspaceRef} value={view} onValueChange={(value) => setView(value as MakeupRequestView)} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
@@ -2389,10 +2394,10 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
             })}
           </WorkspaceTabsList>
           <div className="flex items-center justify-end gap-2">
-            <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
+            {isManager ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
               <Plus className="size-4" aria-hidden="true" />
               휴보강 신청
-            </Button>
+            </Button> : null}
           </div>
         </div>
       </div>
@@ -2400,7 +2405,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       <WorkspaceTabsPanel className="flex flex-col gap-4">
       {message ? notificationWarning ? <Alert variant="destructive"><AlertDescription>{message} {notificationWarning}</AlertDescription></Alert> : <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
       {pageState.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}{pageState.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}<Button variant="outline" onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void controllerRef.current?.retry() }}>다시 시도</Button></div> : null}
-      {contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null}
+      {role !== "teacher" && (contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null)}
       {error ? (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           <span>{error}</span>

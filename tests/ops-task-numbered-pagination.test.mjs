@@ -1925,3 +1925,13 @@ test('008 opening registration create still requests the full catalog and ignore
   assert.equal(currentComponentProps('RegistrationApplicationCreate').schools[0].name, '합성 학교');
   assert.equal(page.requests.some(r => /^(create|save|set|update|delete)_/.test(r.name)), false);
 });
+
+for (const kind of ['transfer', 'withdrawal']) test(`teacher operational ${kind} shared list has no create or edit action`, async t => {
+  const page = await workspace(t, { workspace: kind, viewerRole: 'teacher' });
+  const numbered = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => numbered.resolve({ data: { rows: [row(1, operationPatch(kind))], page: numbered.args.p_page, pageSize: numbered.args.p_page_size, totalCount: 1 }, error: null }));
+  assert.ok(document.body.textContent.includes("서버 학생"), "actual teacher row renders before asserting read-only controls");
+  const controls = [...document.querySelectorAll('button')];
+  assert.equal(controls.some(b => /추가|수정/.test(b.textContent.trim()) && !/필터/.test(b.getAttribute('aria-label') || '')), false);
+  assert.equal(page.queries.includes('students'), false, 'read-only view never loads editing options');
+});

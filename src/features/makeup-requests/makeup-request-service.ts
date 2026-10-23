@@ -3,6 +3,7 @@
 import { supabase } from "@/lib/supabase"
 import {
   canTransitionMakeupRequest,
+  canManagerTransitionMakeupRequest,
   getMakeupRequestEffectiveYear,
   getMakeupRequestKind,
   hasCancelPart,
@@ -878,7 +879,7 @@ export async function approveMakeupRequest(requestId: string, actorId: string, n
   const request = await readMakeupDetail({ id: requestId })
   if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
   const nextStatus = isRefundApprovalRequest(request) ? "refund_pending" : hasMakeupPart(request) ? "completed" : "makeup_pending"
-  if (!canTransitionMakeupRequest(request.status, nextStatus, { isApprover: request.approverProfileId === actorId })) {
+  if (!actorId || !canManagerTransitionMakeupRequest(request.status, nextStatus)) {
     throw new Error("결재 승인 권한이 없습니다.")
   }
 
@@ -915,8 +916,7 @@ export async function requestMakeupRequestRevision(requestId: string, actorId: s
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const request = await readMakeupDetail({ id: requestId })
   if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
-  const isActor = request.approverProfileId === actorId
-  if (!isActor || request.status !== "approval_pending") {
+  if (!actorId || !canManagerTransitionMakeupRequest(request.status, "revision_requested")) {
     throw new Error("보완 요청 권한이 없습니다.")
   }
 
@@ -935,8 +935,7 @@ export async function rejectMakeupRequest(requestId: string, actorId: string, no
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const request = await readMakeupDetail({ id: requestId })
   if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
-  const isActor = request.approverProfileId === actorId
-  if (!isActor || request.status !== "approval_pending") {
+  if (!actorId || !canManagerTransitionMakeupRequest(request.status, "rejected")) {
     throw new Error("반려 권한이 없습니다.")
   }
 
@@ -1000,7 +999,7 @@ export async function resubmitMakeupRequest(requestId: string, input: MakeupRequ
   if (!data.schemaReady) throw new Error(data.error || "휴보강 신청서 DB를 사용할 수 없습니다.")
   const request = await readMakeupDetail({ id: requestId })
   if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
-  if (!canTransitionMakeupRequest(request.status, "approval_pending", { isRequester: request.requesterId === actorId })) {
+  if (!actorId || !canManagerTransitionMakeupRequest(request.status, "approval_pending")) {
     throw new Error("재상신 권한이 없습니다.")
   }
 
@@ -1027,7 +1026,7 @@ export async function cancelCompletedMakeupRequest(requestId: string, actorId: s
   const request = await readMakeupDetail({ id: requestId })
   if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
 
-  if (!canTransitionMakeupRequest(request.status, "canceled", { isApprover: request.approverProfileId === actorId })) {
+  if (!actorId || !canManagerTransitionMakeupRequest(request.status, "canceled")) {
     throw new Error("승인 취소할 수 없는 상태입니다.")
   }
 

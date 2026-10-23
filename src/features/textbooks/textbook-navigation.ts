@@ -124,7 +124,15 @@ function normalizeCatalogPrimary(tab: TextbookTab, primary: TextbookNavigationSt
   }
 }
 
-export function parseTextbookNavigation(params: URLSearchParams): TextbookNavigationState {
+export function parseTextbookNavigation(input: URLSearchParams, requestsOnly = false): TextbookNavigationState {
+  const params = new URLSearchParams(input);
+  if (requestsOnly) {
+    params.set("textbookTab", "requests");
+    if (params.get("textbookDetailKind") !== "purchase") {
+      params.delete("textbookDetailKind");
+      params.delete("textbookDetail");
+    }
+  }
   const candidate = params.get("textbookTab")
   const tab = textbookTabs.includes(candidate as TextbookTab) ? candidate as TextbookTab : "master"
   const kind = params.get("textbookDetailKind")
