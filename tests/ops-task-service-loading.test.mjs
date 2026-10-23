@@ -6,7 +6,7 @@ import vm from "node:vm";
 import ts from "typescript";
 
 import { getRegistrationWorkflowStatusFromLegacyTrack } from "../src/features/tasks/registration-workflow-status.js";
-import { createOpsTaskPageStatsCache } from "../src/features/tasks/ops-task-page-stats-cache.ts";
+import { createOpsTaskPageStatsCache, getOpsTaskPageStatsScope } from "../src/features/tasks/ops-task-page-stats-cache.ts";
 import { startOpsTaskPageSupplementLoad } from "../src/features/tasks/ops-task-page-supplement.ts";
 
 const serviceSource = await readFile(
@@ -64,6 +64,7 @@ function transpileAndLoad(source, exports, mocks = {}) {
     module: sandboxModule,
     exports: sandboxModule.exports,
     createOpsTaskPageStatsCache,
+    getOpsTaskPageStatsScope,
     setRegistrationTrackMutationCacheInvalidator: () => {},
     ...mocks,
   });

@@ -1925,3 +1925,101 @@ test('008 opening registration create still requests the full catalog and ignore
   assert.equal(currentComponentProps('RegistrationApplicationCreate').schools[0].name, '합성 학교');
   assert.equal(page.requests.some(r => /^(create|save|set|update|delete)_/.test(r.name)), false);
 });
+
+
+function generalStatsReads(page) { return page.requests.filter(r => r.name === 'get_ops_task_list_stats_v1'); }
+function generalPageReads(page) { return page.requests.filter(r => r.name === 'list_ops_task_numbered_page_v1'); }
+async function acceptGeneralStats(read, total = 40) {
+  await act(async () => read.resolve({ error: null, data: { total, byStatus: { requested: total }, byView: { inbox: total, sent: 0, completed: 0 }, metrics: {}, facets: {} } }));
+}
+async function clickGeneralSort(label) {
+  const button = document.querySelector(`button[aria-label="${label} 정렬"]`);
+  assert.ok(button, 'real general sort button');
+  await act(async () => button.click());
+}
+for (const initiallyPending of [false, true]) test(`general stats survive sort-only transitions with initial stats ${initiallyPending ? 'pending' : 'ready'}`, async t => {
+  const page = await workspace(t);
+  const firstStats = generalStatsReads(page)[0];
+  await act(async () => page.finish(page.requests.indexOf(generalPageReads(page)[0]), 40));
+  if (!initiallyPending) await acceptGeneralStats(firstStats);
+  const countTab = () => [...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.startsWith('받은함'))?.textContent;
+  if (!initiallyPending) assert.equal(countTab(), '받은함40');
+  const page2 = document.querySelector('button[aria-label="2 페이지"]');
+  await act(async () => page2.click());
+  await act(async () => page.finish(page.requests.indexOf(generalPageReads(page).at(-1)), 40));
+  for (const [sort, label, expectedPages] of [['priority', '우선순위', 3], ['status', '상태', 4], ['due', '시작/마감', 5]]) {
+    await clickGeneralSort(label);
+    assert.equal(generalStatsReads(page).length, 1, 'sort must not restart the equivalent aggregate');
+    assert.equal(firstStats.signal.aborted, false, 'sorting must not cancel the still-valid aggregate owner');
+    if (!initiallyPending) assert.equal(countTab(), '받은함40', 'accepted count remains visible while new order is pending');
+    const read = generalPageReads(page).at(-1);
+    assert.equal(generalPageReads(page).length, expectedPages);
+    assert.equal(read.args.p_filters.sort, sort);
+    assert.equal(read.args.p_page, 1);
+    await act(async () => page.finish(page.requests.indexOf(read), 40, [{ title: `${sort} accepted` }]));
+    assert.ok(document.body.textContent.includes(`${sort} accepted`));
+  }
+  if (initiallyPending) await acceptGeneralStats(firstStats);
+  assert.equal(countTab(), '받은함40');
+  assert.equal(page.requests.some(r => !['get_ops_task_list_stats_v1', 'list_ops_task_numbered_page_v1'].includes(r.name)), false);
+});
+
+test('general stats search changes reject a late prior aggregate after sort and error retry is explicit', async t => {
+  const page = await workspace(t);
+  const oldStats = generalStatsReads(page)[0];
+  await act(async () => page.finish(page.requests.indexOf(generalPageReads(page)[0]), 40));
+  await clickGeneralSort('우선순위');
+  const search = document.querySelector('input[placeholder*="검색"]');
+  await act(async () => search[Object.keys(search).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '새 검색' } }));
+  const freshStats = generalStatsReads(page).at(-1);
+  assert.notEqual(freshStats, oldStats);
+  assert.equal(freshStats.args.p_filters.search, '새 검색');
+  assert.equal(oldStats.signal.aborted, true);
+  const freshPage = generalPageReads(page).at(-1);
+  await act(async () => page.finish(page.requests.indexOf(freshPage), 2, [{ title: '검색 결과' }]));
+  await acceptGeneralStats(freshStats, 2);
+  await acceptGeneralStats(oldStats, 999);
+  assert.match([...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.startsWith('받은함')).textContent, /받은함2$/);
+  assert.equal(document.body.textContent.includes('999'), false);
+  // A failed aggregate is not cached or automatically retried by reordering.
+  await act(async () => search[Object.keys(search).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '실패 검색' } }));
+  const failedStats = generalStatsReads(page).at(-1);
+  await act(async () => failedStats.resolve({ error: { message: 'synthetic unavailable' }, data: null }));
+  const beforeRetry = generalStatsReads(page).length;
+  await clickGeneralSort('상태');
+  assert.equal(generalStatsReads(page).length, beforeRetry, 'sort does not turn an error into implicit retry');
+  await act(async () => document.querySelector('button[aria-label="새로고침"]').click());
+  assert.equal(generalStatsReads(page).length, beforeRetry + 1, 'explicit refresh retries unavailable stats');
+  await acceptGeneralStats(generalStatsReads(page).at(-1), 1);
+  assert.match([...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.startsWith('받은함')).textContent, /받은함1$/);
+});
+
+test('general stats service shares settled sorts but isolates selecting filters and viewers', async t => {
+  const page = await workspace(t);
+  const first = generalStatsReads(page)[0];
+  const filters = first.args.p_filters;
+  await acceptGeneralStats(first);
+  const service = page.load('src/features/tasks/ops-task-service.ts');
+  let result;
+  await act(async () => { result = await service.startOpsTaskPageStatsSupplementLoad({ viewerId: 'actor-a', filters: { ...filters, sort: 'priority' }, signal: new AbortController().signal }); });
+  assert.equal(result.total, 40);
+  assert.equal(generalStatsReads(page).length, 1, 'settled semantic stats are reused across sort and owner');
+  for (const options of [
+    { viewerId: 'actor-b', filters: { ...filters, sort: 'priority' } },
+    { viewerId: 'actor-a', filters: { ...filters, statuses: ['requested'], sort: 'status' } },
+    { viewerId: 'actor-a', filters: { ...filters, queue: 'sent' } },
+  ]) {
+    const before = generalStatsReads(page).length;
+    let pending;
+    await act(async () => { pending = service.startOpsTaskPageStatsSupplementLoad(options); });
+    assert.equal(generalStatsReads(page).length, before + 1);
+    await acceptGeneralStats(generalStatsReads(page).at(-1), 7);
+    assert.equal((await pending).total, 7);
+  }
+  let invalid;
+  await act(async () => { invalid = service.startOpsTaskPageStatsSupplementLoad({ viewerId: 'actor-a', filters: { ...filters, sort: 'invalid' } }); });
+  const invalidRead = generalStatsReads(page).at(-1);
+  assert.equal(invalidRead.args.p_filters.sort, 'invalid', 'invalid sort is not repaired into a cached valid request');
+  await act(async () => invalidRead.resolve({ data: null, error: { code: '22023', message: 'ops_task_filters_invalid' } }));
+  assert.equal(await invalid, undefined);
+});
