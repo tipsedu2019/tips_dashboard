@@ -328,7 +328,13 @@ def _parse_date(s, what):
 def _parse_ts(s, what, code=2):
     try:
         # Python 3.9/3.10 do not accept the standard UTC "Z" suffix.
-        ts = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        normalized = s.replace("Z", "+00:00")
+        # PostgreSQL omits trailing fractional zeroes; older Python accepts
+        # only 3 or 6 digits. Pad microseconds without changing the instant.
+        normalized = re.sub(
+            r"(\d{2}:\d{2}:\d{2})\.(\d{1,6})(?=[+-]\d{2}:\d{2}$)",
+            lambda match: match[1] + "." + match[2].ljust(6, "0"), normalized)
+        ts = datetime.fromisoformat(normalized)
     except (ValueError, TypeError):
         fail(f"{what} must be an ISO-8601 timestamp, got: {s!r}", code)
     if ts.tzinfo is None:

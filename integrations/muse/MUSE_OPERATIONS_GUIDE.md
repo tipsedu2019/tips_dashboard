@@ -15,7 +15,7 @@ operating rules below.
 | Domain | CLI | Pinned SHA256 | Base |
 |---|---|---|---|
 | Class reads/edits (수업) | `~/workspace/skills/tips-admin-api/bin/tips-admin` | `7c9e9c9dee0c74fb7a07916e045bed308f19f8041fa01f189c0eb40cced0a571` | `/api/v1`, `/api/v2` |
-| School calendar research/upserts (학사일정) | `~/workspace/skills/tips-calendar-api-candidate/bin/tips-cal` | `cda7639a812bb1e8d88b3f0bfb86853a1a5522fe356551523dd0ed2a41a95fb7` | `/api/v2` |
+| School calendar research/upserts (학사일정) | `~/workspace/skills/tips-calendar-api-candidate/bin/tips-cal` | `829fc3e90d85db00dcda03bf8e8c718794d569b3b188692a6f383ac98c99380e` | `/api/v2` |
 
 - Run `sha256sum` on the binary before first use in a session. On mismatch,
   **stop and report** — do not run it. Both files are frozen.
