@@ -296,18 +296,21 @@ from annual_range_actors as actors
 join annual_range_role_results as results on results.actor_role = actors.expected_role;
 select is(
   pg_temp.annual_range_school_rows(results.rpc_result -> 'result'),
-  (select pg_temp.annual_range_school_rows(snapshot) from annual_range_snapshot_utc),
-  actors.expected_role || ' reads exactly the owner snapshot of the synthetic school, including dates and metadata'
+  case when actors.expected_role = 'assistant' then '[]'::jsonb
+    else (select pg_temp.annual_range_school_rows(snapshot) from annual_range_snapshot_utc) end,
+  actors.expected_role || case when actors.expected_role = 'assistant'
+    then ' cannot read any synthetic school entries outside word retests'
+    else ' reads exactly the owner snapshot of the synthetic school, including dates and metadata' end
 )
 from annual_range_actors as actors
 join annual_range_role_results as results on results.actor_role = actors.expected_role;
-select is(results.base_event_count, 12, actors.expected_role || ' retains exact base event RLS scope')
+select is(results.base_event_count, case when actors.expected_role = 'assistant' then 0 else 12 end, actors.expected_role || ' retains its exact base event RLS scope')
 from annual_range_actors as actors
 join annual_range_role_results as results on results.actor_role = actors.expected_role;
-select is(results.school_count, 1, actors.expected_role || ' retains exact school RLS scope')
+select is(results.school_count, case when actors.expected_role = 'assistant' then 0 else 1 end, actors.expected_role || ' retains its exact school RLS scope')
 from annual_range_actors as actors
 join annual_range_role_results as results on results.actor_role = actors.expected_role;
-select is(results.subject_detail_count, 1, actors.expected_role || ' retains exact subject detail RLS scope')
+select is(results.subject_detail_count, case when actors.expected_role = 'assistant' then 0 else 1 end, actors.expected_role || ' retains its exact subject detail RLS scope')
 from annual_range_actors as actors
 join annual_range_role_results as results on results.actor_role = actors.expected_role;
 select is(
@@ -315,10 +318,21 @@ select is(
    from pg_catalog.jsonb_array_elements(pg_temp.annual_range_school_rows(results.rpc_result -> 'result')) as row
    cross join lateral pg_catalog.jsonb_each(row.value -> 'typeBuckets') as bucket
    cross join lateral pg_catalog.jsonb_array_elements(bucket.value) as entry),
-  13, actors.expected_role || ' retains exactly twelve base entries and one independent subject detail'
+  case when actors.expected_role = 'assistant' then 0 else 13 end,
+  actors.expected_role || case when actors.expected_role = 'assistant'
+    then ' receives no annual entries outside word retests'
+    else ' retains exactly twelve base entries and one independent subject detail' end
 )
 from annual_range_actors as actors
 join annual_range_role_results as results on results.actor_role = actors.expected_role;
+
+-- This invoker RPC still succeeds for an authenticated assistant but exposes
+-- no rows under restrictive RLS. Do not invent a42501 that the function does not raise.
+select is(
+  (select rpc_result #> '{result,data,rows}' from annual_range_role_results where actor_role = 'assistant'),
+  '[]'::jsonb,
+  'assistant annual RPC returns an explicit empty list across all schools'
+);
 
 select finish();
 rollback;

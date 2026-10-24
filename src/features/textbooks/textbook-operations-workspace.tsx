@@ -1,4 +1,5 @@
 "use client";
+import { TeacherTextbookRequestWorkspace } from "./teacher-textbook-request-workspace";
 import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
 import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
@@ -882,17 +883,21 @@ function useTextbookFormDraft<T>(initial: T) {
   return [state.value, edit, replace, defaults, JSON.stringify(state.value) !== JSON.stringify(state.baseline)] as const;
 }
 
-export function TextbookOperationsWorkspace() {
+export function TextbookOperationsWorkspace({ mode = "management" }: { mode?: "management" | "requests" }) {
   const { user, role, loading } = useAuth();
   if (loading || !user?.id || !role) return <div role="status">로그인 정보를 확인하는 중입니다.</div>;
-  return <TextbookOperationsWorkspaceContent key={`${user.id}:${role}`} />;
+  if (role === "teacher") return <TeacherTextbookRequestWorkspace key={`${user.id}:${role}`} />;
+  const requestsOnly = mode === "requests";
+  return <TextbookOperationsWorkspaceContent key={`${user.id}:${role}:${requestsOnly}`} requestsOnly={requestsOnly} />;
 }
 
-function TextbookOperationsWorkspaceContent() {
-  const { user, role, canManageAll, isAdmin, isStaff, isTeacher } = useAuth();
+function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: boolean }) {
+  const { user, role, canManageAll, isAdmin, isStaff } = useAuth();
+  const canManageTextbookOperations = canManageAll || isAdmin || isStaff || role === "admin" || role === "staff";
+  const canCreateTextbookRequest = canManageTextbookOperations;
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
-  const initialNavigationRef = useRef(parseTextbookNavigation(new URLSearchParams(searchParamString)));
+  const initialNavigationRef = useRef(parseTextbookNavigation(new URLSearchParams(searchParamString), requestsOnly));
   const initialPrimaryFilters = initialNavigationRef.current.primary.filters as Row;
   const [saving, setSaving] = useState("");
   const [message, setMessage] = useState("");
@@ -905,7 +910,8 @@ function TextbookOperationsWorkspaceContent() {
   const deferredOperationQuery = useDeferredValue(operationQuery);
   const masterSearchRef = useRef<HTMLInputElement>(null);
   const operationSearchRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<TextbookTab>(initialNavigationRef.current.tab);
+  const [storedActiveTab, setActiveTab] = useState<TextbookTab>(initialNavigationRef.current.tab);
+  const activeTab = requestsOnly ? "requests" : storedActiveTab;
   const [textbookQualityFilter, setTextbookQualityFilter] = useState<"all" | "inactive">(() => initialPrimaryFilters.quality === "inactive" ? "inactive" : "all");
   const [subjectGroupFilter, setSubjectGroupFilter] = useState(() => text(initialPrimaryFilters.subject) || "all");
   const [schoolLevelGroupFilter, setSchoolLevelGroupFilter] = useState(() => text(initialPrimaryFilters.schoolLevel) || "all");
@@ -957,7 +963,7 @@ function TextbookOperationsWorkspaceContent() {
     if (handledQuery.current === queryString) return;
     handledQuery.current = queryString;
     setNavigationKey(queryString);
-    const restored = parseTextbookNavigation(new URLSearchParams(queryString));
+    const restored = parseTextbookNavigation(new URLSearchParams(queryString), requestsOnly);
     const restoredDetail = getCanonicalTextbookDetail(restored);
     initialNavigationRef.current = restored;
     const filters = restored.primary.filters as Row;
@@ -994,7 +1000,7 @@ function TextbookOperationsWorkspaceContent() {
     setBulkTextbookPatch(emptyBulkTextbookPatch);
     setBulkOrderDialogOpen(false);
     replaceBulkOrderQuantities({});
-  }, [replaceMasterForm, replacePurchaseForm, replaceBulkOrderQuantities]);
+  }, [replaceMasterForm, replacePurchaseForm, replaceBulkOrderQuantities, requestsOnly]);
   if (observedQuery !== searchParamString) {
     setObservedQuery(searchParamString);
     adoptLocationQuery(searchParamString);
@@ -1233,11 +1239,11 @@ function TextbookOperationsWorkspaceContent() {
   }, [acceptedMasterDetail]);
   useEffect(() => {
     const row = acceptedPurchaseDetail?.row;
-    if (!row || !selectedPurchaseDetail) return;
+    if (!canManageTextbookOperations || !row || !selectedPurchaseDetail) return;
     selectPurchaseLine(row.line, row.line.order || undefined, selectedPurchaseDetail.mode, true, row);
     // The selector intentionally remains an event-style helper; request identity guards this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acceptedPurchaseDetail, selectedPurchaseDetail]);
+  }, [acceptedPurchaseDetail, selectedPurchaseDetail, canManageTextbookOperations]);
   useEffect(() => {
     if (activeTab === "inventory" && inventoryDefaultLocationId) setInventoryCountLocationId((current) => current || inventoryDefaultLocationId);
     if (purchaseDialogOpen && !purchaseRetryActive && inventoryDefaultLocationId) applyPurchaseDefaults((current) => {
@@ -1370,8 +1376,6 @@ function TextbookOperationsWorkspaceContent() {
   const currentUserId = text(user?.id);
   const currentUserLabel = text(user?.email || user?.id);
   const currentUserEmail = normalizeEmailValue(user?.email);
-  const canManageTextbookOperations = canManageAll || isAdmin || isStaff || role === "admin" || role === "staff";
-  const canCreateTextbookRequest = isTeacher || canManageTextbookOperations;
   const canDeleteTextbookHistory =
     canManageAll ||
     isAdmin ||
@@ -2063,6 +2067,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openNewRequestDialog() {
+    if (!canCreateTextbookRequest) return;
     requestLocalAction(() => {
       clearTransientTextbookFeedback();
       setSelectedPurchaseLineId("");
@@ -2246,7 +2251,7 @@ function TextbookOperationsWorkspaceContent() {
 
   function changeActiveTab(value: string) {
     requestLocalAction(() => {
-      if (!canManageTextbookOperations && value !== "requests") {
+      if ((requestsOnly || !canManageTextbookOperations) && value !== "requests") {
         setActiveTab("requests");
         setMessage("");
         setActionErrorMessage("");
@@ -2303,14 +2308,14 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function showSavedMasterTextbook(title: string) {
-    setActiveTab("master");
+    setActiveTab(requestsOnly ? "requests" : "master");
     updateOperationSearchQuery("");
     clearTextbookListFilters(title);
     window.setTimeout(() => masterSearchRef.current?.select(), 0);
   }
 
   function showSavedPurchaseFlow(stage: string, title: string, hasCatalogTextbook: boolean) {
-    setActiveTab(canManageTextbookOperations ? "purchase" : "requests");
+    setActiveTab(canManageTextbookOperations && !requestsOnly ? "purchase" : "requests");
     updateOperationSearchQuery(title);
     setPurchaseBoardScope(getSavedPurchaseBoardScope(stage));
     setPurchaseRequestFilter(canManageTextbookOperations ? getSavedPurchaseRequestFilter(stage, hasCatalogTextbook) : "all");
@@ -2816,6 +2821,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function selectPurchaseLine(line: Row, order: Row | undefined, stageOverride?: string, fromDirectDetail = false, directDetail?: TextbookPurchaseCaseRow) {
+    if (!canManageTextbookOperations) return;
     clearTransientTextbookFeedback();
     const scopeLines = getPurchaseScopeLines(line);
     const primaryLine = scopeLines.find((scopeLine) => getRecordId(scopeLine) === getRecordId(line)) || scopeLines[0];
@@ -4845,7 +4851,14 @@ function TextbookOperationsWorkspaceContent() {
 
       <Dialog open={Boolean(selectedPurchaseDetail && !purchaseDialogOpen)} onOpenChange={(open) => { if (!open) closeTextbookDetail("purchase"); }}>
         <DetailDialogContent title="구매 상세" description="선택한 구매 건의 직접 조회 결과입니다." compact={false} onClose={() => closeTextbookDetail("purchase")}>
-          <TextbookDetailState loading={referenceData.purchaseDetail.loading || (!referenceData.purchaseDetail.error && !isExactAcceptedInput(referenceData.purchaseDetail.acceptedInput, selectedPurchaseDetail))} error={referenceData.purchaseDetail.error} onRetry={referenceData.purchaseDetail.retry} emptyLabel="구매 내역을 찾을 수 없습니다." />
+          <TextbookDetailState loading={referenceData.purchaseDetail.loading || (!referenceData.purchaseDetail.error && !isExactAcceptedInput(referenceData.purchaseDetail.acceptedInput, selectedPurchaseDetail))} error={referenceData.purchaseDetail.error} onRetry={referenceData.purchaseDetail.retry} emptyLabel="교재 요청을 찾을 수 없습니다.">
+            {!canManageTextbookOperations && acceptedPurchaseDetail?.row ? <dl className="grid gap-3 sm:grid-cols-2">
+              <TextbookDetailField label="교재" value={acceptedPurchaseDetail.row.references.textbook?.title || acceptedPurchaseDetail.row.line.requested_textbook_title || "미등록 교재"} />
+              <TextbookDetailField label="수업" value={acceptedPurchaseDetail.row.references.class?.name || "—"} />
+              <TextbookDetailField label="상태" value={purchaseStatusLabel(acceptedPurchaseDetail.row.status, acceptedPurchaseDetail.row.quantities.ordered, acceptedPurchaseDetail.row.quantities.received)} />
+              <TextbookDetailField label="요청 수량" value={`${formatQuantity(acceptedPurchaseDetail.row.quantities.requested)}권`} />
+            </dl> : null}
+          </TextbookDetailState>
         </DetailDialogContent>
       </Dialog>
 
@@ -4876,11 +4889,11 @@ function TextbookOperationsWorkspaceContent() {
         <TabsList
           className={cn(
             "grid h-auto min-w-0 flex-1 rounded-lg bg-muted/50 p-1",
-            canManageTextbookOperations ? "grid-cols-3 lg:grid-cols-6" : "grid-cols-1",
+            canManageTextbookOperations && !requestsOnly ? "grid-cols-3 lg:grid-cols-6" : "grid-cols-1",
           )}
-          aria-label="교재관리 업무 탭"
+          aria-label={requestsOnly ? "교재요청" : "교재관리 업무 탭"}
         >
-          {canManageTextbookOperations ? (
+          {canManageTextbookOperations && !requestsOnly ? (
             <TabsTrigger value="master" className={textbookTabTriggerClassName} aria-label="교재 재고">
               <BookOpen className="size-4" />
               교재 재고
@@ -4891,7 +4904,7 @@ function TextbookOperationsWorkspaceContent() {
             요청
             <TabCountBadge value={operationMetrics.requestCount} />
           </TabsTrigger>
-          {canManageTextbookOperations ? (
+          {canManageTextbookOperations && !requestsOnly ? (
             <>
               <TabsTrigger value="purchase" className={textbookTabTriggerClassName} aria-label="주문·입고">
                 <Truck className="size-4" />
@@ -7719,12 +7732,12 @@ function PurchaseProcessTable({
             {selectedReceivableCount > 0 ? <Button type="button" size="sm" variant="outline" aria-label="선택 주문 일괄 입고" disabled={purchaseBatchBusy} aria-busy={saving === "purchase-bulk-receive"} onClick={onBulkReceive}>선택 입고</Button> : null}
             {selectedReturnableCount > 0 ? <DataTableRowActions label="선택 주문·입고 작업" disabled={purchaseBatchBusy}><DropdownMenuItem aria-label="선택 입고 건 공급처 반품" onSelect={onBulkReturn}>선택 반품</DropdownMenuItem></DataTableRowActions> : null}
             <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" aria-label="주문·입고 선택 해제" disabled={purchaseBatchBusy} onClick={() => onToggleVisibleLines?.(selectedLineIds, false)}><X className="size-4" /></Button>
-          </>) : (<>{mode === "request" ? (
+          </>) : (<>{mode === "request" ? (canManageRequestLines ? (
               <Button type="button" size="sm" className="shrink-0" aria-label="교재 요청 추가" title="교재 요청 추가" onClick={onAddLine}>
                 <Plus className="mr-2 size-4" />
                 요청 추가
               </Button>
-            ) : (
+            ) : null) : (
               <>
                 {acceptedFilters ? (
                   <DropdownMenu>

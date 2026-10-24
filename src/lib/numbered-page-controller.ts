@@ -18,6 +18,13 @@ export type NumberedPageSnapshot<T> = {
   error: unknown;
 };
 
+export function isNumberedPagePermissionError(error: unknown) {
+  return error !== null && typeof error === "object" && (
+    ("code" in error && error.code === "42501")
+    || ("status" in error && [401, 403].includes(Number(error.status)))
+  );
+}
+
 export function createNumberedPageController<T>({ loadPage, onChange }: {
   loadPage: (request: NumberedPageLoadRequest) => Promise<NumberedPage<T>>;
   onChange: (snapshot: NumberedPageSnapshot<T>) => void;
@@ -66,12 +73,27 @@ export function createNumberedPageController<T>({ loadPage, onChange }: {
       publish({ ...page, scope: target.scope, requestedPage: page.page, loading: false, error: null });
     } catch (error) {
       invocation++;
-      if (current()) publish({ ...snapshot, loading: false, error });
+      if (current()) {
+        const denied = isNumberedPagePermissionError(error);
+        // A permission failure can mean the server revoked this actor's role.
+        // Keep network-error recovery, but never resurrect a denied page on retry.
+        publish(denied ? { scope: null, requestedPage: target.page, page: 1,
+          pageSize: target.pageSize, totalCount: null, rows: [], loading: false, error }
+          : { ...snapshot, loading: false, error });
+      }
     }
   }
 
   return {
     load,
+    // A sibling detail read can revoke the same actor's list permission.
+    invalidatePermission(error: unknown) {
+      if (disposed || !isNumberedPagePermissionError(error)) return;
+      active?.abort();
+      publish({ scope: null, requestedPage: requested?.page ?? 1, page: 1,
+        pageSize: requested?.pageSize ?? snapshot.pageSize, totalCount: null,
+        rows: [], loading: false, error });
+    },
     retry: () => requested ? load(requested) : Promise.resolve(),
     dispose() { disposed = true; active?.abort(); },
   };

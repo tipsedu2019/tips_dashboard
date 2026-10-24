@@ -24,10 +24,11 @@ create temp table send_before as select
  (select count(*) from dashboard_private.notification_event_fanout_jobs) jobs,
  (select count(*) from dashboard_private.notification_deliveries) deliveries;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
-select pg_temp.wid(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','task3b-'||n||'@example.invalid',crypt('local-only',gen_salt('bf')),now(),'{"provider":"email","providers":["email"]}','{}',now(),now() from generate_series(901,904)n;
+select pg_temp.wid(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','task3b-'||n||'@example.invalid',crypt('local-only',gen_salt('bf')),now(),'{"provider":"email","providers":["email"]}','{}',now(),now() from generate_series(901,906)n;
 insert into public.profiles(id,role,name,email) values
 (pg_temp.wid(901),'admin','합성 관리자','task3b-901@example.invalid'),(pg_temp.wid(902),'staff','합성 직원','task3b-902@example.invalid'),
-(pg_temp.wid(903),'teacher','합성 교사','task3b-903@example.invalid'),(pg_temp.wid(904),'teacher','다른 교사','task3b-904@example.invalid') on conflict(id) do update set role=excluded.role;
+(pg_temp.wid(903),'teacher','합성 교사','task3b-903@example.invalid'),(pg_temp.wid(904),'teacher','다른 교사','task3b-904@example.invalid'),
+(pg_temp.wid(905),'staff','요청 DTO 검증 직원','task3b-905@example.invalid'),(pg_temp.wid(906),'assistant','합성 조교','task3b-906@example.invalid') on conflict(id) do update set role=excluded.role;
 insert into public.textbook_inventory_locations(id,code,name,sort_order) values(pg_temp.wid(900),'__t3b_main__','본관',10);
 insert into public.classes(id,name,class_type,subject,status,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan)
 values(pg_temp.wid(600),'중2반','정규','영어','수강','[]','[]','[]','[]','{}'),(pg_temp.wid(601),'중10반','정규','영어','수강','[]','[]','[]','[]','{}');
@@ -54,6 +55,7 @@ values(pg_temp.wid(10001),pg_temp.wid(7001),pg_temp.wid(1),pg_temp.wid(601),pg_t
 (pg_temp.wid(10002),pg_temp.wid(7000),pg_temp.wid(1),pg_temp.wid(600),pg_temp.wid(900),'2026-08',100,'excluded'),
 (pg_temp.wid(10003),pg_temp.wid(7000),pg_temp.wid(1),pg_temp.wid(600),pg_temp.wid(900),'2026-08',100,'cancelled'),
 (pg_temp.wid(10004),pg_temp.wid(7000),pg_temp.wid(1),pg_temp.wid(600),pg_temp.wid(900),'2026-08',100,'returned');
+create function pg_temp.workflow_permission_state()returns jsonb language sql stable as $$select jsonb_build_object('textbooks',(select md5(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text)from public.textbooks t),'classes',(select md5(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text)from public.classes t),'textbook_purchase_orders',(select md5(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text)from public.textbook_purchase_orders t),'textbook_purchase_order_lines',(select md5(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text)from public.textbook_purchase_order_lines t));$$;
 select has_function('public',name,args,name||' exists') from (values
 ('list_textbook_purchase_page_v1',array['jsonb','text','integer','integer']),
 ('list_textbook_sale_page_v1',array['jsonb','text','integer','integer']),
@@ -138,21 +140,46 @@ select diag('TASK3B_WIRE '||jsonb_build_object('actorId',auth.uid(),'method',met
 
 select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000902',true);
 select lives_ok($$select public.get_textbook_operations_summary_v1()$$,'staff management reads authorized');
-select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000903',true);
-select is(public.list_textbook_purchase_page_v1(pg_temp.pf('{"mode":"request"}'),'status-event',11,10)->>'totalCount','113','teacher can read another actor RLS-visible requests');
-select is(public.get_textbook_purchase_summary_v1(pg_temp.pf('{"mode":"request"}'))->>'rawLineCount','224','teacher request summary stays complete');
-select is(public.get_textbook_purchase_detail_v1(pg_temp.wid(1111),'request')#>'{row,references,supplier}','null'::jsonb,'teacher selected request reference has no supplier catalog');
+-- Keep teacher/request-owner fixtures unchanged. A distinct staff actor retains
+-- the complete legacy request-mode success and strict DTO wire assertions.
+select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000905',true);
+select is(public.list_textbook_purchase_page_v1(pg_temp.pf('{"mode":"request"}'),'status-event',11,10)->>'totalCount','113','staff can read another actor RLS-visible requests');
+select is(public.get_textbook_purchase_summary_v1(pg_temp.pf('{"mode":"request"}'))->>'rawLineCount','224','staff request summary stays complete');
+select is(public.get_textbook_purchase_detail_v1(pg_temp.wid(1111),'request')#>'{row,references,supplier}','null'::jsonb,'staff selected request-mode reference has no supplier catalog');
 select diag('TASK3B_WIRE '||jsonb_build_object('actorId',auth.uid(),'method',method,'input',input,'data',data)::text)from(values
 ('listTextbookPurchasePage',jsonb_build_object('page',1,'pageSize',10,'sort','status-event','filters',pg_temp.pf('{"mode":"request","search":"__t3b__ 교재 111"}')),public.list_textbook_purchase_page_v1(pg_temp.pf('{"mode":"request","search":"__t3b__ 교재 111"}'),'status-event',1,10)),
 ('getTextbookPurchaseSummary',pg_temp.pf('{"mode":"request","search":"__t3b__ 교재 111"}'),public.get_textbook_purchase_summary_v1(pg_temp.pf('{"mode":"request","search":"__t3b__ 교재 111"}'))),
 ('getTextbookPurchaseDetail',jsonb_build_object('anchorLineId',pg_temp.wid(1111),'mode','request'),public.get_textbook_purchase_detail_v1(pg_temp.wid(1111),'request')),
 ('getTextbookPurchaseDetail',jsonb_build_object('anchorLineId',pg_temp.wid(999999),'mode','request'),public.get_textbook_purchase_detail_v1(pg_temp.wid(999999),'request'))
 )w(method,input,data);
+reset role;
+create temp table workflow_permission_before as select pg_temp.workflow_permission_state()state;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000903',true);
+select is((select count(*)from public.textbook_purchase_orders),0::bigint,'teacher raw purchase orders remain RLS-hidden');
+select is((select count(*)from public.textbook_purchase_order_lines),0::bigint,'teacher raw purchase lines remain RLS-hidden');
+select is((select count(*)from public.textbooks),0::bigint,'teacher raw books remain RLS-hidden');
+select is((select count(*)from public.classes),0::bigint,'teacher raw classes remain RLS-hidden');
+select is(public.read_operational_common_v1('book_page','{"p_page":1,"p_page_size":10,"p_search":"__t3b__ 교재 111"}')->>'totalCount','1','teacher common request page reads another actor request');
+select is(public.read_operational_common_v1('book_page','{"p_page":1,"p_page_size":10,"p_search":"__t3b__ 교재 111"}')#>>'{rows,0,bookTitle}','__t3b__ 교재 111','teacher common request page preserves the book display identity');
+select is(public.read_operational_common_v1('book_page','{"p_page":1,"p_page_size":10,"p_search":"__t3b__ 교재 111"}')#>>'{rows,0,studentQuantity}','2','teacher common request page retains student requested quantity');
+select is(public.read_operational_common_v1('book_page','{"p_page":1,"p_page_size":10,"p_search":"__t3b__ 교재 111"}')#>>'{rows,0,teacherQuantity}','3','teacher common request page retains teacher requested quantity');
+select is((select array_agg(k order by k)from jsonb_object_keys(public.read_operational_common_v1('book_page','{"p_page":1,"p_page_size":10,"p_search":"__t3b__ 교재 111"}')#>'{rows,0}')k),array['anchorLineId','bookTitle','className','id','requestedAt','requesterLabel','studentQuantity','teacherQuantity']::text[],'teacher common request row has only fixed common fields without raw line/finance data');
+select throws_ok(sql,'42501','operational_common_read_required','teacher legacy purchase read denied: '||label)from(values
+('select public.list_textbook_purchase_page_v1(pg_temp.pf(),''status-event'',1,10)','order page'),('select public.get_textbook_purchase_summary_v1(pg_temp.pf())','order summary'),('select public.get_textbook_purchase_detail_v1(pg_temp.wid(1111),''order'')','order detail'),
+('select public.list_textbook_purchase_page_v1(pg_temp.pf(''{"mode":"request"}''),''status-event'',1,10)','request page'),('select public.get_textbook_purchase_summary_v1(pg_temp.pf(''{"mode":"request"}''))','request summary'),('select public.get_textbook_purchase_detail_v1(pg_temp.wid(1111),''request'')','request detail'))v(sql,label);
 select throws_ok(sql,'42501','textbook_workflow_read_forbidden','teacher management denied: '||label)from(values
-('select public.list_textbook_purchase_page_v1(pg_temp.pf(),''status-event'',1,10)','purchase page'),('select public.get_textbook_purchase_summary_v1(pg_temp.pf())','purchase summary'),('select public.get_textbook_purchase_detail_v1(pg_temp.wid(1111),''order'')','purchase detail'),
 ('select public.list_textbook_sale_page_v1(pg_temp.sf(),''status-event'',1,10)','sale page'),('select public.get_textbook_sale_summary_v1(pg_temp.sf())','sale summary'),('select public.get_textbook_sale_detail_v1(pg_temp.wid(9111))','sale detail'),
 ('select public.list_textbook_sale_history_page_v1(pg_temp.hf(),''month-class-title'',1,10)','history page'),('select public.get_textbook_sale_history_summary_v1(pg_temp.hf())','history summary'),('select public.get_textbook_operations_summary_v1()','operations'))v(sql,label);
+select set_config('request.jwt.claim.sub','3b000000-0000-4000-8000-000000000906',true);
+select throws_ok(sql,'42501','textbook_workflow_read_forbidden','assistant workflow read denied: '||label)from(values
+('select public.list_textbook_purchase_page_v1(pg_temp.pf(),''status-event'',1,10)','order page'),('select public.get_textbook_purchase_summary_v1(pg_temp.pf())','order summary'),('select public.get_textbook_purchase_detail_v1(pg_temp.wid(1111),''order'')','order detail'),
+('select public.list_textbook_purchase_page_v1(pg_temp.pf(''{"mode":"request"}''),''status-event'',1,10)','request page'),('select public.get_textbook_purchase_summary_v1(pg_temp.pf(''{"mode":"request"}''))','request summary'),('select public.get_textbook_purchase_detail_v1(pg_temp.wid(1111),''request'')','request detail'),
+('select public.list_textbook_sale_page_v1(pg_temp.sf(),''status-event'',1,10)','sale page'),('select public.get_textbook_sale_summary_v1(pg_temp.sf())','sale summary'),('select public.get_textbook_sale_detail_v1(pg_temp.wid(9111))','sale detail'),
+('select public.list_textbook_sale_history_page_v1(pg_temp.hf(),''month-class-title'',1,10)','history page'),('select public.get_textbook_sale_history_summary_v1(pg_temp.hf())','history summary'),('select public.get_textbook_operations_summary_v1()','operations'))v(sql,label);
+select throws_ok($$select public.read_operational_common_v1('book_page','{"p_page":1,"p_page_size":10,"p_search":"__t3b__"}')$$,'42501','operational_common_read_forbidden','assistant denied teacher common request page');
 reset role;
+select is(pg_temp.workflow_permission_state(),(select state from workflow_permission_before),'teacher/assistant permission paths leave workflow rows unchanged');
 select ok(not p.prosecdef and p.provolatile='s' and p.proconfig in(array['search_path=']::text[],array['search_path=""']::text[])and has_function_privilege('authenticated',p.oid,'execute')and not has_function_privilege('anon',p.oid,'execute')and not has_function_privilege('public',p.oid,'execute'),p.proname||' stable invoker fixed path and authenticated-only ACL')
 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname=any(array['list_textbook_purchase_page_v1','list_textbook_sale_page_v1','list_textbook_sale_history_page_v1','get_textbook_purchase_summary_v1','get_textbook_sale_summary_v1','get_textbook_sale_history_summary_v1','get_textbook_operations_summary_v1','get_textbook_purchase_detail_v1','get_textbook_sale_detail_v1']);
 set local role anon;

@@ -33,6 +33,13 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_academic_timetable_range_v1",
   "get_academic_curriculum_detail_v1",
   "get_makeup_detail_v1",
+  // Final role-scope SQL: one exact task or a purpose-complete, role-scoped
+  // reference DTO. Neither exemption applies to the mixed common-read gateway.
+  "get_operational_common_detail_v1",
+  "get_word_retest_reference_data_v1",
+  // Final role-scope SQL: four UUID references produce one authenticated
+  // boolean preflight, never rows or a page. Deadline/retry guards still apply.
+  "validate_word_retest_references_v1",
   // Purpose-complete reservation context is nonpageable, not a scalar count.
   "get_makeup_reservation_context_v1",
   // 20261004160000 + makeup_legacy_approval_occupancy_test.sql: complete
@@ -1306,6 +1313,23 @@ function numberedRpcLimitViolation(argument, contract) {
   return value !== UNKNOWN_LITERAL && !contract.sizes.includes(value) ? "rpc_page_limit_invalid" : null
 }
 
+// The gateway also serves numbered pages: never exempt its name wholesale.
+function operationalCommonRpcLimitViolation(argument) {
+  if (!argument) return "rpc_page_limit_missing"
+  if (!ts.isObjectLiteralExpression(argument) || argument.properties.length !== 2
+    || argument.properties.some(property => !ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name))) return "rpc_page_limit_unresolved"
+  const operations = argument.properties.filter(property => optionName(property) === "p_operation")
+  const args = argument.properties.filter(property => optionName(property) === "p_args")
+  if (operations.length !== 1 || args.length !== 1) return "rpc_page_limit_unresolved"
+  const operation = lexicalLiteralValue(operations[0].initializer), input = unwrap(args[0].initializer)
+  if (!ts.isObjectLiteralExpression(input) || input.properties.some(property => !ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name))) return "rpc_page_limit_unresolved"
+  if (operation === "options" && input.properties.length === 0) return null
+  if (operation === "book_detail" && input.properties.length === 1 && optionName(input.properties[0]) === "p_anchor") return null
+  if (operation === "book_page") return numberedRpcLimitViolation(input, { parameter: "p_page_size", sizes: [10, 15, 20] })
+  if (operation === "book_request_options") return numberedRpcLimitViolation(input, { parameter: "pageSize", sizes: [15] })
+  return "rpc_page_limit_missing"
+}
+
 function isExactTimeoutAbortSignal(call, deadline = 8000) {
   return callMethod(call) === "abortSignal"
     && call.arguments.length === 1
@@ -1630,7 +1654,10 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     const limitArgument = rpcName === "list_timetable_plans_v1" ? "p_page_size" : "p_limit"
     const limits = argument && ts.isObjectLiteralExpression(argument) ? argument.properties.filter((property) => ts.isPropertyAssignment(property)
       && ((ts.isIdentifier(property.name) && property.name.text === limitArgument) || (ts.isStringLiteral(property.name) && property.name.text === limitArgument))) : []
-    if (numberedContract) {
+    if (rpcName === "read_operational_common_v1") {
+      const violation = operationalCommonRpcLimitViolation(argument)
+      if (violation) reasons.push(violation)
+    } else if (numberedContract) {
       const violation = numberedRpcLimitViolation(argument, numberedContract)
       if (violation) reasons.push(violation)
     } else if (hasSpread) reasons.push("rpc_page_limit_unresolved")

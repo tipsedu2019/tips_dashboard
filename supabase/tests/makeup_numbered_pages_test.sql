@@ -142,13 +142,43 @@ select throws_ok($$select pg_temp.page('{"period":"custom","dateFrom":"2026-09-0
 select throws_ok($$select public.get_makeup_detail_v1(null)$$,'22023',null,'null detail ID invalid');
 select throws_ok($$select public.get_makeup_reservation_context_v1('[{"startAt":"bad","endAt":"also bad"}]','{}')$$,'22023',null,'invalid context timestamp SQLSTATE22023');
 reset role;select pg_temp.actor(801);set local role authenticated;
-select is((pg_temp.page()->>'totalCount')::integer,111,'teacher only involved rows');
-select is((pg_temp.page('{"view":"mine"}')->>'totalCount')::integer,1,'mine only own involved revision');
-select is(public.get_makeup_detail_v1(pg_temp.mid(112)),null::jsonb,'off-page unrelated detail cannot bypass RLS');
-select is(public.get_makeup_reservation_context_v1('[]',array[pg_temp.mid(112),pg_temp.mid(119)])->'activeEventRequestIds',jsonb_build_array(pg_temp.mid(119)),'active IDs enforce teacher RLS independently');
+select is((pg_temp.page()->>'totalCount')::integer,112,'teacher common list includes every approval-pending row, including non-participants');
+select is((pg_temp.page('{"view":"mine"}')->>'totalCount')::integer,1,'teacher common request view includes the full revision queue');
+-- Teacher common detail includes non-participant rows, with a positive public
+-- DTO contract derived from the explicit synthetic row112 seed, never a reader
+-- or candidate-projector response used as its own expected value.
+select ok((
+ select
+  (select array_agg(k order by k) from jsonb_object_keys(detail) k)
+   = (select array_agg(k order by k) from unnest(array['id','status','approvalGroup','requestKind','requesterId','teacherCatalogId','teacherProfileId','classId','className','subject','cancelDate','makeupStartAt','makeupEndAt','makeupClassroom','approverTeacherCatalogId','approverProfileId','approvedBy','approvedAt','completedBy','completedAt','canceledBy','canceledAt','cancelAcademicEventId','makeupAcademicEventId','createdAt','updatedAt','requesterLabel','teacherLabel','approverLabel','approvedByLabel','completedByLabel','canceledByLabel','reason','returnedReason','rejectedReason','finalNote','events','schedulePlanBefore','schedulePlanAfter','makeupAcademicEventIds','makeupSlots']::text[]) k)
+  and detail->>'id'=pg_temp.mid(112)::text
+  and detail->>'status'='approval_pending'
+  and detail->>'approvalGroup'='english' and detail->>'requestKind'='makeup_only'
+  and detail->>'className'='수업 112' and detail->>'subject'='영어'
+  and detail->>'requesterId'=pg_temp.mid(805)::text
+  and detail->>'teacherProfileId'=pg_temp.mid(802)::text
+  and detail->>'approverProfileId'=pg_temp.mid(803)::text
+  and detail->>'requesterLabel'='교사 805'
+  and detail->>'teacherLabel'='교사 802' and detail->>'approverLabel'='교사 803'
+  and detail->>'teacherCatalogId'='' and detail->>'approverTeacherCatalogId'=''
+  and detail->>'classId'='' and detail->>'cancelDate'='2026-08-01'
+  and detail->>'makeupStartAt'='2026-08-31T00:00:00+00:00'
+  and detail->>'makeupEndAt'='2026-08-31T01:00:00+00:00'
+  and detail->>'makeupClassroom'='A'
+  and detail->'makeupSlots'='[{"startAt":"2026-08-31T00:00:00+00:00","endAt":"2026-08-31T01:00:00+00:00","classroom":"A"}]'::jsonb
+  and detail->>'createdAt'='2026-08-01T00:00:00+00:00'
+  and jsonb_typeof(detail->'updatedAt')='string' and nullif(detail->>'updatedAt','') is not null
+  and detail->>'reason'='' and detail->>'returnedReason'=''
+  and detail->>'rejectedReason'='' and detail->>'finalNote'=''
+  and detail->'events'='[]'::jsonb
+  and detail->'schedulePlanBefore'='{}'::jsonb and detail->'schedulePlanAfter'='{}'::jsonb
+  and detail->'makeupAcademicEventIds'='[]'::jsonb and not detail ? 'rawMakeupSlots'
+ from (select public.get_makeup_detail_v1(pg_temp.mid(112)) detail) response
+),'teacher non-participant detail has exact common DTO keys, seed identity and masked private fields');
+select is(public.get_makeup_reservation_context_v1('[]',array[pg_temp.mid(112),pg_temp.mid(119)]),'{"reservations":[],"activeEventRequestIds":[]}'::jsonb,'teacher common reader does not expose private reservation or active-event context');
 reset role;select pg_temp.actor(802);set local role authenticated;
-select is((pg_temp.page('{"view":"closed","period":"custom","dateFrom":"2026-09-02"}')->>'totalCount')::integer,0,'unrelated authenticated actor cannot observe private compatibility error');
-select ok(not exists(select 1 from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-09-02T00:00:00Z","endAt":"2026-09-02T01:00:00Z"}]','{}')->'reservations')r where r->>'id'=pg_temp.mid(116)::text),'unknown-date conservative candidate remains RLS-authorized');
+select throws_ok($$select pg_temp.page('{"view":"closed","period":"custom","dateFrom":"2026-09-02"}')$$,'22023','makeup_legacy_slot_format_unsupported','teacher whole common scope preserves exact malformed closed-row compatibility error');
+select is(public.get_makeup_reservation_context_v1('[{"startAt":"2026-09-02T00:00:00Z","endAt":"2026-09-02T01:00:00Z"}]','{}'),'{"reservations":[],"activeEventRequestIds":[]}'::jsonb,'teacher common scope keeps raw malformed reservation candidates private');
 reset role;select pg_temp.actor(805);set local role authenticated;
 select is((pg_temp.page()->>'totalCount')::integer,0,'real assistant restrictive deny');
 select is(public.get_makeup_detail_v1(pg_temp.mid(1)),null::jsonb,'assistant detail denied');
@@ -199,7 +229,7 @@ select ok(exists(select 1 from jsonb_array_elements(public.get_makeup_reservatio
 select throws_ok($$select pg_temp.page(jsonb_build_object('view','closed','teacher','id:'||pg_temp.mid(701),'period','custom','dateFrom','2026-08-31','dateTo','2026-08-31'))$$,'22023','makeup_legacy_slot_format_unsupported','high-precision date fallback uses existing scoped compatibility error, not rounded period keys');
 select is(public.makeup_numbered_slots_v1('{"makeup_slots":[{"date":"2026-08-31T14:59:59.999Z","startTime":"09:00","endTime":"10:00"}]}')#>>'{0,startAt}','2026-08-31T09:00:00+09:00','safe millisecond date fallback retains existing Seoul day');
 reset role;select pg_temp.actor(802);set local role authenticated;
-select ok(not exists(select 1 from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-08-31T00:00:00.000Z","endAt":"2026-08-31T00:01:00.000Z"}]','{}')->'reservations')r where r->>'id'=pg_temp.mid(201)::text),'precision candidates remain authorized by existing RLS');
+select is(public.get_makeup_reservation_context_v1('[{"startAt":"2026-08-31T00:00:00.000Z","endAt":"2026-08-31T00:01:00.000Z"}]','{}'),'{"reservations":[],"activeEventRequestIds":[]}'::jsonb,'teacher common read keeps precise raw reservation candidates private');
 reset role;
 select is((select count(*) from dashboard_private.notification_events),(select events from precision_read_before),'precision reads no notification events');
 select is((select count(*) from dashboard_private.notification_event_fanout_jobs),(select jobs from precision_read_before),'precision reads no jobs');

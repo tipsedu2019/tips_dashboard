@@ -158,7 +158,7 @@ test("role-based navigation exposes textbook requests to teachers without manage
       .map((item) => item.url);
   };
 
-  for (const role of ["admin", "staff", "teacher"]) {
+  for (const role of ["admin", "staff"]) {
     assert.ok(
       navUrlsForRole(role).includes("/admin/textbooks"),
       `${role} should discover textbook management`,
@@ -167,6 +167,8 @@ test("role-based navigation exposes textbook requests to teachers without manage
 
   const teacherUrls = navUrlsForRole("teacher");
   assert.ok(teacherUrls.includes("/admin/curriculum"));
+  assert.ok(teacherUrls.includes("/admin/textbook-requests"));
+  assert.equal(teacherUrls.includes("/admin/textbooks"), false);
   assert.equal(teacherUrls.includes("/admin/students"), false);
   assert.equal(teacherUrls.includes("/admin/classes"), false);
   assert.equal(teacherUrls.some((url) => url.startsWith("/admin/settings/")), false);
@@ -703,21 +705,12 @@ test("assistant navigation only exposes allowed operation surfaces", async () =>
     readSource("src/components/app-sidebar.tsx"),
     readSource("src/components/command-search.tsx"),
   ]);
-  const assistantOverviewBlock = navigationSource.slice(
-    navigationSource.indexOf("const assistantOverviewItems"),
-    navigationSource.indexOf("const fullOverviewItems"),
-  );
-
-  assert.match(navigationSource, /canUseAssistantOperations/);
-  assert.match(navigationSource, /const assistantOverviewItems: NavItem\[\]/);
-  assert.doesNotMatch(assistantOverviewBlock, /title: "할 일"|url: "\/admin\/tasks"/);
-  assert.match(navigationSource, /title: "영어 단어 재시험"[\s\S]*url: "\/admin\/word-retests"/);
-  assert.match(navigationSource, /title: "학사일정"[\s\S]*url: "\/admin\/academic-calendar"/);
-  assert.match(navigationSource, /title: "시간표"[\s\S]*url: "\/admin\/timetable"/);
-  assert.doesNotMatch(assistantOverviewBlock, /url: "\/admin\/dashboard"/);
-  assert.match(navigationSource, /canUseAssistantOperations \? assistantOverviewItems : fullOverviewItems/);
-  assert.match(sidebarSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
-  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
+  const assistantGroups = buildAdminNavGroups(getRoleCapabilities("assistant"));
+  assert.deepEqual(assistantGroups.map(group => group.label), ["영어"]);
+  assert.deepEqual(assistantGroups.flatMap(group => group.items).map(item => ({ title: item.title, url: item.url })), [{ title: "영어 단어 재시험", url: "/admin/word-retests" }]);
+  assert.match(navigationSource, /if \(canUseAssistantOperations\) \{/);
+  assert.match(sidebarSource, /buildAdminNavGroups\(\{ canManageAll, canReadOperations, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
+  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canReadOperations, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
 });
 
 test("homepage content and recruiting navigation are discoverable only to the actual admin role", () => {

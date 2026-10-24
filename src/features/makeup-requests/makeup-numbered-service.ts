@@ -14,6 +14,14 @@ export type MakeupNumberedFilters = {
   dateFrom: string; dateTo: string; filterColumn: MakeupNumberedColumn; search: string
   sortColumn: MakeupNumberedColumn | null; sortDirection: "asc" | "desc" | null
 }
+// Common read uses the same page contract with private search/sort columns absent.
+export const MAKEUP_COMMON_COLUMNS = ["status", "className", "subject", "teacher", "requester", "cancelDate", "makeupAt", "makeupRoom", "approver", "submittedAt", "revisionRequestedAt", "approvedAt", "rejectedAt", "canceledAt"] as const
+export function commonMakeupFilters(filters: MakeupNumberedFilters, commonRead: boolean): MakeupNumberedFilters {
+  if (!commonRead) return filters
+  const allowed = (key: unknown) => MAKEUP_COMMON_COLUMNS.some(column => column === key)
+  const sortAllowed = filters.sortColumn === null || allowed(filters.sortColumn)
+  return { ...filters, filterColumn: allowed(filters.filterColumn) ? filters.filterColumn : "className", sortColumn: sortAllowed ? filters.sortColumn : null, sortDirection: sortAllowed ? filters.sortDirection : null }
+}
 export type MakeupFilterOption = { value: string; label: string; count: number }
 export type MakeupNumberedPage = NumberedPage<MakeupRequest> & {
   viewCounts: Record<MakeupNumberedFilters["view"], number>

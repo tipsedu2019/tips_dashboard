@@ -385,6 +385,19 @@ class CalTest(unittest.TestCase):
         self.assertEqual(len(previews), 1)
         self.assertEqual(previews[0]["afterHash"], AFTER_HASH)
 
+    def test_preview_preserves_postgres_short_fraction_in_output_and_journal(self):
+        self._add_preview_route()
+        expires = "2026-10-24T04:18:58.50641+00:00"
+        self.fake.routes[-1][3]["data"]["expiresAt"] = expires
+        code, out, err = self.invoke(
+            tips_cal.cmd_calendar_changes_preview, self.ctx(),
+            self.ns(events_json=json.dumps([ev()])))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["expiresAt"], expires)
+        entries = tips_cal.journal_read_all(
+            tips_cal.journal_path(self.tmp, tips_cal.canonical_origin_dir(BASE), CRED_ID))
+        self.assertEqual([e["expiresAt"] for e in entries if e["kind"] == "cal_preview"], [expires])
+
     def test_preview_stale_version_no_journal(self):
         self.fake.add("POST", "/calendar/changes/preview", 409,
                       {"data": None,
@@ -1032,6 +1045,41 @@ class CalTest(unittest.TestCase):
         code, _, _ = self.invoke(
             tips_cal.cmd_calendar_school_get, self.ctx(), self.ns())
         self.assertEqual(code, 4)
+
+
+class TimestampPrecisionTest(unittest.TestCase):
+    def parse_accepted(self, value):
+        try:
+            return tips_cal._parse_ts(value, "timestamp")
+        except SystemExit as error:
+            self.fail(f"valid PostgreSQL timestamp refused with code {error.code}: {value}")
+
+    def test_postgres_fractional_seconds_preserve_microseconds(self):
+        for fraction in ("5", "50", "506", "5064", "50641", "506410"):
+            for suffix, hour in (("Z", 4), ("+00:00", 4), ("+09:00", 13)):
+                with self.subTest(fraction=fraction, suffix=suffix):
+                    parsed = self.parse_accepted(
+                        f"2026-10-24T{hour:02d}:18:58.{fraction}{suffix}")
+                    self.assertEqual(parsed, datetime(
+                        2026, 10, 24, 4, 18, 58,
+                        int(fraction.ljust(6, "0")), tzinfo=timezone.utc))
+
+    def test_no_fraction_and_negative_offset_still_match_utc(self):
+        self.assertEqual(
+            self.parse_accepted("2026-10-24T00:18:58.50641-04:00"),
+            datetime(2026, 10, 24, 4, 18, 58, 506410, tzinfo=timezone.utc))
+        self.assertEqual(
+            self.parse_accepted("2026-10-24T04:18:58Z"),
+            datetime(2026, 10, 24, 4, 18, 58, tzinfo=timezone.utc))
+
+    def test_invalid_or_naive_timestamps_keep_requested_refusal_code(self):
+        for value in ("not-a-date", "2026-02-30T04:18:58.50641Z",
+                      "2026-10-24T25:18:58.50641Z", "2026-10-24T04:18:58.50641+25:00",
+                      "2026-10-24T04:18:58.506410", "2026-10-24"):
+            with self.subTest(value=value), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    tips_cal._parse_ts(value, "timestamp", code=4)
+                self.assertEqual(error.exception.code, 4)
 
 
 if __name__ == "__main__":

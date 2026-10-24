@@ -2049,3 +2049,27 @@ for (const scenario of [
   assert.equal(dirty(), true);
   assert.equal(saveRequests(page).length, 0);
 });
+
+test('teacher operations planning reads and selects sessions without creating drafts or writes', async t => {
+  const page = await setup(t, 'operations', { workspace: true,
+    auth: { role: 'teacher' }, route: 'curriculum/lesson-design',
+    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-board` });
+  await act(async () => page.requests.find(r => r.name === 'get_operations_class_lesson_design_detail_v1').resolve({ error: null, data: detail() }));
+  const saved = structuredClone(page.observed.lessonPlanDraft);
+  await act(async () => page.observed.updateLessonPlanDraft(current => ({ ...current, teacherForbiddenEdit: true })));
+  assert.deepEqual(page.observed.lessonPlanDraft, saved, 'read-only callback preserves original draft');
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  await act(async () => { void page.observed.previewLessonSessionGeneration(); void page.observed.confirmLessonSessionGeneration(); });
+  assert.equal(saveRequests(page).length, 0);
+  assert.equal(page.requests.some(r => r.name === 'preview_class_schedule_generation_v1'), false);
+  assert.equal([...document.querySelectorAll('button')].some(b => b.textContent.trim() === '일정 저장'), false);
+  const expand = document.querySelector('button[aria-label="8월 상세 보기"]');
+  assert.ok(expand);
+  await act(async () => expand.click());
+  const session = document.querySelector('[data-lesson-period-session-id] button[aria-pressed]');
+  assert.ok(session, 'saved sessions remain selectable');
+  await act(async () => session.click());
+  assert.ok(page.observed.selectedLessonSessionId);
+  assert.deepEqual(page.observed.lessonPlanDraft, saved);
+  assert.equal(saveRequests(page).length, 0);
+});

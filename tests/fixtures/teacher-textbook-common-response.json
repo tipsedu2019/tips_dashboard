@@ -1,0 +1,157 @@
+{
+  "page": 1,
+  "rows": [
+    {
+      "id": "2b11b2ef8b5fd74f4f0e7aaf24714e5a",
+      "bookTitle": "공통 교재 1",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000401",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "278508687c3017bcc8f508e3bc056d45",
+      "bookTitle": "공통 교재 2",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000402",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "4fddce28e9b5db3e593a43c6c7522dc5",
+      "bookTitle": "공통 교재 3",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000403",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "5a4047b0988891ac91d28bac13934a88",
+      "bookTitle": "공통 교재 4",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000404",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "609d13cbcef032b95ab961f142488f24",
+      "bookTitle": "공통 교재 5",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000405",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "85a5d26f5a641cec8f3cbc4fe34c7f79",
+      "bookTitle": "공통 교재 6",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000406",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "4989cc03ce8782dc00cc79656fc2bee5",
+      "bookTitle": "공통 교재 7",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000407",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "5ec93ab0992c5f23d823d1298d4c71dc",
+      "bookTitle": "공통 교재 8",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000408",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "01d7f0ae0f401beb9def2dc9cc8c9b07",
+      "bookTitle": "공통 교재 9",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000409",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "278343049368ddb4bd57eabb3a207c2b",
+      "bookTitle": "공통 교재 10",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000410",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "b4e40113ba870da05735c95e17b89fcb",
+      "bookTitle": "공통 교재 11",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000411",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "6eed1b5978083e1e00bf1a2f119a7f1e",
+      "bookTitle": "공통 교재 12",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000412",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "e9b474027161ad964e9fd2a3d9628dba",
+      "bookTitle": "공통 교재 13",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000413",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "c81967a8751f0e2b94ba8da046ae5f11",
+      "bookTitle": "공통 교재 14",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000414",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    },
+    {
+      "id": "a40c8b265dc93b57e878a8fcb2868f26",
+      "bookTitle": "공통 교재 15",
+      "className": "공통 교재 수업",
+      "requestedAt": "2026-10-01T00:00:00+00:00",
+      "anchorLineId": "af260000-0000-4000-8000-000000000415",
+      "requesterLabel": "공통 담당자 2",
+      "studentQuantity": 2,
+      "teacherQuantity": 0
+    }
+  ],
+  "pageSize": 15,
+  "totalCount": 16
+}

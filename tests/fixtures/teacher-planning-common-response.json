@@ -1,0 +1,353 @@
+{
+  "detail": {
+    "classItem": {
+      "id": "af250000-0000-4000-8000-000000000102",
+      "name": "전체 공통 수업",
+      "room": "별관 2강",
+      "grade": "중3",
+      "status": "수강",
+      "termId": null,
+      "endDate": null,
+      "subject": "영어",
+      "teacher": "공통 교사",
+      "schedule": "화 19:30-21:30",
+      "termName": null,
+      "className": "전체 공통 수업",
+      "classType": "정규",
+      "startDate": null,
+      "textbookIds": [],
+      "schedulePlan": {
+        "sessions": [
+          null,
+          {
+            "id": "session1",
+            "date": "2026-10-27",
+            "state": "active",
+            "endTime": "21:30",
+            "isForced": true,
+            "billingId": "period1",
+            "startTime": "19:30",
+            "teacherName": "공통 교사",
+            "classroomName": "별관 2강",
+            "sessionNumber": 1,
+            "makeupRequestId": "af250000-0000-4000-8000-000000000201",
+            "makeupRequestRole": "cancel"
+          }
+        ],
+        "sessionStates": {
+          "2026-10-27": "force_active"
+        },
+        "billingPeriods": [
+          {
+            "id": "period1",
+            "label": "10월",
+            "endDate": "2026-10-31",
+            "startDate": "2026-10-01",
+            "totalSessions": 1
+          }
+        ],
+        "sessionOverrides": {},
+        "sessionSchedules": {
+          "2026-10-27": {
+            "endTime": "21:30",
+            "startTime": "19:30",
+            "teacherName": "공통 교사"
+          }
+        }
+      },
+      "scheduleRevision": 0,
+      "scheduleStorageMode": "legacy"
+    },
+    "textbooks": [],
+    "teacherCatalogs": [
+      {
+        "id": "d522d364-5a5a-423b-9120-d8500ef4c96a",
+        "name": "teacher-planning-1",
+        "subjects": [
+          "영어팀"
+        ],
+        "isVisible": true
+      },
+      {
+        "id": "e341f14b-03a8-49f6-884f-78f12c859fbc",
+        "name": "teacher-planning-2",
+        "subjects": [
+          "영어팀"
+        ],
+        "isVisible": true
+      },
+      {
+        "id": "a0af8184-06e7-4d57-985f-ebae16e8a1e3",
+        "name": "teacher-planning-3",
+        "subjects": [
+          "영어팀"
+        ],
+        "isVisible": true
+      },
+      {
+        "id": "b2408a9e-ddd4-4b4c-9e0e-6d460cc7ca91",
+        "name": "teacher-planning-4",
+        "subjects": [
+          "영어팀"
+        ],
+        "isVisible": true
+      },
+      {
+        "id": "ba73e73d-191d-494f-890e-563b268617f0",
+        "name": "teacher-planning-5",
+        "subjects": [
+          "영어팀"
+        ],
+        "isVisible": true
+      }
+    ],
+    "classroomCatalogs": []
+  },
+  "makeup": {
+    "page": 1,
+    "rows": [
+      {
+        "id": "af250000-0000-4000-8000-000000000201",
+        "events": [],
+        "reason": "",
+        "status": "approval_pending",
+        "classId": "af250000-0000-4000-8000-000000000102",
+        "subject": "영어",
+        "className": "전체 공통 수업",
+        "createdAt": "2026-10-23T11:04:38.597371+00:00",
+        "finalNote": "",
+        "updatedAt": "2026-10-23T11:04:38.597371+00:00",
+        "approvedAt": "",
+        "approvedBy": "",
+        "cancelDate": "2026-10-22",
+        "canceledAt": "",
+        "canceledBy": "",
+        "completedAt": "",
+        "completedBy": "",
+        "makeupEndAt": "2026-10-24T12:00:00+00:00",
+        "makeupSlots": [
+          {
+            "endAt": "2026-10-24T12:00:00+00:00",
+            "startAt": "2026-10-24T10:00:00+00:00",
+            "classroom": "별관 2강"
+          }
+        ],
+        "requestKind": "cancel_makeup",
+        "requesterId": "af250000-0000-4000-8000-000000000001",
+        "teacherLabel": "선생님",
+        "approvalGroup": "english",
+        "approverLabel": "합성 담당자 2",
+        "makeupStartAt": "2026-10-24T10:00:00+00:00",
+        "rejectedReason": "",
+        "requesterLabel": "신청자",
+        "returnedReason": "",
+        "approvedByLabel": "",
+        "canceledByLabel": "",
+        "makeupClassroom": "별관 2강",
+        "completedByLabel": "",
+        "teacherCatalogId": "",
+        "teacherProfileId": "af250000-0000-4000-8000-000000000001",
+        "approverProfileId": "af250000-0000-4000-8000-000000000002",
+        "schedulePlanAfter": {},
+        "schedulePlanBefore": {},
+        "cancelAcademicEventId": "",
+        "makeupAcademicEventId": "",
+        "makeupAcademicEventIds": [],
+        "approverTeacherCatalogId": ""
+      }
+    ],
+    "pageSize": 15,
+    "totalCount": 1,
+    "viewCounts": {
+      "mine": 0,
+      "closed": 0,
+      "makeupPending": 0,
+      "refundPending": 0,
+      "approvalPending": 1
+    },
+    "subjectOptions": [
+      {
+        "count": 1,
+        "label": "영어",
+        "value": "영어"
+      },
+      {
+        "count": 0,
+        "label": "수학",
+        "value": "수학"
+      },
+      {
+        "count": 0,
+        "label": "과학",
+        "value": "과학"
+      }
+    ],
+    "teacherOptions": [
+      {
+        "count": 0,
+        "label": "teacher-planning-1",
+        "value": "id:d522d364-5a5a-423b-9120-d8500ef4c96a"
+      },
+      {
+        "count": 0,
+        "label": "teacher-planning-2",
+        "value": "id:e341f14b-03a8-49f6-884f-78f12c859fbc"
+      },
+      {
+        "count": 0,
+        "label": "teacher-planning-3",
+        "value": "id:a0af8184-06e7-4d57-985f-ebae16e8a1e3"
+      },
+      {
+        "count": 0,
+        "label": "teacher-planning-4",
+        "value": "id:b2408a9e-ddd4-4b4c-9e0e-6d460cc7ca91"
+      },
+      {
+        "count": 0,
+        "label": "teacher-planning-5",
+        "value": "id:ba73e73d-191d-494f-890e-563b268617f0"
+      },
+      {
+        "count": 1,
+        "label": "선생님",
+        "value": "name:선생님"
+      }
+    ]
+  },
+  "schedule": {
+    "storageMode": "legacy",
+    "runtimeVersion": 1,
+    "authoritativeSource": "legacy",
+    "effectiveScheduleContext": {
+      "classId": "af250000-0000-4000-8000-000000000102",
+      "version": 1,
+      "catalogs": {
+        "rooms": [],
+        "teachers": [
+          {
+            "id": "a0af8184-06e7-4d57-985f-ebae16e8a1e3",
+            "name": "teacher-planning-3"
+          },
+          {
+            "id": "b2408a9e-ddd4-4b4c-9e0e-6d460cc7ca91",
+            "name": "teacher-planning-4"
+          },
+          {
+            "id": "ba73e73d-191d-494f-890e-563b268617f0",
+            "name": "teacher-planning-5"
+          },
+          {
+            "id": "d522d364-5a5a-423b-9120-d8500ef4c96a",
+            "name": "teacher-planning-1"
+          },
+          {
+            "id": "e341f14b-03a8-49f6-884f-78f12c859fbc",
+            "name": "teacher-planning-2"
+          }
+        ]
+      },
+      "basicSlots": [
+        {
+          "id": null,
+          "endTime": "21:30",
+          "weekday": 2,
+          "startTime": "19:30",
+          "teacherCatalogId": null,
+          "classroomCatalogId": null,
+          "classroomUnresolved": true
+        }
+      ],
+      "approvedByIdentity": {}
+    }
+  },
+  "projection": {
+    "common": {
+      "sessions": [
+        null,
+        {
+          "id": "session1",
+          "date": "2026-10-27",
+          "state": "active",
+          "endTime": "21:30",
+          "isForced": true,
+          "billingId": "period1",
+          "startTime": "19:30",
+          "teacherName": "공통 교사",
+          "classroomName": "별관 2강",
+          "sessionNumber": 1,
+          "makeupRequestId": "af250000-0000-4000-8000-000000000201",
+          "makeupRequestRole": "cancel"
+        }
+      ],
+      "sessionStates": {
+        "2026-10-27": "force_active"
+      },
+      "billingPeriods": [
+        {
+          "id": "period1",
+          "label": "10월",
+          "endDate": "2026-10-31",
+          "startDate": "2026-10-01",
+          "totalSessions": 1
+        }
+      ],
+      "sessionOverrides": {},
+      "sessionSchedules": {
+        "2026-10-27": {
+          "endTime": "21:30",
+          "startTime": "19:30",
+          "teacherName": "공통 교사"
+        }
+      }
+    },
+    "original": {
+      "memo": "PRIVATE_PLAN_CANARY",
+      "history": [
+        {
+          "before": "PRIVATE_HISTORY_CANARY"
+        }
+      ],
+      "sessions": [
+        null,
+        {
+          "id": "session1",
+          "date": "2026-10-27",
+          "memo": "PRIVATE_MEMO_CANARY",
+          "state": "active",
+          "endTime": "21:30",
+          "isForced": true,
+          "billingId": "period1",
+          "startTime": "19:30",
+          "teacherName": "공통 교사",
+          "actualContent": "PRIVATE_LEARNING_CANARY",
+          "classroomName": "별관 2강",
+          "sessionNumber": 1,
+          "makeupRequestId": "af250000-0000-4000-8000-000000000201",
+          "makeupRequestRole": "cancel"
+        }
+      ],
+      "sessionStates": {
+        "2026-10-27": "force_active"
+      },
+      "billingPeriods": [
+        {
+          "id": "period1",
+          "label": "10월",
+          "endDate": "2026-10-31",
+          "private": "PRIVATE_PERIOD_CANARY",
+          "startDate": "2026-10-01",
+          "totalSessions": 1
+        }
+      ],
+      "sessionSchedules": {
+        "2026-10-27": {
+          "memo": "PRIVATE_OVERRIDE_CANARY",
+          "endTime": "21:30",
+          "startTime": "19:30",
+          "teacherName": "공통 교사"
+        }
+      }
+    }
+  }
+}

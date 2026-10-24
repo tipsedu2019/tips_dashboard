@@ -196,7 +196,9 @@ test("refresh before the first profile resolves keeps protected children closed 
   await h.resolve(1, profile("user-a", "teacher"));
   assert.equal(h.context.role, "teacher");
   assert.equal(h.context.canManageAll, false);
-  assert.equal(h.mounts, 1);
+  assert.equal(h.mounts, 0, "teacher must not mount management children");
+  assert.equal(h.input(), null);
+  assert.ok(h.destinations.includes(h.context.defaultAdminPath));
 });
 
 test("overlapping renewals cannot restore permissions from an older profile response", async t => {
@@ -211,8 +213,9 @@ test("overlapping renewals cannot restore permissions from an older profile resp
   assert.equal(h.context.role, "teacher");
   assert.equal(h.context.canManageAll, false);
   assert.equal(h.context.session.expires_at, 300);
-  assert.ok(h.input() === input, "the original input node stays mounted");
-  assert.equal(h.input().value, "보존할 내용");
+  assert.equal(h.input(), null, "teacher downgrade closes the management route");
+  assert.equal(input.isConnected, false, "an obsolete admin form cannot stay mounted");
+  assert.ok(h.destinations.includes(h.context.defaultAdminPath));
 });
 
 test("a different user immediately loses the old user's form while stale refresh work remains rejected", async t => {
@@ -542,7 +545,8 @@ test("a different account cannot share or apply the previous account's permissio
   await h.resolve(2, profile("user-b", "teacher"));
   assert.equal(h.context.user.id, "user-b");
   assert.equal(h.context.role, "teacher");
-  assert.equal(h.input().value, "");
+  assert.equal(h.input(), null, "another teacher account cannot mount management children");
+  assert.ok(h.destinations.includes(h.context.defaultAdminPath));
 });
 
 test("a synthetic downgraded actor cannot write through the real server authorization handler", async t => {

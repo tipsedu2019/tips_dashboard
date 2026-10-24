@@ -914,6 +914,11 @@
       "fileName": "20261022133155_management_class_schedule_ownership.sql",
       "status": "final",
       "sha256": "3f0e7b641157f46ebadfacd9b097c7bfd14f91521635afd476681ed7d45f4cd3"
+    },
+    {
+      "fileName": "20261023091500_dashboard_operational_role_scope.sql",
+      "status": "final",
+      "sha256": "dfa81cdeedcd307d8337235d7b2d2e0bf41eff059e63b66a43295c538ff3bdf5"
     }
   ]
 }

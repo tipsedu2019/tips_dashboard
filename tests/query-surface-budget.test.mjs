@@ -3309,3 +3309,69 @@ test("actual past-correction transport aborts at 20s and never automatically dup
   assert.equal(fixture.calls[0].retryEnabled, false)
   assert.equal(fixture.calls[0].parameters, parameters)
 })
+
+
+test("operational common RPC budgets distinguish exact contexts from numbered pages", () => {
+  const inspect = (name, args, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/tasks/common-read-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map(item => item.reason)
+  for (const name of ["get_operational_common_detail_v1", "get_word_retest_reference_data_v1"]) {
+    assert.deepEqual(inspect(name, "{p_id:request.id}"), [])
+    assert.deepEqual(inspect(name + "_other", "{}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{}", ".retry(false)").includes("list_abort_signal_missing"))
+  }
+  const rpc = "read_operational_common_v1"
+  for (const args of ['{p_operation:"options",p_args:{}}','{p_operation:"book_detail",p_args:{p_anchor:request.id}}']) assert.deepEqual(inspect(rpc,args),[])
+  for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(rpc,`{p_operation:"book_page",p_args:{p_page_size:${size}}}`),[])
+  for (const size of ["30", "null"]) assert.deepEqual(inspect(rpc,`{p_operation:"book_page",p_args:{p_page_size:${size}}}`),["rpc_page_limit_invalid"])
+  assert.deepEqual(inspect(rpc,'{p_operation:"book_request_options",p_args:{scope:request.scope,search:request.search,page:request.page,pageSize:15}}'),[])
+  assert.deepEqual(inspect(rpc,'{p_operation:"book_request_options",p_args:{pageSize:30}}'),['rpc_page_limit_invalid'])
+  assert.deepEqual(inspect(rpc,'{p_operation:"book_request_options",p_args:{}}'),['rpc_page_limit_missing'])
+  assert.deepEqual(inspect(rpc,'{p_operation:"book_page",p_args:{}}'),["rpc_page_limit_missing"])
+  for (const args of ['{p_operation:request.operation,p_args:{}}','{p_operation:"unreviewed",p_args:{}}','{p_operation:"options",p_args:{all:true}}','{...request,p_operation:"options",p_args:{}}']) assert.ok(inspect(rpc,args).some(reason=>reason.startsWith("rpc_page_limit_")))
+  assert.ok(inspect(rpc,'{p_operation:"options",p_args:{}}',".retry(false)").includes("list_abort_signal_missing"))
+})
+
+
+const wordRetestReferenceFile = "src/features/tasks/word-retest-reference-data.ts"
+const wordRetestReferenceSource = () => readFile(new URL(`../${wordRetestReferenceFile}`, import.meta.url), "utf8")
+const inspectWordRetestReference = (source) => inspectQuerySurfaceSource({
+  surface: "tasks", file: wordRetestReferenceFile, source,
+}).map((violation) => violation.reason).sort()
+
+test("exact four-reference boolean preflight is nonpageable in the actual retest helper", async () => {
+  const source = await wordRetestReferenceSource()
+  assert.match(source, /\.rpc\(["']validate_word_retest_references_v1["'],\s*\{\s*p_student_id:\s*input\.studentId,\s*p_class_id:\s*input\.classId,\s*p_textbook_id:\s*input\.textbookId,\s*p_teacher_id:\s*input\.teacherId,?\s*\}\)/u)
+  assert.match(source, /if \(data !== true\) throw/u, "only explicit scalar true accepts the reference preflight")
+  assert.deepEqual(inspectWordRetestReference(source), [])
+})
+
+test("boolean preflight recognition never exempts unknown or similar RPC names", async () => {
+  const source = await wordRetestReferenceSource()
+  for (const name of ["validate_word_retest_references_v2", "validate_word_retest_references_v1_page", "list_validate_word_retest_references_v1"]) {
+    const candidate = source.replace("validate_word_retest_references_v1", name)
+    assert.notEqual(candidate, source, "the negative fixture must replace the actual exact RPC")
+    assert.deepEqual(inspectWordRetestReference(candidate), ["rpc_page_limit_missing"])
+  }
+})
+
+test("boolean preflight classification retains the exact eight-second deadline", async () => {
+  const source = await wordRetestReferenceSource()
+  const marker = '}).abortSignal(AbortSignal.timeout(8_000)).retry(false)\n  if (error) throw error\n  if (data !== true)'
+  assert.equal(source.split(marker).length, 2, "target exactly the boolean producer rather than reference catalog reads")
+  for (const suffix of ["", ".abortSignal(AbortSignal.timeout(20_000))", ".abortSignal(signal)"]) {
+    const candidate = source.replace(marker, `})${suffix}.retry(false)\n  if (error) throw error\n  if (data !== true)`)
+    assert.deepEqual(inspectWordRetestReference(candidate), ["list_abort_signal_missing"])
+  }
+})
+
+test("boolean preflight classification never enables automatic retry", async () => {
+  const source = await wordRetestReferenceSource()
+  const marker = '}).abortSignal(AbortSignal.timeout(8_000)).retry(false)\n  if (error) throw error\n  if (data !== true)'
+  assert.equal(source.split(marker).length, 2, "target exactly the boolean producer rather than reference catalog reads")
+  for (const suffix of ["", ".retry(true)", ".retry(shouldRetry)"]) {
+    const candidate = source.replace(marker, `}).abortSignal(AbortSignal.timeout(8_000))${suffix}\n  if (error) throw error\n  if (data !== true)`)
+    assert.deepEqual(inspectWordRetestReference(candidate), ["list_retry_false_missing"])
+  }
+})

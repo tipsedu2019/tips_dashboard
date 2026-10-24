@@ -1,8 +1,8 @@
 begin;
 select no_plan();
 create function pg_temp.ai_id(n integer) returns uuid language sql immutable as $$select ('ad030000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
-insert into auth.users(id,instance_id,aud,role,email) select pg_temp.ai_id(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','ai-transition-'||n||'@test.invalid' from generate_series(1,4) n;
-insert into public.profiles(id,role,name) select pg_temp.ai_id(n),case n when 1 then 'admin' when 2 then 'staff' when 3 then 'teacher' else 'assistant' end,'synthetic transition' from generate_series(1,4) n on conflict(id) do update set role=excluded.role;
+insert into auth.users(id,instance_id,aud,role,email) select pg_temp.ai_id(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','ai-transition-'||n||'@test.invalid' from generate_series(1,5) n;
+insert into public.profiles(id,role,name) select pg_temp.ai_id(n),case n when 1 then 'admin' when 2 then 'staff' when 3 then 'teacher' when 4 then 'assistant' else 'staff' end,'synthetic transition' from generate_series(1,5) n on conflict(id) do update set role=excluded.role;
 insert into dashboard_private.ai_agent_requests(id,requester_id,title,body) values(pg_temp.ai_id(10),pg_temp.ai_id(2),'synthetic','synthetic');
 insert into dashboard_private.ai_agent_credentials(id,created_by,label,token_hash,scopes,expires_at) values(pg_temp.ai_id(20),pg_temp.ai_id(1),'synthetic',repeat('d',64),array['ai-agent:requests:read','ai-agent:requests:claim','ai-agent:requests:update'],now()+interval '1 day');
 insert into dashboard_private.ai_agent_credential_grants(credential_id,queues,actions,expires_at) values(pg_temp.ai_id(20),array['employee_requests'],array['read','claim','renew','progress','question','done'],now()+interval '1 day');
@@ -50,7 +50,7 @@ select throws_ok($q$select public.ai_agent_bot_api_v1(repeat('d',64),'claim',jso
 select throws_ok($q$select pg_temp.bot('question',10,'3',36,'{"text":"Which item?"}')$q$,'55000','ai_agent_claim_lost','answer invalidates old question readback receipt');
 reset role;
 -- Every employee role uses the actual append/cancel writer for own requests.
-insert into dashboard_private.ai_agent_requests(id,requester_id,title,body) select pg_temp.ai_id(n),pg_temp.ai_id(case n when 11 then 2 when 12 then 3 when 13 then 4 when 14 then 2 when 15 then 3 else 4 end),'synthetic own','synthetic' from generate_series(11,16)n;
+insert into dashboard_private.ai_agent_requests(id,requester_id,title,body) select pg_temp.ai_id(n),pg_temp.ai_id(case n when 11 then 2 when 12 then 3 when 13 then 5 when 14 then 2 when 15 then 3 else 5 end),'synthetic own','synthetic' from generate_series(11,16)n;
 select set_config('request.jwt.claim.sub',pg_temp.ai_id(2)::text,true);
 set local role authenticated;
 select is(pg_temp.user_op('append_message',11,'1',41,'{"kind":"comment","text":"staff"}')->'request'->>'version','2','staff own append works');
@@ -67,10 +67,15 @@ select throws_ok($q$select pg_temp.user_op('cancel',16,'1',48)$q$,'P0002','ai_ag
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.ai_id(4)::text,true);
 set local role authenticated;
-select is(pg_temp.user_op('append_message',13,'1',49,'{"kind":"comment","text":"assistant"}')->'request'->>'version','2','assistant own append works');
-select is(pg_temp.user_op('cancel',16,'1',50)->>'status','cancelled','assistant own cancel works');
-select throws_ok($q$select pg_temp.user_op('append_message',11,'2',51,'{"kind":"comment","text":"other"}')$q$,'P0002','ai_agent_not_found','assistant other append denied');
-select throws_ok($q$select pg_temp.user_op('cancel',12,'2',52)$q$,'P0002','ai_agent_not_found','assistant other cancel denied');
+select throws_ok($q$select pg_temp.user_op('append_message',13,'1',49,'{"kind":"comment","text":"assistant"}')$q$,'42501','ai_agent_forbidden','assistant append denied before request/replay');
+select throws_ok($q$select pg_temp.user_op('cancel',16,'1',50)$q$,'42501','ai_agent_forbidden','assistant cancel denied');
+reset role;
+select set_config('request.jwt.claim.sub',pg_temp.ai_id(5)::text,true);
+set local role authenticated;
+select is(pg_temp.user_op('append_message',13,'1',49,'{"kind":"comment","text":"second staff"}')->'request'->>'version','2','second staff own append works');
+select is(pg_temp.user_op('cancel',16,'1',50)->>'status','cancelled','second staff own cancel works');
+select throws_ok($q$select pg_temp.user_op('append_message',11,'2',51,'{"kind":"comment","text":"other"}')$q$,'P0002','ai_agent_not_found','second staff other append denied');
+select throws_ok($q$select pg_temp.user_op('cancel',12,'2',52)$q$,'P0002','ai_agent_not_found','second staff other cancel denied');
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.ai_id(1)::text,true);
 set local role authenticated;
@@ -365,6 +370,11 @@ select throws_ok($q$select public.ai_agent_user_api_v1('actions',jsonb_build_obj
 select lives_ok($q$select public.ai_agent_user_api_v1('action_events',jsonb_build_object('id',pg_temp.ai_id(75),'actionId',pg_temp.ai_id(2001)))$q$,'admin can read authorized immutable journal');
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.ai_id(4)::text,true);
+set local role authenticated;
+select throws_ok($q$select public.ai_agent_user_api_v1('actions',jsonb_build_object('id',pg_temp.ai_id(75)))$q$,'42501','ai_agent_forbidden','assistant cannot read action list');
+select throws_ok($q$select public.ai_agent_user_api_v1('action_events',jsonb_build_object('id',pg_temp.ai_id(75),'actionId',pg_temp.ai_id(2001)))$q$,'42501','ai_agent_forbidden','assistant cannot read action journal');
+reset role;
+select set_config('request.jwt.claim.sub',pg_temp.ai_id(5)::text,true);
 set local role authenticated;
 select throws_ok($q$select public.ai_agent_user_api_v1('actions',jsonb_build_object('id',pg_temp.ai_id(75)))$q$,'P0002','ai_agent_not_found','nonowner cannot list actions');
 select throws_ok($q$select public.ai_agent_user_api_v1('action_events',jsonb_build_object('id',pg_temp.ai_id(75),'actionId',pg_temp.ai_id(2001)))$q$,'P0002','ai_agent_not_found','nonowner cannot read journal');

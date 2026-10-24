@@ -209,11 +209,33 @@ select is(
 reset role;
 update public.profiles set role = 'teacher' where id = pg_temp.fid(900);
 set local role authenticated;
+-- Raw legacy readers no longer expose class metadata to teachers. The actual
+-- curriculum UI reads v2 through the fixed common-info gateway instead.
 select is(
   (public.get_academic_curriculum_numbered_page_v1(pg_temp.filters(), 1, 10, true) ->> 'totalCount')::integer,
-  3,
-  'teacher keeps final authenticated class-read visibility'
+  0,
+  'teacher legacy numbered reader cannot expose raw class metadata'
 );
+select is(
+  public.get_academic_curriculum_page_v1(pg_temp.filters(), null, null, 30, true) -> 'rows',
+  '[]'::jsonb,
+  'teacher legacy cursor reader cannot expose raw class metadata'
+);
+create temporary table teacher_curriculum_unscoped on commit drop as
+select public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(), 1, 10, true) data;
+select is((data ->> 'totalCount')::integer, 3, 'teacher actual v2 common reader retains all three matching classes')
+from teacher_curriculum_unscoped;
+select is((data #>> '{stats,total}')::integer, 3, 'teacher actual v2 common stats agree with the full list')
+from teacher_curriculum_unscoped;
+select is(
+  (select pg_catalog.jsonb_agg(row ->> 'id' order by row ->> 'id')
+   from pg_catalog.jsonb_array_elements(data -> 'rows') row),
+  pg_catalog.jsonb_build_array(pg_temp.fid(1)::text, pg_temp.fid(2)::text, pg_temp.fid(3)::text),
+  'teacher actual v2 rows preserve every ungrouped and grouped class ID'
+)
+from teacher_curriculum_unscoped;
+select is(data -> 'resolvedPeriodId', 'null'::jsonb, 'teacher actual v2 common reader remains unscoped')
+from teacher_curriculum_unscoped;
 
 reset role;
 select pg_catalog.set_config('request.jwt.claim.sub', '', true);

@@ -677,13 +677,13 @@ test("레거시 브리지는 sourceEventId만 받고 권위 원본·공유 소�
   assert.match(sql, /canonical_event\.payload ->> 'makeup_request_id'/)
 })
 
-test("조교 휴보강 알림 후처리는 actor profile에서 service-role dispatch 전에 거절한다", async () => {
+test("선생님·조교 휴보강 알림 후처리는 actor profile에서 service-role dispatch 전에 거절한다", async () => {
   const route = await optionalSource(routeUrl)
   const postSource = route.slice(route.indexOf("export async function POST"))
   const authIndex = postSource.indexOf("actorClient.auth.getUser(token)")
   const profileLookupIndex = postSource.indexOf('.from("profiles")')
   const lookupFailureIndex = postSource.indexOf("if (actorProfileError || !isRecord(actorProfile))")
-  const assistantDenialIndex = postSource.indexOf('if (text(actorProfile.role) === "assistant")')
+  const assistantDenialIndex = postSource.indexOf('if (["teacher", "assistant"].includes(text(actorProfile.role)))')
   const serviceClientIndex = postSource.indexOf("const serverClient = serviceClient()")
   const bodyIndex = postSource.indexOf("request.json()")
   const planIndex = postSource.indexOf("get_makeup_legacy_dispatch_plan_v1")
@@ -698,7 +698,7 @@ test("조교 휴보강 알림 후처리는 actor profile에서 service-role disp
   )
   assert.match(
     postSource,
-    /if \(text\(actorProfile\.role\) === "assistant"\) return response\(\{ ok: false, error: "휴보강 접근 권한이 없습니다\." \}, 403\)/,
+    /if \(\["teacher", "assistant"\]\.includes\(text\(actorProfile\.role\)\)\) return response\(\{ ok: false, error: "휴보강 접근 권한이 없습니다\." \}, 403\)/,
   )
   assert.doesNotMatch(postSource, /serverClient\s*\.from\("profiles"\)/)
   assert.ok(authIndex >= 0 && authIndex < profileLookupIndex, "actor authentication must precede the profile role lookup")
@@ -960,7 +960,7 @@ test("영어·수학 레거시 토글은 공통 과목팀 canonical rule 한 건
 test("pgTAP 패킷은 single-writer 경계·원본 계보·스냅샷·최종 parity를 검증한다", async () => {
   const sql = await optionalSource(pgTapUrl)
 
-  assert.match(sql, /select plan\(85\)/)
+  assert.match(sql, /select plan\(92\)/)
   assert.match(sql, /mirror_makeup_notification_template_v1/)
   assert.match(sql, /hasnt_trigger\([\s\S]*?reconcile_makeup_notification_settings_after_write_v1/)
   assert.match(sql, /authenticated direct legacy setting writers remain closed/)

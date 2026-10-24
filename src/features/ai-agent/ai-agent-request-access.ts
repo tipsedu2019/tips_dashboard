@@ -1,7 +1,7 @@
 export function resolveAiAgentRequestAccess({ role, isFallbackRole, loading }: {
   role: string | null | undefined; isFallbackRole: boolean | undefined; loading: boolean;
 }) {
-  const canUseRequests = !loading && isFallbackRole === false && ['admin', 'staff', 'teacher', 'assistant'].includes(role ?? '');
+  const canUseRequests = !loading && isFallbackRole === false && ['admin', 'staff', 'teacher'].includes(role ?? '');
   return { canUseRequests, canViewAll: canUseRequests && role === 'admin' };
 }
 export type AiRequestActor = { userId: string; role: string };

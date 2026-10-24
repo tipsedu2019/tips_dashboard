@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { assertAnnualContract, buildFixtureSql, HTTP_ACTORS, HTTP_CASES, HTTP_DETAIL_ID, HTTP_SCHOOL_ID,
+import { assertAnnualContract, assertAnnualRoleContract, buildFixtureSql, HTTP_ACTORS, HTTP_CASES, HTTP_DETAIL_ID, HTTP_SCHOOL_ID,
   HTTP_YEAR, ownedSidecarId, signSyntheticJwt, validateDockerBoundary, validateLocalTarget, validateSidecarBoundary } from "./probe-operations-annual-board-http.mjs";
 
 const project = "tips_supabase_db_qa_abcdef012345";
@@ -197,8 +197,55 @@ test("HTTP response contract rejects exclusive-end or metadata/date regressions 
   }
 });
 
+
+test("assistant annual HTTP scope accepts an explicit empty response and rejects leaks or malformed counts", () => {
+  const empty = { ok: true, data: { academicYear: HTTP_YEAR, rows: [],
+    summary: { eventCount: 0, schoolCount: 0, activeTypeCount: 0 } } };
+  assert.equal(assertAnnualRoleContract(empty, "assistant"), null);
+  for (const mutate of [
+    value => { value.ok = false; },
+    value => { value.data.academicYear += 1; },
+    value => { delete value.data.rows; },
+    value => { value.data.rows.push({ schoolId: HTTP_SCHOOL_ID, typeBuckets: {} }); },
+    value => { value.data.rows.push({ schoolId: "another-school", typeBuckets: {} }); },
+    value => { value.data.summary.eventCount = 1; },
+    value => { value.data.summary.schoolCount = 1; },
+    value => { value.data.summary.activeTypeCount = 1; },
+    value => { value.data.summary.eventCount = "0"; },
+    value => { delete value.data.summary; },
+  ]) {
+    const changed = structuredClone(empty);
+    mutate(changed);
+    assert.throws(() => assertAnnualRoleContract(changed, "assistant"), /^Error: annual_http_/u);
+  }
+  for (const role of ["viewer", "teacher", "staff", "admin"]) {
+    assert.throws(() => assertAnnualRoleContract(empty, role), /annual_http_entry_count_mismatch/u,
+      `${role} must not inherit assistant empty-scope expectations`);
+  }
+  assert.throws(() => assertAnnualRoleContract(empty, "unknown"), /annual_http_role_scope_invalid/u);
+});
+
+test("all four existing full-read roles keep the unchanged strict annual date and metadata oracle", () => {
+  const entries = HTTP_CASES.map(entry => ({ id: entry.id, start: entry.start, end: entry.end,
+    dateLabel: entry.start === entry.end ? entry.start : `${entry.start} ~ ${entry.end}`,
+    displayMeta: entry.meta.rangeEnd == null ? {} : { rangeEnd: String(entry.meta.rangeEnd) } }));
+  entries.push({ id: `exam-detail:${HTTP_DETAIL_ID}`, start: "2198-10-07", end: "2198-10-07", dateLabel: "2198-10-07",
+    examDateLabel: "2198-10-07", displayMeta: { rangeEnd: "2198-10-08" } });
+  const body = { ok: true, data: { academicYear: HTTP_YEAR,
+    rows: [{ schoolId: HTTP_SCHOOL_ID, typeBuckets: { examination: entries } }] } };
+  for (const role of ["viewer", "teacher", "staff", "admin"]) {
+    assert.deepEqual(assertAnnualRoleContract(body, role), assertAnnualContract(body));
+    const changed = structuredClone(body);
+    changed.data.rows[0].typeBuckets.examination[0].end = "2198-10-09";
+    assert.throws(() => assertAnnualRoleContract(changed, role), /annual_http_inclusive_period_mismatch/u);
+  }
+  assert.throws(() => assertAnnualRoleContract(body, "assistant"), /annual_http_assistant_scope_mismatch/u);
+});
+
 test("runtime source keeps transport secrets off arguments/output and exact owned cleanup", async () => {
   const source = await readFile(new URL("probe-operations-annual-board-http.mjs", import.meta.url), "utf8");
+  assert.match(source, /assertAnnualRoleContract\(response\.body, actor\.role\)/u);
+  assert.match(source, /"assistant_raw_rls_mismatch"/u);
   assert.match(source, /"--pull=never"/u);
   assert.match(source, /"--read-only"/u);
   assert.match(source, /"--env", "PGRST_DB_URI", "--env", "PGRST_JWT_SECRET"/u);

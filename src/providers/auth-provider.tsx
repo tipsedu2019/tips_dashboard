@@ -60,6 +60,7 @@ type AuthContextValue = {
   canUseAiAgentRequests: boolean
   canViewAllAiAgentRequests: boolean
   canManageAll: boolean
+  canReadOperations: boolean
   canEditCurriculumPlanning: boolean
   canEditClassSchedulePlanning: boolean
   canEditClassSchedule: boolean
