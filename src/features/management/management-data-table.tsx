@@ -105,7 +105,7 @@ import {
 } from "./class-schedule-slots";
 import {
   ClassEnrollmentStatusCell,
-  type ClassRosterMode,
+  type LoadClassRoster,
 } from "./class-enrollment-status-cell";
 import {
   formatStudentSchoolCategoryLabel,
@@ -370,7 +370,7 @@ type ManagementTableActions = {
   onOpenSchoolMaster?: () => void;
   onOpenTeacherMaster?: () => void;
   onOpenClassroomMaster?: () => void;
-  onLoadClassRoster?: (classId: string, mode: ClassRosterMode) => Promise<unknown[]>;
+  onLoadClassRoster?: LoadClassRoster;
 };
 
 type StoredManagementScroll = {
@@ -836,15 +836,6 @@ function renderClassCapacityCell(row: ManagementRow) {
   return capacity > 0 ? <span className="text-sm text-foreground">{capacity}</span> : null;
 }
 
-function getClassEnrollmentStatusCellKey(row: ManagementRow) {
-  const raw = row.raw || {};
-  return [
-    row.id,
-    raw.registeredCount || raw.registered_count || row.metrics.studentCount || 0,
-    raw.waitlistCount || raw.waitlist_count || row.metrics.waitlistCount || 0,
-  ].join(":");
-}
-
 function renderPlainCell(value: unknown, className = "text-sm text-foreground") {
   const normalized = normalizeScalar(value);
   if (!normalized) {
@@ -1286,7 +1277,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           <StudentEnrollmentStatusCell key={`${row.original.id}:${row.original.metrics.classCount}:${row.original.metrics.waitlistCount}:${row.original.raw?.updated_at || ""}`} row={row.original} onLoad={actions.onLoadStudentEnrollments} />
         ) : (
           <ClassEnrollmentStatusCell
-            key={getClassEnrollmentStatusCellKey(row.original)}
             row={row.original}
             onLoadRoster={actions.onLoadClassRoster}
           />
@@ -2548,7 +2538,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                   <dt className="text-muted-foreground">수강</dt>
                   <dd className="min-w-0 [&>div]:min-w-0">
                     <ClassEnrollmentStatusCell
-                      key={getClassEnrollmentStatusCellKey(record)}
                       row={record}
                       onLoadRoster={actions.onLoadClassRoster}
                     />
