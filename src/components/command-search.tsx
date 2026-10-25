@@ -290,7 +290,7 @@ export function CommandSearch({ open, onOpenChange, returnFocusRef }: CommandSea
           <CommandList data-testid="admin-quick-search-list">
             <CommandEmpty>일치하는 메뉴가 없습니다.</CommandEmpty>
             {groupedEntries.map(([group, items]) => (
-              <CommandGroup key={group} heading={`${group} ${items.length}개`}>
+              <CommandGroup key={group} heading={group}>
                 {items.map((item) => {
                   const Icon = item.icon
                   const isCurrent = normalizeCommandPath(item.url) === currentPath

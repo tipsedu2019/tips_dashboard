@@ -650,7 +650,8 @@ test("quick search remains a discoverable menu search", async () => {
   assert.match(source, /aria-label=\{`빠른 이동: \$\{item\.title\}/);
   assert.match(source, /현재/);
   assert.match(source, /<ArrowRight/);
-  assert.match(source, /heading=\{`\$\{group\} \$\{items\.length\}개`\}/);
+  assert.match(source, /<CommandGroup key=\{group\} heading=\{group\}>/);
+  assert.doesNotMatch(source, /heading=\{`\$\{group\} \$\{items\.length\}개`\}/);
   assert.match(source, /keywords=\{\[item\.group, item\.url\]\}/);
   assert.doesNotMatch(source, /운영 워크스페이스/);
   assert.doesNotMatch(source, /<span className="truncate text-xs text-zinc-500 dark:text-zinc-400">\{item\.group\}<\/span>/);

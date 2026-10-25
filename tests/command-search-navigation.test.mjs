@@ -4,7 +4,9 @@ import { JSDOM } from "jsdom"
 import * as React from "react"
 import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs"
 
-async function setup(t, { dirty = true, detail = true, skipAutoFocusNotification = false } = {}) {
+async function setup(t, { dirty = true, detail = true, skipAutoFocusNotification = false,
+  auth = { canManageAll: true, canEditCurriculumPlanning: true, canUseAssistantOperations: false },
+} = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: "https://test.invalid/admin/students?selected=student-1" })
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   globalThis.window = dom.window
@@ -31,7 +33,7 @@ async function setup(t, { dirty = true, detail = true, skipAutoFocusNotification
   const boundaries = new Map([
     ["next/navigation", { usePathname: () => "/admin/students", useRouter: () => router }],
     ["next/link", ({ children, ...props }) => React.createElement("a", props, children)],
-    ["@/providers/auth-provider", { useAuth: () => ({ canManageAll: true, canEditCurriculumPlanning: true, canUseAssistantOperations: false }) }],
+    ["@/providers/auth-provider", { useAuth: () => auth }],
     ["@/components/mode-toggle", { ModeToggle: () => null }],
     ["@/hooks/use-mobile", { useIsMobile: () => false }],
   ])
@@ -77,7 +79,18 @@ async function setup(t, { dirty = true, detail = true, skipAutoFocusNotification
     else { await React.act(async () => item.click()); await settle() }
   }
   const button = async name => { const el = [...document.querySelectorAll('[data-testid="confirm"] button')].find(b => b.textContent === name); assert.ok(el); await React.act(async () => el.click()); await settle() }
-  return { open, key, select, button, calls, prefetches, confirmationOrigins, settle }
+  const search = async value => {
+    const input = document.querySelector('[cmdk-input]')
+    assert.ok(input)
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, value)
+      input.dispatchEvent(new window.Event("input", { bubbles: true }))
+    })
+    await settle()
+  }
+  const visibleItems = () => [...document.querySelectorAll('[cmdk-item]')].filter(item => !item.closest('[hidden]'))
+  const visibleHeadings = () => [...document.querySelectorAll('[cmdk-group-heading]')].filter(item => !item.closest('[hidden]')).map(item => item.textContent)
+  return { open, key, select, button, search, visibleItems, visibleHeadings, calls, prefetches, confirmationOrigins, settle }
 }
 
 test("header search opens by click while global hotkeys preserve normal input", async t => {
@@ -138,4 +151,68 @@ test("reopening quick search resets selection even without the optional auto-foc
   const p = await setup(t, { dirty: false, skipAutoFocusNotification: true })
   for (let index = 0; index < 3; index += 1) { await p.open(); await p.select("admin-classes") }
   assert.deepEqual(p.calls, ["/admin/classes", "/admin/classes", "/admin/classes"])
+})
+
+test("filtered quick search uses group names without unrelated total counts", async t => {
+  const p = await setup(t, { dirty: false })
+  await p.open()
+  const initialIds = p.visibleItems().map(item => item.id).sort()
+  assert.ok(initialIds.length > 1)
+
+  await p.search("통계")
+  assert.deepEqual(p.visibleItems().map(item => item.getAttribute("data-testid")), ["admin-quick-search-item-admin-statistics"])
+  assert.deepEqual(p.visibleHeadings(), ["관리"])
+
+  await p.search("zzzz-not-a-menu")
+  assert.equal(p.visibleItems().length, 0)
+  assert.deepEqual(p.visibleHeadings(), [])
+  assert.equal(document.querySelector('[cmdk-empty]')?.textContent, "일치하는 메뉴가 없습니다.")
+
+  await p.search("수업")
+  assert.ok(p.visibleItems().length > 1)
+  assert.ok(p.visibleItems().some(item => item.getAttribute("data-testid") === "admin-quick-search-item-admin-classes"))
+  assert.ok(p.visibleHeadings().every(heading => !/\d+개/.test(heading)))
+
+  await p.search("")
+  assert.deepEqual(p.visibleItems().map(item => item.id).sort(), initialIds)
+  assert.equal(document.querySelector('[cmdk-empty]'), null)
+  await p.search("통계")
+  await p.key("Enter")
+  assert.deepEqual(p.calls, ["/admin/statistics"])
+  assert.equal(document.querySelector('[data-testid="admin-quick-search-dialog"]'), null)
+})
+
+test("filtered quick search Escape restores its opener and dirty navigation keeps the draft", async t => {
+  const p = await setup(t)
+  await p.open()
+  await p.search("통계")
+  await p.key("Escape")
+  assert.ok(document.activeElement.matches('[data-testid="admin-quick-search-trigger"]'))
+  assert.deepEqual(p.calls, [])
+  await p.open()
+  await p.search("통계")
+  await p.key("Enter")
+  assert.deepEqual(p.calls, [])
+  assert.deepEqual(p.confirmationOrigins, [{ quickSearchExists: false, active: "빠른 이동 열기" }])
+  await p.button("계속 편집")
+  assert.equal(document.querySelector('[aria-label="학생 초안"]').value, "미저장 초안")
+  assert.ok(document.activeElement.matches('[aria-label="학생 초안"]'))
+})
+
+for (const assistant of [false, true]) test(`filtered quick search preserves ${assistant ? "assistant" : "teacher"} menu boundaries`, async t => {
+  const p = await setup(t, { dirty: false, auth: {
+    canManageAll: false, canReadOperations: !assistant, canUseAssistantOperations: assistant, isAdmin: false,
+  } })
+  await p.open()
+  const itemIds = p.visibleItems().map(item => item.getAttribute("data-testid"))
+  assert.ok(itemIds.includes("admin-quick-search-item-admin-word-retests"))
+  assert.ok(!itemIds.some(id => /admin-settings|admin-statistics|admin-public-content/.test(id)))
+  if (assistant) assert.deepEqual(itemIds, ["admin-quick-search-item-admin-word-retests"])
+  else assert.ok(itemIds.includes("admin-quick-search-item-admin-curriculum"))
+  await p.search("통계")
+  assert.equal(p.visibleItems().length, 0)
+  assert.equal(document.querySelector('[cmdk-empty]')?.textContent, "일치하는 메뉴가 없습니다.")
+  await p.search("재시험")
+  assert.deepEqual(p.visibleItems().map(item => item.getAttribute("data-testid")), ["admin-quick-search-item-admin-word-retests"])
+  assert.deepEqual(p.visibleHeadings(), ["영어"])
 })
