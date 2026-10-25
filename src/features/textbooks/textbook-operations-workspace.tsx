@@ -1,6 +1,7 @@
 "use client";
 import { TeacherTextbookRequestWorkspace } from "./teacher-textbook-request-workspace";
 import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
+import { TEXTBOOK_FILTER_SUBJECT_OPTIONS, filterTextbookPickerGroups, getTextbookFilterGradeOptions, isRetiredTextbookGradeFilter, isRetiredTextbookSubjectFilter, normalizeTextbookCatalogFilters, normalizeTextbookPickerFilters } from "./textbook-filter-policy";
 import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
 
@@ -145,7 +146,6 @@ import {
   TextbookGradeLevel,
   TextbookSchoolLevel,
   TextbookSubSubjectSettingRecord,
-  getGradeOptionsForSchoolLevel,
   getSubSubjectOptionsForSubject,
   getTextbookCategoryLabel,
   getTextbookGradeSummary,
@@ -1392,7 +1392,7 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
     [acceptedMasterOptions],
   );
   const gradeLevelGroupOptions = useMemo(
-    () => getGradeOptionsForSchoolLevel(schoolLevelGroupFilter === "all" ? "" : schoolLevelGroupFilter),
+    () => getTextbookFilterGradeOptions(schoolLevelGroupFilter),
     [schoolLevelGroupFilter],
   );
   const acceptedMasterSummary = numbered.master.summary.value;
@@ -2133,11 +2133,12 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
 
   function applyMobileClassificationFilters(filters: TextbookClassificationFilters) {
     requestLocalAction(() => {
+      const normalized = normalizeTextbookCatalogFilters({ subject: filters.subject, gradeLevel: filters.grade, subSubject: filters.category });
       clearTransientTextbookFeedback();
-      setSubjectGroupFilter(filters.subject);
-      setCategoryGroupFilter(filters.category);
+      setSubjectGroupFilter(normalized.subject);
+      setCategoryGroupFilter(normalized.subSubject);
       setSchoolLevelGroupFilter(filters.school);
-      setGradeLevelGroupFilter(filters.grade);
+      setGradeLevelGroupFilter(normalized.gradeLevel);
       clearMasterSelection();
     }, { skipConfirmation: !masterBulkDraftDirty });
   }
@@ -2145,7 +2146,7 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
   function changeSubjectGroupFilter(value: string) {
     requestLocalAction(() => {
       clearTransientTextbookFeedback();
-      setSubjectGroupFilter(value);
+      setSubjectGroupFilter(isRetiredTextbookSubjectFilter(value) ? "all" : value);
       setCategoryGroupFilter("all");
       clearMasterSelection();
     }, { skipConfirmation: !(masterBulkDraftDirty) });
@@ -2163,7 +2164,7 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
   function changeGradeLevelGroupFilter(value: string) {
     requestLocalAction(() => {
       clearTransientTextbookFeedback();
-      setGradeLevelGroupFilter(value);
+      setGradeLevelGroupFilter(isRetiredTextbookGradeFilter(value) ? "all" : value);
       clearMasterSelection();
     }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
@@ -4882,7 +4883,7 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
                   categoryFilter={draft.category} onCategoryFilterChange={category => setDraft({ ...draft, category })} categoryOptions={categoryGroupOptions}
                   schoolLevelFilter={draft.school} onSchoolLevelFilterChange={school => setDraft({ ...draft, school, grade: "all" })}
                   gradeLevelFilter={draft.grade} onGradeLevelFilterChange={grade => setDraft({ ...draft, grade })}
-                  gradeLevelOptions={getGradeOptionsForSchoolLevel(draft.school === "all" ? "" : draft.school)} />}
+                  gradeLevelOptions={getTextbookFilterGradeOptions(draft.school)} />}
               </TextbookMobileFilters>
               <Button type="button" variant="ghost" size="icon" className="shrink-0 md:hidden" aria-label="모바일 교재 필터 초기화" title="필터 초기화" disabled={!hasTextbookListFilter} onClick={resetTextbookListFilters}><RefreshCw className="size-4" aria-hidden="true" /></Button>
               {listReadFeedback ?? (selectedTextbookRows.length > 0 ? (
@@ -5727,6 +5728,7 @@ function SearchCombobox({
   contentClassName,
   allowDeselect = false,
   filterGroups = [],
+  filterPolicy,
   serverState,
   selectedDisplayOption,
 }: {
@@ -5743,6 +5745,7 @@ function SearchCombobox({
   contentClassName?: string;
   allowDeselect?: boolean;
   filterGroups?: SearchSelectFilterGroup[];
+  filterPolicy?: "textbook";
   serverState?: TextbookReferencePickerState;
   selectedDisplayOption?: SearchSelectOption | null;
 }) {
@@ -5752,19 +5755,27 @@ function SearchCombobox({
   const filterPanelId = useId();
   const [selectedFilterValues, setSelectedFilterValues] = useState<Record<string, string[]>>({});
   const selected = options.find((option) => option.value === value) || (selectedDisplayOption?.value === value ? selectedDisplayOption : undefined);
-  const effectiveFilterGroups = serverState?.baseFilterGroups || filterGroups;
-  const effectiveSelectedFilterValues = serverState?.selectedFilters || selectedFilterValues;
+  const rawFilterGroups = serverState?.baseFilterGroups || filterGroups;
+  const effectiveFilterGroups = filterPolicy === "textbook" ? filterTextbookPickerGroups(rawFilterGroups) : rawFilterGroups;
+  const rawSelectedFilterValues = serverState?.selectedFilters || selectedFilterValues;
+  const effectiveSelectedFilterValues = filterPolicy === "textbook" ? normalizeTextbookPickerFilters(rawSelectedFilterValues) : rawSelectedFilterValues;
   const activeFilterCount = serverState?.activeFilterCount ?? effectiveFilterGroups.reduce((sum, group) => {
     const validValues = new Set(group.options.map((option) => option.value));
     return sum + (effectiveSelectedFilterValues[group.key] || []).filter((value) => validValues.has(value)).length;
   }, 0);
-  const visibleFilterGroups = serverState?.visibleFilterGroups || buildVisibleSearchSelectFilterGroups(options, effectiveFilterGroups, effectiveSelectedFilterValues);
-  const filteredOptions = serverState ? options : filterGroups.length === 0
+  const rawVisibleFilterGroups = serverState?.visibleFilterGroups || buildVisibleSearchSelectFilterGroups(options, effectiveFilterGroups, effectiveSelectedFilterValues);
+  const visibleFilterGroups = filterPolicy === "textbook" ? filterTextbookPickerGroups(rawVisibleFilterGroups) : rawVisibleFilterGroups;
+  const filteredOptions = serverState ? options : effectiveFilterGroups.length === 0
     ? options
-    : options.filter((option) => doesSearchOptionMatchFilters(option, filterGroups, selectedFilterValues));
+    : options.filter((option) => doesSearchOptionMatchFilters(option, effectiveFilterGroups, effectiveSelectedFilterValues));
   const currentSearch = serverState?.search ?? search;
   const hasQuery = Boolean(currentSearch.trim() || activeFilterCount);
   const clearSelection = allowDeselect ? () => { onValueChange(""); setOpen(false); } : undefined;
+  const changeSelectedFilters = (value: Record<string, string[]>) => {
+    const next = filterPolicy === "textbook" ? normalizeTextbookPickerFilters(value) : value;
+    if (serverState) serverState.setSelectedFilters(next);
+    else setSelectedFilterValues(next);
+  };
 
   return (
     <SharedSearchCombobox
@@ -5800,7 +5811,7 @@ function SearchCombobox({
             <Button type="button" variant="ghost" size="sm" aria-label={`${ariaLabel} 필터`} aria-expanded={filtersOpen} aria-controls={filterPanelId} onClick={() => setFiltersOpen((current) => !current)}>
               필터{activeFilterCount > 0 ? ` ${activeFilterCount}` : ""}<ChevronDown className={cn("size-4", filtersOpen && "rotate-180")} aria-hidden="true" />
             </Button>
-            <Button type="button" variant="ghost" size="sm" disabled={activeFilterCount === 0} onClick={() => serverState ? serverState.setSelectedFilters({}) : setSelectedFilterValues({})} aria-label={`${ariaLabel} 필터 초기화`}>초기화</Button>
+            <Button type="button" variant="ghost" size="sm" disabled={activeFilterCount === 0} onClick={() => changeSelectedFilters({})} aria-label={`${ariaLabel} 필터 초기화`}>초기화</Button>
           </div>
           {filtersOpen ? <div id={filterPanelId} className="grid max-h-36 gap-3 overflow-y-auto overscroll-contain pb-2">
             {visibleFilterGroups.map((group) => (
@@ -5811,8 +5822,7 @@ function SearchCombobox({
                     const isFilterSelected = (effectiveSelectedFilterValues[group.key] || []).includes(option.value);
                     return <Button key={`${group.key}-${option.value}`} type="button" variant={isFilterSelected ? "secondary" : "outline"} size="sm" className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left" aria-pressed={isFilterSelected} aria-label={`${ariaLabel} ${group.label} ${option.label} 필터`} onClick={() => {
                       const next = toggleSearchSelectFilter(effectiveSelectedFilterValues, group.key, option.value);
-                      if (serverState) serverState.setSelectedFilters(next);
-                      else setSelectedFilterValues(next);
+                      changeSelectedFilters(next);
                     }}>
                       {isFilterSelected ? <Check className="size-3" aria-hidden="true" /> : null}<span className="min-w-0 break-words">{option.label}</span>
                     </Button>;
@@ -5877,6 +5887,7 @@ function TextbookSelect({ textbooks = [], value, onValueChange, serverState, sel
       emptyLabel="교재가 없습니다"
       ariaLabel="교재 선택"
       filterGroups={textbookSelectFilterGroups}
+      filterPolicy="textbook"
       serverState={serverState}
       selectedDisplayOption={selectedDisplayOption}
     />
@@ -6016,7 +6027,7 @@ function TextbookListControls({
 }) {
   const subjectSelectOptions = [
     { value: "all", label: "전체 과목" },
-    ...subjectOptions,
+    ...TEXTBOOK_FILTER_SUBJECT_OPTIONS,
   ];
   const categorySelectOptions = [
     { value: "all", label: "전체 세부과목" },

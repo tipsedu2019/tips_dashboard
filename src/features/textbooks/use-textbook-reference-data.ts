@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useCommittedSearch } from "@/hooks/use-committed-search"
+import { filterTextbookPickerGroups, normalizeTextbookPickerFilters } from "./textbook-filter-policy"
 
 import {
   getTextbookClassReference,
@@ -207,10 +208,12 @@ function usePicker(
     current.reset(current.value)
   }, [actorKey, enabled])
   const [selectedFilters, setSelectedFiltersState] = useState<Record<string, string[]>>({})
+  const effectiveSelectedFilters = useMemo(() => kind === "book" ? normalizeTextbookPickerFilters(selectedFilters) : selectedFilters, [kind, selectedFilters])
+  const effectivePage = effectiveSelectedFilters === selectedFilters ? page : 1
   const pendingSearch = search !== committed
-  const filters = kind === "book" || kind === "class" ? { search: committed, selectedFilters } : { search: committed }
+  const filters = kind === "book" || kind === "class" ? { search: committed, selectedFilters: effectiveSelectedFilters } : { search: committed }
   const sort = kind === "book" ? "match-title" : kind === "location" ? "match-order" : "match-name"
-  const request = enabled && !pendingSearch ? { filters, page, pageSize, sort } : null
+  const request = enabled && !pendingSearch ? { filters, page: effectivePage, pageSize, sort } : null
   const reader = useCallback(async (next: PageRequest<unknown, string>, options: { signal: AbortSignal }) => {
     if (kind === "book") return listTextbookReferencePage(next as PageRequest<TextbookReferenceFilters, "match-title">, options)
     if (kind === "class") return listTextbookClassReferencePage(next as PageRequest<TextbookClassReferenceFilters, "match-name">, options)
@@ -221,19 +224,30 @@ function usePicker(
   const result = resource.value
   const setSearch = useCallback((value: string) => { onChange(value); setPage(1) }, [onChange])
   const onCompositionEnd = (value: string) => { searchState.onCompositionEnd(value); setPage(1) }
-  const setSelectedFilters = useCallback((value: Record<string, string[]>) => { onSubmit(); setSelectedFiltersState(clone(value)); setPage(1) }, [onSubmit])
+  const setSelectedFilters = useCallback((value: Record<string, string[]>) => {
+    onSubmit()
+    setSelectedFiltersState(clone(kind === "book" ? normalizeTextbookPickerFilters(value) : value))
+    setPage(1)
+  }, [kind, onSubmit])
   const setPageSize = useCallback((value: PickerPageSize) => { onSubmit(); setPageSizeState(value); setPage(1) }, [onSubmit])
   const goToPage = useCallback(async (value: number) => {
     if (!Number.isInteger(value) || value < 1) return
     onSubmit()
     setPage(value)
   }, [onSubmit])
+  const rawBaseGroups = result && "baseFilterGroups" in result ? result.baseFilterGroups : []
+  const rawVisibleGroups = result && "visibleFilterGroups" in result ? result.visibleFilterGroups : []
+  const baseFilterGroups = kind === "book" ? filterTextbookPickerGroups(rawBaseGroups) : rawBaseGroups
+  const visibleFilterGroups = kind === "book" ? filterTextbookPickerGroups(rawVisibleGroups) : rawVisibleGroups
+  const activeFilterCount = kind === "book" ? baseFilterGroups.reduce((count, group) => count
+    + (effectiveSelectedFilters[group.key] || []).filter((value) => group.options.some((option) => option.value === value)).length, 0)
+    : result && "activeFilterCount" in result ? result.activeFilterCount : 0
   return {
-    rows: result?.rows || [], page, pageSize,
-    totalCount: result?.totalCount ?? null, search, selectedFilters,
-    baseFilterGroups: result && "baseFilterGroups" in result ? result.baseFilterGroups : [],
-    visibleFilterGroups: result && "visibleFilterGroups" in result ? result.visibleFilterGroups : [],
-    activeFilterCount: result && "activeFilterCount" in result ? result.activeFilterCount : 0,
+    rows: result?.rows || [], page: effectivePage, pageSize,
+    totalCount: result?.totalCount ?? null, search, selectedFilters: effectiveSelectedFilters,
+    baseFilterGroups,
+    visibleFilterGroups,
+    activeFilterCount,
     defaultLocation: result && "defaultLocation" in result ? result.defaultLocation : null,
     loading: Boolean(actorKey && enabled && pendingSearch) || resource.loading,
     error: pendingSearch ? null : resource.error, acceptedInput: pendingSearch ? null : resource.acceptedInput,

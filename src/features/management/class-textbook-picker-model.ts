@@ -9,6 +9,7 @@ import {
   normalizeTextbookSchoolLevel,
   normalizeTextbookSubject,
 } from "../textbooks/textbook-taxonomy.ts";
+import { normalizeTextbookCatalogFilters } from "../textbooks/textbook-filter-policy.ts";
 
 export type ClassTextbookPickerFilters = {
   subject: string;
@@ -40,12 +41,12 @@ export function getDefaultClassTextbookFilters(
   const gradeLevel = normalizeTextbookGradeLevel(classRecord.grade || classRecord.gradeLevel || classRecord.grade_level);
   const derivedSchool = TEXTBOOK_GRADE_OPTIONS.find((option) => option.value === gradeLevel)?.schoolLevel || "";
 
-  return {
+  return normalizeTextbookCatalogFilters({
     subject: rawSubject ? normalizeTextbookSubject(rawSubject) : "",
     schoolLevel: derivedSchool || normalizeTextbookSchoolLevel(classRecord.schoolLevel || classRecord.school_level),
     gradeLevel,
     subSubject: text(classRecord.subSubject || classRecord.sub_subject),
-  };
+  }, "");
 }
 
 export function filterClassTextbookCandidates<T extends Record<string, unknown>>(

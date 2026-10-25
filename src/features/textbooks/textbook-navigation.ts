@@ -10,6 +10,7 @@ import type {
   TextbookQualityFilter,
 } from "./textbook-read-types"
 import type { DataTablePageSize } from "@/lib/numbered-pagination"
+import { isRetiredTextbookGradeFilter, isRetiredTextbookSubjectFilter, normalizeTextbookCatalogFilters } from "./textbook-filter-policy.ts"
 
 export const textbookTabs = ["master", "requests", "purchase", "sales", "inventory"] as const
 export type TextbookTab = (typeof textbookTabs)[number]
@@ -82,8 +83,10 @@ function parsePrimary(tab: TextbookTab, raw: string | null): PrimaryFilters {
   if (!value) return primaryDefaults(tab)
   if (tab === "master" || tab === "inventory") {
     const keys = ["search", "subject", "schoolLevel", "gradeLevel", "subSubject", "quality", "inventory"]
-    if (!exactKeys(value, keys) || !strings(value, keys) || !subjects.has(value.subject as string) || !schoolLevels.has(value.schoolLevel as string)
-      || !gradeLevels.has(value.gradeLevel as string) || !quality.has(value.quality as TextbookQualityFilter) || !inventory.has(value.inventory as string)) return primaryDefaults(tab)
+    if (!exactKeys(value, keys) || !strings(value, keys)
+      || (!subjects.has(value.subject as string) && !isRetiredTextbookSubjectFilter(value.subject as string)) || !schoolLevels.has(value.schoolLevel as string)
+      || (!gradeLevels.has(value.gradeLevel as string) && !isRetiredTextbookGradeFilter(value.gradeLevel as string))
+      || !quality.has(value.quality as TextbookQualityFilter) || !inventory.has(value.inventory as string)) return primaryDefaults(tab)
     const search = boundedText(value.search)
     const subSubject = value.subSubject === "all" ? "all" : boundedText(value.subSubject, 80, false)
     return search !== null && subSubject !== null ? { ...value, search, subSubject } as MasterFilters : primaryDefaults(tab)
@@ -111,9 +114,10 @@ function parseHistory(raw: string | null): SaleHistoryFilters {
 // Accept old bookmarks, but never keep a removed catalog filter active invisibly.
 function normalizeCatalogPrimary(tab: TextbookTab, primary: TextbookNavigationState["primary"]): TextbookNavigationState["primary"] {
   if (tab !== "master" && tab !== "inventory") return primary
-  const filters = primary.filters as MasterFilters
+  const originalFilters = primary.filters as MasterFilters
+  const filters = normalizeTextbookCatalogFilters(originalFilters)
   const quality = tab === "master" && filters.quality === "inactive" ? "inactive" : "all"
-  const changed = filters.quality !== quality || filters.inventory !== "all"
+  const changed = filters !== originalFilters || filters.quality !== quality || filters.inventory !== "all"
   return {
     ...primary,
     page: changed ? 1 : primary.page,

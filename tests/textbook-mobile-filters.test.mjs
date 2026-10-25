@@ -18,6 +18,18 @@ test('mobile inventory classification drafts cancel, apply once at page one and 
     await waitForFocus(h, control)
   }
   await h.act(() => trigger().click())
+  for (const [label, excluded, included] of [
+    ['교재 과목 필터', ['기타'], ['전체 과목', '영어', '수학', '과학']],
+    ['교재 학년 필터', ['초1', '초2', '초3', '초4'], ['전체 학년', '초5', '초6', '중1', '고3']],
+  ]) {
+    const control = document.querySelector(`[role="dialog"] [aria-label="${label}"]`)
+    await h.act(() => control.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+    const labels = [...document.querySelectorAll('[role="option"]')].map(node => node.textContent)
+    for (const value of excluded) assert.equal(labels.includes(value), false, value)
+    for (const value of included) assert.equal(labels.includes(value), true, value)
+    await h.act(() => document.querySelector('[role="listbox"]').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    await waitForFocus(h, control)
+  }
   await chooseDraft('교재 과목 필터', '영어')
   await chooseDraft('교재 학년 필터', '고1')
   assert.equal(reads().length, initial, 'draft selection never queries')

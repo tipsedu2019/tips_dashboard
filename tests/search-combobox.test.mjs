@@ -151,6 +151,7 @@ async function loadClassTextbookPicker(searchCombobox) {
   const ui = createComboboxUiStubs();
   const taxonomy = await import("../src/features/textbooks/textbook-taxonomy.ts");
   const pickerModel = await import("../src/features/management/class-textbook-picker-model.ts");
+  const filterPolicy = await import("../src/features/textbooks/textbook-filter-policy.ts");
   const Select = forwardRef(function Select(props, ref) {
     const selectProps = { ...props };
     delete selectProps.children;
@@ -170,6 +171,7 @@ async function loadClassTextbookPicker(searchCombobox) {
     ["@/components/ui/search-combobox", searchCombobox],
     ["@/components/ui/select", { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue }],
     ["@/features/textbooks/textbook-taxonomy", taxonomy],
+    ["@/features/textbooks/textbook-filter-policy", filterPolicy],
     ["./class-textbook-picker-model", pickerModel],
     ["./picker-meta-pills", { PickerMetaPills: () => null }],
     ["./picker-filter-surface", {

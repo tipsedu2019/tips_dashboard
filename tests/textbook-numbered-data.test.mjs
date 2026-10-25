@@ -149,7 +149,7 @@ test('direct 10 to 11 retains page/count during pending failure and retries exac
   assert.deepEqual(pages(h).map(r => r.args.p_page), [10, 11]);
   assert.equal(h.current.master.page, 10); assert.equal(h.current.master.requestedPage, 11);
   assert.deepEqual(h.current.master.rows, rows); assert.equal(h.current.master.totalCount, 111);
-  const failure = { code: '42501', message: 'denied' };
+  const failure = new TypeError('network unavailable');
   await h.reject(pages(h)[1], failure);
   assert.equal(h.current.master.error, failure); assert.equal(h.current.master.page, 10);
   await h.act(() => h.current.master.retry());
@@ -388,4 +388,34 @@ test('StrictMode lifetime cleanup/setup replay keeps current summary callbacks w
   const before = h.requests.length;
   await h.act(() => { h.current.master.summary.retry(); h.current.operations.retry(); });
   assert.equal(h.requests.length, before + 2);
+});
+
+
+test('permission denial clears accepted textbook rows and cannot restore them during a failed retry', async t => {
+  const commits = [];
+  const h = await setupHook(t, onlyMaster({ restoredPage: 10, restorationKey: 'ten', onPageCommit: value => commits.push(value) }));
+  const first = pages(h)[0];
+  await h.resolve(first, pageData(first, 111, Array.from({ length: 10 }, (_, i) => masterRow(110 - i))));
+  await h.act(() => h.current.master.goToPage(11));
+  await h.reject(pages(h).at(-1), { code: '42501', message: 'denied' });
+  const assertDiscarded = () => {
+    assert.deepEqual(h.current.master.rows, []);
+    assert.equal(h.current.master.totalCount, null);
+    assert.equal(h.current.master.acceptedFilters, null);
+    assert.equal(h.current.master.page, 1);
+    assert.equal(h.current.master.requestedPage, 11);
+  };
+  assertDiscarded();
+  await h.act(() => h.current.master.retry());
+  assertDiscarded();
+  await h.reject(pages(h).at(-1), new TypeError('network unavailable'));
+  assertDiscarded();
+  await h.act(() => h.current.master.retry());
+  assertDiscarded();
+  const accepted = pages(h).at(-1);
+  assert.equal(accepted.args.p_page, 11);
+  await h.resolve(accepted, pageData(accepted, 101, [masterRow()]));
+  assert.equal(h.current.master.page, 11);
+  assert.deepEqual(h.current.master.rows, [masterRow()]);
+  assert.deepEqual(commits.map(c => c.page), [10, 11]);
 });

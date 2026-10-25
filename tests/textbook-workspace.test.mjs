@@ -504,8 +504,8 @@ test("textbook operation selectors support multi-select filters in option menus"
   assert.match(workspaceSource, /filterGroups\?: SearchSelectFilterGroup\[\]/);
   assert.doesNotMatch(workspaceSource, /filterLayout\?: SearchSelectFilterLayout/);
   assert.match(workspaceSource, /const \[selectedFilterValues, setSelectedFilterValues\] = useState<Record<string, string\[\]>>/);
-  assert.match(workspaceSource, /const filteredOptions = serverState \? options : filterGroups\.length === 0/);
-  assert.match(searchComboboxBlock, /const visibleFilterGroups = serverState\?\.visibleFilterGroups \|\| buildVisibleSearchSelectFilterGroups/);
+  assert.match(workspaceSource, /const filteredOptions = serverState \? options : effectiveFilterGroups\.length === 0/);
+  assert.match(searchComboboxBlock, /const rawVisibleFilterGroups = serverState\?\.visibleFilterGroups \|\| buildVisibleSearchSelectFilterGroups/);
   assert.match(searchComboboxBlock, /const \[filtersOpen, setFiltersOpen\] = useState\(false\)/);
   assert.match(searchComboboxBlock, /aria-expanded=\{filtersOpen\} aria-controls=\{filterPanelId\}/);
   assert.match(searchComboboxBlock, /\{filtersOpen \? <div id=\{filterPanelId\}/);
@@ -513,6 +513,9 @@ test("textbook operation selectors support multi-select filters in option menus"
   assert.match(searchComboboxBlock, /<legend[^>]*>\{group\.label\}<\/legend>/);
   assert.match(searchComboboxBlock, /disabled=\{activeFilterCount === 0\}/);
   assert.match(workspaceSource, /function toggleSearchSelectFilter/);
+  assert.match(textbookSelectBlock, /filterPolicy="textbook"/);
+  assert.doesNotMatch(classSelectBlock, /filterPolicy="textbook"/);
+  assert.match(searchComboboxBlock, /filterTextbookPickerGroups\(rawVisibleFilterGroups\)/);
   assert.match(workspaceSource, /activeFilterCount/);
   assert.match(workspaceSource, /필터 초기화/);
   assert.doesNotMatch(searchComboboxBlock, />\s*필터\s*<\/span>/);
@@ -667,7 +670,7 @@ test("textbook workspace separates category filters and lets grouped rows collap
   assert.doesNotMatch(workspaceSource, /구분별/);
   assert.doesNotMatch(workspaceSource, /출판사별/);
   assert.match(workspaceSource, /TEXTBOOK_SCHOOL_LEVEL_OPTIONS/);
-  assert.match(workspaceSource, /getGradeOptionsForSchoolLevel/);
+  assert.match(workspaceSource, /getTextbookFilterGradeOptions/);
   assert.match(workspaceSource, /getSubSubjectOptionsForSubject/);
   assert.doesNotMatch(workspaceSource, /row\.publisher \|\| row\.category/);
   assert.match(workspaceSource, /collapsedTextbookGroups/);
