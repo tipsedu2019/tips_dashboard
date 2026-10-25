@@ -1929,6 +1929,214 @@ test('008 opening registration create still requests the full catalog and ignore
 
 function generalStatsReads(page) { return page.requests.filter(r => r.name === 'get_ops_task_list_stats_v1'); }
 function generalPageReads(page) { return page.requests.filter(r => r.name === 'list_ops_task_numbered_page_v1'); }
+for (const kind of ['transfer', 'withdrawal']) test(`ops auxiliary stats recovery: ${kind} reports stats failure after a successful primary page`, async t => {
+  // The real service receives only this file's deferred Supabase transport.
+  // Fail immediately if an unexpected code path tries a real network request.
+  const originalFetch = globalThis.fetch;
+  let networkCalls = 0;
+  globalThis.fetch = () => { networkCalls += 1; throw new Error('unexpected external request in isolated stats fixture'); };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const page = await workspace(t, { workspace: kind });
+  const primary = generalPageReads(page)[0];
+  const stats = generalStatsReads(page)[0];
+  assert.ok(primary, 'real numbered primary read starts');
+  assert.ok(stats, 'independent stats read starts');
+  await act(async () => page.finish(page.requests.indexOf(primary), 2, [operationPatch(kind, '합성 보존 행 A'), operationPatch(kind, '합성 보존 행 B')]));
+  await act(async () => stats.resolve({ data: null, error: { code: 'XX000', message: 'SYNTHETIC_PRIVATE_STATS_FAILURE' } }));
+  assert.match(document.body.textContent, /합성 보존 행 A/);
+  assert.match(document.body.textContent, /합성 보존 행 B/);
+  assert.equal(generalPageReads(page).length, 1, 'stats failure must not replay the successful primary read');
+  assert.equal(networkCalls, 0);
+  assert.deepEqual(page.requests.filter(request => !['list_ops_task_numbered_page_v1', 'get_ops_task_list_stats_v1'].includes(request.name)).map(request => request.name), [], 'this read-only recovery starts no writes or extra permission requests');
+  assert.doesNotMatch(document.body.textContent, /SYNTHETIC_PRIVATE_STATS_FAILURE/);
+  const alert = [...document.querySelectorAll('[role="alert"]')].find(node => node.textContent.includes('건수와 필터 선택 정보를 불러오지 못했습니다.'));
+  assert.ok(alert, 'successful primary rows need a separate visible warning when their supplemental stats fail');
+  assert.ok([...alert.querySelectorAll('button')].some(button => button.textContent.trim() === '집계 다시 불러오기'), 'failed stats provide their own retry action');
+});
+const operationStatsWarning = '건수와 필터 선택 정보를 불러오지 못했습니다.';
+const operationStatsPending = '건수와 필터 선택 정보를 불러오는 중입니다.';
+function operationStatsAlert() {
+  return [...document.querySelectorAll('[role="alert"]')].find(node => node.textContent.includes(operationStatsWarning));
+}
+function operationStatsRetry() {
+  const retry = [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '집계 다시 불러오기');
+  assert.ok(retry, 'real supplemental retry button');
+  return retry;
+}
+function operationApplicantTab() {
+  const tab = [...document.querySelectorAll('[role="tab"]')].find(node => node.textContent.startsWith('신청'));
+  assert.ok(tab, 'real operation applicant tab');
+  return tab;
+}
+async function failOperationStats(read) {
+  await act(async () => read.resolve({ data: null, error: { code: 'XX000', message: 'SYNTHETIC_PRIVATE_STATS_FAILURE' } }));
+}
+async function acceptOperationStats(read, total = 12, facets = {}) {
+  await act(async () => read.resolve({ error: null, data: { total, byStatus: { requested: total }, byView: { applicant: total, operations: 0, closed: 0 }, metrics: {}, facets } }));
+}
+function assertOnlyOperationReads(page) {
+  assert.deepEqual(page.requests.filter(request => !['list_ops_task_numbered_page_v1', 'get_ops_task_list_stats_v1'].includes(request.name)).map(request => request.name), [], 'recovery starts no writes or extra permission RPCs');
+}
+async function changeOperationSearch(search, value) {
+  await act(async () => search[Object.keys(search).find(key => key.startsWith('__reactProps'))].onChange({ target: { value } }));
+}
+async function restoreOperationStatsPage(t, kind) {
+  const { createDefaultOpsTaskPageFilters } = modules(null)('src/features/tasks/ops-task-service.ts');
+  const filters = { ...createDefaultOpsTaskPageFilters(kind, 'actor-a'), search: '합성 검색', subject: '수학', teacher: '합성 담당', filterColumn: 'student' };
+  const page = await workspace(t, { workspace: kind, historyState: { tipsOpsTaskList: {
+    version: 1, actorScope: '["actor-a","staff"]', pathname: `/admin/${kind}`, filters, page: 2, pageSize: 10, scrollY: 0,
+  } } });
+  const primary = generalPageReads(page)[0];
+  assert.deepEqual(primary.args.p_filters, filters);
+  assert.equal(primary.args.p_page, 2);
+  await act(async () => page.finish(page.requests.indexOf(primary), 12, [operationPatch(kind, '합성 보존 행 A'), operationPatch(kind, '합성 보존 행 B')]));
+  return { page, filters, search: document.querySelector(`input[aria-label="${kind === 'transfer' ? '전반' : '퇴원'} 검색"]`) };
+}
+for (const kind of ['transfer', 'withdrawal']) test(`ops auxiliary stats recovery: ${kind} retries only stats once and preserves restored controls page and focus`, async t => {
+  const { page, filters, search } = await restoreOperationStatsPage(t, kind);
+  assert.ok(search);
+  assert.equal(search.value, filters.search);
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 건수 확인 중');
+  assert.ok([...document.querySelectorAll('[role="status"]')].some(node => node.textContent.includes(operationStatsPending)));
+  const failedStats = generalStatsReads(page).at(-1);
+  const initialStatsCount = generalStatsReads(page).length;
+  await failOperationStats(failedStats);
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 건수 확인 불가');
+  const labels = () => [...document.querySelector(`[aria-label="${kind === 'transfer' ? '전반' : '퇴원'} 누가 필터"]`).querySelectorAll('[role="combobox"]')].map(node => node.textContent);
+  assert.deepEqual(labels(), ['수학', '합성 담당'], 'unavailable facets must not relabel selected values as all');
+  const retry = operationStatsRetry();
+  retry.focus();
+  await act(async () => { retry.click(); retry.click(); });
+  assert.equal(generalStatsReads(page).length, initialStatsCount + 1, 'same-tick repeated activation owns only one stats read');
+  assert.equal(generalPageReads(page).length, 1, 'dedicated stats retry never replays primary');
+  assert.deepEqual(generalStatsReads(page).at(-1).args, failedStats.args);
+  assert.equal(document.activeElement, retry, 'pending retry keeps its keyboard focus');
+  assert.equal(retry.getAttribute('aria-disabled'), 'true');
+  assert.equal(search.value, filters.search);
+  assert.ok(document.querySelector('[aria-label="2 페이지"][aria-current="page"]'));
+  assert.match(document.body.textContent, /합성 보존 행 A/);
+  await acceptOperationStats(generalStatsReads(page).at(-1));
+  assert.equal(operationStatsAlert(), undefined);
+  assert.equal(document.activeElement, search, 'successful retry restores focus before its button disappears');
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 12건');
+  assert.equal(search.value, filters.search);
+  assert.deepEqual(labels(), ['수학', '합성 담당']);
+  assert.equal(generalPageReads(page).length, 1);
+  assertOnlyOperationReads(page);
+});
+for (const kind of ['transfer', 'withdrawal']) test(`ops auxiliary stats recovery: ${kind} retains known stats when returning to the same criteria fails`, async t => {
+  const { page, search } = await restoreOperationStatsPage(t, kind);
+  await acceptOperationStats(generalStatsReads(page).at(-1), 12, { subject: [{ value: '수학', label: '수학', count: 12 }], teacher: [{ value: '합성 담당', label: '합성 담당', count: 12 }] });
+  page.load('src/features/tasks/ops-task-service.ts').clearOpsTaskPageStatsCache();
+  await changeOperationSearch(search, '임시 합성 검색');
+  await changeOperationSearch(search, '합성 검색');
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 12건', 'same criteria retain the last accepted stats while refreshing');
+  assert.match(document.body.textContent, /이전 집계를 표시합니다/);
+  const primary = generalPageReads(page).at(-1);
+  await act(async () => page.finish(page.requests.indexOf(primary), 12, [operationPatch(kind, '합성 보존 행 A'), operationPatch(kind, '합성 보존 행 B')]));
+  await failOperationStats(generalStatsReads(page).at(-1));
+  assert.match(operationStatsAlert().textContent, /이전 집계를 표시합니다/);
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 12건');
+  assert.equal(search.value, '합성 검색');
+  const primaryCount = generalPageReads(page).length;
+  const retry = operationStatsRetry();
+  await act(async () => retry.click());
+  const otherFocusedControl = operationApplicantTab();
+  otherFocusedControl.focus();
+  await acceptOperationStats(generalStatsReads(page).at(-1), 13);
+  assert.equal(document.activeElement, otherFocusedControl, 'settled stats never steal focus from another active control');
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 13건');
+  assert.equal(generalPageReads(page).length, primaryCount);
+  assertOnlyOperationReads(page);
+});
+for (const kind of ['transfer', 'withdrawal']) for (const primaryOutcome of ['empty', 'failed']) test(`ops auxiliary stats recovery: ${kind} keeps ${primaryOutcome} primary distinct from successful zero stats`, async t => {
+  const page = await workspace(t, { workspace: kind });
+  const primary = generalPageReads(page)[0];
+  if (primaryOutcome === 'empty') await act(async () => page.finish(page.requests.indexOf(primary), 0));
+  else await act(async () => primary.resolve({ data: null, error: { code: 'XX000', message: 'SYNTHETIC_PRIMARY_FAILURE' } }));
+  await acceptOperationStats(generalStatsReads(page)[0], 0);
+  assert.equal(operationStatsAlert(), undefined);
+  assert.doesNotMatch(document.body.textContent, new RegExp(operationStatsPending));
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청', 'accepted zero is not an unknown count');
+  assert.equal(operationApplicantTab().textContent.includes('—'), false);
+  const primaryAlert = [...document.querySelectorAll('[role="alert"]')].find(node => node.textContent.includes('목록을 불러오지 못했습니다.'));
+  assert.equal(Boolean(primaryAlert), primaryOutcome === 'failed');
+  assert.equal([...document.querySelectorAll('button')].some(button => button.textContent.trim() === '집계 다시 불러오기'), false);
+  assertOnlyOperationReads(page);
+});
+for (const kind of ['transfer', 'withdrawal']) for (const lateOutcome of ['success', 'failure']) test(`ops auxiliary stats recovery: ${kind} excludes cancelled ${lateOutcome} after a search scope change`, async t => {
+  const { page, search } = await restoreOperationStatsPage(t, kind);
+  await acceptOperationStats(generalStatsReads(page).at(-1), 12);
+  page.load('src/features/tasks/ops-task-service.ts').clearOpsTaskPageStatsCache();
+  await changeOperationSearch(search, '이전 합성 검색');
+  const oldStats = generalStatsReads(page).at(-1);
+  const oldPrimary = generalPageReads(page).at(-1);
+  await changeOperationSearch(search, '다른 합성 검색');
+  const nextStats = generalStatsReads(page).at(-1);
+  assert.notEqual(nextStats, oldStats);
+  assert.equal(oldStats.signal.aborted, true);
+  assert.equal(nextStats.args.p_filters.search, '다른 합성 검색');
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 건수 확인 중', 'a new criteria scope never borrows the former count');
+  const nextPrimary = generalPageReads(page).at(-1);
+  await act(async () => page.finish(page.requests.indexOf(nextPrimary), 1, [operationPatch(kind, '새 합성 행')]));
+  await acceptOperationStats(nextStats, 1);
+  if (lateOutcome === 'success') await acceptOperationStats(oldStats, 999, { subject: [{ value: '오래된 과목', label: '오래된 과목', count: 999 }] });
+  else await failOperationStats(oldStats);
+  await act(async () => page.finish(page.requests.indexOf(oldPrimary), 12, [operationPatch(kind, '오래된 합성 행')]));
+  assert.equal(operationStatsAlert(), undefined);
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 1건');
+  assert.equal(search.value, '다른 합성 검색');
+  assert.doesNotMatch(document.body.textContent, /999|오래된 과목|오래된 합성 행|SYNTHETIC_PRIVATE_STATS_FAILURE/);
+  assert.match(document.body.textContent, /새 합성 행/);
+  assertOnlyOperationReads(page);
+});
+for (const kind of ['transfer', 'withdrawal']) test(`ops auxiliary stats recovery: ${kind} detaches an old role stats failure without new writes`, async t => {
+  const page = await workspace(t, { workspace: kind });
+  const oldStats = generalStatsReads(page)[0];
+  await page.render({ viewerRole: 'teacher' });
+  assert.equal(oldStats.signal.aborted, true);
+  const freshStats = generalStatsReads(page).at(-1);
+  assert.notEqual(freshStats, oldStats);
+  const primary = generalPageReads(page).at(-1);
+  await act(async () => page.finish(page.requests.indexOf(primary), 1, [operationPatch(kind, '합성 교사 조회 행')]));
+  await acceptOperationStats(freshStats, 1);
+  await failOperationStats(oldStats);
+  assert.equal(operationStatsAlert(), undefined);
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 1건');
+  assert.match(document.body.textContent, /합성 교사 조회 행/);
+  assertOnlyOperationReads(page);
+});
+for (const { kind, denial } of [
+  { kind: 'transfer', denial: { code: '42501', message: 'SYNTHETIC_DENIED' } },
+  { kind: 'withdrawal', denial: { status: 403, message: 'SYNTHETIC_FORBIDDEN' } },
+]) test(`ops auxiliary stats recovery: ${kind} removes stats retry after teacher primary denial ${denial.code || denial.status} and recovers for a new actor`, async t => {
+  const page = await workspace(t, { workspace: kind, viewerRole: 'teacher' });
+  const primary = generalPageReads(page)[0];
+  const stats = generalStatsReads(page)[0];
+  await failOperationStats(stats);
+  assert.ok(operationStatsAlert(), 'stats error is visible before the primary permission result');
+  assert.ok(operationStatsRetry());
+  await act(async () => primary.resolve({ data: null, error: denial }));
+  const statsCountAfterDenial = generalStatsReads(page).length;
+  assert.equal(operationStatsAlert(), undefined, 'permission denial removes the supplemental recovery surface');
+  assert.equal([...document.querySelectorAll('button')].some(button => button.textContent.trim() === '집계 다시 불러오기'), false, 'a denied viewer has no stats retry click path');
+  assert.doesNotMatch(document.body.textContent, new RegExp(`${operationStatsWarning}|${operationStatsPending}`));
+  assert.ok([...document.querySelectorAll('[role="alert"]')].some(node => node.textContent.includes('목록을 불러오지 못했습니다.')), 'the primary permission failure remains visible');
+  await page.render();
+  assert.equal(generalStatsReads(page).length, statsCountAfterDenial, 'the denied actor cannot restart supplemental reads on render');
+  await page.render({ viewerId: 'actor-b' });
+  const freshStats = generalStatsReads(page).at(-1);
+  const freshPrimary = generalPageReads(page).at(-1);
+  assert.notEqual(freshStats, stats, 'the new authenticated owner receives its own stats read');
+  assert.notEqual(freshPrimary, primary);
+  await act(async () => page.finish(page.requests.indexOf(freshPrimary), 1, [operationPatch(kind, '새 계정 합성 조회 행')]));
+  await acceptOperationStats(freshStats, 1);
+  assert.equal(operationStatsAlert(), undefined);
+  assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 1건');
+  assert.match(document.body.textContent, /새 계정 합성 조회 행/);
+  assert.doesNotMatch(document.body.textContent, /SYNTHETIC_DENIED|SYNTHETIC_FORBIDDEN|SYNTHETIC_PRIVATE_STATS_FAILURE/);
+  assertOnlyOperationReads(page);
+});
 async function acceptGeneralStats(read, total = 40) {
   await act(async () => read.resolve({ error: null, data: { total, byStatus: { requested: total }, byView: { inbox: total, sent: 0, completed: 0 }, metrics: {}, facets: {} } }));
 }

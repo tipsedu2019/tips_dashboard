@@ -5020,7 +5020,7 @@ test("create defaults and withdrawal handoffs wait for non-registration option c
 
 test("paged badges counts and filter options consume server stats instead of the selected rows", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  assert.match(source, /const authoritativeTaskStats = data\?\.stats/);
+  assert.match(source, /const authoritativeTaskStats = recoverOperationStats && taskStatsFilterScope !== taskStatsRequestScope \? undefined : data\?\.stats/);
   assert.match(source, /authoritativeTaskStats\?\.byView/);
   assert.match(source, /authoritativeTaskStats\?\.metrics/);
   assert.match(source, /authoritativeTaskStats\?\.facets/);

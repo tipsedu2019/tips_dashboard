@@ -5886,12 +5886,17 @@ function WithdrawalFilterSelect({
   onChange: (value: string) => void
   onOpen?: () => void
 }) {
+  // These operation facets use their display names as values. A missing
+  // aggregate must not relabel an active condition as "전체".
+  const displayedOptions = includeAll && value !== "all" && !options.some((option) => option.value === value)
+    ? [{ value, label: value }, ...options]
+    : options
   return (
     <div className="min-w-[8rem] flex-1 sm:max-w-[10rem]" onPointerDown={onOpen}>
       <TaskListboxField
         label={<span className="sr-only">{label}</span>}
         value={value}
-        options={includeAll ? [{ value: "all", label: allLabel }, ...options] : options}
+        options={includeAll ? [{ value: "all", label: allLabel }, ...displayedOptions] : displayedOptions}
         onChange={onChange}
       />
     </div>
@@ -8395,6 +8400,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const [supplementRevision, setSupplementRevision] = useState(0)
   const [taskStatsFilterScope, setTaskStatsFilterScope] = useState<string | null>(null)
+  const recoverOperationStats = isTransferWorkspace || isWithdrawalWorkspace
+  const [operationStatsRetryRevision, setOperationStatsRetryRevision] = useState(0)
+  const [operationStatsState, setOperationStatsState] = useState<{ scope: string; status: "loading" | "ready" | "error" }>({ scope: "", status: "loading" })
+  const acceptedOperationStatsRef = useRef<{ scope: string; stats: NonNullable<OpsTaskWorkspaceData["stats"]> } | null>(null)
+  const operationStatsRetryLockRef = useRef(false)
+  const operationStatsRetryButtonRef = useRef<HTMLButtonElement>(null)
+  const [operationStatsRetryScope, setOperationStatsRetryScope] = useState<string | null>(null)
   const refreshNumberedPage = numberedPage.refresh
   const reload = useCallback(async (_force = false, _showPending = true) => {
     void _force
@@ -8420,28 +8432,52 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [refreshNumberedPage, registrationFixtureEnabled, registrationFixtureRequested, wordRetestFixtureRequested, wordRetestFixtureViewer])
 
   useEffect(() => {
-    if (!numberedServerPage || authLoading || !currentUserId || commonReadDenied) return
+    if (!numberedServerPage || authLoading || !currentUserId || commonReadDenied) {
+      if (commonReadDenied) acceptedOperationStatsRef.current = null
+      operationStatsRetryLockRef.current = false
+      return
+    }
     const controller = new AbortController()
     workspaceLoadAbortControllerRef.current = controller
     const generation = ++workspaceLoadGenerationRef.current
-    setTaskStatsFilterScope(null)
-    setData((current) => current ? { ...current, stats: undefined } : current)
+    const current = () => workspaceMountedRef.current && !controller.signal.aborted && workspaceLoadGenerationRef.current === generation
+    const retained = recoverOperationStats && acceptedOperationStatsRef.current?.scope === taskStatsRequestScope
+      ? acceptedOperationStatsRef.current.stats : undefined
+    setTaskStatsFilterScope(retained ? taskStatsRequestScope : null)
+    setData((current) => current ? { ...current, stats: retained } : current)
+    if (recoverOperationStats) setOperationStatsState({ scope: taskStatsRequestScope, status: "loading" })
     const registration = taskStatsRequestFilters.taskType === "registration"
       ? startOpsRegistrationTaskPageSupplementLoad({ filters: taskStatsRequestFilters, viewerId: currentUserId, signal: controller.signal })
       : null
-    const stats = registration?.stats || startOpsTaskPageStatsSupplementLoad({ filters: taskStatsRequestFilters, viewerId: currentUserId, signal: controller.signal })
-    const current = () => workspaceMountedRef.current && !controller.signal.aborted && workspaceLoadGenerationRef.current === generation
+    const stats = registration?.stats || startOpsTaskPageStatsSupplementLoad({
+      filters: taskStatsRequestFilters, viewerId: currentUserId, signal: controller.signal,
+      onError: () => {
+        if (recoverOperationStats && current()) {
+          operationStatsRetryLockRef.current = false
+          setOperationStatsState({ scope: taskStatsRequestScope, status: "error" })
+        }
+      },
+    })
     void stats.then((stats) => {
       if (stats && current()) {
         setTaskStatsFilterScope(JSON.stringify(taskStatsRequestFilters))
         setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { stats }))
+        if (recoverOperationStats) {
+          acceptedOperationStatsRef.current = { scope: taskStatsRequestScope, stats }
+          operationStatsRetryLockRef.current = false
+          if (document.activeElement === operationStatsRetryButtonRef.current) {
+            workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
+          }
+          setOperationStatsState({ scope: taskStatsRequestScope, status: "ready" })
+          setOperationStatsRetryScope(null)
+        }
       }
     })
     void registration?.registrationRuntime.then((registrationRuntime) => {
       if (registrationRuntime && current()) setData((data) => mergeOpsTaskPageSupplement(data || emptyOpsTaskWorkspaceData, { registrationRuntime }))
     })
-    return () => { controller.abort(); workspaceLoadGenerationRef.current += 1 }
-  }, [authLoading, commonReadDenied, currentUserId, numberedServerPage, supplementRevision, taskStatsRequestFilters])
+    return () => { controller.abort(); workspaceLoadGenerationRef.current += 1; operationStatsRetryLockRef.current = false }
+  }, [authLoading, commonReadDenied, currentUserId, numberedServerPage, supplementRevision, taskStatsRequestFilters, taskStatsRequestScope, recoverOperationStats, operationStatsRetryRevision])
 
   const refreshFirstTaskPageAfterMutation = useCallback(async () => {
     await reload(true, false)
@@ -9149,7 +9185,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     () => numberedServerPage ? tasks : tasks.filter((task) => task.type === scopedTaskType),
     [numberedServerPage, scopedTaskType, tasks],
   )
-  const authoritativeTaskStats = data?.stats
+  const authoritativeTaskStats = recoverOperationStats && taskStatsFilterScope !== taskStatsRequestScope ? undefined : data?.stats
+  const operationStatsStatus = operationStatsState.scope === taskStatsRequestScope ? operationStatsState.status : "loading"
+  const operationStatsUnknown = recoverOperationStats && numberedServerPage && !authoritativeTaskStats
   // Production never treats a selected page as a complete catalog/count source.
   const hasAuthoritativeTaskStats = numberedServerPage
   const summary = useMemo(
@@ -12680,10 +12718,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                    <WorkspaceTabsTrigger
 	                      key={tab.key}
 	                      value={tab.key}
-	                      aria-label={withdrawalCount > 0 ? `${tab.label} ${withdrawalCount}건` : tab.label}
+	                      aria-label={operationStatsUnknown ? `${tab.label} 건수 ${operationStatsStatus === "error" ? "확인 불가" : "확인 중"}` : withdrawalCount > 0 ? `${tab.label} ${withdrawalCount}건` : tab.label}
 	                    >
 	                      <span>{tab.label}</span>
-	                      {withdrawalCount > 0 && (
+	                      {operationStatsUnknown ? <span aria-hidden="true" className="text-xs text-muted-foreground">—</span> : withdrawalCount > 0 && (
 	                        <span aria-hidden="true" className="text-xs tabular-nums opacity-80">
 	                          {withdrawalCount}
 	                        </span>
@@ -12962,6 +13000,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
               void readCompletedClassLabels(true)
             }}>수업명 다시 불러오기</Button>
+          </div>
+        ) : null}
+
+        {recoverOperationStats && numberedServerPage && !commonReadDenied && !authLoading && currentUserId && operationStatsStatus !== "ready" ? (
+          <div role={operationStatsStatus === "error" ? "alert" : "status"} className={cn("flex flex-wrap items-center gap-2 text-sm", operationStatsStatus === "error" ? "text-destructive" : "text-muted-foreground")}>
+            <span>{operationStatsStatus === "error" ? "건수와 필터 선택 정보를 불러오지 못했습니다." : "건수와 필터 선택 정보를 불러오는 중입니다."}{authoritativeTaskStats ? " 이전 집계를 표시합니다." : ""}</span>
+            {operationStatsStatus === "error" || operationStatsRetryScope === taskStatsRequestScope ? (
+              <Button ref={operationStatsRetryButtonRef} variant="outline" size="form" aria-disabled={operationStatsStatus === "loading"} onClick={() => {
+                if (commonReadDenied || authLoading || !currentUserId || operationStatsStatus !== "error" || operationStatsRetryLockRef.current) return
+                operationStatsRetryLockRef.current = true
+                setOperationStatsRetryScope(taskStatsRequestScope)
+                setOperationStatsState({ scope: taskStatsRequestScope, status: "loading" })
+                setOperationStatsRetryRevision((revision) => revision + 1)
+              }}>집계 다시 불러오기</Button>
+            ) : null}
           </div>
         ) : null}
 
