@@ -9,12 +9,10 @@ import { useSearchParams } from "next/navigation";
 import { useDraftNavigation } from "@/hooks/use-draft-navigation";
 import { pushLocalHistoryState } from "@/lib/unsaved-history-fallback";
 import {
-  Barcode,
   BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
-  ChevronsUpDown,
   Copy,
   FileImage,
   Loader2,
@@ -35,21 +33,13 @@ import { ActionFeedback } from "@/components/ui/action-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
+import { SearchCombobox as SharedSearchCombobox, SearchComboboxItem, SearchComboboxOptionContent, SearchComboboxPagination } from "@/components/ui/search-combobox";
 import { Dialog } from "@/components/ui/dialog";
 import { TextbookMobileFilters, type TextbookClassificationFilters } from "./textbook-mobile-filters";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { FormDialogContent, DetailDialogContent, DocumentDialogContent, ConfirmationDialogContent } from "@/components/ui/form-dialog";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -94,7 +84,6 @@ import {
   getTextbookTitle,
   groupPurchaseLinesByStatus,
   groupSaleLinesByStatus,
-  normalizeBarcodeValue,
 } from "./textbook-ledger.js";
 import { textbookService } from "./textbook-service";
 import { createPurchaseAttempt, discardUnwrittenPurchaseAttempt, finishPurchaseAttempt, readPurchaseAttempt, resumePurchaseAttempt, savePurchaseAttempt, type PurchaseAttempt } from "./textbook-purchase-retry";
@@ -126,7 +115,6 @@ import {
 } from "./textbook-read-model";
 import type {
   SearchSelectOption,
-  SearchSelectFilterLayout,
   SearchSelectFilterGroup,
   Row,
   PurchaseBoardScope,
@@ -253,8 +241,6 @@ const emptyMasterForm = {
   subSubject: "",
   category: "",
   publisher: "",
-  isbn13: "",
-  barcode: "",
   price: "",
   status: "active",
 };
@@ -1954,20 +1940,6 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
     adoptLocationQuery(next.toString());
   }
 
-  function setMasterIsbn13(value: string) {
-    const nextIsbn = normalizeBarcodeValue(value);
-    setMasterForm((current) => {
-      const previousIsbn = normalizeBarcodeValue(current.isbn13);
-      const previousBarcode = normalizeBarcodeValue(current.barcode);
-      const shouldMirrorBarcode = !previousBarcode || previousBarcode === previousIsbn;
-      return {
-        ...current,
-        isbn13: nextIsbn,
-        barcode: shouldMirrorBarcode ? nextIsbn : previousBarcode,
-      };
-    });
-  }
-
   function openDuplicateMaster(row: Row) {
     selectMasterTextbook(row);
   }
@@ -2000,8 +1972,6 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
       subSubject: getTextbookSubSubject(row),
       category: text(row.category),
       publisher: text(row.publisher),
-      isbn13: normalizeBarcodeValue(row.isbn13),
-      barcode: normalizeBarcodeValue(row.barcode),
       price: text(row.sale_price || row.salePrice || row.price || ""),
       status: normalizeStatusValue(row.status),
     });
@@ -2975,8 +2945,6 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
       ...masterForm,
       title: normalizeStoredTextInput(masterForm.title),
       publisher: normalizeStoredTextInput(masterForm.publisher),
-      isbn13: normalizeBarcodeValue(masterForm.isbn13),
-      barcode: normalizeBarcodeValue(masterForm.barcode || masterForm.isbn13),
       category: [
         getTextbookSchoolLevelSummary(masterForm),
         getTextbookGradeSummary(masterForm),
@@ -3996,7 +3964,7 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
         <FormDialogContent
           returnFocusRef={dialogOpenerRef}
           title={masterForm.id ? "교재 수정" : "교재 신규 등록"}
-          description="교재명, 학년, 세부과목, 출판사, 판매가, ISBN, 바코드를 등록하거나 수정합니다."
+          description="교재명, 학년, 세부과목, 출판사, 판매가를 등록하거나 수정합니다."
           onSubmit={submitMaster}
           onCancel={closeMasterDialog}
           cancelLabel="교재 등록 취소"
@@ -4222,34 +4190,6 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
                   aria-label="판매가"
                   autoComplete="off"
                 />
-              </Field>
-            </div>
-            <div className="grid min-w-0 gap-4 border-t border-border/60 pt-4 sm:grid-cols-2">
-              <Field label="ISBN">
-                <Input
-                  name="isbn13"
-                  value={masterForm.isbn13}
-                  onChange={(event) => setMasterIsbn13(event.target.value)}
-                  inputMode="numeric"
-                  placeholder="13자리 ISBN"
-                  aria-label="ISBN"
-                  autoComplete="off"
-                />
-              </Field>
-              <Field label="바코드">
-                <div className="relative">
-                  <Barcode className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                  <Input
-                    name="barcode"
-                    value={masterForm.barcode}
-                    onChange={(event) => setMasterForm((current) => ({ ...current, barcode: normalizeBarcodeValue(event.target.value) }))}
-                    className="pl-9"
-                    inputMode="numeric"
-                    placeholder="스캔 또는 입력"
-                    aria-label="바코드"
-                    autoComplete="off"
-                  />
-                </div>
               </Field>
             </div>
         </FormDialogContent>
@@ -4934,7 +4874,7 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
           <DataTableWorkspaceToolbar
             className={cn("[&_[data-slot=data-table-condition-row]]:min-h-0 md:[&_[data-slot=data-table-condition-row]]:min-h-9", [subjectGroupFilter, categoryGroupFilter, schoolLevelGroupFilter, gradeLevelGroupFilter].every(value => value === "all") && "max-md:[&_[data-slot=data-table-condition-row]]:hidden")}
             search={<DataTableSearchField ref={masterSearchRef} value={query} onValueChange={updateMasterSearchQuery}
-              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" />}
+              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사" />}
             actions={<div data-slot="textbook-master-actions" className="flex min-w-0 flex-1 items-center justify-end gap-1">
               <TextbookMobileFilters applied={{ subject: subjectGroupFilter, category: categoryGroupFilter, school: schoolLevelGroupFilter, grade: gradeLevelGroupFilter }} onApply={applyMobileClassificationFilters}>
                 {(draft, setDraft) => <TextbookListControls idPrefix="textbook-mobile"
@@ -5221,7 +5161,7 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
           <InventoryCountWorkspace
             readFeedback={listReadFeedback}
             searchControl={<DataTableSearchField ref={masterSearchRef} value={query} onValueChange={updateMasterSearchQuery}
-              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" />}
+              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사" />}
             classificationControls={(locationControl) => <TextbookListControls extraFilters={locationControl}
             subjectFilter={subjectGroupFilter}
             onSubjectFilterChange={(value) => {
@@ -5787,7 +5727,6 @@ function SearchCombobox({
   contentClassName,
   allowDeselect = false,
   filterGroups = [],
-  filterLayout = "default",
   serverState,
   selectedDisplayOption,
 }: {
@@ -5804,11 +5743,13 @@ function SearchCombobox({
   contentClassName?: string;
   allowDeselect?: boolean;
   filterGroups?: SearchSelectFilterGroup[];
-  filterLayout?: SearchSelectFilterLayout;
   serverState?: TextbookReferencePickerState;
   selectedDisplayOption?: SearchSelectOption | null;
 }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterPanelId = useId();
   const [selectedFilterValues, setSelectedFilterValues] = useState<Record<string, string[]>>({});
   const selected = options.find((option) => option.value === value) || (selectedDisplayOption?.value === value ? selectedDisplayOption : undefined);
   const effectiveFilterGroups = serverState?.baseFilterGroups || filterGroups;
@@ -5821,181 +5762,85 @@ function SearchCombobox({
   const filteredOptions = serverState ? options : filterGroups.length === 0
     ? options
     : options.filter((option) => doesSearchOptionMatchFilters(option, filterGroups, selectedFilterValues));
-  const usesTwoColumnFilterLayout = filterLayout === "subject-grade-teacher" || filterLayout === "subject-grade-detail";
-  const shouldInlineFilterReset = usesTwoColumnFilterLayout && activeFilterCount > 0;
+  const currentSearch = serverState?.search ?? search;
+  const hasQuery = Boolean(currentSearch.trim() || activeFilterCount);
+  const clearSelection = allowDeselect ? () => { onValueChange(""); setOpen(false); } : undefined;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          id={triggerId}
-          aria-expanded={open}
-          aria-label={ariaLabel}
-          className={cn("w-full justify-between gap-2 px-3 font-normal", triggerClassName)}
-        >
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-            {triggerLabel ? <span className="shrink-0 text-xs font-medium text-muted-foreground">{triggerLabel}</span> : null}
-            <span className={cn("min-w-0 truncate", !selected && "text-muted-foreground")}>
-              {selected?.label || (serverState && value ? "선택 항목을 찾을 수 없습니다" : placeholder)}
-            </span>
-          </span>
-          <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className={cn("w-[min(640px,calc(100vw-2rem))] p-0", contentClassName)}
-        align="start"
-        onWheelCapture={(event) => event.stopPropagation()}
-        onTouchMoveCapture={(event) => event.stopPropagation()}
-      >
-        <Command shouldFilter={serverState ? false : undefined}>
-          <CommandInput
-            placeholder={searchPlaceholder}
-            value={serverState?.search}
-            onValueChange={serverState ? serverState.setSearch : undefined}
-            onCompositionStart={serverState?.onCompositionStart}
-            onCompositionEnd={serverState ? (event) => serverState.onCompositionEnd(event.currentTarget.value) : undefined}
-          />
-          {visibleFilterGroups.length > 0 ? (
-            <div className="grid gap-2 border-b px-2 py-2">
-              {!usesTwoColumnFilterLayout && activeFilterCount > 0 ? (
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 rounded-md px-2 text-xs"
-                    onClick={() => serverState ? serverState.setSelectedFilters({}) : setSelectedFilterValues({})}
-                    aria-label={`${ariaLabel} 필터 초기화`}
-                  >
-                    필터 초기화
-                  </Button>
+    <SharedSearchCombobox
+      open={open}
+      onOpenChange={(next) => { setOpen(next); if (!next && !serverState) setSearch(""); }}
+      triggerId={triggerId}
+      triggerLabel={[triggerLabel, selected?.label || (serverState && value ? "선택 항목을 찾을 수 없습니다" : placeholder)].filter(Boolean).join(" ")}
+      triggerPlaceholder={!selected}
+      triggerAriaLabel={ariaLabel}
+      triggerClassName={triggerClassName}
+      contentClassName={contentClassName}
+      wrapTrigger
+      searchValue={currentSearch}
+      onSearchValueChange={serverState ? serverState.setSearch : setSearch}
+      onSearchCompositionStart={serverState?.onCompositionStart}
+      onSearchCompositionEnd={serverState ? (event) => serverState.onCompositionEnd(event.currentTarget.value) : undefined}
+      searchPlaceholder={searchPlaceholder}
+      searchAriaLabel={`${ariaLabel} 검색`}
+      shouldFilter={!serverState}
+      selectedValue={value}
+      listAriaLabel={`${ariaLabel} 목록`}
+      loading={serverState?.loading}
+      loadingMessage="불러오는 중…"
+      emptyMessage={serverState?.error ? (
+        <div className="grid justify-items-center gap-2" role="alert">
+          <span>목록을 불러오지 못했습니다.</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => { void serverState.retry(); }}>다시 시도</Button>
+        </div>
+      ) : <span role="status">{hasQuery ? "검색 결과가 없습니다." : emptyLabel}</span>}
+      filters={effectiveFilterGroups.length > 0 ? (
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <Button type="button" variant="ghost" size="sm" aria-label={`${ariaLabel} 필터`} aria-expanded={filtersOpen} aria-controls={filterPanelId} onClick={() => setFiltersOpen((current) => !current)}>
+              필터{activeFilterCount > 0 ? ` ${activeFilterCount}` : ""}<ChevronDown className={cn("size-4", filtersOpen && "rotate-180")} aria-hidden="true" />
+            </Button>
+            <Button type="button" variant="ghost" size="sm" disabled={activeFilterCount === 0} onClick={() => serverState ? serverState.setSelectedFilters({}) : setSelectedFilterValues({})} aria-label={`${ariaLabel} 필터 초기화`}>초기화</Button>
+          </div>
+          {filtersOpen ? <div id={filterPanelId} className="grid max-h-36 gap-3 overflow-y-auto overscroll-contain pb-2">
+            {visibleFilterGroups.map((group) => (
+              <fieldset key={group.key} className="min-w-0">
+                <legend className="mb-1 text-xs font-medium text-muted-foreground">{group.label}</legend>
+                <div className="flex flex-wrap gap-1">
+                  {group.options.map((option) => {
+                    const isFilterSelected = (effectiveSelectedFilterValues[group.key] || []).includes(option.value);
+                    return <Button key={`${group.key}-${option.value}`} type="button" variant={isFilterSelected ? "secondary" : "outline"} size="sm" className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left" aria-pressed={isFilterSelected} aria-label={`${ariaLabel} ${group.label} ${option.label} 필터`} onClick={() => {
+                      const next = toggleSearchSelectFilter(effectiveSelectedFilterValues, group.key, option.value);
+                      if (serverState) serverState.setSelectedFilters(next);
+                      else setSelectedFilterValues(next);
+                    }}>
+                      {isFilterSelected ? <Check className="size-3" aria-hidden="true" /> : null}<span className="min-w-0 break-words">{option.label}</span>
+                    </Button>;
+                  })}
                 </div>
-              ) : null}
-              <div
-                className={cn(
-                  "grid max-h-36 gap-2 overflow-y-auto pr-1",
-                  usesTwoColumnFilterLayout && "grid-cols-2 items-start",
-                  shouldInlineFilterReset && "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]",
-                )}
-              >
-                {visibleFilterGroups.map((group) => (
-                  <Fragment key={group.key}>
-                    <div
-                      className={cn(
-                        "grid gap-1",
-                        usesTwoColumnFilterLayout && !["subject", "grade"].includes(group.key) && (shouldInlineFilterReset ? "col-span-3" : "col-span-2"),
-                      )}
-                    >
-                      <div className="text-[11px] font-medium text-muted-foreground">{group.label}</div>
-                      <div className="flex flex-wrap gap-1">
-                        {group.options.map((option) => {
-                          const isFilterSelected = (effectiveSelectedFilterValues[group.key] || []).includes(option.value);
-                          return (
-                            <button
-                              key={`${group.key}-${option.value}`}
-                              type="button"
-                              className={cn(
-                                "inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-1 text-[11px] leading-none transition",
-                                isFilterSelected
-                                  ? "border-primary bg-primary text-primary-foreground"
-                                  : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-                              )}
-                              aria-pressed={isFilterSelected}
-                              aria-label={`${ariaLabel} ${group.label} ${option.label} 필터`}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                const next = toggleSearchSelectFilter(effectiveSelectedFilterValues, group.key, option.value);
-                                if (serverState) serverState.setSelectedFilters(next);
-                                else setSelectedFilterValues(next);
-                              }}
-                            >
-                              <span className="min-w-0 truncate">{option.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    {group.key === "grade" && shouldInlineFilterReset ? (
-                      <div className="flex items-end justify-end">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 rounded-md px-2 text-xs"
-                          onClick={() => serverState ? serverState.setSelectedFilters({}) : setSelectedFilterValues({})}
-                          aria-label={`${ariaLabel} 필터 초기화`}
-                        >
-                          필터 초기화
-                        </Button>
-                      </div>
-                    ) : null}
-                  </Fragment>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          <CommandList
-            className="max-h-80 overscroll-contain overflow-y-auto"
-            onWheelCapture={(event) => event.stopPropagation()}
-            onTouchMoveCapture={(event) => event.stopPropagation()}
-          >
-            <CommandEmpty>{serverState?.loading ? "불러오는 중" : emptyLabel}</CommandEmpty>
-            <CommandGroup>
-              {filteredOptions.map((option) => (
-                <CommandItem
-                  key={option.value}
-                  value={buildSearchSelectCommandValue(option)}
-                  className="items-start gap-2 py-2"
-                  onSelect={() => {
-                    onValueChange(allowDeselect && option.value === value ? "" : option.value);
-                    setOpen(false);
-                  }}
-                >
-                  <Check className={cn("mt-0.5 size-4 shrink-0", option.value === value ? "opacity-100" : "opacity-0")} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-start justify-between gap-2">
-                      <span className="min-w-0 truncate font-medium">{option.label}</span>
-                      {option.description ? (
-                        <span className="shrink-0 text-xs text-muted-foreground">{option.description}</span>
-                      ) : null}
-                    </div>
-                    {option.metaRows?.length ? (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {option.metaRows.map((row) => (
-                          <span
-                            key={`${row.label}-${row.value}`}
-                            className="inline-flex max-w-full items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 text-[11px] leading-none"
-                          >
-                            <span className="shrink-0 font-medium text-muted-foreground">{row.label}</span>
-                            <span className="min-w-0 truncate text-foreground">{row.value}</span>
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-            {serverState ? (
-              <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t bg-background px-2 py-2" aria-label={`${ariaLabel} 서버 페이지`}>
-                <Button type="button" variant="outline" size="sm" disabled={serverState.loading || serverState.page <= 1} onClick={() => { void serverState.goToPage(serverState.page - 1); }}>이전</Button>
-                <span className="text-xs text-muted-foreground">{formatQuantity(serverState.page)} / {formatQuantity(Math.max(1, Math.ceil((serverState.totalCount || 0) / serverState.pageSize)))}</span>
-                {serverState.error ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => { void serverState.retry(); }}>다시 시도</Button>
-                ) : (
-                  <Button type="button" variant="outline" size="sm" disabled={serverState.loading || serverState.totalCount === null || serverState.page * serverState.pageSize >= serverState.totalCount} onClick={() => { void serverState.goToPage(serverState.page + 1); }}>다음</Button>
-                )}
-              </div>
-            ) : null}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+              </fieldset>
+            ))}
+          </div> : null}
+        </div>
+      ) : undefined}
+      footer={serverState ? (
+        <SearchComboboxPagination label={ariaLabel} page={serverState.page} pageSize={serverState.pageSize} totalCount={serverState.totalCount} loading={serverState.loading}
+          onPageChange={(page) => { void serverState.goToPage(page); }} onClear={clearSelection} clearDisabled={!value} />
+      ) : clearSelection ? <Button type="button" size="sm" variant="ghost" disabled={!value} onClick={clearSelection}>선택 해제</Button> : undefined}
+    >
+      {!serverState?.error && filteredOptions.map((option) => {
+        // Keep the verified RPC wire model intact; retired codes have no presentation role.
+        const meta = option.metaRows?.filter((row) => !["ISBN", "바코드"].includes(row.label)).map((row) => row.value) || [];
+        const description = compactUniqueLabels([option.description || "", ...meta]).join(" · ");
+        return <SearchComboboxItem key={option.value} value={option.value} keywords={[buildSearchSelectCommandValue(option)]} onSelect={() => {
+          onValueChange(allowDeselect && option.value === value ? "" : option.value);
+          setOpen(false);
+          if (!serverState) setSearch("");
+        }}>
+          <SearchComboboxOptionContent label={option.label} description={description} selected={option.value === value} />
+        </SearchComboboxItem>;
+      })}
+    </SharedSearchCombobox>
   );
 }
 
@@ -6028,11 +5873,10 @@ function TextbookSelect({ textbooks = [], value, onValueChange, serverState, sel
       value={value}
       onValueChange={onValueChange}
       placeholder="교재 선택"
-      searchPlaceholder="교재명, 출판사, ISBN"
+      searchPlaceholder="교재명, 출판사"
       emptyLabel="교재가 없습니다"
       ariaLabel="교재 선택"
       filterGroups={textbookSelectFilterGroups}
-      filterLayout="subject-grade-detail"
       serverState={serverState}
       selectedDisplayOption={selectedDisplayOption}
     />
@@ -6059,7 +5903,6 @@ function ClassSelect({ classes = [], value, onValueChange, serverState, selected
       ariaLabel="수업 선택"
       allowDeselect={true}
       filterGroups={classSelectFilterGroups}
-      filterLayout="subject-grade-teacher"
       serverState={serverState}
       selectedDisplayOption={selectedDisplayOption}
     />

@@ -755,10 +755,14 @@ test("master option consumers use exact accepted category and bulk metadata and 
   await h.act(() => document.querySelector('[aria-label="교재 세부과목 필터"]').click())
   assert.equal(document.body.textContent.includes("서비스 목록 분류"), true)
   assert.equal(document.body.textContent.includes("요약 전용 분류"), false)
+  await h.act(() => document.activeElement.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })))
+  await waitForComboboxFocus(h, "교재 세부과목 필터")
   await h.act(() => document.querySelector('[aria-label="현재 교재 전체 선택"]').click())
   await h.act(() => button("속성 변경").click())
   await h.act(() => document.querySelector('[aria-label="일괄 세부과목"]').click())
   assert.equal(document.body.textContent.includes("서비스 일괄 분류"), true)
+  await h.act(() => document.activeElement.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })))
+  await waitForComboboxFocus(h, "일괄 세부과목")
 
   await h.act(() => document.querySelector('[aria-label="일괄 과목 선택"]').click())
   await h.act(() => [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.includes("수학")).click())
@@ -900,8 +904,8 @@ test("bulk order keeps quantities and selection after a fresh-detail failure and
   assert.deepEqual(retry.args, reads[0].args)
 })
 
-test("master common form keeps ISBN and price after failed save and admits only one concurrent write", async (t) => {
-  const row = masterRow(151)
+test("master common form omits retired identifiers and keeps price after failed save with one concurrent write", async (t) => {
+  const row = masterRow(151, { isbn13: "9781234567890", barcode: "LEGACY-CODE-151" })
   const h = await setup(t, { search: `?textbookTab=master&textbookDetailKind=master&textbookDetail=${row.id}` })
   await h.resolve(h.requests.find(r => r.name === "get_textbook_master_detail_v1"), { row })
   await h.resolve(h.requests.findLast(r => r.name === "get_textbook_master_options_v1"), masterOptions())
@@ -910,7 +914,8 @@ test("master common form keeps ISBN and price after failed save and admits only 
     const input = document.querySelector(`[aria-label="${label}"]`)
     await h.act(() => input[Object.keys(input).find(k => k.startsWith("__reactProps$"))].onChange({ target: { value } }))
   }
-  await change("ISBN", "9781234567890")
+  assert.equal(document.querySelector('[aria-label="ISBN"]'), null)
+  assert.equal(document.querySelector('[aria-label="바코드"]'), null)
   await change("판매가", "14500")
   const save = document.querySelector('[aria-label="교재 저장"]')
   assert.equal(save.disabled, false, document.querySelector('[role="dialog"]').textContent)
@@ -922,8 +927,8 @@ test("master common form keeps ISBN and price after failed save and admits only 
   const writes = h.requests.filter(r => r.table === "textbooks")
   assert.equal(writes.length, 1)
   const payload = writes[0].steps.find(s => s.method === "upsert").args[0]
-  assert.equal(payload.isbn13, "9781234567890")
-  assert.equal(payload.barcode, "9781234567890")
+  assert.equal(Object.hasOwn(payload, "isbn13"), false, "editing another field cannot clear the stored ISBN")
+  assert.equal(Object.hasOwn(payload, "barcode"), false, "editing another field cannot clear the stored barcode")
   assert.equal(payload.sale_price, 14500)
   assert.equal(save.textContent.trim(), "변경 저장")
   await h.reject(writes[0], { message: "합성 교재 저장 실패" })
@@ -932,11 +937,17 @@ test("master common form keeps ISBN and price after failed save and admits only 
   assert.equal(document.activeElement, alert)
   assert.ok(alert.textContent.includes(safeUnexpectedError))
   assert.equal(alert.textContent.includes("합성 교재 저장 실패"), false)
-  assert.equal(dialog.querySelector('[aria-label="ISBN"]').value, "9781234567890")
+  assert.equal(dialog.querySelector('[aria-label="ISBN"]'), null)
+  assert.equal(dialog.querySelector('[aria-label="바코드"]'), null)
   assert.equal(dialog.querySelector('[aria-label="판매가"]').value, "14500")
   assert.equal(save.disabled, false)
   await h.act(() => save.click())
-  assert.equal(h.requests.filter(r => r.table === "textbooks").length, 2)
+  const retriedWrites = h.requests.filter(r => r.table === "textbooks")
+  assert.equal(retriedWrites.length, 2)
+  const retryPayload = retriedWrites[1].steps.find(s => s.method === "upsert").args[0]
+  assert.equal(Object.hasOwn(retryPayload, "isbn13"), false)
+  assert.equal(Object.hasOwn(retryPayload, "barcode"), false)
+  assert.equal(retryPayload.sale_price, 14500)
   assert.equal(dialog.querySelector('[role="alert"]'), null)
 })
 
