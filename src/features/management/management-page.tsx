@@ -1324,7 +1324,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [textbookCandidatesHaveMore, setTextbookCandidatesHaveMore] = useState(false);
   const [textbookCandidatesLoading, setTextbookCandidatesLoading] = useState(false);
   const [textbookCandidateCommittedScope, setTextbookCandidateCommittedScope] = useState<TextbookCandidateScope | null>(null);
+  const [textbookCandidateError, setTextbookCandidateError] = useState<{ scopeKey: string; page: "first" | "more" } | null>(null);
+  const [textbookCandidateRetry, setTextbookCandidateRetry] = useState(0);
   const textbookCandidateRequestRef = useRef(0);
+  const textbookCandidatePendingRef = useRef(false);
   const handleTextbookCandidateFiltersChange = useCallback((next: ClassTextbookPickerFilters) => {
     setTextbookCandidateFilters((current) => (
       current.subject === next.subject
@@ -1358,12 +1361,15 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     textbookCandidateFilters.subSubject,
   ]);
   const textbookCandidateScopeMatches = textbookCandidateCommittedScope?.key === textbookCandidateScopeKey;
-
-
+  const currentTextbookCandidateError = textbookCandidateError?.scopeKey === textbookCandidateScopeKey
+    ? textbookCandidateError.page
+    : null;
 
   useEffect(() => {
     const requestId = textbookCandidateRequestRef.current + 1;
     textbookCandidateRequestRef.current = requestId;
+    textbookCandidatePendingRef.current = Boolean(selectedTextbookClassId);
+    setTextbookCandidateError(null);
     if (!selectedTextbookClassId) {
       setTextbookCandidateRows([]);
       setTextbookCandidateCursor(null);
@@ -1390,19 +1396,79 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         filters: requestedScope.filters,
         cursor: null,
       }).then((page) => {
-        if (requestId !== textbookCandidateRequestRef.current || !page) return;
+        if (requestId !== textbookCandidateRequestRef.current) return;
+        if (!page) throw new Error("Textbook candidates unavailable");
         setTextbookCandidateRows(normalizeClassTextbookRecords(page.rows));
         setTextbookCandidateCursor(page.nextCursor as ManagementPageCursor | null);
         setTextbookCandidatesHaveMore(page.hasMore);
         setTextbookCandidateCommittedScope(requestedScope);
-      }).catch((candidateError: unknown) => {
-        if (requestId === textbookCandidateRequestRef.current) setOperationError(getSaveErrorMessage(candidateError));
+      }).catch(() => {
+        if (requestId === textbookCandidateRequestRef.current) {
+          setTextbookCandidateError({ scopeKey: requestedScope.key, page: "first" });
+        }
       }).finally(() => {
-        if (requestId === textbookCandidateRequestRef.current) setTextbookCandidatesLoading(false);
+        if (requestId === textbookCandidateRequestRef.current) {
+          textbookCandidatePendingRef.current = false;
+          setTextbookCandidatesLoading(false);
+        }
       });
     }, 250);
-    return () => window.clearTimeout(timer);
-  }, [loadClassTextbookCandidatePage, selectedTextbookClassId, textbookCandidateFilters, textbookCandidateQuery, textbookCandidateScopeKey]);
+    return () => {
+      window.clearTimeout(timer);
+      if (requestId === textbookCandidateRequestRef.current) {
+        textbookCandidateRequestRef.current += 1;
+        textbookCandidatePendingRef.current = false;
+      }
+    };
+  }, [loadClassTextbookCandidatePage, selectedTextbookClassId, textbookCandidateFilters, textbookCandidateQuery, textbookCandidateScopeKey, textbookCandidateRetry]);
+
+  const loadMoreTextbookCandidates = async () => {
+    const committedScope = textbookCandidateCommittedScope;
+    if (!committedScope
+      || committedScope.key !== textbookCandidateScopeKey
+      || !textbookCandidateCursor
+      || textbookCandidatePendingRef.current) return;
+    const requestId = textbookCandidateRequestRef.current;
+    textbookCandidatePendingRef.current = true;
+    setTextbookCandidatesLoading(true);
+    setTextbookCandidateError(null);
+    try {
+      const page = await loadClassTextbookCandidatePage({
+        classId: committedScope.classId,
+        search: committedScope.search,
+        filters: committedScope.filters,
+        cursor: textbookCandidateCursor,
+      });
+      if (requestId !== textbookCandidateRequestRef.current) return;
+      if (!page) throw new Error("Textbook candidates unavailable");
+      setTextbookCandidateRows((current) => [...new Map(
+        normalizeClassTextbookRecords([...current, ...page.rows]).map((textbook) => [textbook.id, textbook]),
+      ).values()]);
+      setTextbookCandidateCursor(page.nextCursor as ManagementPageCursor | null);
+      setTextbookCandidatesHaveMore(page.hasMore);
+    } catch {
+      if (requestId === textbookCandidateRequestRef.current) {
+        setTextbookCandidateError({ scopeKey: committedScope.key, page: "more" });
+      }
+    } finally {
+      if (requestId === textbookCandidateRequestRef.current) {
+        textbookCandidatePendingRef.current = false;
+        setTextbookCandidatesLoading(false);
+      }
+    }
+  };
+
+  const retryTextbookCandidates = () => {
+    if (!currentTextbookCandidateError || textbookCandidatePendingRef.current) return;
+    if (currentTextbookCandidateError === "more") {
+      void loadMoreTextbookCandidates();
+      return;
+    }
+    textbookCandidatePendingRef.current = true;
+    setTextbookCandidatesLoading(true);
+    setTextbookCandidateError(null);
+    setTextbookCandidateRetry((current) => current + 1);
+  };
 
   const reconcileManagementPage = useCallback(async (selectedId?: string) => {
     if (kind === "classes" && selectedId) {
@@ -3252,38 +3318,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             textbooks={textbookCandidateScopeMatches ? textbookCandidateRows : []}
             selectedIds={selectedIds}
             disabled={!canMutateRows}
-            loading={!textbookCandidateScopeMatches || textbookCandidatesLoading}
+            loading={textbookCandidatesLoading || (!textbookCandidateScopeMatches && !currentTextbookCandidateError)}
+            error={currentTextbookCandidateError}
+            onRetry={retryTextbookCandidates}
             hasMore={textbookCandidateScopeMatches && textbookCandidatesHaveMore}
             query={textbookCandidateQuery}
             onQueryChange={setTextbookCandidateQuery}
             onFiltersChange={handleTextbookCandidateFiltersChange}
-            onLoadMore={async () => {
-              const committedScope = textbookCandidateCommittedScope;
-              if (!committedScope
-                || committedScope.key !== textbookCandidateScopeKey
-                || !textbookCandidateCursor
-                || textbookCandidatesLoading) return;
-              const requestId = textbookCandidateRequestRef.current;
-              setTextbookCandidatesLoading(true);
-              try {
-                const page = await loadClassTextbookCandidatePage({
-                  classId: committedScope.classId,
-                  search: committedScope.search,
-                  filters: committedScope.filters,
-                  cursor: textbookCandidateCursor,
-                });
-                if (!page || requestId !== textbookCandidateRequestRef.current) return;
-                setTextbookCandidateRows((current) => [...new Map(
-                  normalizeClassTextbookRecords([...current, ...page.rows]).map((textbook) => [textbook.id, textbook]),
-                ).values()]);
-                setTextbookCandidateCursor(page.nextCursor as ManagementPageCursor | null);
-                setTextbookCandidatesHaveMore(page.hasMore);
-              } catch (candidateError) {
-                if (requestId === textbookCandidateRequestRef.current) setOperationError(getSaveErrorMessage(candidateError));
-              } finally {
-                if (requestId === textbookCandidateRequestRef.current) setTextbookCandidatesLoading(false);
-              }
-            }}
+            onLoadMore={loadMoreTextbookCandidates}
             onSelectedIdsChange={updateSelectedIds}
           />
         </div>
