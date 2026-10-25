@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 
-import { DataTableToolbar, DataTableCommandRow, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { DataTableCommandRow, DataTableWorkspaceToolbar, DataTableReadFeedback, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
 import { DataTableSearchField } from "@/components/data-table/data-table-search-field"
 import { useDataTableColumns } from "@/components/data-table/data-table-columns"
 import { cn } from "@/lib/utils"
@@ -6156,6 +6156,8 @@ function WithdrawalDataTable({
   serverPaged = false,
   serverFilterOptions,
   onFilterOpen,
+  statsFeedback,
+  searchRef,
   onPageControlsChange,
   initialControls = EMPTY_OPERATION_TABLE_PAGE_CONTROLS,
 }: {
@@ -6178,6 +6180,8 @@ function WithdrawalDataTable({
   serverPaged?: boolean
   serverFilterOptions?: { subject: TodoFilterOption[]; teacher: TodoFilterOption[] }
   onFilterOpen?: () => void
+  statsFeedback?: ReactNode
+  searchRef?: Ref<HTMLInputElement>
   onPageControlsChange?: (controls: OperationTablePageControls) => void
   initialControls?: OperationTablePageControls
 }) {
@@ -6295,12 +6299,15 @@ function WithdrawalDataTable({
 
   return (
     <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
-      <DataTableToolbar aria-label="퇴원 전체 필터">
+      <DataTableWorkspaceToolbar aria-label="퇴원 전체 필터"
+        feedback={<>{statsFeedback}{columnSettingsControl}</>}
+        search={
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <WithdrawalFilterSelect label="퇴원 검색 범위" includeAll={false} value={filterColumnKey} allLabel="학생" options={WITHDRAWAL_TABLE_COLUMNS.filter(column => column.columnKey !== "action" && (!commonReadOnly || isOperationalCommonColumn("withdrawal", column.columnKey))).map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as WithdrawalTableColumnKey)} />
-          <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="퇴원 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
-          {columnSettingsControl}
+          <DataTableSearchField ref={searchRef} value={filterValue} onValueChange={setFilterValue} label="퇴원 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
         </div>
+        }
+        filters={
         <DataTableFilterPanel label="퇴원 검색 조건" activeFilters={[
           ...(selectedSubjectFilter !== "all" ? [{label: "과목", value: selectedSubjectFilter}] : []),
           ...(selectedTeacherFilter !== "all" ? [{label: "선생님", value: selectedTeacherFilter}] : []),
@@ -6338,7 +6345,8 @@ function WithdrawalDataTable({
         />
           </div>
         </DataTableFilterPanel>
-      </DataTableToolbar>
+        }
+      />
       <div data-testid="withdrawal-mobile-task-list" className="grid gap-2 p-3 md:hidden" aria-label="퇴원 모바일 목록">
         {loading ? (
           <div className="px-3 py-10 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
@@ -6609,6 +6617,8 @@ function TransferDataTable({
   serverPaged = false,
   serverFilterOptions,
   onFilterOpen,
+  statsFeedback,
+  searchRef,
   onPageControlsChange,
   initialControls = EMPTY_OPERATION_TABLE_PAGE_CONTROLS,
 }: {
@@ -6631,6 +6641,8 @@ function TransferDataTable({
   serverPaged?: boolean
   serverFilterOptions?: { subject: TodoFilterOption[]; teacher: TodoFilterOption[] }
   onFilterOpen?: () => void
+  statsFeedback?: ReactNode
+  searchRef?: Ref<HTMLInputElement>
   onPageControlsChange?: (controls: OperationTablePageControls) => void
   initialControls?: OperationTablePageControls
 }) {
@@ -6752,12 +6764,15 @@ function TransferDataTable({
 
   return (
     <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
-      <DataTableToolbar aria-label="전반 전체 필터">
+      <DataTableWorkspaceToolbar aria-label="전반 전체 필터"
+        feedback={<>{statsFeedback}{columnSettingsControl}</>}
+        search={
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <WithdrawalFilterSelect label="전반 검색 범위" includeAll={false} value={filterColumnKey} allLabel="학생" options={TRANSFER_TABLE_COLUMNS.filter(column => column.columnKey !== "action" && (!commonReadOnly || isOperationalCommonColumn("transfer", column.columnKey))).map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as TransferTableColumnKey)} />
-          <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="전반 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
-          {columnSettingsControl}
+          <DataTableSearchField ref={searchRef} value={filterValue} onValueChange={setFilterValue} label="전반 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
         </div>
+        }
+        filters={
         <DataTableFilterPanel label="전반 검색 조건" activeFilters={[
           ...(selectedSubjectFilter !== "all" ? [{label: "과목", value: selectedSubjectFilter}] : []),
           ...(selectedTeacherFilter !== "all" ? [{label: "선생님", value: selectedTeacherFilter}] : []),
@@ -6796,7 +6811,8 @@ function TransferDataTable({
         />
           </div>
         </DataTableFilterPanel>
-      </DataTableToolbar>
+        }
+      />
       <div data-testid="transfer-mobile-task-list" className="grid gap-2 p-3 md:hidden" aria-label="전반 모바일 목록">
         {loading ? (
           <div className="px-3 py-10 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
@@ -8405,8 +8421,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [operationStatsState, setOperationStatsState] = useState<{ scope: string; status: "loading" | "ready" | "error" }>({ scope: "", status: "loading" })
   const acceptedOperationStatsRef = useRef<{ scope: string; stats: NonNullable<OpsTaskWorkspaceData["stats"]> } | null>(null)
   const operationStatsRetryLockRef = useRef(false)
-  const operationStatsRetryButtonRef = useRef<HTMLButtonElement>(null)
-  const [operationStatsRetryScope, setOperationStatsRetryScope] = useState<string | null>(null)
+  const operationSearchRef = useRef<HTMLInputElement>(null)
   const refreshNumberedPage = numberedPage.refresh
   const reload = useCallback(async (_force = false, _showPending = true) => {
     void _force
@@ -8465,11 +8480,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         if (recoverOperationStats) {
           acceptedOperationStatsRef.current = { scope: taskStatsRequestScope, stats }
           operationStatsRetryLockRef.current = false
-          if (document.activeElement === operationStatsRetryButtonRef.current) {
-            workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
-          }
           setOperationStatsState({ scope: taskStatsRequestScope, status: "ready" })
-          setOperationStatsRetryScope(null)
         }
       }
     })
@@ -12608,6 +12619,28 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     <div className="min-w-0 flex-1" />
   )
 
+  const operationStatsFeedback = recoverOperationStats && numberedServerPage && !commonReadDenied && !authLoading && currentUserId && operationStatsStatus !== "ready" ? (
+    operationStatsStatus === "error" ? (
+      <DataTableReadFeedback
+        label={authoritativeTaskStats ? "이전 집계 · 갱신 실패" : "집계 확인 불가"}
+        message={`건수와 필터 선택 정보를 불러오지 못했습니다.${authoritativeTaskStats ? " 이전 집계를 표시합니다." : ""}`}
+        retryLabel="집계 다시 불러오기"
+        returnFocusRef={operationSearchRef}
+        onRetry={() => {
+          if (commonReadDenied || authLoading || !currentUserId || operationStatsStatus !== "error" || operationStatsRetryLockRef.current) return
+          operationStatsRetryLockRef.current = true
+          setOperationStatsState({ scope: taskStatsRequestScope, status: "loading" })
+          setOperationStatsRetryRevision((revision) => revision + 1)
+        }}
+      />
+    ) : (
+      <span role="status" className="min-w-0 truncate text-xs text-muted-foreground">
+        {authoritativeTaskStats ? "이전 집계 · 확인 중" : "집계 확인 중"}
+        <span className="sr-only">건수와 필터 선택 정보를 불러오는 중입니다.{authoritativeTaskStats ? " 이전 집계를 표시합니다." : ""}</span>
+      </span>
+    )
+  ) : undefined
+
   const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace || isWordRetestWorkspace
     ? "flex flex-col gap-2"
     : "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"
@@ -13003,20 +13036,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         ) : null}
 
-        {recoverOperationStats && numberedServerPage && !commonReadDenied && !authLoading && currentUserId && operationStatsStatus !== "ready" ? (
-          <div role={operationStatsStatus === "error" ? "alert" : "status"} className={cn("flex flex-wrap items-center gap-2 text-sm", operationStatsStatus === "error" ? "text-destructive" : "text-muted-foreground")}>
-            <span>{operationStatsStatus === "error" ? "건수와 필터 선택 정보를 불러오지 못했습니다." : "건수와 필터 선택 정보를 불러오는 중입니다."}{authoritativeTaskStats ? " 이전 집계를 표시합니다." : ""}</span>
-            {operationStatsStatus === "error" || operationStatsRetryScope === taskStatsRequestScope ? (
-              <Button ref={operationStatsRetryButtonRef} variant="outline" size="form" aria-disabled={operationStatsStatus === "loading"} onClick={() => {
-                if (commonReadDenied || authLoading || !currentUserId || operationStatsStatus !== "error" || operationStatsRetryLockRef.current) return
-                operationStatsRetryLockRef.current = true
-                setOperationStatsRetryScope(taskStatsRequestScope)
-                setOperationStatsState({ scope: taskStatsRequestScope, status: "loading" })
-                setOperationStatsRetryRevision((revision) => revision + 1)
-              }}>집계 다시 불러오기</Button>
-            ) : null}
-          </div>
-        ) : null}
 
         {numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           목록을 불러오지 못했습니다.{numberedPage.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}
@@ -13094,6 +13113,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
 	            serverPaged={Boolean(numberedServerPage)}
 	            serverFilterOptions={operationFilterOptions}
+              statsFeedback={operationStatsFeedback}
+              searchRef={operationSearchRef}
 	            onFilterOpen={() => void ensureTaskOptions()}
 	            onPageControlsChange={setOperationTablePageControls}
 	          />
@@ -13119,6 +13140,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
 	            serverPaged={Boolean(numberedServerPage)}
 	            serverFilterOptions={operationFilterOptions}
+              statsFeedback={operationStatsFeedback}
+              searchRef={operationSearchRef}
 	            onFilterOpen={() => void ensureTaskOptions()}
 	            onPageControlsChange={setOperationTablePageControls}
 	          />

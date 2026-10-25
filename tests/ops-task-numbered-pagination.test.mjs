@@ -1294,6 +1294,30 @@ for (const mode of ['booking']) test(`real registration ${mode} child protects p
   assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
   await settleDraftUi(() => draftAction('계속 편집')); assert.equal(selector().value, choice);
   await settleDraftUi(() => clickTab(subjectTab)); await settleDraftUi(() => draftAction('변경사항 버리기'));
+  const expectedTrackId = subjectTab.id.replace('registration-subject-tab-', '');
+  const transitionState = () => ({
+    capturedConnected: subjectTab.isConnected,
+    sameNode: document.getElementById(subjectTab.id) === subjectTab,
+    freshSelected: document.getElementById(subjectTab.id)?.getAttribute('aria-selected'),
+    focusTrackId: app().focusTrackId,
+    confirmationPresent: Boolean(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]')),
+  });
+  const beforeTransitionSettles = transitionState();
+  // React commits the close at the end of the action's act; Radix then queues
+  // close autofocus, which commits the pending navigation. Wait for that real
+  // transition, not a longer sleep inside the same action act.
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    const state = transitionState();
+    if (state.freshSelected === 'true' && state.focusTrackId === expectedTrackId && !state.confirmationPresent) break;
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  }
+  const afterTransitionSettles = transitionState();
+  t.diagnostic(JSON.stringify({ beforeTransitionSettles, afterTransitionSettles }));
+  assert.equal(afterTransitionSettles.capturedConnected, true, 'captured subject tab is still mounted');
+  assert.equal(afterTransitionSettles.sameNode, true, 'captured and fresh subject tab are the same node');
+  assert.equal(afterTransitionSettles.focusTrackId, expectedTrackId, 'subject navigation committed to the requested track');
+  assert.equal(afterTransitionSettles.confirmationPresent, false, 'discard confirmation finished closing');
   assert.equal(subjectTab.getAttribute('aria-selected'), 'true');
   assert.equal(inquiry.value, '남는 본체 초안'); assert.equal(unloadIsBlocked(), true);
   await settleDraftUi(() => requestAppNavigation(() => routes.push('remaining')));
@@ -1951,7 +1975,7 @@ for (const kind of ['transfer', 'withdrawal']) test(`ops auxiliary stats recover
   assert.doesNotMatch(document.body.textContent, /SYNTHETIC_PRIVATE_STATS_FAILURE/);
   const alert = [...document.querySelectorAll('[role="alert"]')].find(node => node.textContent.includes('건수와 필터 선택 정보를 불러오지 못했습니다.'));
   assert.ok(alert, 'successful primary rows need a separate visible warning when their supplemental stats fail');
-  assert.ok([...alert.querySelectorAll('button')].some(button => button.textContent.trim() === '집계 다시 불러오기'), 'failed stats provide their own retry action');
+  assert.ok([...alert.querySelectorAll('button')].some(button => button.getAttribute('aria-label') === '집계 다시 불러오기'), 'failed stats provide their own retry action');
 });
 const operationStatsWarning = '건수와 필터 선택 정보를 불러오지 못했습니다.';
 const operationStatsPending = '건수와 필터 선택 정보를 불러오는 중입니다.';
@@ -1959,7 +1983,7 @@ function operationStatsAlert() {
   return [...document.querySelectorAll('[role="alert"]')].find(node => node.textContent.includes(operationStatsWarning));
 }
 function operationStatsRetry() {
-  const retry = [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '집계 다시 불러오기');
+  const retry = [...document.querySelectorAll('button')].find(button => button.getAttribute('aria-label') === '집계 다시 불러오기');
   assert.ok(retry, 'real supplemental retry button');
   return retry;
 }
@@ -2010,14 +2034,14 @@ for (const kind of ['transfer', 'withdrawal']) test(`ops auxiliary stats recover
   assert.equal(generalStatsReads(page).length, initialStatsCount + 1, 'same-tick repeated activation owns only one stats read');
   assert.equal(generalPageReads(page).length, 1, 'dedicated stats retry never replays primary');
   assert.deepEqual(generalStatsReads(page).at(-1).args, failedStats.args);
-  assert.equal(document.activeElement, retry, 'pending retry keeps its keyboard focus');
-  assert.equal(retry.getAttribute('aria-disabled'), 'true');
+  assert.equal(document.activeElement, search, 'shared feedback returns focus before the pending retry replaces its button');
+  assert.equal(retry.isConnected, false, 'pending feedback replaces the retry inside the fixed command lane');
   assert.equal(search.value, filters.search);
   assert.ok(document.querySelector('[aria-label="2 페이지"][aria-current="page"]'));
   assert.match(document.body.textContent, /합성 보존 행 A/);
   await acceptOperationStats(generalStatsReads(page).at(-1));
   assert.equal(operationStatsAlert(), undefined);
-  assert.equal(document.activeElement, search, 'successful retry restores focus before its button disappears');
+  assert.equal(document.activeElement, search, 'successful retry preserves focus on the stable search');
   assert.equal(operationApplicantTab().getAttribute('aria-label'), '신청 12건');
   assert.equal(search.value, filters.search);
   assert.deepEqual(labels(), ['수학', '합성 담당']);
@@ -2061,7 +2085,7 @@ for (const kind of ['transfer', 'withdrawal']) for (const primaryOutcome of ['em
   assert.equal(operationApplicantTab().textContent.includes('—'), false);
   const primaryAlert = [...document.querySelectorAll('[role="alert"]')].find(node => node.textContent.includes('목록을 불러오지 못했습니다.'));
   assert.equal(Boolean(primaryAlert), primaryOutcome === 'failed');
-  assert.equal([...document.querySelectorAll('button')].some(button => button.textContent.trim() === '집계 다시 불러오기'), false);
+  assert.equal([...document.querySelectorAll('button')].some(button => button.getAttribute('aria-label') === '집계 다시 불러오기'), false);
   assertOnlyOperationReads(page);
 });
 for (const kind of ['transfer', 'withdrawal']) for (const lateOutcome of ['success', 'failure']) test(`ops auxiliary stats recovery: ${kind} excludes cancelled ${lateOutcome} after a search scope change`, async t => {
@@ -2119,7 +2143,7 @@ for (const { kind, denial } of [
   await act(async () => primary.resolve({ data: null, error: denial }));
   const statsCountAfterDenial = generalStatsReads(page).length;
   assert.equal(operationStatsAlert(), undefined, 'permission denial removes the supplemental recovery surface');
-  assert.equal([...document.querySelectorAll('button')].some(button => button.textContent.trim() === '집계 다시 불러오기'), false, 'a denied viewer has no stats retry click path');
+  assert.equal([...document.querySelectorAll('button')].some(button => button.getAttribute('aria-label') === '집계 다시 불러오기'), false, 'a denied viewer has no stats retry click path');
   assert.doesNotMatch(document.body.textContent, new RegExp(`${operationStatsWarning}|${operationStatsPending}`));
   assert.ok([...document.querySelectorAll('[role="alert"]')].some(node => node.textContent.includes('목록을 불러오지 못했습니다.')), 'the primary permission failure remains visible');
   await page.render();
@@ -2375,4 +2399,41 @@ test('final teacher page permission denial invalidates an already pending common
   console.log('AUTH_LATE_DETAIL',JSON.stringify({rowCount:document.querySelectorAll('[data-registration-case-row]').length,hasLate:document.body.textContent.includes('LATE DETAIL AFTER DENIAL'),commonReads:commonReads(h).length}));
   assert.equal(document.body.textContent.includes('LATE DETAIL AFTER DENIAL'),false,'an old detail completion cannot resurrect data after permission denial');
   noRawOrWrites(h);
+});
+
+
+for (const kind of ['transfer', 'withdrawal']) test(`ops aggregate feedback stays in the shared command lane: ${kind}`, async t => {
+  const { page, search } = await restoreOperationStatsPage(t, kind);
+  const toolbar = document.querySelector(`[aria-label="${kind === 'transfer' ? '전반' : '퇴원'} 전체 필터"]`);
+  const filters = toolbar.querySelector(`[aria-label="${kind === 'transfer' ? '전반' : '퇴원'} 누가 필터"]`);
+  const initialStatsCount = generalStatsReads(page).length;
+  const command = toolbar.querySelector('[data-slot="data-table-command-row"]');
+  assert.ok(command, 'aggregate states use the shared command row, not a new workspace row');
+  const settings = toolbar.querySelector('[aria-label="컬럼 구성"]');
+  assert.ok(settings?.closest('[data-slot="data-table-actions"]'), 'column settings shares the fixed actions lane');
+  const conditions = toolbar.querySelector('[data-slot="data-table-condition-row"]');
+  const assertStableNodes = () => {
+    assert.equal(toolbar.querySelector('input[type="search"]'), search);
+    assert.equal(toolbar.querySelector('[data-slot="data-table-command-row"]'), command);
+    assert.equal(toolbar.querySelector('[data-slot="data-table-condition-row"]'), conditions);
+    assert.equal(toolbar.querySelector(`[aria-label="${kind === 'transfer' ? '전반' : '퇴원'} 누가 필터"]`), filters);
+    assert.equal(toolbar.querySelector('[aria-label="컬럼 구성"]'), settings, 'column settings remains mounted through feedback changes');
+    assert.equal(search.value, '합성 검색');
+  };
+  const pending = [...document.querySelectorAll('[role="status"]')].find(node => node.textContent.includes(operationStatsPending));
+  assert.ok(pending?.closest('[data-slot="data-table-actions"]'), 'loading stays in the reserved command lane');
+  await failOperationStats(generalStatsReads(page).at(-1));
+  assert.equal(operationStatsAlert()?.closest('[data-slot="data-table-command-row"]'), command);
+  assertStableNodes();
+  const retry = operationStatsRetry();
+  retry.focus();
+  await act(async () => retry.click());
+  assert.equal(document.activeElement, search, 'shared feedback returns focus before replacing retry');
+  assertStableNodes();
+  await acceptOperationStats(generalStatsReads(page).at(-1));
+  assert.equal(operationStatsAlert(), undefined);
+  assertStableNodes();
+  assert.equal(generalPageReads(page).length, 1);
+  assert.equal(generalStatsReads(page).length, initialStatsCount + 1, 'only the requested stats retry starts after restored initial reads');
+  assertOnlyOperationReads(page);
 });
