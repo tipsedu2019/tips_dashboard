@@ -1467,3 +1467,68 @@ test('inventory counts use all books without heuristic filters or badges and pre
   assert.equal(h.requests.some(r=>r.table||r.name==='create_textbook_stock_count_v1'),false);
   await h.assertNoLegacyReads();
 });
+
+test('removed textbook classifications normalize old URLs without losing other view state', () => {
+  for (const tab of ['master', 'inventory']) for (const gradeLevel of ['e1', 'e2', 'e3', 'e4']) {
+    const filters = { ...masterFilters, subject: 'other', schoolLevel: 'elementary', gradeLevel, subSubject: 'legacy' }
+    const params = new URLSearchParams({ textbookTab: tab, textbookPage: '7', textbookPageSize: '20', textbookFilters: JSON.stringify(filters), textbookDetailKind: 'master', textbookDetail: id(99), unrelated: 'keep' })
+    const parsed = parseTextbookNavigation(params)
+    assert.deepEqual(parsed.primary, { page: 1, pageSize: 20, filters: { ...filters, subject: 'all', gradeLevel: 'all', subSubject: 'all' } })
+    assert.deepEqual(parsed.detail, { kind: 'master', id: id(99) })
+    const serialized = serializeTextbookNavigation(params, { ...parsed, primary: { page: 7, pageSize: 20, filters } })
+    assert.equal(serialized.get('unrelated'), 'keep')
+    assert.deepEqual(parseTextbookNavigation(serialized), parsed)
+  }
+  const filters = { ...masterFilters, subject: 'math', schoolLevel: 'elementary', gradeLevel: 'e5', subSubject: '기타' }
+  const parsed = parseTextbookNavigation(new URLSearchParams({ textbookTab: 'master', textbookPage: '3', textbookFilters: JSON.stringify(filters) }))
+  assert.equal(parsed.primary.page, 3)
+  assert.deepEqual(parsed.primary.filters, filters, 'the subtype named 기타 and supported grades remain valid')
+})
+
+for (const tab of ['master', 'inventory']) test(`${tab} clears removed filters before its first RPC and external navigation`, async t => {
+  const filters = { ...masterFilters, subject: 'other', schoolLevel: 'elementary', gradeLevel: 'e2', subSubject: 'legacy' }
+  const params = new URLSearchParams({ textbookTab: tab, textbookPage: '8', textbookPageSize: '20', textbookFilters: JSON.stringify(filters) })
+  const h = await setup(t, { search: `?${params}` })
+  if (tab === 'inventory') await h.resolve(h.requests.find(r => r.name === 'list_textbook_location_reference_page_v1'), {
+    rows: [{ value: id(900), label: '합성 위치', searchText: 'main' }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: id(900), code: 'main', name: '합성 위치' },
+  })
+  const name = tab === 'master' ? 'list_textbook_master_page_v1' : 'list_textbook_inventory_page_v1'
+  const first = h.requests.find(r => r.name === name)
+  assert.ok(first)
+  assert.equal(first.args.p_page, 1)
+  assert.equal(first.args.p_page_size, 20)
+  assert.equal(first.args.p_filters.subject, 'all')
+  assert.equal(first.args.p_filters.gradeLevel, 'all')
+  assert.equal(first.args.p_filters.subSubject, 'all')
+  assert.equal(first.args.p_filters.search, 'grammar')
+  assert.equal(first.args.p_filters.schoolLevel, 'elementary')
+  const options = h.requests.filter(r => r.name === 'get_textbook_master_options_v1')
+  assert.ok(options.length > 0)
+  assert.ok(options.every(r => r.args.p_filters.listSubject === 'all'))
+  await h.resolve(first, { rows: [], page: 1, pageSize: 20, totalCount: 0 })
+  params.set('textbookFilters', JSON.stringify({ ...filters, search: 'next', subject: 'english', gradeLevel: 'e4', subSubject: '기타' }))
+  await h.navigate(`?${params}`)
+  const next = h.requests.findLast(r => r.name === name)
+  assert.equal(next.args.p_page, 1)
+  assert.equal(next.args.p_filters.gradeLevel, 'all')
+  assert.equal(next.args.p_filters.subject, 'english')
+  assert.equal(next.args.p_filters.subSubject, '기타')
+  assert.equal(next.args.p_filters.search, 'next')
+  await h.assertNoLegacyReads()
+})
+
+test('catalog full view and title search keep books in removed filter classifications accessible', async t => {
+  const h = await setup(t, { search: '?textbookTab=master' })
+  const legacy = masterRow(998, { title: '합성 저학년 교재', name: '합성 저학년 교재', subject: 'other', school_level: 'elementary', school_levels: ['elementary'], grade_level: 'e1', grade_levels: ['e1'], sub_subject: '기타' })
+  await h.resolve(h.requests.find(r => r.name === 'list_textbook_master_page_v1'), { rows: [legacy], page: 1, pageSize: 10, totalCount: 1 })
+  assert.deepEqual(preparedRowIds('master-desktop'), [legacy.id])
+  assert.deepEqual(preparedRowIds('master-mobile'), [legacy.id])
+  const filters = { search: '합성 저학년', subject: 'all', schoolLevel: 'all', gradeLevel: 'all', subSubject: 'all', quality: 'all', inventory: 'all' }
+  await h.navigate(`?${new URLSearchParams({ textbookTab: 'master', textbookFilters: JSON.stringify(filters) })}`)
+  const request = h.requests.findLast(r => r.name === 'list_textbook_master_page_v1')
+  assert.deepEqual(request.args.p_filters, filters)
+  await h.resolve(request, { rows: [legacy], page: 1, pageSize: 10, totalCount: 1 })
+  assert.deepEqual(preparedRowIds('master-desktop'), [legacy.id])
+  await h.assertNoLegacyReads()
+})

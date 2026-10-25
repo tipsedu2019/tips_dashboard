@@ -6,14 +6,13 @@ import { Button } from "@/components/ui/button";
 import { SearchCombobox, SearchComboboxItem } from "@/components/ui/search-combobox";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  TEXTBOOK_GRADE_OPTIONS,
   TEXTBOOK_SCHOOL_LEVEL_OPTIONS,
-  TEXTBOOK_SUBJECT_OPTIONS,
   getTextbookGradeSummary,
   getTextbookSchoolLevelSummary,
   getTextbookSubjectLabel,
   normalizeTextbookSubject,
 } from "@/features/textbooks/textbook-taxonomy";
+import { TEXTBOOK_FILTER_GRADE_OPTIONS, TEXTBOOK_FILTER_SUBJECT_OPTIONS, getTextbookFilterGradeOptions, normalizeTextbookCatalogFilters } from "@/features/textbooks/textbook-filter-policy";
 
 import {
   ClassTextbookPickerFilters,
@@ -73,9 +72,7 @@ export function ClassTextbookPicker({
       .filter((textbook) => !selectedIdSet.has(textbook.id)),
     [filters, query, selectedIdSet, textbooks],
   );
-  const gradeOptions = TEXTBOOK_GRADE_OPTIONS.filter((option) =>
-    !filters.schoolLevel || option.schoolLevel === filters.schoolLevel,
-  );
+  const gradeOptions = getTextbookFilterGradeOptions(filters.schoolLevel);
   const subSubjectOptions = useMemo(
     () => [...new Set(textbooks
       .filter((textbook) => !filters.subject || normalizeTextbookSubject(textbook.subject) === filters.subject)
@@ -91,15 +88,15 @@ export function ClassTextbookPicker({
   function updateFilter(name: keyof ClassTextbookPickerFilters, value: string) {
     setFilters((current) => {
       if (name === "subject") {
-        return { ...current, subject: value, subSubject: "" };
+        return normalizeTextbookCatalogFilters({ ...current, subject: value, subSubject: "" }, "");
       }
       if (name === "schoolLevel") {
-        const gradeStillFits = !current.gradeLevel || TEXTBOOK_GRADE_OPTIONS.some(
+        const gradeStillFits = !current.gradeLevel || TEXTBOOK_FILTER_GRADE_OPTIONS.some(
           (option) => option.value === current.gradeLevel && (!value || option.schoolLevel === value),
         );
         return { ...current, schoolLevel: value, gradeLevel: gradeStillFits ? current.gradeLevel : "" };
       }
-      return { ...current, [name]: value };
+      return normalizeTextbookCatalogFilters({ ...current, [name]: value }, "");
     });
   }
 
@@ -156,7 +153,7 @@ export function ClassTextbookPicker({
                 <SelectContent>
                   <SelectGroup>
                     <SelectItem value="all">전체 과목</SelectItem>
-                    {TEXTBOOK_SUBJECT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                    {TEXTBOOK_FILTER_SUBJECT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                   </SelectGroup>
                 </SelectContent>
               </Select>

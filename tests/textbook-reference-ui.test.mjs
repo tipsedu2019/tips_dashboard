@@ -978,3 +978,34 @@ test("sale detail retries in place and shows complete long identity and operatio
   assert.equal(document.querySelector('[role="dialog"]'), null)
   assert.equal(new URLSearchParams(window.location.search).has('textbookDetail'), false)
 })
+
+test('book filter choices are narrowed after wire validation while legacy rows and class filters survive', async t => {
+  const h = await setupReferenceHook(t, { ...actor, bookOptions: { enabled: true }, classOptions: { enabled: true } })
+  const groups = [
+    { key: 'subject', label: '과목', optionOrder: ['영어', '수학', '과학', '기타'], options: [{ value: 'english', label: '영어', count: 1 }, { value: 'other', label: '기타', count: 1 }] },
+    { key: 'grade', label: '학년', options: [{ value: 'e1', label: '초1', count: 1 }, { value: 'e5', label: '초5', count: 1 }] },
+    { key: 'subSubject', label: '세부과목', options: [{ value: '기타', label: '기타', count: 2 }] },
+  ]
+  const legacy = { ...bookOption(711), filterValues: { subject: [{ value: 'other', label: '기타' }], grade: [{ value: 'e1', label: '초1' }], subSubject: [{ value: '기타', label: '기타' }] } }
+  const supported = { ...bookOption(712), filterValues: { subject: [{ value: 'english', label: '영어' }], grade: [{ value: 'e5', label: '초5' }], subSubject: [{ value: '기타', label: '기타' }] } }
+  await h.resolve(h.requests.find(r => r.name === 'list_textbook_reference_page_v1'), { rows: [legacy, supported], page: 1, pageSize: 20, totalCount: 2, baseFilterGroups: groups, visibleFilterGroups: groups, activeFilterCount: 0 })
+  assert.equal(h.current.bookOptions.error, null, 'the original four-subject server contract must still parse')
+  assert.deepEqual(h.current.bookOptions.rows.map(r => r.value), [legacy.value, supported.value], 'choice cleanup must not remove books')
+  for (const field of ['baseFilterGroups', 'visibleFilterGroups']) {
+    assert.deepEqual(h.current.bookOptions[field].find(g => g.key === 'subject').options.map(o => o.value), ['english'])
+    assert.deepEqual(h.current.bookOptions[field].find(g => g.key === 'grade').options.map(o => o.value), ['e5'])
+    assert.deepEqual(h.current.bookOptions[field].find(g => g.key === 'subSubject').options.map(o => o.value), ['기타'])
+  }
+  await h.act(() => h.current.bookOptions.setSelectedFilters({ subject: ['other', 'english'], grade: ['e1', 'e2', 'e3', 'e4', 'e5'], subSubject: ['기타'] }))
+  const request = h.requests.findLast(r => r.name === 'list_textbook_reference_page_v1')
+  assert.deepEqual(request.args.p_filters.selectedFilters, { subject: ['english'], grade: ['e5'], subSubject: ['기타'] })
+  assert.equal(request.args.p_page, 1)
+  await h.resolve(request, { rows: [supported], page: 1, pageSize: 20, totalCount: 1, baseFilterGroups: groups, visibleFilterGroups: groups, activeFilterCount: 3 })
+  assert.equal(h.current.bookOptions.activeFilterCount, 3)
+  await h.act(() => h.current.bookOptions.setSelectedFilters({ subject: ['other'], grade: ['e1'], subSubject: ['legacy'] }))
+  assert.deepEqual(h.requests.findLast(r => r.name === 'list_textbook_reference_page_v1').args.p_filters.selectedFilters, {})
+  assert.deepEqual(h.current.bookOptions.selectedFilters, {})
+  await h.act(() => h.current.classOptions.setSelectedFilters({ subject: ['other'], grade: ['e1'] }))
+  assert.deepEqual(h.requests.findLast(r => r.name === 'list_textbook_class_reference_page_v1').args.p_filters.selectedFilters, { subject: ['other'], grade: ['e1'] }, 'class selectors are outside the textbook filter policy')
+  assert.equal(h.requests.some(r => r.table), false)
+})
