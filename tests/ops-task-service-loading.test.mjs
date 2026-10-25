@@ -400,17 +400,19 @@ test("task stats supplement combines caller cancellation with the exact bounded 
   });
 });
 
-function controlledStatsSupplement(registration = false) {
+function controlledStatsSupplement(registration = false, { abortSignal = AbortSignal } = {}) {
   const requests = [];
   const start = loadOpsTaskPageStatsSupplementWithMocks({
     opsTaskPageStatsCache: createOpsTaskPageStatsCache({ ttlMs: 60_000 }),
-    AbortSignal,
+    AbortSignal: abortSignal,
     supabase: {
-      rpc(name) {
+      rpc(name, args) {
         assert.equal(name, "get_ops_task_list_stats_v1");
         const response = Promise.withResolvers();
         const request = {
           ...response,
+          name,
+          args,
           signal: null,
           abortSignal(signal) { request.signal = signal; return request; },
           retry(enabled) { assert.equal(enabled, false); return request; },
@@ -423,8 +425,8 @@ function controlledStatsSupplement(registration = false) {
   }, registration);
   return {
     requests,
-    start: (signal) => {
-      const result = start({ filters: { taskType: registration ? "registration" : "general" }, viewerId: "viewer-a", signal });
+    start: (signal, options = {}) => {
+      const result = start({ filters: { taskType: registration ? "registration" : "general" }, viewerId: "viewer-a", ...options, signal });
       return registration ? result.stats : result;
     },
   };
@@ -486,6 +488,129 @@ test("stats supplement preserves same-owner deduplication and separates live own
   assert.equal((await start(new AbortController().signal)).total, 2);
   assert.equal(requests.length, 2);
 });
+
+const recoveredStats = (total) => ({ total, byStatus: {}, byView: {}, metrics: {}, facets: {} });
+
+for (const taskType of ["transfer", "withdrawal"]) {
+  for (const failure of ["rpc-error", "rejection", "undefined"]) {
+    test(`${taskType} stats ${failure} notifies once without an argument, stays uncached and retries independently`, async () => {
+      const { start, requests } = controlledStatsSupplement();
+      const owner = new AbortController();
+      const notices = [];
+      const options = { filters: { taskType, subject: "영어" }, onError: (...args) => notices.push(args) };
+      const first = start(owner.signal, options);
+      await Promise.resolve();
+      assert.equal(requests.length, 1);
+      assert.deepEqual(JSON.parse(JSON.stringify(requests[0].args)), {
+        p_type: taskType, p_filters: options.filters,
+      });
+      if (failure === "rejection") requests[0].reject(new Error("synthetic stats rejection"));
+      else requests[0].resolve(failure === "rpc-error"
+        ? { data: null, error: { code: "XX000", message: "synthetic stats failure" } }
+        : { data: undefined, error: null });
+      assert.equal(await first, undefined);
+      assert.deepEqual(notices, [[]], "the optional callback reports failure once and exposes no raw error argument");
+
+      const retry = start(owner.signal, options);
+      await Promise.resolve();
+      assert.equal(requests.length, 2, "failed aggregate reads must not satisfy the stats cache");
+      assert.deepEqual(requests[1].args, requests[0].args);
+      requests[1].resolve({ data: [recoveredStats(5)], error: null });
+      assert.equal((await retry).total, 5);
+      assert.equal((await start(new AbortController().signal, options)).total, 5);
+      assert.equal(requests.length, 2, "only the successful recovery is cached");
+      assert.deepEqual(notices, [[]], "recovery and cache hits do not repeat the failed-read notice");
+      assert.ok(requests.every((request) => request.name === "get_ops_task_list_stats_v1"), "stats recovery never requests a primary page or a write");
+    });
+  }
+
+  test(`${taskType} stats synchronous transport throw uses the optional failure callback`, async () => {
+    const calls = [];
+    const notices = [];
+    const start = loadOpsTaskPageStatsSupplementWithMocks({
+      AbortSignal,
+      supabase: { rpc(name) { calls.push(name); throw new Error("synthetic synchronous stats failure"); } },
+    });
+    assert.equal(await start({
+      filters: { taskType }, viewerId: "viewer-a", signal: new AbortController().signal,
+      onError: (...args) => notices.push(args),
+    }), undefined);
+    assert.deepEqual(notices, [[]]);
+    assert.deepEqual(calls, ["get_ops_task_list_stats_v1"]);
+    assert.equal(await start({ filters: { taskType }, viewerId: "viewer-a" }), undefined,
+      "omitting the optional callback preserves the existing fulfilled undefined contract");
+  });
+
+  test(`${taskType} zero stats remain a successful cached result without an error notice`, async () => {
+    const { start, requests } = controlledStatsSupplement();
+    const notices = [];
+    const options = { filters: { taskType }, onError: (...args) => notices.push(args) };
+    const pending = start(new AbortController().signal, options);
+    await Promise.resolve();
+    requests[0].resolve({ data: [recoveredStats(0)], error: null });
+    const stats = await pending;
+    assert.deepEqual(JSON.parse(JSON.stringify(stats)), recoveredStats(0));
+    assert.equal((await start(new AbortController().signal, options)).total, 0);
+    assert.equal(requests.length, 1);
+    assert.deepEqual(notices, []);
+  });
+
+  for (const outcome of ["rpc-error", "rejection", "success"]) {
+    test(`${taskType} caller cancellation suppresses a late ${outcome} notice and prevents cache reuse`, async () => {
+      const { start, requests } = controlledStatsSupplement();
+      const notices = [];
+      const options = { filters: { taskType }, onError: (...args) => notices.push(args) };
+      const owner = new AbortController();
+      const pending = start(owner.signal, options);
+      await Promise.resolve();
+      owner.abort();
+      assert.equal(requests[0].signal.aborted, true);
+      if (outcome === "rejection") requests[0].reject(new Error("synthetic canceled stats read"));
+      else requests[0].resolve(outcome === "rpc-error"
+        ? { data: null, error: { code: "57014", message: "synthetic canceled stats read" } }
+        : { data: [recoveredStats(900)], error: null });
+      const result = await pending;
+      if (outcome !== "success") assert.equal(result, undefined);
+      assert.deepEqual(notices, []);
+
+      const replacement = start(new AbortController().signal, options);
+      await Promise.resolve();
+      assert.equal(requests.length, 2, "a canceled owner's response cannot populate the cache");
+      requests[1].resolve({ data: [recoveredStats(2)], error: null });
+      assert.equal((await replacement).total, 2);
+      assert.deepEqual(notices, []);
+    });
+  }
+
+  test(`${taskType} stats timeout reports failure while its caller remains live`, async () => {
+    const deadlines = [];
+    const { start, requests } = controlledStatsSupplement(false, { abortSignal: {
+      // Replace only the deadline clock. Signal composition remains the native
+      // AbortSignal.any; the fake transport rejects when the test aborts it.
+      timeout(milliseconds) {
+        const controller = new AbortController();
+        deadlines.push({ milliseconds, controller });
+        return controller.signal;
+      },
+      any: (signals) => AbortSignal.any(signals),
+    } });
+    const owner = new AbortController();
+    const notices = [];
+    const pending = start(owner.signal, { filters: { taskType }, onError: (...args) => notices.push(args) });
+    await Promise.resolve();
+    assert.equal(deadlines.length, 1);
+    assert.equal(deadlines[0].milliseconds, 8_000);
+    const timeoutError = new DOMException("synthetic stats deadline", "TimeoutError");
+    deadlines[0].controller.abort(timeoutError);
+    assert.equal(requests[0].signal.aborted, true);
+    assert.equal(requests[0].signal.reason, timeoutError);
+    assert.equal(owner.signal.aborted, false, "request timeout is distinct from caller cancellation");
+    requests[0].reject(timeoutError);
+    assert.equal(await pending, undefined);
+    assert.deepEqual(notices, [[]]);
+    assert.equal(requests.length, 1);
+  });
+}
 
 // Withdrawal status/other-live-roster preservation is now exercised against the
 // authoritative SQL core in withdrawal_last_lesson_release_test.sql and

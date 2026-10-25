@@ -1836,10 +1836,17 @@ export function startOpsTaskPageStatsSupplementLoad(options: {
   filters: OpsTaskPageFilters
   viewerId: string
   signal?: AbortSignal
+  onError?: () => void
 }) {
   return Promise.resolve()
     .then(() => loadOpsTaskPageStats(options.filters, options.viewerId, options.signal))
     .catch(() => undefined)
+    .then((stats) => {
+      // A caller cancellation is obsolete work; an RPC/timeout failure is not
+      // an authoritative empty aggregate. Keep the existing optional result.
+      if (!stats && !options.signal?.aborted) options.onError?.()
+      return stats
+    })
 }
 
 export function startOpsRegistrationTaskPageSupplementLoad(options: {
