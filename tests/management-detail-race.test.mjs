@@ -2403,3 +2403,210 @@ test("common class form retains explicit zero in the metadata input", async t =>
   assert.equal(writes[0][0].fee, "0");
   assert.equal(writes[0][1].scheduleOwnership, "normalized");
 });
+
+
+// Exercise the production page and ClassTextbookPicker with a native rendering
+// adapter only for the overlay. Browser evidence separately verifies Radix focus
+// and positioning. The adapter does not implement loading, errors, or retries.
+function textbookRecoveryCombobox({ open, onOpenChange, triggerAriaLabel, searchAriaLabel,
+  searchValue, onSearchValueChange, loading, loadingMessage, emptyMessage, children, filters, footer }) {
+  const items = Array.isArray(children) ? children.filter(Boolean) : children ? [children] : [];
+  return createElement("div", { "data-testid": "textbook-recovery-combobox" },
+    createElement("button", { type: "button", "aria-label": triggerAriaLabel, onClick: () => onOpenChange(!open) }, triggerAriaLabel),
+    open ? createElement("div", { "data-testid": "textbook-recovery-popover" },
+      createElement("input", { "aria-label": searchAriaLabel, value: searchValue, onChange: event => onSearchValueChange(event.target.value) }),
+      filters,
+      createElement("div", { "data-testid": "textbook-recovery-results" }, loading
+        ? createElement("div", { role: "status" }, loadingMessage)
+        : items.length ? items : emptyMessage),
+      footer) : null);
+}
+
+const textbookRecoveryBook = (id, title = `합성 교재 ${id}`) => ({
+  id, title, subject: "english", schoolLevel: "middle", gradeLevel: "middle_1",
+  schoolLevels: ["middle"], gradeLevels: ["middle_1"], subSubject: "", publisher: "합성 출판사",
+});
+const textbookRecoveryPage = (rows = [], cursor = null) => ({ rows, nextCursor: cursor, hasMore: cursor !== null });
+
+async function setupTextbookRecovery(t) {
+  const ui = await setup(t, {
+    configureFixture(fixture) {
+      fixture.candidateRequests = [];
+      fixture.candidateWrites = [];
+      fixture.records.loadClassTextbookCandidatePage = input => {
+        const deferred = Promise.withResolvers();
+        fixture.candidateRequests.push({ input: structuredClone(input), ...deferred });
+        return deferred.promise;
+      };
+      Object.assign(fixture.rows[0].raw, { textbook_ids: ["book-existing"], textbook_usage: {
+        "book-existing": { startDate: "2026-10-01", endDate: "2026-10-31", title: "기존 합성 교재" },
+      } });
+      for (const name of ["updateClass", "saveClassScheduleDefaults", "replaceClassGroupMemberships"]) {
+        fixture.service[name] = async input => {
+          fixture.candidateWrites.push({ name, input });
+          throw new Error("unexpected synthetic write");
+        };
+      }
+    },
+    componentOverrides: [["@/components/ui/search-combobox", {
+      SearchCombobox: textbookRecoveryCombobox,
+      SearchComboboxItem: ({ children, onSelect, value }) => createElement("button", {
+        type: "button", "data-candidate-id": value, onClick: () => onSelect(value),
+      }, children),
+    }]],
+  });
+  const debounce = () => act(async () => new Promise(resolve => setTimeout(resolve, 275)));
+  const picker = () => document.querySelector('[data-testid="textbook-recovery-popover"]');
+  const results = () => document.querySelector('[data-testid="textbook-recovery-results"]');
+  return { ...ui, debounce, picker, results,
+    query: value => act(async () => {
+      const input = picker()?.querySelector('[aria-label="교재 검색"]');
+      assert.ok(input, "textbook search remains mounted");
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, value);
+      input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    }),
+    acceptCandidates: (index, value) => act(async () => ui.candidateRequests[index].resolve(value)),
+    failCandidates: index => act(async () => ui.candidateRequests[index].reject(new Error("synthetic-private-503"))),
+  };
+}
+
+async function openTextbookRecovery(ui, label = "A 영어반") {
+  await ui.click(label);
+  await ui.click("교재 검색 또는 선택");
+  await ui.debounce();
+  assert.equal(ui.candidateRequests.at(-1).input.cursor, null);
+}
+
+function assertTextbookRecoveryError(ui, nextPage = false) {
+  const alert = ui.picker()?.querySelector('[role="alert"]');
+  assert.ok(alert, "a failed read must render a local alert instead of permanent loading");
+  assert.match(alert.textContent, nextPage ? /다음 교재를 불러오지 못했습니다/ : /교재를 불러오지 못했습니다/);
+  assert.equal(ui.results().querySelector('[role="status"]'), null);
+  assert.doesNotMatch(ui.text(), /synthetic-private-503/);
+  assert.ok([...ui.picker().querySelectorAll("button")].some(button => button.textContent.trim() === "다시 시도"));
+}
+
+test("class textbook candidate recovery: first failure retries the same scope and preserves unsaved usage", async t => {
+  const ui = await setupTextbookRecovery(t);
+  await openTextbookRecovery(ui);
+  await ui.editField("textbook-book-existing-start", "2026-10-02");
+  await ui.failCandidates(0);
+  assertTextbookRecoveryError(ui);
+  assert.equal(document.getElementById("textbook-book-existing-start").value, "2026-10-02");
+  assert.equal(document.getElementById("textbook-book-existing-end").value, "2026-10-31");
+  await ui.clickTogether("다시 시도", "다시 시도");
+  await ui.debounce();
+  assert.equal(ui.candidateRequests.length, 2, "rapid retry must create only one read");
+  assert.deepEqual(ui.candidateRequests[1].input, ui.candidateRequests[0].input);
+  await ui.acceptCandidates(1, textbookRecoveryPage([textbookRecoveryBook("book-new")]));
+  assert.match(ui.results().textContent, /합성 교재 book-new/);
+  assert.equal(ui.picker().querySelector('[role="alert"]'), null);
+  assert.equal(document.getElementById("textbook-book-existing-start").value, "2026-10-02");
+  assert.equal(document.getElementById("textbook-book-existing-end").value, "2026-10-31");
+  assert.equal(ui.candidateWrites.length, 0);
+});
+
+test("class textbook candidate recovery: null first page is recoverable and not a false empty or loading result", async t => {
+  const ui = await setupTextbookRecovery(t);
+  await openTextbookRecovery(ui);
+  await ui.acceptCandidates(0, null);
+  assertTextbookRecoveryError(ui);
+  assert.doesNotMatch(ui.results().textContent, /조건에 맞는 교재 없음/);
+  await ui.click("다시 시도");
+  await ui.debounce();
+  assert.equal(ui.candidateRequests.length, 2);
+  await ui.acceptCandidates(1, textbookRecoveryPage());
+  assert.match(ui.results().textContent, /조건에 맞는 교재 없음/);
+  assert.equal(ui.picker().querySelector('[role="alert"]'), null);
+  assert.equal(ui.candidateWrites.length, 0);
+});
+
+test("class textbook candidate recovery: next-page failure retains accepted rows and retries the exact cursor", async t => {
+  const ui = await setupTextbookRecovery(t);
+  await openTextbookRecovery(ui);
+  const cursor = { after: "synthetic-book-page-1" };
+  await ui.acceptCandidates(0, textbookRecoveryPage([textbookRecoveryBook("book-first"), textbookRecoveryBook("book-selected")], cursor));
+  await act(async () => document.querySelector('[data-candidate-id="book-selected"]').click());
+  await ui.editField("textbook-book-selected-start", "2026-11-01");
+  await ui.editField("textbook-book-selected-end", "2026-11-30");
+  await ui.click("다음 30건");
+  assert.equal(ui.candidateRequests.length, 2);
+  await ui.failCandidates(1);
+  assertTextbookRecoveryError(ui, true);
+  assert.match(ui.results().textContent, /합성 교재 book-first/);
+  await ui.clickTogether("다시 시도", "다시 시도");
+  assert.equal(ui.candidateRequests.length, 3, "next-page retry must not duplicate a pending read");
+  assert.deepEqual(ui.candidateRequests[2].input, ui.candidateRequests[1].input);
+  assert.deepEqual(ui.candidateRequests[2].input.cursor, cursor);
+  await ui.acceptCandidates(2, textbookRecoveryPage([textbookRecoveryBook("book-second")]));
+  assert.match(ui.results().textContent, /합성 교재 book-first/);
+  assert.match(ui.results().textContent, /합성 교재 book-second/);
+  assert.equal(document.querySelector('[data-candidate-id="book-selected"]'), null, "chosen book stays excluded from candidates");
+  assert.equal(document.getElementById("textbook-book-selected-start").value, "2026-11-01");
+  assert.equal(document.getElementById("textbook-book-selected-end").value, "2026-11-30");
+  assert.equal(ui.picker().querySelector('[role="alert"]'), null);
+  assert.equal(ui.candidateWrites.length, 0);
+});
+
+test("class textbook candidate recovery: stale query success and error cannot replace the active results", async t => {
+  for (const outcome of ["success", "error"]) {
+    const ui = await setupTextbookRecovery(t);
+    await openTextbookRecovery(ui);
+    await ui.query("새 검색");
+    await ui.debounce();
+    assert.equal(ui.candidateRequests.length, 2);
+    assert.equal(ui.candidateRequests[1].input.search, "새 검색");
+    await ui.acceptCandidates(1, textbookRecoveryPage([textbookRecoveryBook("book-active", "새 검색 결과")]));
+    if (outcome === "success") await ui.acceptCandidates(0, textbookRecoveryPage([textbookRecoveryBook("book-stale", "과거 검색 결과")]));
+    else await ui.failCandidates(0);
+    assert.match(ui.results().textContent, /새 검색 결과/);
+    assert.doesNotMatch(ui.results().textContent, /과거 검색 결과/);
+    assert.equal(ui.picker().querySelector('[role="alert"]'), null);
+    assert.equal(ui.candidateWrites.length, 0);
+    await ui.unmount();
+  }
+});
+
+test("class textbook candidate recovery: closing and switching class invalidates an earlier failed request", async t => {
+  const ui = await setupTextbookRecovery(t);
+  await openTextbookRecovery(ui);
+  await ui.click("수업 상세 닫기");
+  await ui.click("B 영어반");
+  await ui.click("교재 검색 또는 선택");
+  await ui.debounce();
+  assert.equal(ui.candidateRequests.length, 2);
+  assert.equal(ui.candidateRequests[1].input.classId, "b");
+  await ui.acceptCandidates(1, textbookRecoveryPage([textbookRecoveryBook("book-b")]));
+  await ui.failCandidates(0);
+  assert.match(ui.results().textContent, /합성 교재 book-b/);
+  assert.equal(ui.picker().querySelector('[role="alert"]'), null);
+  assert.doesNotMatch(ui.text(), /synthetic-private-503/);
+  assert.equal(ui.candidateWrites.length, 0);
+});
+
+
+test("class textbook candidate recovery: stale next-page success and failure cannot change a newer query cursor", async t => {
+  for (const outcome of ["success", "error"]) {
+    const ui = await setupTextbookRecovery(t);
+    await openTextbookRecovery(ui);
+    await ui.acceptCandidates(0, textbookRecoveryPage([textbookRecoveryBook("book-old")], { after: "old-page" }));
+    await ui.click("다음 30건");
+    await ui.query("새 검색");
+    await ui.debounce();
+    assert.equal(ui.candidateRequests.length, 3);
+    const currentCursor = { after: "new-page" };
+    await ui.acceptCandidates(2, textbookRecoveryPage([textbookRecoveryBook("book-current", "새 검색 교재")], currentCursor));
+    if (outcome === "success") await ui.acceptCandidates(1, textbookRecoveryPage([textbookRecoveryBook("book-stale", "과거 페이지 교재")]));
+    else await ui.failCandidates(1);
+    assert.match(ui.results().textContent, /새 검색 교재/);
+    assert.doesNotMatch(ui.results().textContent, /과거 페이지 교재|합성 교재 book-old/);
+    assert.equal(ui.picker().querySelector('[role="alert"]'), null);
+    await ui.click("다음 30건");
+    assert.equal(ui.candidateRequests.length, 4);
+    assert.deepEqual(ui.candidateRequests[3].input.cursor, currentCursor);
+    assert.equal(ui.candidateRequests[3].input.search, "새 검색");
+    await ui.acceptCandidates(3, textbookRecoveryPage());
+    assert.equal(ui.candidateWrites.length, 0);
+    await ui.unmount();
+  }
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { SearchCombobox, SearchComboboxItem } from "@/components/ui/search-combobox";
@@ -34,6 +34,8 @@ type ClassTextbookPickerProps = {
   selectedIds: string[];
   disabled: boolean;
   loading: boolean;
+  error?: "first" | "more" | null;
+  onRetry?: () => Promise<void> | void;
   hasMore: boolean;
   query: string;
   onQueryChange: (query: string) => void;
@@ -52,6 +54,8 @@ export function ClassTextbookPicker({
   selectedIds,
   disabled,
   loading,
+  error,
+  onRetry,
   hasMore,
   query,
   onQueryChange,
@@ -104,6 +108,23 @@ export function ClassTextbookPicker({
     onQueryChange("");
   }
 
+  function retry(event: MouseEvent<HTMLButtonElement>) {
+    // The retry button is removed while loading. Keep keyboard focus in the
+    // unchanged search field instead of dropping it behind the popover.
+    event.currentTarget.closest('[data-slot="command"]')
+      ?.querySelector<HTMLInputElement>('[data-slot="command-input"]')?.focus();
+    void onRetry?.();
+  }
+
+  const readError = error ? (
+    <div role="alert" className="grid justify-items-center gap-2 p-2 text-sm">
+      <span>{error === "more" ? "다음 교재를 불러오지 못했습니다." : "교재를 불러오지 못했습니다."}</span>
+      <Button type="button" size="sm" variant="outline" disabled={loading || !onRetry} onClick={retry}>
+        다시 시도
+      </Button>
+    </div>
+  ) : null;
+
   return (
     <SearchCombobox
       open={open}
@@ -111,6 +132,7 @@ export function ClassTextbookPicker({
       triggerLabel="교재 검색 또는 선택"
       triggerPlaceholder
       triggerAriaLabel="교재 검색 또는 선택"
+      wrapTrigger
       searchValue={query}
       onSearchValueChange={onQueryChange}
       searchPlaceholder="교재명, 출판사 검색"
@@ -121,7 +143,7 @@ export function ClassTextbookPicker({
         </Button>
       )}
       listAriaLabel="선택 가능한 교재"
-      emptyMessage="조건에 맞는 교재 없음"
+      emptyMessage={readError || "조건에 맞는 교재 없음"}
       loading={loading && candidates.length === 0}
       loadingMessage="교재 불러오는 중"
       disabled={disabled}
@@ -174,7 +196,7 @@ export function ClassTextbookPicker({
             </PickerFilterField>
         </PickerFilterSurface>
       )}
-      footer={hasMore ? (
+      footer={error ? (candidates.length > 0 ? readError : null) : hasMore ? (
         <Button
           type="button"
           size="sm"
