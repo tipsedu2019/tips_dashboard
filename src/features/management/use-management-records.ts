@@ -20,6 +20,7 @@ import type { ManagementListPageSize } from "./management-page-size";
 import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller";
 import { createManagementNumberedReadService, type ManagementNumberedSort } from "./management-numbered-service";
 import { sanitizeManagementNumberedSort, type ManagementNumberedQuery } from "./management-numbered-state";
+import type { ClassRosterPage } from "./class-enrollment-status-cell";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -972,19 +973,21 @@ export function useManagementRecords(
   const loadClassRosterPreview = useCallback(async ({
     classId,
     mode,
+    cursor = null,
   }: {
     classId: string;
     mode: "registered" | "waitlist";
-  }) => {
-    if (!readService || kind !== "classes") return [] as Record<string, unknown>[];
+    cursor?: string | null;
+  }): Promise<ClassRosterPage | null> => {
+    if (!readService || kind !== "classes") return null;
     const result = await readService.loadRelationPage({
       kind: "classes",
       id: classId,
       relationKind: mode === "registered" ? "registered_students" : "waitlisted_students",
-      cursor: null,
+      cursor,
       limit: 30,
     });
-    return relationRows(result);
+    return result?.page as ClassRosterPage | null ?? null;
   }, [kind, readService]);
 
   const loadClassTextbookCandidatePage = useCallback(async ({

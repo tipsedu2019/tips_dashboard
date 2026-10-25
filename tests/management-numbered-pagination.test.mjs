@@ -857,3 +857,40 @@ test("auth-blocked metadata and catalogs leave loading, require explicit retry a
   assert.deepEqual(state.filterOptions, { schools: ["새 학교"] });
   assert.equal(catalogCalls.length, 4, "one initial pair plus one manual retry pair");
 });
+
+
+test("class roster preview producer preserves page continuation through the real hook and read service", async t => {
+  const page = await mountClassConsumer(t);
+  await act(async () => page.finish(0, 1));
+  const relationCalls = [], existingRpc = page.supabase.rpc;
+  const registered = Array.from({ length: 35 }, (_, index) => ({ id: `synthetic-registered-${index + 1}`, name: `합성 등록 ${String(index + 1).padStart(3, "0")}` }));
+  const waitlisted = Array.from({ length: 7 }, (_, index) => ({ id: `synthetic-waiting-${index + 1}`, name: `합성 대기 ${String(index + 1).padStart(3, "0")}` }));
+  page.supabase.rpc = (name, args) => {
+    if (name !== "list_management_detail_relation_page_v1") return existingRpc(name, args);
+    relationCalls.push({ name, args });
+    const waiting = args.p_relation_kind === "waitlisted_students";
+    const more = args.p_cursor_id !== null;
+    const rows = waiting ? waitlisted : more ? registered.slice(30) : registered.slice(0, 30);
+    return { abortSignal() { return this; }, retry() { return Promise.resolve({ error: null, data: { page: {
+      rows, hasMore: !waiting && !more,
+      nextCursor: !waiting && !more ? { sortValue: registered[29].name, id: registered[29].id } : null,
+    } } }); } };
+  };
+  const first = await page.state.loadClassRosterPreview({ classId: "synthetic-class", mode: "registered", cursor: null });
+  assert.equal(first?.hasMore, true, "the hook must retain the continuation instead of returning only the first 30 rows");
+  assert.equal(first.rows.length, 30);
+  assert.equal(typeof first.nextCursor, "string");
+  const next = await page.state.loadClassRosterPreview({ classId: "synthetic-class", mode: "registered", cursor: first.nextCursor });
+  assert.deepEqual(next.rows, registered.slice(30));
+  assert.equal(next.hasMore, false);
+  assert.equal(next.nextCursor, null);
+  const waiting = await page.state.loadClassRosterPreview({ classId: "synthetic-class", mode: "waitlist", cursor: null });
+  assert.deepEqual(waiting.rows, waitlisted);
+  assert.equal(waiting.hasMore, false);
+  assert.deepEqual(relationCalls.map(call => call.name), Array(3).fill("list_management_detail_relation_page_v1"));
+  assert.deepEqual(relationCalls.map(({ args }) => args.p_limit), [30, 30, 30]);
+  assert.deepEqual(relationCalls.map(({ args }) => args.p_relation_kind), ["registered_students", "registered_students", "waitlisted_students"]);
+  assert.deepEqual(relationCalls.map(({ args }) => args.p_cursor_id), [null, registered[29].id, null]);
+  assert.deepEqual(relationCalls.map(({ args }) => args.p_cursor_sort_key), [null, registered[29].name, null]);
+  assert.ok(relationCalls.every(({ args }) => args.p_kind === "classes" && args.p_id === "synthetic-class"));
+});

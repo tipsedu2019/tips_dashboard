@@ -2748,7 +2748,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         return result.page;
       } : undefined,
       onLoadClassRoster: kind === "classes"
-        ? (classId: string, mode: "registered" | "waitlist") => loadClassRosterPreview({ classId, mode })
+        ? (classId: string, mode: "registered" | "waitlist", cursor: string | null) => loadClassRosterPreview({ classId, mode, cursor })
         : undefined,
       onBulkUpdateRows: canMutateRows ? handleBulkUpdateRows : undefined,
       onBulkDeleteRows: canMutateRows && kind === "textbooks" ? handleBulkDeleteRows : undefined,
