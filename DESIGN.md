@@ -147,7 +147,7 @@ TIPS는 학원 구성원이 학생, 수업, 일정, 교재, 등록, 알림 업�
 
 표 구성의 상세 사용법은 `src/components/data-table/README.md`를 따른다. 관리 목록의 기준 화면은 `/admin/students`, 복잡한 편집은 `/admin/classes`, 설정 목록은 `/admin/settings/schools`, 시간순 요약은 `/admin/dashboard`다. 기준 화면은 시각·상호작용의 비교 대상이며 다른 메뉴의 업무 데이터나 필드를 복사하는 템플릿은 아니다.
 
-등록 목록은 단계 탭 아래 한 외곽면 안에 공통 검색/등록 행동, 상담 담당 범위, 데이터, 페이지 이동을 배치한다. `RegistrationListToolbar`는 공통 `DataTableToolbar`, `DataTableCommandRow`, `Button`의 합성이며 별도 시각 체계를 만들지 않는다. 과목별 행 정렬과 상담 기본 범위 `내 담당`을 유지하고, 건수가 0이어도 담당 범위 버튼은 남긴다. 등록 상세에서는 과목 탭과 진행상태를 같은 행에 두고 진행상태 메뉴는 다른 입력과 동일한 `RegistrationSelect`를 사용한다. 관리팀 알림은 해당 진행 단계의 `sectionActions`, 방문 취소 전달은 상담 영역 아래에 배치하며 고정 헤더에 넣지 않는다. 기존 단계별 폼은 접거나 다시 마운트하지 않아 미저장 입력을 유지한다.
+등록 목록은 단계 탭 아래 한 외곽면 안에 공통 검색/등록 행동, 상담 담당 범위, 데이터, 페이지 이동을 배치한다. `RegistrationListToolbar`는 공통 `DataTableToolbar`, `DataTableCommandRow`, `Button`의 합성이며 별도 시각 체계를 만들지 않는다. 검색은 `DataTableSearchField`의 조합 중 Escape 보호·지우기·초점 계약을 사용하되 기존 deferred 조회 시점과 목록 복원을 유지한다. 주조회 오류·갱신 피드백은 같은 명령행에서 검색과 등록 버튼을 유지하며 집계 불일치·수업명·청강 참조 오류와 분리한다. 과목별 행 정렬과 상담 기본 범위 `내 담당`을 유지하고, 건수가 0이어도 담당 범위 버튼은 남긴다. 등록 상세에서는 과목 탭과 진행상태를 같은 행에 두고 진행상태 메뉴는 다른 입력과 동일한 `RegistrationSelect`를 사용한다. 관리팀 알림은 해당 진행 단계의 `sectionActions`, 방문 취소 전달은 상담 영역 아래에 배치하며 고정 헤더에 넣지 않는다. 기존 단계별 폼은 접거나 다시 마운트하지 않아 미저장 입력을 유지한다.
 
 공통 `FormDialogContent`·`DetailDialogContent`·`ConfirmationDialogContent`는 `returnFocusRef`를 같은 `DialogFrame`에 전달한다. 발급 입력에서 결과 확인 창으로 이어지는 흐름처럼 최초 열기 요소가 바뀔 수 있으면 명시적인 반환 대상을 연결하고 닫기·Escape 모두에서 확인한다.
 

@@ -5,9 +5,10 @@ import type { ReactNode } from "react"
 import { DataTableCommandRow, DataTableToolbar } from "@/components/data-table/data-table-surface"
 import { Button } from "@/components/ui/button"
 
-export function RegistrationListToolbar({ search, actions, consultationScope }: {
+export function RegistrationListToolbar({ search, actions, feedback, consultationScope }: {
   search: ReactNode
   actions?: ReactNode
+  feedback?: ReactNode
   consultationScope?: {
     value: "mine" | "all"
     counts: { mine: number; all: number }
@@ -16,7 +17,7 @@ export function RegistrationListToolbar({ search, actions, consultationScope }: 
 }) {
   return (
     <DataTableToolbar>
-      <DataTableCommandRow search={search} actions={actions} />
+      <DataTableCommandRow search={search} actions={<>{feedback}{actions}</>} />
       {consultationScope ? (
         <div role="group" aria-label="상담 목록 범위" className="flex flex-wrap items-center gap-1">
           {(["mine", "all"] as const).map((scope) => (
