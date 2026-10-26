@@ -1696,9 +1696,11 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     acceptedFilters.period === "all" ? "전체 기간" : `${acceptedFilters.dateFrom || "시작일 전체"} ~ ${acceptedFilters.dateTo || "종료일 전체"}`,
     `${pageState.page}페이지`,
   ].filter(Boolean).join(" · ")
-  const todayKey = useMemo(() => toDateKey(new Date()), [])
   const customDates = useRef(makeupCustomDatesFromUrl(new URLSearchParams(searchParams.toString()), navigation.filters))
   const changeFilters = useCallback((patch: Partial<MakeupNumberedFilters>) => {
+    // A new preset selection uses today's local date; saved/custom ranges stay explicit.
+    const todayKey = patch.period === "today" || patch.period === "week" || patch.period === "month"
+      ? toDateKey(new Date()) : ""
     setNavigation((current) => {
       const filters = commonMakeupFilters({ ...current.filters, ...patch }, role === "teacher")
       if (patch.dateFrom !== undefined || patch.dateTo !== undefined) customDates.current = { dateFrom: patch.dateFrom ?? customDates.current.dateFrom, dateTo: patch.dateTo ?? customDates.current.dateTo }
@@ -1708,7 +1710,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       }
       return { filters, page: 1 }
     })
-  }, [todayKey, role])
+  }, [role])
   const setView = useCallback((view: MakeupRequestView) => changeFilters({ view }), [changeFilters])
   const [catalogData, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,

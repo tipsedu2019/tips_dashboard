@@ -244,7 +244,7 @@ test('fresh teacher create honors effective-year director rotation and preserves
   await rejected;assert.equal(io.requests.filter((r)=>r.name).length,0);
 });
 
-test('presets use mount-local day across UTC and month boundaries and preserve custom open bounds', async (t) => {
+test('presets use browser-local day across UTC and month boundaries and preserve custom open bounds', async (t) => {
   const oldTimezone = process.env.TZ; process.env.TZ = 'Asia/Seoul'; t.after(() => { if (oldTimezone === undefined) delete process.env.TZ; else process.env.TZ = oldTimezone; });
   const p = await setup(t, { clock: '2026-08-31T16:30:00Z', search: '?view=approvalPending&page=11' });
   await act(async () => p.finish(p.numbered()[0]));
@@ -259,6 +259,110 @@ test('presets use mount-local day across UTC and month boundaries and preserve c
   assert.equal(p.numbered().at(-1).args.p_filters.dateFrom, '');
   await act(async () => button('직접입력 휴보강 보기').click());
   assert.equal(p.numbered().at(-1).args.p_filters.dateFrom, '2026-08-15'); assert.equal(p.numbered().at(-1).args.p_filters.dateTo, '');
+});
+
+function isolatePeriodClock(t, timezone = 'Asia/Seoul') {
+  const oldTimezone = process.env.TZ, originalFetch = globalThis.fetch;
+  let networkAttempts = 0;
+  process.env.TZ = timezone;
+  globalThis.fetch = () => { networkAttempts++; throw new Error('Unexpected network in isolated makeup period test'); };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (oldTimezone === undefined) delete process.env.TZ; else process.env.TZ = oldTimezone;
+    assert.equal(networkAttempts, 0);
+  });
+}
+function assertPeriodReadsOnly(page) {
+  const allowed = new Set(['list_makeup_numbered_page_v1', 'get_makeup_reservation_context_v1', 'get_makeup_effective_occupancy_v1']);
+  assert.deepEqual(page.requests.filter(request => request.name && !allowed.has(request.name)).map(request => request.name), []);
+  assert.equal(page.requests.some(request => request.steps?.some(step => ['insert', 'update', 'delete', 'upsert'].includes(step.name))), false);
+}
+const periodBounds = request => [request.args.p_filters.dateFrom, request.args.p_filters.dateTo];
+for (const boundary of [
+  { name: 'midnight', label: '오늘', before: '2026-08-31T14:59:00Z', after: '2026-08-31T15:01:00Z', old: ['2026-08-31', '2026-08-31'], next: ['2026-09-01', '2026-09-01'] },
+  { name: 'week', label: '이번주', before: '2026-08-30T14:59:00Z', after: '2026-08-30T15:01:00Z', old: ['2026-08-24', '2026-08-30'], next: ['2026-08-31', '2026-09-06'] },
+  { name: 'month', label: '이번달', before: '2026-09-30T14:59:00Z', after: '2026-09-30T15:01:00Z', old: ['2026-09-01', '2026-09-30'], next: ['2026-10-01', '2026-10-31'] },
+  { name: 'browser timezone', timezone: 'UTC', label: '오늘', before: '2026-08-31T23:59:00Z', after: '2026-09-01T00:01:00Z', old: ['2026-08-31', '2026-08-31'], next: ['2026-09-01', '2026-09-01'] },
+]) test(`makeup explicit period selection advances across ${boundary.name} without remount`, async t => {
+  isolatePeriodClock(t, boundary.timezone);
+  const initial = { clock: boundary.before, search: '?view=approvalPending&page=11' };
+  const p = await setup(t, initial);
+  await act(async () => p.finish(p.numbered()[0]));
+  const preset = button(`${boundary.label} 휴보강 보기`);
+  await act(async () => preset.click());
+  assert.deepEqual(periodBounds(p.numbered().at(-1)), boundary.old);
+  await act(async () => p.finish(p.numbered().at(-1), 1, { rows: [row(1, { className: '합성 이전 기간' })] }));
+  const requestCount = p.numbered().length, acceptedUrl = window.location.href;
+  initial.clock = boundary.after;
+  await p.render();
+  assert.equal(p.numbered().length, requestCount, 'clock passage alone does not refresh a saved query');
+  assert.equal(window.location.href, acceptedUrl);
+  assert.equal(button(`${boundary.label} 휴보강 보기`), preset, 'the same mounted control is reselected');
+  await act(async () => preset.click());
+  const next = p.numbered().at(-1);
+  assert.deepEqual(periodBounds(next), boundary.next, 'an explicit new choice uses the current browser-local day');
+  assert.equal(next.args.p_page, 1);
+  assert.match(document.body.textContent, /합성 이전 기간/);
+  await act(async () => p.finish(next, 1, { rows: [row(2, { className: '합성 현재 기간' })] }));
+  assert.match(document.body.textContent, /합성 현재 기간/);
+  assert.doesNotMatch(document.body.textContent, /합성 이전 기간/);
+  assert.equal(preset.getAttribute('aria-pressed'), 'true');
+  assertPeriodReadsOnly(p);
+});
+
+for (const custom of [
+  { dateFrom: '2026-08-15', dateTo: '' },
+  { dateFrom: '', dateTo: '2026-09-15' },
+]) test(`makeup explicit period choice preserves custom ${custom.dateFrom ? 'start' : 'end'} bound across midnight`, async t => {
+  isolatePeriodClock(t);
+  const initial = { clock: '2026-08-31T14:59:00Z', search: '?view=approvalPending&makeupFilters=' + encodeURIComponent(JSON.stringify({ ...filters, period: 'custom', ...custom })) };
+  const p = await setup(t, initial);
+  await act(async () => p.finish(p.numbered()[0]));
+  const requestCount = p.numbered().length;
+  initial.clock = '2026-08-31T15:01:00Z';
+  await p.render();
+  assert.equal(p.numbered().length, requestCount);
+  await act(async () => p.observed.changeFilters({ search: '합성 수업' }));
+  assert.deepEqual(periodBounds(p.numbered().at(-1)), [custom.dateFrom, custom.dateTo], 'unselected custom bounds survive other filter changes');
+  await act(async () => p.finish(p.numbered().at(-1)));
+  await act(async () => button('오늘 휴보강 보기').click());
+  assert.deepEqual(periodBounds(p.numbered().at(-1)), ['2026-09-01', '2026-09-01']);
+  await act(async () => p.finish(p.numbered().at(-1)));
+  await act(async () => button('전체 기간 휴보강 보기').click());
+  assert.deepEqual(periodBounds(p.numbered().at(-1)), ['', '']);
+  await act(async () => p.finish(p.numbered().at(-1)));
+  await act(async () => button('직접입력 휴보강 보기').click());
+  assert.deepEqual(periodBounds(p.numbered().at(-1)), [custom.dateFrom, custom.dateTo], 'quick choices do not overwrite retained custom inputs');
+  assertPeriodReadsOnly(p);
+});
+
+test('makeup saved period retry and Back retain explicit dates after the clock advances', async t => {
+  isolatePeriodClock(t);
+  const initial = { clock: '2026-08-31T14:59:00Z', search: '?view=approvalPending' };
+  const p = await setup(t, initial);
+  await act(async () => p.finish(p.numbered()[0]));
+  await act(async () => button('오늘 휴보강 보기').click());
+  const old = p.numbered().at(-1);
+  await act(async () => p.finish(old, 1));
+  const savedUrl = window.location.href;
+  initial.clock = '2026-08-31T15:01:00Z';
+  await act(async () => p.observed.changeFilters({ search: '합성 검색' }));
+  const failed = p.numbered().at(-1);
+  assert.deepEqual(periodBounds(failed), ['2026-08-31', '2026-08-31'], 'search does not silently reinterpret a saved period');
+  await act(async () => failed.reject(new Error('Synthetic period query failure')));
+  await act(async () => button('다시 시도').click());
+  const retry = p.numbered().at(-1);
+  assert.deepEqual(retry.args.p_filters, failed.args.p_filters);
+  await act(async () => p.finish(retry, 1));
+  await act(async () => button('오늘 휴보강 보기').click());
+  assert.deepEqual(periodBounds(p.numbered().at(-1)), ['2026-09-01', '2026-09-01']);
+  await act(async () => p.finish(p.numbered().at(-1), 1));
+  await act(async () => {
+    window.history.replaceState(null, '', savedUrl);
+    window.dispatchEvent(new window.PopStateEvent('popstate'));
+  });
+  assert.deepEqual(periodBounds(p.numbered().at(-1)), ['2026-08-31', '2026-08-31'], 'Back restores the saved explicit range');
+  assertPeriodReadsOnly(p);
 });
 test('off-page exact detail preserves editor identity and draft through page back navigation', async (t) => {
   const p = await setup(t, { search: `?view=approvalPending&requestId=${id(999)}` });
