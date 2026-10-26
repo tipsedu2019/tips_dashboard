@@ -13,6 +13,15 @@ const dialogActionsClassName = "shrink-0 space-y-3 border-t border-border/70 bg-
 const dialogFrameClassName = "flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 motion-reduce:animate-none"
 const dialogHeaderClassName = "shrink-0 border-b border-border/70 px-5 py-5 pr-14 text-left sm:px-6 sm:pr-14"
 
+/** Presentation pieces for workflows that already own their header and native form. */
+function ScrollableDialogBody({ className, ...props }: React.ComponentProps<"div">) {
+  return <div data-slot="scrollable-dialog-body" {...props} className={cn(dialogBodyClassName, className)} />
+}
+
+function ScrollableDialogFooter({ className, ...props }: React.ComponentProps<"div">) {
+  return <div data-slot="scrollable-dialog-footer" {...props} className={cn(dialogActionsClassName, className)} />
+}
+
 /** Layout only for existing workflows: the caller retains submission, busy and draft guards. */
 function ScrollableDialogContent({ title, description, children, footer, className, ...props }: Omit<React.ComponentProps<typeof DialogContent>, "title"> & {
   title: string
@@ -25,8 +34,8 @@ function ScrollableDialogContent({ title, description, children, footer, classNa
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription className="sr-only">{description}</DialogDescription>
       </DialogHeader>
-      <div data-slot="scrollable-dialog-body" className={dialogBodyClassName}>{children}</div>
-      <div data-slot="scrollable-dialog-footer" className={dialogActionsClassName}>{footer}</div>
+      <ScrollableDialogBody>{children}</ScrollableDialogBody>
+      <ScrollableDialogFooter>{footer}</ScrollableDialogFooter>
     </DialogContent>
   )
 }
@@ -222,4 +231,4 @@ function DocumentDialogContent({ title, description, children, toolbar, feedback
   )
 }
 
-export { FormDialogContent, DetailDialogContent, DocumentDialogContent, ConfirmationDialogContent, ScrollableDialogContent }
+export { FormDialogContent, DetailDialogContent, DocumentDialogContent, ConfirmationDialogContent, ScrollableDialogContent, ScrollableDialogBody, ScrollableDialogFooter }

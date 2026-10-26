@@ -2101,6 +2101,15 @@ test('registration late list failure retains an open create draft and restores f
   await act(async () => { create.focus(); create.click(); });
   const host = document.querySelector('[data-registration-application-host]');
   assert.equal(host?.getAttribute('data-registration-application-mode'), 'create');
+  const form = host.querySelector('form');
+  const body = form?.querySelector('[data-slot="scrollable-dialog-body"]');
+  const footer = form?.querySelector('[data-slot="scrollable-dialog-footer"]');
+  assert.ok(body && footer, 'registration fields and actions have separate scroll/layout owners');
+  const submit = footer.querySelector('button[type="submit"]');
+  assert.equal(submit?.form, form, 'the original native form owns the footer submit');
+  assert.equal(body.contains(submit), false);
+  assert.equal(host.querySelectorAll('form').length, 1);
+  assert.equal(host.querySelectorAll('button[aria-label="닫기"]').length, 1);
   await act(async () => currentComponentProps('RegistrationApplicationCreate').onFormPatch({ studentName: '전송하지 않는 합성 초안' }));
   await act(async () => pending.reject(new Error('synthetic late read failure')));
   assert.ok(document.querySelector('[data-registration-application-host]') === host);
@@ -2109,6 +2118,9 @@ test('registration late list failure retains an open create draft and restores f
   await act(async () => host.querySelector('button[aria-label="닫기"]').click());
   assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
   await settleDraftUi(() => draftAction('계속 편집'));
+  assert.equal(host.querySelector('form'), form, 'continuing preserves the same native form');
+  assert.equal(form.querySelector('[data-slot="scrollable-dialog-body"]'), body);
+  assert.equal(submit.form, form);
   assert.equal(currentComponentProps('RegistrationApplicationCreate').form.studentName, '전송하지 않는 합성 초안');
   await act(async () => host.querySelector('button[aria-label="닫기"]').click());
   await settleDraftUi(() => draftAction('변경사항 버리기'));
