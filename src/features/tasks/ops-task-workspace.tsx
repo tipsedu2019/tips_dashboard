@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 
-import { DataTableCommandRow, DataTableWorkspaceToolbar, DataTableReadFeedback, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { DataTableCommandRow, DataTableWorkspaceToolbar, DataTableReadFeedback, DataTableFilters, DATA_TABLE_FILTER_FIELD_CLASS_NAME, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
 import { DataTableSearchField } from "@/components/data-table/data-table-search-field"
 import { useDataTableColumns } from "@/components/data-table/data-table-columns"
 import { cn } from "@/lib/utils"
@@ -41,6 +41,7 @@ import {
 import type { DateTimePickerDraftState } from "@/components/ui/date-time-picker"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { GoogleChatDeliveryControl } from "@/features/notifications/notification-delivery-control"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
@@ -7982,6 +7983,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [wordRetestTeacherFilter, setWordRetestTeacherFilter] = useState<WordRetestSelectFilterKey>("all")
   const [wordRetestClassFilter, setWordRetestClassFilter] = useState<WordRetestSelectFilterKey>("all")
   const [operationTablePageControls, setOperationTablePageControls] = useState<OperationTablePageControls>(EMPTY_OPERATION_TABLE_PAGE_CONTROLS)
+  const { isColumnVisible: isWordRetestColumnVisible, columnSettingsControl: wordRetestColumnSettingsControl } = useDataTableColumns(
+    "tips:word-retest:columns", WORD_RETEST_COLUMNS, { ready: isWordRetestWorkspace, title: "열 설정" },
+  )
   const [wordRetestTablePageSort, setWordRetestTablePageSort] = useState<{ column: string | null; direction: "asc" | "desc" | null }>({ column: null, direction: null })
   const [wordRetestScoreDrafts, setWordRetestScoreDrafts] = useState<Record<string, WordRetestScoreDraft>>({})
   const wordRetestScoreBaselinesRef = useRef<Record<string, WordRetestScoreDraft>>({})
@@ -9568,8 +9572,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const isWordRetestFilteredEmpty = isWordRetestWorkspace && (
     wordRetestBranchFilter !== "all" ||
     wordRetestPeriodFilter !== "all" ||
-    Boolean(wordRetestCustomStartDate) ||
-    Boolean(wordRetestCustomEndDate) ||
     wordRetestTeacherFilter !== "all" ||
     wordRetestClassFilter !== "all"
   )
@@ -12583,7 +12585,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const isRegistrationList = isRegistrationWorkspace && registrationMode === "list"
-  const workspaceSearchControl = showSearch ? (
+  const workspaceSearchControl = isWordRetestWorkspace ? (
+    <DataTableSearchField ref={taskSearchInputRef} value={query} onValueChange={setQuery}
+      label={`${workspaceLabel} 검색`} clearLabel="검색 지우기" placeholder={WORKSPACE_SEARCH_PLACEHOLDERS[workspace]} />
+  ) : showSearch ? (
     <div className="relative min-w-0 flex-1">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
@@ -12639,6 +12644,74 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         <span className="sr-only">건수와 필터 선택 정보를 불러오는 중입니다.{authoritativeTaskStats ? " 이전 집계를 표시합니다." : ""}</span>
       </span>
     )
+  ) : undefined
+
+  // Reset only temporary query conditions. Keep the role, custom-date drafts,
+  // table preferences and inline score drafts owned by their existing state.
+  const defaultWordRetestTeacherFilter = shouldDefaultWordRetestTeacherFilter && currentUserTeacherOption
+    ? (wordRetestFilterOptions.teacher.find((option) => option.value === currentUserTeacherOption.id)
+      || wordRetestFilterOptions.teacher.find((option) => normalizeLookupValue(option.label) === normalizeLookupValue(currentUserTeacherOption.label)))?.value || "all"
+    : "all"
+  const canResetWordRetestFilters = Boolean(query) || wordRetestBranchFilter !== "all"
+    || wordRetestPeriodFilter !== "all" || wordRetestTeacherFilter !== defaultWordRetestTeacherFilter
+    || wordRetestClassFilter !== "all" || showClosed
+  const resetWordRetestFilters = () => {
+    setQuery("")
+    setWordRetestBranchFilter("all")
+    setWordRetestPeriodFilter("all")
+    // Keep inactive custom bounds as drafts, just as the date inputs do. They
+    // are excluded from the RPC unless custom is explicitly selected again.
+    const params = new URLSearchParams(window.location.search)
+    params.delete("branch")
+    params.delete("period")
+    const search = params.toString()
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${search ? `?${search}` : ""}`)
+    wordRetestTeacherFilterTouchedRef.current = false
+    setWordRetestTeacherFilter(defaultWordRetestTeacherFilter)
+    setWordRetestClassFilter("all")
+    setShowClosed(false)
+  }
+  const wordRetestFilters = isWordRetestWorkspace ? (
+    <DataTableFilterPanel label="단어 재시험 검색 조건" onReset={resetWordRetestFilters} canReset={canResetWordRetestFilters} activeFilters={[
+      { label: "검색", value: query },
+      { label: "지점", value: wordRetestBranchFilter === "all" ? "" : wordRetestBranchFilter },
+      { label: "본시험일", value: wordRetestPeriodFilter === "all" ? "" : wordRetestPeriodFilter === "custom" ? `${wordRetestCustomStartDate || "시작일 미지정"} ~ ${wordRetestCustomEndDate || "종료일 미지정"}` : WORD_RETEST_PERIOD_FILTERS.find((filter) => filter.key === wordRetestPeriodFilter)?.label || "" },
+      { label: "담당선생님", value: wordRetestTeacherFilter === "all" ? "" : wordRetestFilterOptions.teacher.find((option) => option.value === wordRetestTeacherFilter)?.label || "선택한 선생님" },
+      { label: "수업", value: wordRetestClassFilter === "all" ? "" : wordRetestFilterOptions.class.find((option) => option.value === wordRetestClassFilter)?.label || "선택한 수업" },
+      { label: "완료", value: showClosed ? "완료 포함" : "" },
+    ].filter((filter) => Boolean(filter.value))}>
+      <DataTableFilters aria-label="단어 재시험 검색 조건">
+        <div className="grid min-w-0 gap-1.5">
+          <Label>지점</Label>
+          <div role="group" aria-label="단어 재시험 지점" className="flex w-fit gap-1">
+            {WORD_RETEST_BRANCH_FILTERS.map((filter) => (
+              <Button key={filter.key} type="button" variant={wordRetestBranchFilter === filter.key ? "secondary" : "ghost"} size="form"
+                aria-pressed={wordRetestBranchFilter === filter.key} aria-label={`${filter.label} 단어 재시험 보기`}
+                onClick={() => syncWordRetestBranchFilter(filter.key)}>{filter.label}</Button>
+            ))}
+          </div>
+        </div>
+        <div className="grid min-w-0 gap-1.5">
+          <Label>본시험일</Label>
+          <WordRetestPeriodFilterBar value={wordRetestPeriodFilter} startDate={wordRetestCustomStartDate} endDate={wordRetestCustomEndDate}
+            onChange={syncWordRetestPeriodFilter} onStartDateChange={(value) => syncWordRetestCustomDate("from", value)}
+            onEndDateChange={(value) => syncWordRetestCustomDate("to", value)} />
+        </div>
+        <WordRetestFilterBar options={wordRetestFilterOptions} teacherFilter={wordRetestTeacherFilter} classFilter={wordRetestClassFilter}
+          onTeacherChange={(value) => { wordRetestTeacherFilterTouchedRef.current = true; setWordRetestTeacherFilter(value) }}
+          onClassChange={setWordRetestClassFilter} onFilterOpen={() => void ensureTaskOptions()} />
+        <Button type="button" variant="ghost" size="form" className="hidden md:inline-flex" disabled={!canResetWordRetestFilters} onClick={resetWordRetestFilters}>조건 초기화</Button>
+      </DataTableFilters>
+    </DataTableFilterPanel>
+  ) : null
+  const wordRetestReadFeedback = numberedPage.error ? (
+    <DataTableReadFeedback label="목록 조회 실패"
+      message={`목록을 불러오지 못했습니다.${numberedPage.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}`}
+      retryLabel="목록 다시 불러오기" returnFocusRef={taskSearchInputRef} onRetry={() => numberedPage.retry()} />
+  ) : numberedPage.loading && numberedPage.totalCount !== null ? (
+    <span role="status" className="min-w-0 truncate text-xs text-muted-foreground" title={`이전 조회 결과: ${acceptedCriteriaLabel}`}>
+      목록 갱신 중<span className="sr-only"> · 이전 조회 결과: {acceptedCriteriaLabel}</span>
+    </span>
   ) : undefined
 
   const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace || isWordRetestWorkspace
@@ -12803,19 +12876,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 {showClosed ? "완료 숨김" : "완료 보기"}
               </Button>
             )}
-            {isWordRetestWorkspace && (
-              <WordRetestManualDialog
-                open={wordRetestManualOpen}
-                onOpenChange={setWordRetestManualOpen}
-              />
-            )}
             {!isWordRetestWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && (
               <Button type="button" variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading} aria-label="새로고침" className="size-8 px-0">
                 <RefreshCw className="size-4" />
                 <span className="sr-only">새로고침</span>
               </Button>
             )}
-	            {showToolbarCreate && !isRegistrationList && (
+	            {showToolbarCreate && !isRegistrationList && !isWordRetestWorkspace && (
 	              <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
 	                <Plus className="size-4" />
 	                {getWorkspaceCreateActionLabel(workspace, workspaceLabel)}
@@ -12823,7 +12890,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            )}
           </div>
         </div>
-        <WorkspaceTabsPanel className={isRegistrationList ? DATA_TABLE_LAYOUT_CLASS_NAME : "flex flex-col gap-2"}>
+        <WorkspaceTabsPanel className={isRegistrationList || isWordRetestWorkspace ? DATA_TABLE_LAYOUT_CLASS_NAME : "flex flex-col gap-2"}>
         {isRegistrationList ? (
           <RegistrationListToolbar
             search={workspaceSearchControl}
@@ -12900,80 +12967,30 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         )}
 
-        {!isRegistrationList && (showSearch || (isWordRetestWorkspace && showClosedToggle)) && (
-          <DataTableCommandRow reserveActions={isWordRetestWorkspace}
-            search={workspaceSearchControl}
-            actions={isWordRetestWorkspace && (selectedWordRetests.length > 0 ? (
-              <DataTableSelectionActions count={selectedWordRetests.length} label="선택한 단어 재시험 작업" disabled={saving} onClear={() => { clearWordRetestSelection(); taskSearchInputRef.current?.focus({ preventScroll: true }); }}>
-                <Button type="button" variant="destructive-ghost" size="sm" disabled={saving} onClick={() => requestRemoveWordRetests(selectedWordRetests)}>
-                  <Trash2 aria-hidden="true" className="size-4" />선택 삭제
-                </Button>
-              </DataTableSelectionActions>
-            ) : showClosedToggle && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-pressed={showClosed}
-                onClick={() => setShowClosed((value) => !value)}
-                className="h-9 shrink-0 whitespace-nowrap px-3"
-              >
-                <Check className="size-4" />
-                <span>{showClosed ? "완료 숨김" : "완료 보기"}</span>
-              </Button>
-            ))}
-          />
-        )}
+        {isWordRetestWorkspace ? (
+          <DataTableWorkspaceToolbar search={workspaceSearchControl} filters={wordRetestFilters}
+            actions={<>
+              <div className="flex min-w-0 items-center justify-end gap-1 sm:gap-2">
+                {wordRetestReadFeedback ?? (selectedWordRetests.length > 0 ? (
+                  <DataTableSelectionActions count={selectedWordRetests.length} label="선택한 단어 재시험 작업" disabled={saving}
+                    onClear={() => { clearWordRetestSelection(); taskSearchInputRef.current?.focus({ preventScroll: true }) }}>
+                    <Button type="button" variant="destructive-ghost" size="sm" disabled={saving} onClick={() => requestRemoveWordRetests(selectedWordRetests)}>
+                      <Trash2 aria-hidden="true" className="size-4" />선택 삭제
+                    </Button>
+                  </DataTableSelectionActions>
+                ) : showClosedToggle && <Button type="button" variant="outline" size="sm" aria-pressed={showClosed} onClick={() => setShowClosed((value) => !value)}>
+                  <Check aria-hidden="true" className="size-4" />{showClosed ? "완료 숨김" : "완료 보기"}
+                </Button>)}
+              </div>
+              {/* Keep overlay owners/triggers mounted through selection and reads. */}
+              {wordRetestColumnSettingsControl}
+              <WordRetestManualDialog open={wordRetestManualOpen} onOpenChange={setWordRetestManualOpen} />
+              {!wordRetestReadFeedback && selectedWordRetests.length === 0 && showToolbarCreate && <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
+                <Plus aria-hidden="true" className="size-4" />{getWorkspaceCreateActionLabel(workspace, workspaceLabel)}
+              </Button>}
+            </>} />
+        ) : !isRegistrationList && showSearch ? <DataTableCommandRow reserveActions={false} search={workspaceSearchControl} /> : null}
 
-	        {isWordRetestWorkspace && (
-	          <DataTableFilterPanel label="단어 재시험 검색 조건" activeFilters={[
-                { label: "지점", value: wordRetestBranchFilter === "all" ? "" : wordRetestBranchFilter },
-                { label: "본시험일", value: wordRetestPeriodFilter === "all" ? "" : wordRetestPeriodFilter === "custom" ? `${wordRetestCustomStartDate || "시작일 미지정"} ~ ${wordRetestCustomEndDate || "종료일 미지정"}` : WORD_RETEST_PERIOD_FILTERS.find((filter) => filter.key === wordRetestPeriodFilter)?.label || "" },
-                { label: "담당선생님", value: wordRetestTeacherFilter === "all" ? "" : wordRetestFilterOptions.teacher.find((option) => option.value === wordRetestTeacherFilter)?.label || "선택한 선생님" },
-                { label: "수업", value: wordRetestClassFilter === "all" ? "" : wordRetestFilterOptions.class.find((option) => option.value === wordRetestClassFilter)?.label || "선택한 수업" },
-              ].filter((filter) => Boolean(filter.value))}>
-              <div className="grid gap-4 md:gap-3">
-	            <div className="flex flex-wrap gap-2">
-	              <div className="inline-flex w-fit rounded-md border bg-background p-1" aria-label="단어 재시험 지점">
-	                {WORD_RETEST_BRANCH_FILTERS.map((filter) => (
-	                  <button
-	                    key={filter.key}
-	                    type="button"
-	                    aria-pressed={wordRetestBranchFilter === filter.key}
-	                    aria-label={`${filter.label} 단어 재시험 보기`}
-	                    onClick={() => syncWordRetestBranchFilter(filter.key)}
-	                    className={[
-	                      "h-11 rounded-md px-3 text-sm font-medium md:h-8",
-	                      wordRetestBranchFilter === filter.key ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:bg-muted",
-	                    ].join(" ")}
-	                  >
-	                    {filter.label}
-	                  </button>
-	                ))}
-	              </div>
-	              <WordRetestPeriodFilterBar
-	                value={wordRetestPeriodFilter}
-	                startDate={wordRetestCustomStartDate}
-	                endDate={wordRetestCustomEndDate}
-	                onChange={syncWordRetestPeriodFilter}
-	                onStartDateChange={(value) => syncWordRetestCustomDate("from", value)}
-	                onEndDateChange={(value) => syncWordRetestCustomDate("to", value)}
-	              />
-	            </div>
-	            <WordRetestFilterBar
-	              options={wordRetestFilterOptions}
-	              teacherFilter={wordRetestTeacherFilter}
-	              classFilter={wordRetestClassFilter}
-	              onTeacherChange={(value) => {
-	                wordRetestTeacherFilterTouchedRef.current = true
-	                setWordRetestTeacherFilter(value)
-	              }}
-	              onClassChange={setWordRetestClassFilter}
-	              onFilterOpen={() => void ensureTaskOptions()}
-	            />
-	          </div>
-              </DataTableFilterPanel>
-	        )}
 
         {isTodoWorkspace && (
           <div className="grid gap-2">
@@ -13037,10 +13054,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ) : null}
 
 
-        {numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+        {!isWordRetestWorkspace && numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           목록을 불러오지 못했습니다.{numberedPage.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}
           <Button variant="outline" size="sm" disabled={numberedPage.loading} onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void numberedPage.retry() }}>다시 시도</Button>
-        </div> : numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과: {acceptedCriteriaLabel}</div> : registrationListCountMismatch && registrationMode === "list" ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+        </div> : !isWordRetestWorkspace && numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과: {acceptedCriteriaLabel}</div> : registrationListCountMismatch && registrationMode === "list" ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           목록과 집계 건수가 일치하지 않습니다. 다시 조회해 주세요.
           <Button variant="outline" size="form" onClick={() => {
             workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
@@ -13147,6 +13164,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	          />
 	        ) : isWordRetestWorkspace && numberedPage.error && visibleTasks.length === 0 ? null : isWordRetestWorkspace ? (
 		          <WordRetestTaskList
+                isColumnVisible={isWordRetestColumnVisible}
 	            key={`word_retest:${navigationRestore.key}`}
 	            initialSort={wordRetestTablePageSort}
 	            tasks={visibleTasks}
@@ -15489,25 +15507,23 @@ function WordRetestPeriodFilterBar({
 }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <div className="inline-flex max-w-full overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="단어 재시험 본시험일 기간">
+      <div role="group" className="inline-flex max-w-full flex-wrap gap-1" aria-label="단어 재시험 본시험일 기간">
         {WORD_RETEST_PERIOD_FILTERS.map((filter) => (
-          <button
+          <Button
             key={filter.key}
             type="button"
             aria-pressed={value === filter.key}
             aria-label={`${filter.label} 단어 재시험 보기`}
             onClick={() => onChange(filter.key)}
-            className={[
-              "h-11 shrink-0 rounded-md px-3 text-sm font-medium md:h-8",
-              value === filter.key ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:bg-muted",
-            ].join(" ")}
+            variant={value === filter.key ? "secondary" : "ghost"}
+            size="form"
           >
             {filter.label}
-          </button>
+          </Button>
         ))}
       </div>
       {value === "custom" && (
-        <div className="grid min-w-[18rem] flex-1 gap-2 sm:max-w-sm sm:grid-cols-2">
+        <div className="grid min-w-0 flex-1 gap-2 sm:max-w-sm sm:grid-cols-2">
           <DatePickerControl
             value={startDate}
             onChange={onStartDateChange}
@@ -15544,19 +15560,18 @@ function WordRetestFilterBar({
   onClassChange: (value: WordRetestSelectFilterKey) => void
   onFilterOpen?: () => void
 }) {
-  if (options.teacher.length === 0 && options.class.length === 0 && teacherFilter === "all" && classFilter === "all") return null
-
   return (
-    <div aria-label="단어 재시험 필터" className="grid gap-2 sm:grid-cols-2">
-      <TodoFilterListbox label="담당선생님" allLabel="담당선생님 전체" value={teacherFilter} options={options.teacher} onChange={onTeacherChange} onOpen={onFilterOpen} />
-      <TodoFilterListbox label="수업" allLabel="수업 전체" value={classFilter} options={options.class} onChange={onClassChange} onOpen={onFilterOpen} />
-    </div>
+    <>
+      <div className={DATA_TABLE_FILTER_FIELD_CLASS_NAME}><TodoFilterListbox label="담당선생님" allLabel="담당선생님 전체" unavailableSelectionLabel="선택한 선생님" value={teacherFilter} options={options.teacher} onChange={onTeacherChange} onOpen={onFilterOpen} /></div>
+      <div className={DATA_TABLE_FILTER_FIELD_CLASS_NAME}><TodoFilterListbox label="수업" allLabel="수업 전체" unavailableSelectionLabel="선택한 수업" value={classFilter} options={options.class} onChange={onClassChange} onOpen={onFilterOpen} /></div>
+    </>
   )
 }
 
 function TodoFilterListbox({
   label,
   allLabel,
+  unavailableSelectionLabel,
   value,
   options,
   onChange,
@@ -15564,6 +15579,7 @@ function TodoFilterListbox({
 }: {
   label: string
   allLabel: string
+  unavailableSelectionLabel?: string
   value: string
   options: TodoFilterOption[]
   onChange: (value: string) => void
@@ -15574,7 +15590,10 @@ function TodoFilterListbox({
   const [open, setOpen] = useState(false)
   const allOption = { value: "all", label: allLabel, count: 0 }
   const listboxOptions = [allOption, ...options]
-  const selectedOption = listboxOptions.find((option) => option.value === value) || allOption
+  // A missing facet does not clear the filter. Never cache its old name or add
+  // an unavailable option; show only a non-identifying selection label.
+  const selectedOption = listboxOptions.find((option) => option.value === value) ||
+    { value, label: unavailableSelectionLabel || allLabel, count: 0 }
 
   function selectOption(nextValue: string) {
     onChange(nextValue)
@@ -16026,6 +16045,7 @@ function TaskList({
 }
 
 function WordRetestTaskList({
+  isColumnVisible,
   tasks,
   initialSort,
   mode,
@@ -16053,6 +16073,7 @@ function WordRetestTaskList({
   serverPaged = false,
   onPageSortChange,
 }: {
+  isColumnVisible: (columnId: string) => boolean
   tasks: OpsTask[]
   initialSort?: { column: string | null; direction: "asc" | "desc" | null }
   mode: WordRetestMode
@@ -16084,7 +16105,6 @@ function WordRetestTaskList({
   const [columnWidths, setColumnWidths] = useState<Record<WordRetestTableColumnKey, number>>(WORD_RETEST_TABLE_COLUMN_WIDTHS)
   const [wordRetestTableSort, setWordRetestTableSort] = useState<WordRetestTableSort>(() => initialSort?.column && initialSort.direction
     ? { columnKey: initialSort.column as WordRetestTableColumnKey, direction: initialSort.direction } : null)
-  const { isColumnVisible, columnSettingsControl } = useDataTableColumns("tips:word-retest:columns", WORD_RETEST_COLUMNS)
   const visibleColumns = WORD_RETEST_COLUMNS.filter(column => isColumnVisible(column.id))
   const gridTemplateColumns = getWordRetestTableGridTemplate(columnWidths, visibleColumns)
   const gridTemplateStyle = { "--word-retest-grid-template": gridTemplateColumns } as CSSProperties
@@ -16153,7 +16173,6 @@ function WordRetestTaskList({
 
   return (
     <div className="min-w-0">
-      <div className="flex justify-end border-b px-3 py-2">{columnSettingsControl}</div>
       <div role={mobile ? undefined : "table"} aria-label="단어 재시험 목록" className="grid gap-2.5 bg-muted/50 p-3 md:block md:overflow-x-auto md:bg-background md:p-0">
       {!mobile && <div role="row" className="grid min-h-[var(--table-header-height)] min-w-max items-center gap-3 border-b bg-muted px-3 py-2 text-xs text-muted-foreground [grid-template-columns:var(--word-retest-grid-template)]" style={gridTemplateStyle}>
         {visibleColumns.map(column => column.id === "select" ? <span key={column.id} role="columnheader">
