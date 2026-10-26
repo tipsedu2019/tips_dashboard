@@ -12586,7 +12586,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const isRegistrationList = isRegistrationWorkspace && registrationMode === "list"
-  const workspaceSearchControl = isWordRetestWorkspace ? (
+  const workspaceSearchControl = isWordRetestWorkspace || isRegistrationList ? (
     <DataTableSearchField ref={taskSearchInputRef} value={query} onValueChange={setQuery}
       label={`${workspaceLabel} 검색`} clearLabel="검색 지우기" placeholder={WORKSPACE_SEARCH_PLACEHOLDERS[workspace]} />
   ) : showSearch ? (
@@ -12705,7 +12705,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       </DataTableFilters>
     </DataTableFilterPanel>
   ) : null
-  const wordRetestReadFeedback = numberedPage.error ? (
+  const listReadFeedback = numberedPage.error ? (
     <DataTableReadFeedback label="목록 조회 실패"
       message={`목록을 불러오지 못했습니다.${numberedPage.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}`}
       retryLabel="목록 다시 불러오기" returnFocusRef={taskSearchInputRef} onRetry={() => numberedPage.retry()} />
@@ -12895,6 +12895,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         {isRegistrationList ? (
           <RegistrationListToolbar
             search={workspaceSearchControl}
+            feedback={listReadFeedback}
             actions={showToolbarCreate ? (
               <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
                 <Plus className="size-4" />
@@ -12972,7 +12973,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           <DataTableWorkspaceToolbar search={workspaceSearchControl} filters={wordRetestFilters}
             actions={<>
               <div className="flex min-w-0 items-center justify-end gap-1 sm:gap-2">
-                {wordRetestReadFeedback ?? (selectedWordRetests.length > 0 ? (
+                {listReadFeedback ?? (selectedWordRetests.length > 0 ? (
                   <DataTableSelectionActions count={selectedWordRetests.length} label="선택한 단어 재시험 작업" disabled={saving}
                     onClear={() => { clearWordRetestSelection(); taskSearchInputRef.current?.focus({ preventScroll: true }) }}>
                     <Button type="button" variant="destructive-ghost" size="sm" disabled={saving} onClick={() => requestRemoveWordRetests(selectedWordRetests)}>
@@ -12986,7 +12987,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               {/* Keep overlay owners/triggers mounted through selection and reads. */}
               {wordRetestColumnSettingsControl}
               <WordRetestManualDialog open={wordRetestManualOpen} onOpenChange={setWordRetestManualOpen} />
-              {!wordRetestReadFeedback && selectedWordRetests.length === 0 && showToolbarCreate && <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
+              {!listReadFeedback && selectedWordRetests.length === 0 && showToolbarCreate && <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
                 <Plus aria-hidden="true" className="size-4" />{getWorkspaceCreateActionLabel(workspace, workspaceLabel)}
               </Button>}
             </>} />
@@ -13055,10 +13056,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ) : null}
 
 
-        {!isWordRetestWorkspace && numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+        {!isWordRetestWorkspace && !isRegistrationList && numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           목록을 불러오지 못했습니다.{numberedPage.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}
           <Button variant="outline" size="sm" disabled={numberedPage.loading} onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void numberedPage.retry() }}>다시 시도</Button>
-        </div> : !isWordRetestWorkspace && numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과: {acceptedCriteriaLabel}</div> : registrationListCountMismatch && registrationMode === "list" ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+        </div> : !isWordRetestWorkspace && !isRegistrationList && numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과: {acceptedCriteriaLabel}</div> : registrationListCountMismatch && registrationMode === "list" ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           목록과 집계 건수가 일치하지 않습니다. 다시 조회해 주세요.
           <Button variant="outline" size="form" onClick={() => {
             workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus()

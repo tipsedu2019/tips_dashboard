@@ -16,14 +16,17 @@ test("zero-count owner scope stays usable without remounting the active search f
   const { createRoot } = await import("react-dom/client")
   const root = createRoot(document.getElementById("root"))
   let selected = "mine"
+  let feedback
   const render = (withScope = true) => root.render(createElement(RegistrationListToolbar, {
     search: createElement("input", { type: "search", "aria-label": "등록 검색", defaultValue: "김학생" }),
     actions: createElement("button", null, "등록 추가"),
+    feedback,
     consultationScope: withScope ? { value: selected, counts: { mine: 0, all: 3 }, onChange: (value) => { selected = value; render() } } : undefined,
   }))
   try {
     await act(async () => render())
     const input = document.querySelector('input[type="search"]')
+    const create = [...document.querySelectorAll('button')].find(button => button.textContent === "등록 추가")
     const all = document.querySelector('[aria-label="전체 담당 3건"]')
     assert.equal(document.querySelector('[aria-label="내 담당 0건"]').disabled, false)
     assert.equal(document.querySelector('[aria-label="내 담당 0건"]').getAttribute("aria-pressed"), "true")
@@ -32,6 +35,15 @@ test("zero-count owner scope stays usable without remounting the active search f
     assert.equal(all.getAttribute("aria-pressed"), "true")
     assert.equal(document.querySelector('input[type="search"]'), input)
     assert.equal(input.value, "김학생")
+    for (const role of ["alert", "status"]) {
+      feedback = createElement("span", { role }, role === "alert" ? "조회 실패" : "조회 중")
+      await act(async () => render())
+      assert.ok(document.querySelector('input[type="search"]') === input)
+      assert.ok([...document.querySelectorAll('button')].find(button => button.textContent === "등록 추가") === create, "feedback retains the live create/return trigger")
+      assert.ok(document.querySelector(`[role="${role}"]`).closest('[data-slot="data-table-actions"]'))
+      assert.equal(document.querySelector('[aria-label="내 담당 0건"]').disabled, false)
+    }
+    feedback = undefined
     await act(async () => render(false))
     assert.equal(document.querySelector('input[type="search"]'), input)
     assert.equal(input.value, "김학생")

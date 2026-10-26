@@ -2017,6 +2017,105 @@ function supportRegistrationRetryFocus() {
   window.HTMLElement.prototype.detachEvent = function (name, listener) { this.removeEventListener(name.replace(/^on/, ''), listener); };
 }
 
+test('registration shared search preserves deferred page resets and guards composing Escape without a new submit policy', async t => {
+  const page = await workspace(t, { workspace: 'registration', search: '?taskPage=2&taskPageType=registration' });
+  supportRegistrationRetryFocus();
+  const first = registrationReads(page)[0];
+  assert.equal(first.args.p_page, 2);
+  await act(async () => page.finish(page.requests.indexOf(first), 12, [registrationPatch(11), registrationPatch(12)]));
+  const input = document.querySelector('input[aria-label="등록 검색"]');
+  const change = value => input[Object.keys(input).find(key => key.startsWith('__reactProps'))].onChange({ target: { value } });
+  await act(async () => { input.focus(); change('가상 한글'); });
+  const selected = registrationReads(page).at(-1);
+  assert.equal(selected.args.p_page, 1);
+  assert.deepEqual(selected.args.p_filters, { taskType: 'registration', search: '가상 한글', statuses: [], view: 'inquiry', consultationOwnerId: null });
+  const reads = registrationReads(page).length;
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...composition })));
+    assert.equal(input.value, '가상 한글');
+    assert.equal(registrationReads(page).length, reads);
+  }
+  await act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  assert.equal(registrationReads(page).length, reads, 'Enter does not add an explicit commit to deferred registration search');
+  await act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  assert.equal(input.value, '');
+  assert.ok(document.activeElement === input);
+  assert.equal(registrationReads(page).at(-1).args.p_filters.search, '');
+  assert.equal(registrationReads(page).at(-1).args.p_page, 1);
+  await act(async () => change('   '));
+  await act(async () => document.querySelector('button[aria-label="검색 지우기"]').click());
+  assert.equal(input.value, '');
+  assert.ok(document.activeElement === input);
+  assert.ok(document.querySelector('input[aria-label="등록 검색"]') === input);
+  assert.equal(new URLSearchParams(window.location.search).has('search'), false, 'no new query-string persistence is introduced');
+  assert.ok(page.requests.every(request => /^(list_|get_|read_)|_runtime_version$/.test(request.name)), 'search only issues existing read RPCs');
+});
+
+test('registration command feedback preserves consultation scope, accepted rows and the create trigger through retry', async t => {
+  const page = await workspace(t, { workspace: 'registration', viewerId: id(800), search: '?flow=consultation_requested&owner=mine' });
+  supportRegistrationRetryFocus();
+  const patch = registrationPatch(1, '합성 상담 학생');
+  patch.registrationTracks.forEach(track => Object.assign(track, { workflowStatus: 'consultation_requested', directorProfileId: id(800) }));
+  await act(async () => page.finish(page.requests.indexOf(registrationReads(page)[0]), 1, [patch]));
+  const input = document.querySelector('input[aria-label="등록 검색"]');
+  const command = input.closest('[data-slot="data-table-command-row"]');
+  const create = [...command.querySelectorAll('button')].find(button => button.textContent.includes('등록 추가'));
+  const list = document.querySelector('[data-testid="registration-case-desktop-list"]');
+  const accepted = list.textContent;
+  await act(async () => input[Object.keys(input).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '새 합성 조건' } }));
+  const failed = registrationReads(page).at(-1);
+  assert.equal(failed.args.p_filters.consultationOwnerId, id(800));
+  assert.ok(command.querySelector('[role="status"]'));
+  await act(async () => failed.reject(new Error('synthetic unavailable')));
+  const feedback = command.querySelector('[role="alert"]');
+  assert.match(feedback.textContent, /목록을 불러오지 못했습니다.*이전 조회 결과/);
+  assert.equal(document.querySelectorAll('[role="alert"]').length, 1, 'there is one main read failure, not an extra row or count-conflict alert');
+  assert.equal(list.textContent, accepted);
+  assert.ok([...command.querySelectorAll('button')].find(button => button.textContent.includes('등록 추가')) === create);
+  assert.ok(document.querySelector('[aria-label="상담 목록 범위"]'));
+  await act(async () => command.querySelector('button[aria-label="목록 다시 불러오기"]').click());
+  assert.ok(document.activeElement === input);
+  const retried = registrationReads(page).at(-1);
+  assert.deepEqual(retried.args, failed.args);
+  assert.ok(command.querySelector('[role="status"]'));
+  assert.equal(command.querySelector('[role="alert"]'), null);
+  await act(async () => page.finish(page.requests.indexOf(retried), 0));
+  assert.ok(document.querySelector('input[aria-label="등록 검색"]') === input);
+  assert.equal(input.value, '새 합성 조건');
+  assert.equal(new URLSearchParams(window.location.search).get('owner'), 'mine');
+  assert.equal(window.history.state.tipsOpsTaskList.filters.search, '새 합성 조건');
+  assert.match(document.body.textContent, /검색 결과가 없습니다/);
+});
+
+test('registration late list failure retains an open create draft and restores focus to its unchanged trigger', async t => {
+  const page = await workspace(t, { workspace: 'registration' });
+  exposeSyntheticDetailLayout(t);
+  await act(async () => page.finish(page.requests.indexOf(registrationReads(page)[0]), 1, [registrationPatch(1)]));
+  const search = document.querySelector('input[aria-label="등록 검색"]');
+  const create = [...search.closest('[data-slot="data-table-command-row"]').querySelectorAll('button')].find(button => button.textContent.includes('등록 추가'));
+  await act(async () => search[Object.keys(search).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '가상 조회' } }));
+  const pending = registrationReads(page).at(-1);
+  await act(async () => { create.focus(); create.click(); });
+  const host = document.querySelector('[data-registration-application-host]');
+  assert.equal(host?.getAttribute('data-registration-application-mode'), 'create');
+  await act(async () => currentComponentProps('RegistrationApplicationCreate').onFormPatch({ studentName: '전송하지 않는 합성 초안' }));
+  await act(async () => pending.reject(new Error('synthetic late read failure')));
+  assert.ok(document.querySelector('[data-registration-application-host]') === host);
+  assert.equal(currentComponentProps('RegistrationApplicationCreate').form.studentName, '전송하지 않는 합성 초안');
+  assert.ok(create.isConnected);
+  await act(async () => host.querySelector('button[aria-label="닫기"]').click());
+  assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
+  await settleDraftUi(() => draftAction('계속 편집'));
+  assert.equal(currentComponentProps('RegistrationApplicationCreate').form.studentName, '전송하지 않는 합성 초안');
+  await act(async () => host.querySelector('button[aria-label="닫기"]').click());
+  await settleDraftUi(() => draftAction('변경사항 버리기'));
+  await settleDetailFocus();
+  assert.equal(document.querySelector('[data-registration-application-host]'), null);
+  assert.ok(document.activeElement === create, 'closing returns to the same command even while list failure remains');
+  assert.ok(page.requests.every(request => /^(list_|get_|read_)|_runtime_version$/.test(request.name)), 'the synthetic draft never submits a write RPC');
+  assert.equal(page.tableRequests.some(request => request.filters.some(([method]) => ['insert', 'update', 'delete', 'upsert'].includes(method))), false);
+});
+
 for (const order of ['stats-first', 'page-first']) test('registration completed count conflict is explicit and manual retry reloads both reads: ' + order, async t => {
   const page = await workspace(t, { workspace: 'registration', search: '?flow=completed' });
   supportRegistrationRetryFocus();
@@ -2059,7 +2158,8 @@ for (const outcome of ['pending', 'failed']) test('registration empty previous s
   if (outcome === 'failed') await act(async () => read.reject(new Error('synthetic private timeout')));
   assertNoRegistrationFalseEmpty();
   assert.equal(document.body.textContent.includes('synthetic private timeout'), false);
-  assert.match(document.body.textContent, outcome === 'pending' ? /갱신하는 중/ : /불러오지 못했습니다/);
+  const feedback = document.querySelector('[data-slot="data-table-command-row"]');
+  assert.match(feedback.textContent, outcome === 'pending' ? /목록 갱신 중/ : /불러오지 못했습니다/);
 });
 
 for (const scope of ['empty', 'search', 'mine']) test('registration legitimate empty scope remains explained: ' + scope, async t => {
