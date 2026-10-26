@@ -1001,6 +1001,118 @@ function wordFilterRows() {
       displayValues: { ...patch.displayValues, teacher: `합성담당${letter}`, class: `합성수업${letter}`, student: `합성학생${letter}` } };
   });
 }
+async function wordDetailFocusWorkspace(t, { viewerRole = 'staff', directLink = false, settleExactRead = true } = {}) {
+  const rows = wordFilterRows().map((item, index) => ({ ...item, id: id(index + 11), status: 'done',
+    completedAt: '2099-01-02T00:00:00Z', inlineState: { ...item.inlineState, retestStatus: 'done' } }));
+  const filters = { taskType: 'word_retest', search: '합성', statuses: [], queue: viewerRole === 'teacher' ? 'teacher' : 'assistant', branch: null,
+    period: 'all', dateFrom: null, dateTo: null, teacherId: null, classId: null, includeClosed: true,
+    tableSortColumn: 'student', tableSortDirection: 'desc' };
+  const saved = { version: 1, actorScope: JSON.stringify(['actor-a', viewerRole]), pathname: '/admin/word_retest',
+    filters, page: 2, pageSize: 10, scrollY: 420 };
+  const search = new URLSearchParams({ role: filters.queue });
+  if (directLink) search.set('taskId', rows[0].id);
+  const page = await workspace(t, { workspace: 'word_retest', viewerRole, search: `?${search}`,
+    historyState: { tipsOpsTaskList: saved }, tableResponse: table => table === 'ops_word_retests'
+      ? { data: { task_id: rows[0].id, student_name: rows[0].studentName, class_name: rows[0].className,
+        teacher_catalog_id: rows[0].inlineState.teacherId, teacher_name: rows[0].inlineState.teacherName,
+        textbook_name: '합성 교재', unit: '1', retest_status: 'done', total_question_count: 30,
+        cutoff_question_count: 25, first_score: 28 }, error: null } : undefined });
+  exposeSyntheticDetailLayout(t);
+  if (!settleExactRead) {
+    // Statistics can arrive before the numbered rows in the real workspace.
+    await act(async () => {
+      const stats = page.requests.filter(request => request.name === 'get_ops_task_list_stats_v1' && !request.signal?.aborted).at(-1);
+      assert.ok(stats, 'current statistics request exists after list-scope restoration');
+      stats.wordFocusSettled = true;
+      stats.resolve({ error: null, data: { total: 12, byStatus: { done: 12 }, byView: {}, metrics: {}, facets: {} } });
+    });
+    assert.equal(page.tableRequests.filter(request => request.table === 'ops_tasks').length, 1, 'direct link starts its off-page read before the numbered rows arrive');
+  }
+  const acceptReads = async () => act(async () => {
+    for (const request of page.requests.filter(request => !request.wordFocusSettled)) {
+      request.wordFocusSettled = true;
+      assert.ok(['list_ops_task_numbered_page_v1', 'get_ops_task_list_stats_v1'].includes(request.name), 'detail round trip uses read RPCs only');
+      if (request.name === 'list_ops_task_numbered_page_v1') {
+        assert.equal(request.args.p_page, 2, 'detail round trip preserves the non-first page');
+        assert.deepEqual(request.args.p_filters, filters, 'detail round trip preserves accepted search, period, role queue and sort');
+        request.resolve({ error: null, data: { rows, page: 2, pageSize: 10, totalCount: 12 } });
+      } else request.resolve({ error: null, data: { total: 12, byStatus: { done: 12 }, byView: { assistant: 0, teacher: 0, completed: 12 }, metrics: {}, facets: {} } });
+    }
+  });
+  await acceptReads();
+  const opener = document.querySelector(`button[aria-label="${rows[0].studentName} 단어 재시험 수정"]`);
+  assert.ok(opener, 'synthetic completed row has its real list control');
+  if (!directLink) await act(async () => { opener.focus(); opener.click(); });
+  await settleDetailFocus();
+  const exact = page.tableRequests.find(request => request.table === 'ops_tasks');
+  assert.ok(exact, 'read-only detail loads its exact task');
+  const exactResponse = { data: { id: rows[0].id, title: '합성 완료 재시험', type: 'word_retest', status: 'done',
+    priority: 'normal', student_name: rows[0].studentName, class_id: rows[0].classId, class_name: rows[0].className,
+    completed_at: rows[0].completedAt }, error: null };
+  if (settleExactRead) await act(async () => exact.resolve(exactResponse));
+  await settleDetailFocus();
+  const dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog?.textContent.includes(rows[0].studentName), 'actual word read-detail is rendered');
+  assert.ok(dialog.contains(document.activeElement), 'focus enters the real dialog');
+  t.after(() => {
+    assert.ok(page.requests.every(request => ['list_ops_task_numbered_page_v1', 'get_ops_task_list_stats_v1'].includes(request.name)), 'including close, the whole detail focus test uses read RPCs only');
+    assert.equal(page.tableRequests.some(request => request.filters.some(([method]) => ['insert', 'update', 'upsert', 'delete'].includes(method))), false, 'detail focus tests never write business data');
+  });
+  return { page, opener, filters, acceptReads, exact, exactResponse };
+}
+
+for (const [viewerRole, method] of [['staff', 'Escape'], ['staff', 'close button'], ['staff', 'Back'],
+  ['admin', 'Escape'], ['assistant', 'Escape'], ['teacher', 'Escape']]) {
+  test(`word detail focus returns to the ${viewerRole} ${method === 'Back' ? 'search fallback' : 'opener'} after ${method} without losing list context`, async t => {
+    const { page, opener, filters, acceptReads } = await wordDetailFocusWorkspace(t, { viewerRole });
+    if (method === 'Back') {
+      await act(async () => { const popped = new Promise(resolve => window.addEventListener('popstate', resolve, { once: true })); window.history.back(); await popped; });
+      await acceptReads();
+      await settleDetailFocus();
+      assert.equal(document.querySelector('[role="dialog"]'), null);
+    } else await closeGeneralDetailForFocus(method);
+    assert.equal(new URLSearchParams(window.location.search).has('taskId'), false);
+    assert.deepEqual(generalPageReads(page).at(-1).args.p_filters, filters);
+    assert.equal(generalPageReads(page).at(-1).args.p_page, 2);
+    if (method === 'Back') {
+      assert.equal(opener.isConnected, false, 'restoring the history page replaces the old list control');
+      assert.ok(document.activeElement === document.querySelector('input[type="search"]'), 'Back uses the existing search fallback after its original opener unmounts');
+    } else assert.ok(document.activeElement === opener, 'read-only word detail restores its actual list opener');
+  });
+}
+for (const directLink of [false, true]) test(`word detail focus uses search when ${directLink ? 'opened by a direct link' : 'its opener becomes unavailable'}`, async t => {
+  const { opener } = await wordDetailFocusWorkspace(t, { directLink });
+  if (!directLink) opener.hidden = true;
+  const search = document.querySelector('input[type="search"]');
+  assert.ok(search);
+  await closeGeneralDetailForFocus('Escape');
+  assert.ok(document.activeElement === search, 'same-route word detail falls back to the existing search input');
+});
+test('word detail focus does not reopen a closed direct link after its earlier off-page read resolves', async t => {
+  const { page, exact, exactResponse, filters } = await wordDetailFocusWorkspace(t, { directLink: true, settleExactRead: false });
+  assert.equal(page.tableRequests.filter(request => request.table === 'ops_tasks').length, 2, 'initial off-page read remains pending while the numbered result opens its own detail read');
+  await closeGeneralDetailForFocus('Escape');
+  assert.equal(new URLSearchParams(window.location.search).has('taskId'), false, 'explicit close removes the direct link');
+  await act(async () => exact.resolve(exactResponse));
+  await settleDetailFocus();
+  assert.ok(!document.querySelector('[role="dialog"]'), 'late direct-link data cannot reopen a detail the user closed');
+  assert.equal(new URLSearchParams(window.location.search).has('taskId'), false, 'late read cannot recreate the closed task URL');
+  assert.equal(page.tableRequests.filter(request => request.table === 'ops_tasks').length, 2, 'late read cannot start another detail request');
+  assert.deepEqual(generalPageReads(page).at(-1).args.p_filters, filters);
+  assert.equal(generalPageReads(page).at(-1).args.p_page, 2);
+});
+test('word detail focus accepts a delayed off-page read while its direct link is still current', async t => {
+  const { page, exact, exactResponse } = await wordDetailFocusWorkspace(t, { directLink: true, settleExactRead: false });
+  assert.equal(page.tableRequests.filter(request => request.table === 'ops_tasks').length, 2);
+  assert.equal(document.querySelector('[role="dialog"]').textContent.includes('합성 완료 재시험'), false, 'list summary is visible before the pending exact read');
+  await act(async () => exact.resolve(exactResponse));
+  await settleDetailFocus();
+  assert.equal(new URLSearchParams(window.location.search).get('taskId'), exactResponse.data.id);
+  assert.ok(document.querySelector('[role="dialog"]').textContent.includes('합성 완료 재시험'), 'current exact detail remains accepted after a slower read');
+  await closeGeneralDetailForFocus('Escape');
+  assert.equal(new URLSearchParams(window.location.search).has('taskId'), false);
+  assert.ok(document.activeElement === document.querySelector('input[type="search"]'));
+});
 async function acceptWordFilterReads(page, rows = wordFilterRows()) {
   const matches = (row, filters, ignored) => (!filters.search || row.studentName.includes(filters.search))
     && (ignored === 'teacherId' || !filters.teacherId || row.inlineState.teacherId === filters.teacherId)
