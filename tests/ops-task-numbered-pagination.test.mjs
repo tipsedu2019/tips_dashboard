@@ -92,6 +92,9 @@ function transport(pendingRpcNames = []) {
 async function setup(t, url = 'https://test.invalid/admin/tasks') {
   const dom = new JSDOM('<div id="root"></div>', { url });
   globalThis.window = dom.window; globalThis.document = dom.window.document;
+  // ReactDOM is loaded before JSDOM. Install its legacy listener adapter on
+  // every fresh window so focus retained between test cases is also detachable.
+  supportRegistrationRetryFocus();
   window.matchMedia = (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {} });
   for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
@@ -2887,4 +2890,41 @@ for (const kind of ['transfer', 'withdrawal']) test(`ops aggregate feedback stay
   assert.equal(generalPageReads(page).length, 1);
   assert.equal(generalStatsReads(page).length, initialStatsCount + 1, 'only the requested stats retry starts after restored initial reads');
   assertOnlyOperationReads(page);
+});
+
+for (const type of ['todo', 'word_retest', 'transfer', 'withdrawal']) test(`long task dialog keeps the native form and draft owner: ${type}`, async t => {
+  const page = await workspace(t, { workspace: type });
+  exposeSyntheticDetailLayout(t);
+  const initialRead = page.requests.findIndex(request => request.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(initialRead, 0));
+  const create = [...document.querySelectorAll('button')].find(button => /^(추가|할 일 추가|전반 신청|퇴원 신청)$/.test(button.textContent.trim()));
+  assert.ok(create, 'existing allowed create action');
+  await act(async () => { create.focus(); create.click(); });
+  const dialog = document.querySelector('[role="dialog"]');
+  const body = dialog?.querySelector('[data-slot="scrollable-dialog-body"]');
+  const footer = dialog?.querySelector('[data-slot="scrollable-dialog-footer"]');
+  assert.ok(body && footer, 'long fields and actions have separate layout owners');
+  const form = body.querySelector('form');
+  const submit = footer.querySelector('button[type="submit"]');
+  assert.ok(form && submit);
+  assert.equal(submit.form, form, 'external action still belongs to the original native form');
+  assert.equal(form.contains(submit), false);
+  assert.equal(dialog.querySelectorAll('form').length, 1);
+  assert.ok([...form.elements].includes(submit), 'implicit/native submission discovers the action');
+  assert.equal(footer.querySelectorAll('button:not([type])').length, 0);
+  if (type === 'todo') {
+    const title = form.querySelector('input[placeholder="무엇을 해야 하나요?"]');
+    assert.ok(title);
+    await act(async () => submit.click());
+    assert.match(dialog.textContent, /할 일을 입력하세요/);
+    assert.ok(body.querySelector('form') === form, 'validation retains the form owner');
+    await act(async () => title[Object.keys(title).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '전송하지 않는 가상 초안' } }));
+    await act(async () => footer.querySelector('button[type="button"]').click());
+    assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
+    await settleDraftUi(() => draftAction('계속 편집'));
+    assert.ok(body.querySelector('form') === form);
+    assert.equal(title.value, '전송하지 않는 가상 초안');
+  }
+  assert.ok(page.requests.every(request => /^(list_|get_|read_)|_runtime_version$/.test(request.name)), 'no write request leaves this synthetic test');
+  assert.equal(page.tableRequests.some(request => request.filters.some(([method]) => ['insert', 'update', 'delete', 'upsert'].includes(method))), false);
 });

@@ -119,7 +119,7 @@ test("/admin/tasks is a focused team task inbox workspace", async () => {
     "applyTaskPatch",
 	    "data && !data.schemaReady",
 	    "sm:max-w-2xl",
-	    "sm:min-h-[min(760px,92vh)]",
+	    "<ScrollableDialogContent",
 	    "max-h-[calc(100dvh-1rem)]",
 	    "overscroll-contain",
 	    "scroll-pb-24",
@@ -142,9 +142,13 @@ test("operation dialogs keep accessible descriptions hidden from the visual work
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
   assert.match(workspaceSource, /DialogDescription,/);
+  const frameSource = await readSource("src/components/ui/form-dialog.tsx");
+  assert.match(frameSource, /<DialogDescription className="sr-only">\{description\}<\/DialogDescription>/);
+  assert.match(frameSource, /min-h-0 flex-1 overflow-y-auto/);
+  assert.match(frameSource, /shrink-0 border-b/);
   assert.match(
     workspaceSource,
-    /<DialogDescription className="sr-only">[\s\S]*?운영 업무를 입력하고 저장합니다\.[\s\S]*?<\/DialogDescription>/,
+    /<ScrollableDialogContent[\s\S]*?description="운영 업무를 입력하고 저장합니다\."/,
   );
   assert.match(
     workspaceSource,
@@ -345,7 +349,7 @@ test("todo form uses compact polished controls for dates priority and team selec
     "onWheel={handleLinkedListWheel}",
     "onOpenAutoFocus={(event) => event.preventDefault()}",
     "setIsLinkedSearchOpen(false)",
-    'DialogHeader className="-mx-6 -mt-6 border-b px-6 pb-5 pt-4"',
+    'title={formDialogTitle}',
     "<PrioritySelectField",
     "<TeamSelectField",
     "<DateField",
@@ -2324,7 +2328,7 @@ test("registration form actions remain in normal flow and wrap safely on narrow 
   assert.match(source, /const formActionBarClassName = "-mx-6 -mb-6[^"\n]*"/);
   assert.match(source, /className=\{formActionBarClassName\}/);
   assert.doesNotMatch(source, /form\.type === "registration" \? "sticky bottom-0/);
-  assert.match(source, /form\.type === "registration" \? "scroll-pb-24 sm:max-w-4xl" : "scroll-pb-24"/);
+  assert.match(source, /form\.type === "registration" \? "sm:max-w-4xl"/);
   assert.match(source, /form\.type === "registration" \? "h-auto min-h-9 whitespace-normal" : ""/);
   assert.match(source, /form\.type === "registration" \? "break-words text-center leading-tight" : "truncate"/);
 });
@@ -2760,7 +2764,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     formDialogSource,
-    /<Button type="submit" disabled=\{saving \|\| \(!canSubmitCurrentForm && form\.type !== "registration"\)\} className="w-full sm:w-auto">/,
+    /<Button type="submit" form=\{taskFormId\} disabled=\{saving \|\| \(!canSubmitCurrentForm && form\.type !== "registration"\)\} className="min-h-11 flex-1 sm:min-h-9 sm:flex-none">/,
   );
   assert.match(
     formDialogSource,
@@ -4523,7 +4527,7 @@ test("completed operational task details are locked after management sync", asyn
     "const canSubmitCurrentForm = canSubmitOpsTaskForm(form, Boolean(editingTask))",
     "{!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== \"word_retest_retry\" && (",
     "{!isEditingLockedCompletedTask && (",
-    "<Button type=\"submit\" disabled={saving || (!canSubmitCurrentForm && form.type !== \"registration\")} className=\"w-full sm:w-auto\">",
+    "<Button type=\"submit\" form={taskFormId} disabled={saving || (!canSubmitCurrentForm && form.type !== \"registration\")} className=\"min-h-11 flex-1 sm:min-h-9 sm:flex-none\">",
   ]);
   assert.equal(
     workspaceSource.match(/\{!isEditingLockedCompletedTask && formCompletionBlockers\.length > 0 && \(/g)?.length,
