@@ -2274,7 +2274,9 @@ test("textbook workspace keeps master filters reversible and avoids native delet
   assert.match(workspaceSource, /function updateMasterSearchQuery\(value: string\)/);
   assert.match(workspaceSource, /clearTransientTextbookFeedback\(\);[\s\S]*setQuery\(value\)/);
   assert.match(workspaceSource, /onValueChange=\{updateMasterSearchQuery\}/);
-  assert.match(dataTableSearchFieldSource, /onChange=\{\(event\) => onValueChange\(event\.target\.value\)\}/);
+  assert.match(dataTableSearchFieldSource, /onValueChange: \(value: string, detail\?: \{ isComposing: boolean \}\) => void/);
+  assert.match(dataTableSearchFieldSource, /onChange=\{\(event\) => onValueChange\(event\.target\.value, \{\s*isComposing:/);
+  assert.match(dataTableSearchFieldSource, /function clear\(\) \{\s*onValueChange\(""\);/);
   assert.doesNotMatch(workspaceSource, /function changeInventoryFilter/);
   assert.match(workspaceSource, /function changeTextbookQualityFilter\(value: "all" \| "inactive"\)/);
   assert.match(workspaceSource, /function changeSubjectGroupFilter\(value: string\)/);

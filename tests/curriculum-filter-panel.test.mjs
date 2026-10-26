@@ -235,7 +235,7 @@ test("shared class filter panel exposes all conditions and reset directly", asyn
   const source = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
   assert.match(source, /<DataTableFilters/);
   assert.match(source, /selects\.map\(renderSelectField\)/);
-  assert.match(source, /aria-label=\{searchPlaceholder\}/);
+  assert.match(source, /<DataTableSearchField[\s\S]*?label=\{searchPlaceholder\}/);
   assert.match(source, /onClick=\{onReset\}/);
   assert.doesNotMatch(source, /Popover|menuSelects|quickSelects|filterCount|ClassFilterPanelChip/);
 });

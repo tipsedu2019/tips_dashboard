@@ -66,7 +66,6 @@ import {
   managementService,
 } from "./management-service.js";
 import { replaceManagementListUrl, serializeManagementListFilters } from "./management-filter-transition.js";
-import { getManagementListErrorRecoveryState } from "./management-list-load-state";
 import {
   filterClassStudentCandidates,
   filterStudentClassCandidates,
@@ -1184,6 +1183,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     stats,
     loading,
     error,
+    errorSource,
     classFormReferences,
     classFormReferencesStatus,
     retryClassFormReferences,
@@ -3573,47 +3573,18 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       ? relatedTitle(pendingClassStudentDetailRecord, "학생")
       : resolveRelatedTitle(pendingClassStudentDetailId)
     : "학생";
-  const errorRecovery = getManagementListErrorRecoveryState({
-    error,
-    loading,
-    rowCount: rows.length,
-  });
 
   return (
     <div className={cn("flex flex-col gap-6", kind === "students" && "student-workspace", kind === "classes" && "class-workspace")}>
-      {errorRecovery.visible ? (
-        <div className="px-4 lg:px-6">
-          <Alert variant="destructive">
-            <AlertDescription>
-              <div className="flex w-full flex-wrap items-center justify-between gap-3">
-                <div className="grid gap-1">
-                  <span>{error}</span>
-                  {errorRecovery.hasRetainedRows ? (
-                    <span className="text-xs">기존 목록은 유지됩니다.</span>
-                  ) : null}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  aria-label={`${config.emptyLabel} 목록 다시 시도`}
-                  onClick={() => void refresh()}
-                  disabled={errorRecovery.retryDisabled}
-                >
-                  {loading ? "다시 시도 중" : "다시 시도"}
-                </Button>
-              </div>
-            </AlertDescription>
-          </Alert>
-        </div>
-      ) : null}
-
       <div className="@container/main mt-2 px-4 lg:px-6 lg:mt-4">
         <ManagementDataTable
           kind={kind}
           rows={rows}
           stats={stats}
           loading={loading}
+          readError={error}
+          readErrorSource={errorSource}
+          onRetryRead={() => void refresh()}
           page={page}
           totalCount={totalCount}
           sort={displayedSort}

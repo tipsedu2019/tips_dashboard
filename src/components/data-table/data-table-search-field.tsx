@@ -8,12 +8,15 @@ import { cn } from "@/lib/utils";
 
 export const DataTableSearchField = forwardRef<HTMLInputElement, {
   value: string;
-  onValueChange: (value: string) => void;
+  onValueChange: (value: string, detail?: { isComposing: boolean }) => void;
+  onCompositionStart?: () => void;
+  onCompositionEnd?: (value: string) => void;
+  onSubmit?: () => void;
   label: string;
   clearLabel?: string;
   placeholder?: string;
   className?: string;
-}>(function DataTableSearchField({ value, onValueChange, label, clearLabel = `${label} 초기화`, placeholder, className }, ref) {
+}>(function DataTableSearchField({ value, onValueChange, onCompositionStart, onCompositionEnd, onSubmit, label, clearLabel = `${label} 초기화`, placeholder, className }, ref) {
   const inputRef = useRef<HTMLInputElement>(null);
   useImperativeHandle(ref, () => inputRef.current!, []);
   function clear() {
@@ -23,9 +26,17 @@ export const DataTableSearchField = forwardRef<HTMLInputElement, {
   return (
     <div role="search" aria-label={label} data-slot="data-table-search" className={cn("relative min-w-0 flex-1", className)}>
       <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-      <Input ref={inputRef} type="search" value={value} onChange={(event) => onValueChange(event.target.value)}
+      <Input ref={inputRef} type="search" value={value} onChange={(event) => onValueChange(event.target.value, {
+        isComposing: Boolean(event.nativeEvent && "isComposing" in event.nativeEvent && event.nativeEvent.isComposing),
+      })}
+        onCompositionStart={onCompositionStart}
+        onCompositionEnd={(event) => onCompositionEnd?.(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+          if (event.key === "Enter" && onSubmit) {
+            event.preventDefault();
+            onSubmit();
+          }
           if (event.key === "Escape" && value) {
             event.preventDefault();
             event.stopPropagation();

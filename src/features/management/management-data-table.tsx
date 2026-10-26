@@ -2,8 +2,6 @@
 "use no memo";
 
 import {
-  type ChangeEvent,
-  type CompositionEvent,
   type CSSProperties,
   type ReactNode,
   memo,
@@ -45,6 +43,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection";
 import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel";
+import { DataTableSearchField } from "@/components/data-table/data-table-search-field";
 import { ManagementBulkActionBar, type BulkEditField } from "./management-bulk-actions";
 import { StudentRowActions } from "./student-row-actions";
 import { Input } from "@/components/ui/input";
@@ -82,6 +81,7 @@ import {
   DataTableSortButton,
   DataTableToolbar,
   DataTableCommandRow,
+  DataTableReadFeedback,
   DataTableFilters,
   DATA_TABLE_FILTER_FIELD_CLASS_NAME,
   DataTableViewport,
@@ -997,6 +997,9 @@ type ManagementDataTableProps = {
   rows: ManagementRow[];
   stats: ManagementStat[];
   loading: boolean;
+  readError?: string | null;
+  readErrorSource?: "list" | "metadata" | null;
+  onRetryRead?: () => void;
   page: number;
   totalCount: number | null;
   sort: ManagementNumberedSort;
@@ -1025,6 +1028,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   rows,
   stats,
   loading,
+  readError = null,
+  readErrorSource = null,
+  onRetryRead,
   page,
   totalCount,
   sort,
@@ -1043,6 +1049,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
 }: ManagementDataTableProps & { pathname: string; searchParamString: string }) {
   const router = useRouter();
   const tableLayoutRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
   const tablePagerRef = useRef<HTMLDivElement | null>(null);
   const managementScrollStorageKey = useMemo(
@@ -1713,7 +1720,8 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
       .slice(0, 2)
       .map((stat) => `${stat.label} ${stat.value}`)
       .join(" · ");
-  const emptyStateTitle = rows.length === 0 ? `${emptyLabel} 없음` : `${emptyLabel} 결과 없음`;
+  const emptyStateTitle = hasActiveFilters ? `${emptyLabel} 결과 없음` : `${emptyLabel} 없음`;
+  const suppressEmptyState = Boolean(readError && readErrorSource !== "metadata") || totalCount === null;
   const createLabel = kind === "students" ? "학생 등록" : kind === "classes" ? "수업 등록" : "교재 등록";
   const hasCreateAction = typeof actions.onCreate === "function";
   const showSummaryBadge = hasActiveFilters || rows.length !== filteredRowCount;
@@ -2066,22 +2074,17 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
     if (options.syncUrl === false) return;
   };
 
-  const isComposingSearchInput = (event: ChangeEvent<HTMLInputElement>) => (
-    searchComposing ||
-    ("isComposing" in event.nativeEvent && Boolean(event.nativeEvent.isComposing))
-  );
-
-  const handleGlobalFilterChange = (event: ChangeEvent<HTMLInputElement>) => {
-    updateGlobalFilter(String(event.target.value), { syncUrl: !isComposingSearchInput(event) });
+  const handleGlobalFilterChange = (value: string, detail?: { isComposing: boolean }) => {
+    updateGlobalFilter(value, detail ? { syncUrl: !(searchComposing || detail.isComposing) } : undefined);
   };
 
   const handleGlobalFilterCompositionStart = () => {
     setSearchComposing(true);
   };
 
-  const handleGlobalFilterCompositionEnd = (event: CompositionEvent<HTMLInputElement>) => {
+  const handleGlobalFilterCompositionEnd = (value: string) => {
     setSearchComposing(false);
-    updateGlobalFilter(String(event.currentTarget.value), { syncUrl: true });
+    updateGlobalFilter(value, { syncUrl: true });
   };
 
   const updateGrouping = (nextGrouping: GroupingState) => {
@@ -2194,34 +2197,25 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   );
 
   const searchControl = (
-    <div className="relative min-w-0" role="search" aria-label={`${emptyLabel} 검색`}>
-      <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-      <Input
-        type="search"
-        aria-label={`${emptyLabel} 검색`}
-        autoComplete="off"
-        enterKeyHint="search"
+      <DataTableSearchField ref={searchInputRef}
+        label={`${emptyLabel} 검색`}
+        clearLabel={`${emptyLabel} 검색어 지우기`}
         placeholder={`${emptyLabel} 검색`}
         value={globalFilter ?? ""}
-        onChange={handleGlobalFilterChange}
+        onValueChange={handleGlobalFilterChange}
         onCompositionStart={handleGlobalFilterCompositionStart}
         onCompositionEnd={handleGlobalFilterCompositionEnd}
-        className="h-9 pl-9 pr-9"
       />
-      {normalizedGlobalFilter ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="absolute right-1 top-1/2 size-7 -translate-y-1/2 rounded-md active:-translate-y-1/2"
-          onClick={() => updateGlobalFilter("")}
-          aria-label={`${emptyLabel} 검색어 지우기`}
-        >
-          <X className="size-3.5" />
-        </Button>
-      ) : null}
-    </div>
   );
+
+  const readFeedback = loading ? (
+    <span role="status" className="min-w-0 text-xs text-muted-foreground">{rows.length ? "목록 갱신 중…" : "조회 중…"}</span>
+  ) : readError ? (
+    <DataTableReadFeedback label={readErrorSource === "metadata" ? "부가 정보 조회 실패" : "목록 조회 실패"}
+      message={`${readError}${rows.length ? " 기존 목록은 유지됩니다." : ""}`}
+      retryLabel={`${emptyLabel} 목록 다시 시도`} returnFocusRef={searchInputRef}
+      onRetry={() => onRetryRead?.()} />
+  ) : null;
 
   const createControl = (
     <Button
@@ -2553,7 +2547,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             </article>
           );
         })
-      ) : (
+      ) : suppressEmptyState ? null : (
         <div className="rounded-lg border border-border/70 bg-background px-3 py-8 text-center">
           <span className="text-sm font-medium text-muted-foreground">{emptyStateTitle}</span>
           {hasActiveFilters ? (
@@ -2647,7 +2641,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             </article>
           );
         })
-      ) : (
+      ) : suppressEmptyState ? null : (
         <div className="rounded-lg border border-border/70 bg-background px-3 py-8 text-center">
           <span className="text-sm font-medium text-muted-foreground">{emptyStateTitle}</span>
           {hasActiveFilters ? (
@@ -2683,6 +2677,8 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             setSearchComposing(false);
             updateGlobalFilter(value, { syncUrl: true });
           }}
+          searchInputRef={searchInputRef}
+          readFeedback={readFeedback}
           summaryLabel={""}
           showReset={hasActiveFilters}
           onReset={resetFilters}
@@ -2695,7 +2691,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         />
       ) : (
         <DataTableToolbar className={cn("gap-2", kind === "students" && "student-list-toolbar")}>
-          <DataTableCommandRow search={searchControl} actions={bulkActionBar ?? <>{createControl}{columnSettingsControl}</>} />
+          <DataTableCommandRow search={searchControl} actions={<>{readFeedback}{bulkActionBar ?? <>{createControl}{columnSettingsControl}</>}</>} />
           {kind !== "students" ? (
             <DataTableFilters>
               {badgeColumn ? (
@@ -2963,7 +2959,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                   })}
                 </DataTableBodyRow>
               ))
-            ) : (
+            ) : suppressEmptyState ? null : (
               <DataTableBodyRow>
                 <DataTableBodyCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="h-28 py-6">
                   <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2 text-center">
