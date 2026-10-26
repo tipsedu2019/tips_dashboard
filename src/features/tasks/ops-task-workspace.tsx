@@ -11003,6 +11003,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           syncTaskDeepLink(null)
           return
         }
+        if (exactTask.type === "word_retest" && new URLSearchParams(window.location.search).get("taskId") !== deepLinkedTaskId) return
         if (exactTask.type === "registration" && !deepLinkedTrackId && !deepLinkedAppointmentId) {
           void openRegistrationCase(exactTask.id, { allowDirectLoad: true })
           return
@@ -13786,7 +13787,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       {registrationApplicationHost.kind === "closed" ? (
       <Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent
-          restoreFocusToOpener={isTodoWorkspace}
+          restoreFocusToOpener={isTodoWorkspace || isWordRetestWorkspace}
           restoreFocusFallbackRef={taskSearchInputRef}
           showCloseButton={!canonicalRegistrationApplicationRendered}
           closeButtonLabel="닫기"
