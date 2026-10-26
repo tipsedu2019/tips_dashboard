@@ -160,6 +160,9 @@ export async function setup(t, initial = {}) {
   t.after(async () => {
     await unmount();
     for (const cleanup of testComponentCleanups) await cleanup();
+    // Radix queues close autofocus after unmount. Keep its owner document alive
+    // until those callbacks finish, as the real browser does on dialog close.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
     dom.window.close();
   });
   await render();

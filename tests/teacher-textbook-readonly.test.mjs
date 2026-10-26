@@ -20,6 +20,75 @@ function onlySafeTransport(h) {
 }
 async function mount(t) { return setup(t, { mode: 'requests', auth: teacher(1804) }); }
 
+test('teacher request initial read failure exposes unknown counts instead of a successful zero result', async t => {
+  const h = await mount(t);
+  await h.reject(request(h), { code: 'XX000', message: 'SYNTHETIC_PRIVATE_FAILURE' });
+  assert.match(document.body.textContent, /건수 미확인/);
+  assert.doesNotMatch(document.body.textContent, /전체 0건|0건 · 0–0번째|교재요청 없음|등록된 교재요청이 없습니다/);
+  assert.equal(button('다음 페이지').disabled, true);
+  assert.equal(button('1 페이지'), undefined, 'unknown count has no fabricated first-page result');
+  onlySafeTransport(h);
+});
+
+test('teacher request successful initial empty and searched empty have distinct guidance', async t => {
+  const h = await mount(t); const first = request(h);
+  await h.resolve(first, envelope(first, []));
+  assert.match(document.body.textContent, /등록된 교재요청이 없습니다/);
+  assert.match(document.body.textContent, /전체 0건/);
+  await change(h, '가상 결과 없음'); const searched = request(h);
+  await h.resolve(searched, envelope(searched, []));
+  assert.match(document.body.textContent, /검색 조건에 맞는 교재요청이 없습니다/);
+  assert.doesNotMatch(document.body.textContent, /등록된 교재요청이 없습니다/);
+  assert.equal(document.querySelector('input[aria-label="교재요청 검색"]').value, '가상 결과 없음');
+  assert.ok(button('교재요청 검색 초기화'));
+  await h.act(() => button('교재요청 검색 초기화').click());
+  assert.deepEqual(request(h).args.p_args, { p_search: '', p_page: 1, p_page_size: 15 });
+  assert.ok(document.activeElement === document.querySelector('input[aria-label="교재요청 검색"]'));
+  onlySafeTransport(h);
+});
+
+test('teacher request read recovery keeps the creation owner, draft guard and return trigger mounted', async t => {
+  const h = await mount(t); const first = request(h);
+  window.HTMLElement.prototype.getClientRects = function () { return this.hidden ? [] : [{ width: 32, height: 32 }]; };
+  await h.resolve(first, envelope(first, [row(991, '가상 기존 요청')]));
+  const input = document.querySelector('input[aria-label="교재요청 검색"]');
+  const create = button('요청 추가');
+  await change(h, '가상 실패 검색');
+  await h.reject(request(h), { code: 'XX000', message: 'SYNTHETIC_PRIVATE_READ' });
+  assert.equal(document.body.textContent.includes('가상 기존 요청'), false, 'ordinary failure retains the existing accepted-result discard policy');
+  assert.ok(button('요청 추가') === create);
+  const retry = button('교재요청 다시 조회');
+  assert.ok(retry.closest('[data-slot="data-table-command-row"]'));
+  await h.act(() => retry.click()); const pending = request(h);
+  assert.ok(document.activeElement === input);
+  await h.act(() => { create.focus(); create.click(); });
+  const form = document.querySelector('form');
+  const title = document.querySelector('[aria-label="요청 교재명"]');
+  await h.act(() => title[Object.keys(title).find(key => key.startsWith('__reactProps$'))].onChange({ target: { value: '전송하지 않는 가상 초안' } }));
+  await h.reject(pending, { code: 'XX000', message: 'SYNTHETIC_LATE_READ' });
+  assert.ok(document.querySelector('form') === form, 'late read feedback cannot remount the form owner');
+  assert.equal(title.value, '전송하지 않는 가상 초안');
+  assert.ok(button('요청 추가') === create);
+  await h.act(() => button('취소').click());
+  assert.ok(document.querySelector('[data-testid="draft-navigation-confirm-dialog"]'));
+  await h.act(() => button('계속 편집').click());
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 25)));
+  assert.equal(title.value, '전송하지 않는 가상 초안');
+  await h.act(() => button('취소').click());
+  await h.act(() => button('변경사항 버리기').click());
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 25)));
+  assert.equal(document.querySelector('form'), null);
+  assert.ok(document.activeElement === create, 'the stable create button receives close focus after list failure');
+  await h.act(() => button('교재요청 다시 조회').click());
+  const final = request(h);
+  assert.equal(final.args.p_args.p_search, '가상 실패 검색');
+  await h.resolve(final, envelope(final, [row(992, '가상 복구 결과')]));
+  assert.equal(document.querySelector('[role="alert"]'), null);
+  assert.ok(document.querySelector('input[aria-label="교재요청 검색"]') === input);
+  assert.ok(button('요청 추가') === create);
+  onlySafeTransport(h);
+});
+
 test('teacher actual caller renders only common read rows and local read-only detail without extra RPC', async t => {
   const h = await mount(t); const first = request(h);
   assert.deepEqual(first.args, { p_operation:'book_page', p_args:{p_search:'',p_page:1,p_page_size:15} });
@@ -47,7 +116,7 @@ test('page two and search use bounded page arguments, and search resets to page 
   await change(h,'국어'); const searched=request(h);
   assert.deepEqual(searched.args.p_args,{p_search:'국어',p_page:1,p_page_size:15});
   await h.resolve(searched,envelope(searched,[]));
-  assert.match(document.body.textContent,/교재요청 없음/);
+  assert.match(document.body.textContent,/검색 조건에 맞는 교재요청이 없습니다/);
   onlySafeTransport(h);
 });
 
@@ -75,7 +144,7 @@ test('read failure clears prior rows/detail, shows safe error, and retries only 
   assert.match(document.querySelector('[role="alert"]').textContent,/교재요청 조회 권한 또는 로그인 상태를 확인해 주세요/);
   assert.equal(document.body.textContent.includes('PRIVATE_SERVER_ERROR_CANARY'),false);
   const before=calls(h).length; await h.act(()=>Promise.resolve()); assert.equal(calls(h).length,before);
-  await h.act(()=>button('다시 조회').click()); const retry=request(h);
+  await h.act(()=>button('교재요청 다시 조회').click()); const retry=request(h);
   assert.equal(calls(h).length,before+1); assert.deepEqual(retry.args,failed.args);
   await h.resolve(retry,envelope(retry,[row(302,'복구 결과')]));
   assert.match(document.body.textContent,/복구 결과/); assert.equal(document.querySelector('[role="alert"]'),null);
