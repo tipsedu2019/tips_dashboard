@@ -835,7 +835,7 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.doesNotMatch(workspaceSource, /최종 확인/);
   assert.match(workspaceSource, /requestDialogOpen/);
   assert.match(workspaceSource, /휴보강 신청/);
-  assert.match(workspaceSource, /DialogTitle>\{editingRequestId \? "휴보강 보완 재상신" : "휴보강 신청"\}/);
+  assert.match(workspaceSource, /<ScrollableDialogContent[\s\S]*?title=\{editingRequestId \? "휴보강 보완 재상신" : "휴보강 신청"\}/);
   assert.doesNotMatch(workspaceSource, /const shouldShowRequestForm = view === "mine"/);
   const headerActionSource = workspaceSource.slice(
     workspaceSource.indexOf('aria-label="휴보강 흐름"'),
@@ -1036,7 +1036,7 @@ test("makeup approval completes makeup-bearing requests and keeps cancel-only re
   assert.doesNotMatch(workspaceSource, /window\.prompt\("승인 메모"/);
   assert.doesNotMatch(workspaceSource, /window\.prompt\("관리팀 최종 확인 메모"/);
   assert.doesNotMatch(workspaceSource, /window\.prompt/);
-  assert.match(workspaceSource, /DialogContent[\s\S]*className="max-h-\[86vh\] overflow-y-auto sm:max-w-4xl"[\s\S]*closeButtonLabel="저장하지 않고 닫기"[\s\S]*onCloseButtonClick=\{closeRequestDialog\}[\s\S]*showCloseButtonText/);
+  assert.match(workspaceSource, /ScrollableDialogContent[\s\S]*className="sm:max-w-4xl"[\s\S]*closeButtonLabel="저장하지 않고 닫기"[\s\S]*onCloseButtonClick=\{closeRequestDialog\}/);
   assert.match(workspaceSource, />\s*저장하지 않고 닫기\s*<\/Button>/);
   assert.doesNotMatch(workspaceSource, /xl:grid-cols-\[minmax\(360px,420px\)_1fr\]/);
   assert.match(workspaceSource, /md:grid-cols-\[minmax\(150px,1fr\)_minmax\(96px,0\.55fr\)_minmax\(96px,0\.55fr\)_32px\]/);
@@ -1106,7 +1106,11 @@ test("makeup dialogs provide sr-only descriptions without adding visual helper c
     workspaceSource.indexOf('<Dialog open={Boolean(approvalRequest)}'),
   );
 
-  assert.match(requestDialogSource, /<DialogDescription className="sr-only">[\s\S]*?휴보강 신청 정보를 입력하고 결재자에게 상신합니다\.[\s\S]*?<\/DialogDescription>/);
+  assert.match(requestDialogSource, /description="휴보강 신청 정보를 입력하고 결재자에게 상신합니다\."/);
+  const frame = readFileSync(new URL("../src/components/ui/form-dialog.tsx", import.meta.url), "utf8");
+  const scrollable = frame.slice(frame.indexOf('function ScrollableDialogContent'), frame.indexOf('type DialogFrameProps'));
+  assert.match(scrollable, /<DialogTitle>\{title\}<\/DialogTitle>/);
+  assert.match(scrollable, /<DialogDescription className="sr-only">\{description\}<\/DialogDescription>/);
   assert.match(detailDialogSource, /<DialogDescription className="sr-only">[\s\S]*?선택한 휴보강 신청의 결재 상태와 처리 내용을 확인합니다\.[\s\S]*?<\/DialogDescription>/);
   assert.doesNotMatch(requestDialogSource, /<DialogDescription(?! className="sr-only")/);
   assert.doesNotMatch(detailDialogSource, /<DialogDescription(?! className="sr-only")/);

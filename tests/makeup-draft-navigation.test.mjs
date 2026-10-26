@@ -73,3 +73,26 @@ test('makeup first read failure preserves search and does not claim no applicati
   assert.equal(document.body.textContent.includes('private read timeout'), false);
   assert.ok(document.querySelector('input[type="search"]'));
 });
+
+
+test('long makeup request keeps its title and actions outside the scrollable input body', async t => {
+  const p = await ready(t);
+  await click('휴보강 신청');
+  const dialog = document.querySelector('[role="dialog"]');
+  const body = dialog.querySelector('[data-slot="scrollable-dialog-body"]');
+  const footer = dialog.querySelector('[data-slot="scrollable-dialog-footer"]');
+  assert.ok(body && footer, 'long input uses a bounded body with a separate action area');
+  assert.equal(body.parentElement, dialog);
+  assert.equal(footer.parentElement, dialog);
+  assert.ok(!body.contains(dialog.querySelector('[data-slot="dialog-title"]')));
+  assert.ok(body.contains(document.querySelector('#makeup-reason')));
+  assert.ok(footer.contains(button('상신')));
+  assert.equal(dialog.querySelector('form'), null, 'the layout must not introduce implicit Enter submission');
+  await act(async () => p.observed.patch(value => ({...value, reason: '가상 미저장 내용'})));
+  const submit = button('상신');
+  const handler = submit[Object.keys(submit).find(key => key.startsWith('__reactProps'))].onClick;
+  await act(async () => handler());
+  assert.ok(footer.querySelector('[role="alert"]'), 'validation feedback stays with the visible actions');
+  assert.equal(document.querySelector('#makeup-reason').value, '가상 미저장 내용');
+  assert.equal(p.requests.some(r => /create_makeup|transition_makeup/.test(r.name || '')), false);
+});
