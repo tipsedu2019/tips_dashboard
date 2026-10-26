@@ -993,6 +993,245 @@ test('word-retest drafts survive numbered replacement while selection and bulk t
   await page.render({ viewerRole: 'staff' }); await finish(first);
   assert.equal(document.querySelector('input[aria-label="학생1 1차 점수"]').value, '', 'role session cannot inherit score drafts');
 });
+function wordFilterRows() {
+  return ['A', 'B'].map((letter, index) => {
+    const patch = operationPatch('word_retest', `합성학생${letter}`);
+    return { ...row(index + 1, patch), classId: id(700 + index), className: `합성수업${letter}`,
+      inlineState: { ...patch.inlineState, teacherId: id(600 + index), teacherName: `합성담당${letter}`, className: `합성수업${letter}`, testAt: '2099-01-01T00:00:00Z' },
+      displayValues: { ...patch.displayValues, teacher: `합성담당${letter}`, class: `합성수업${letter}`, student: `합성학생${letter}` } };
+  });
+}
+async function acceptWordFilterReads(page, rows = wordFilterRows()) {
+  const matches = (row, filters, ignored) => (!filters.search || row.studentName.includes(filters.search))
+    && (ignored === 'teacherId' || !filters.teacherId || row.inlineState.teacherId === filters.teacherId)
+    && (ignored === 'classId' || !filters.classId || row.classId === filters.classId);
+  await act(async () => {
+    for (const request of page.requests.filter(request => !request.wordFilterSettled)) {
+      request.wordFilterSettled = true;
+      const filters = request.args.p_filters;
+      assert.ok(['list_ops_task_numbered_page_v1', 'get_ops_task_list_stats_v1'].includes(request.name), 'synthetic filter flow must issue only read RPCs');
+      const selected = rows.filter(row => matches(row, filters));
+      if (request.name === 'list_ops_task_numbered_page_v1') {
+        request.resolve({ error: null, data: { rows: selected, page: request.args.p_page, pageSize: request.args.p_page_size, totalCount: selected.length } });
+      } else {
+        const facet = (key, label) => rows.filter(row => matches(row, filters, key)).map(row => ({
+          value: key === 'teacherId' ? row.inlineState.teacherId : row.classId, label: row.displayValues[label], count: 1,
+        }));
+        request.resolve({ error: null, data: { total: selected.length, byStatus: {}, byView: { assistant: selected.length, teacher: 0 }, metrics: {},
+          facets: { teacher: facet('teacherId', 'teacher'), class: facet('classId', 'class') } } });
+      }
+    }
+  });
+}
+function wordFilterTrigger(label) {
+  const button = document.querySelector(`button[aria-label="${label}"][aria-haspopup="listbox"]`);
+  assert.ok(button, `visible ${label} control`);
+  return button;
+}
+async function chooseWordFilter(label, optionLabel) {
+  await act(async () => wordFilterTrigger(label).click());
+  const option = [...document.querySelectorAll('[role="option"]')].find(option => option.textContent.startsWith(optionLabel));
+  assert.ok(option, `available option ${optionLabel}`);
+  await act(async () => option.click());
+}
+async function searchWordFilter(value) {
+  const input = document.querySelector('input[type="search"]');
+  assert.ok(input);
+  await act(async () => input[Object.keys(input).find(key => key.startsWith('__reactProps'))].onChange({ target: { value } }));
+}
+for (const [key, label, selectedLabel, fallback, allLabel] of [
+  ['teacherId', '담당선생님', '합성담당A', '선택한 선생님', '담당선생님 전체'],
+  ['classId', '수업', '합성수업A', '선택한 수업', '수업 전체'],
+]) test(`word filter selection: ${key} stays visibly applied through successful empty search and clears only explicitly`, async t => {
+  const originalFetch = globalThis.fetch;
+  let networkCalls = 0;
+  globalThis.fetch = () => { networkCalls++; throw new Error('external network forbidden in synthetic word filter test'); };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const page = await workspace(t, { workspace: 'word_retest' });
+  await acceptWordFilterReads(page);
+  await chooseWordFilter(label, selectedLabel);
+  await acceptWordFilterReads(page);
+  const selectedId = generalPageReads(page).at(-1).args.p_filters[key];
+  assert.ok(selectedId);
+  assert.match(wordFilterTrigger(label).textContent, new RegExp(selectedLabel));
+  assert.deepEqual(currentComponentProps('WordRetestTaskList').tasks.map(row => row.studentName), ['합성학생A']);
+
+  await searchWordFilter('합성학생B');
+  // Pending facets also must not advertise a wider scope or retain an old private label.
+  const pendingLabel = wordFilterTrigger(label).textContent;
+  await acceptWordFilterReads(page);
+  assert.equal(generalPageReads(page).at(-1).args.p_filters[key], selectedId);
+  assert.equal(currentComponentProps('WordRetestTaskList').tasks.length, 0, 'A plus a B-only search is a successful zero result');
+  assert.equal(wordFilterTrigger(label).textContent, fallback, 'missing facet must not claim all while the request remains scoped');
+  assert.equal(pendingLabel, fallback);
+  assert.notEqual(wordFilterTrigger(label).textContent, allLabel);
+  await act(async () => wordFilterTrigger(label).click());
+  assert.equal([...document.querySelectorAll('[role="option"]')].some(option => option.textContent.includes(selectedLabel)), false, 'do not restore a stale option or disclose its label');
+  assert.equal(document.querySelector('[role="option"][aria-selected="true"]'), null, 'the real all option is not selected');
+  await act(async () => wordFilterTrigger(label).click());
+
+  await searchWordFilter('');
+  await acceptWordFilterReads(page);
+  assert.equal(generalPageReads(page).at(-1).args.p_filters[key], selectedId, 'clearing search preserves the chosen scope');
+  assert.match(wordFilterTrigger(label).textContent, new RegExp(selectedLabel));
+  assert.deepEqual(currentComponentProps('WordRetestTaskList').tasks.map(row => row.studentName), ['합성학생A']);
+  const renamed = wordFilterRows();
+  renamed[0].displayValues[key === 'teacherId' ? 'teacher' : 'class'] = '현재 허용된 이름';
+  await searchWordFilter('합성학생A');
+  await acceptWordFilterReads(page, renamed);
+  assert.match(wordFilterTrigger(label).textContent, /현재 허용된 이름/, 'use only the current authorized facet label, never a cached old name');
+  assert.equal(wordFilterTrigger(label).textContent.includes(selectedLabel), false);
+  await searchWordFilter('합성학생B');
+  await acceptWordFilterReads(page);
+  await chooseWordFilter(label, allLabel);
+  await acceptWordFilterReads(page);
+  assert.equal(generalPageReads(page).at(-1).args.p_filters[key], null);
+  assert.equal(wordFilterTrigger(label).textContent, allLabel);
+  assert.deepEqual(currentComponentProps('WordRetestTaskList').tasks.map(row => row.studentName), ['합성학생B'], 'explicit all recovers the matching B row');
+  assert.equal(networkCalls, 0);
+});
+test('word filter selection: actor change and empty authorized facets never retain old labels or options', async t => {
+  const page = await workspace(t, { workspace: 'word_retest' });
+  await acceptWordFilterReads(page);
+  await chooseWordFilter('담당선생님', '합성담당A');
+  await acceptWordFilterReads(page);
+  await searchWordFilter('합성학생B');
+  const obsolete = generalStatsReads(page).at(-1);
+  await page.render({ viewerId: 'actor-b', viewerRole: 'assistant' });
+  await acceptWordFilterReads(page, []);
+  assert.equal(document.body.textContent.includes('합성담당A'), false);
+  assert.equal(document.body.textContent.includes('합성수업A'), false);
+  assert.equal(currentComponentProps('WordRetestTaskList').tasks.length, 0);
+  assert.equal(obsolete.signal.aborted, true, 'old actor response cannot supply current facet labels');
+  const trigger = document.querySelector('button[aria-label="담당선생님"][aria-haspopup="listbox"]');
+  if (trigger) {
+    await act(async () => trigger.click());
+    assert.deepEqual([...document.querySelectorAll('[role="option"]')].map(option => option.textContent), ['담당선생님 전체']);
+  }
+});
+test('word phase1 toolbar reset restores conditions without losing custom dates, score drafts or table preferences', async t => {
+  const page = await workspace(t, { workspace: 'word_retest', search: '?role=assistant&branch=본관&period=custom&from=2099-01-01&to=2099-01-31' });
+  exposeSyntheticDetailLayout(t);
+  await acceptWordFilterReads(page);
+  const search = document.querySelector('input[type="search"]');
+  const command = search.closest('[data-slot="data-table-command-row"]');
+  assert.ok(command.querySelector('button[aria-label="컬럼 구성"]'));
+  assert.ok(command.querySelector('button[aria-label="영어 단어 재시험 업무 매뉴얼"]'));
+  assert.ok([...command.querySelectorAll('button')].some(button => button.textContent === '추가'));
+  assert.equal(document.querySelectorAll('button[aria-label="컬럼 구성"]').length, 1);
+  const score = document.querySelector('input[aria-label="합성학생A 1차 점수"]');
+  await act(async () => score[Object.keys(score).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '27' } }));
+  await act(async () => document.querySelector('button[aria-label="컬럼 구성"]').click());
+  await act(async () => currentComponentProps('DataTableColumnVisibilitySetting', props => props.label === '담당선생님').onVisibleChange(true));
+  const preferences = window.localStorage.getItem('tips:word-retest:columns');
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === '완료').click());
+  await chooseWordFilter('담당선생님', '합성담당A'); await acceptWordFilterReads(page);
+  await chooseWordFilter('수업', '합성수업A'); await acceptWordFilterReads(page);
+  await searchWordFilter('합성학생B'); await acceptWordFilterReads(page);
+  assert.equal(currentComponentProps('WordRetestTaskList').tasks.length, 0);
+  assert.equal(document.querySelector('input[type="search"]'), search, 'search stays mounted through zero results');
+  const reset = [...document.querySelectorAll('button')].find(button => button.textContent === '조건 초기화');
+  assert.equal(reset.disabled, false);
+  const start = generalPageReads(page).length;
+  await act(async () => reset.click()); await acceptWordFilterReads(page);
+  const reads = generalPageReads(page).slice(start);
+  assert.ok(reads.length > 0);
+  for (const request of reads) {
+    assert.equal(request.args.p_page, 1);
+    assert.equal(request.args.p_filters.queue, 'assistant');
+    assert.equal(request.args.p_filters.branch, null);
+    assert.equal(request.args.p_filters.period, 'all');
+    assert.equal(request.args.p_filters.teacherId, null);
+    assert.equal(request.args.p_filters.classId, null);
+  }
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.search, '');
+  assert.equal(reset.disabled, true);
+  assert.equal(new URL(window.location.href).searchParams.get('role'), 'assistant');
+  for (const key of ['branch', 'period']) assert.equal(new URL(window.location.href).searchParams.has(key), false);
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.dateFrom, null);
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.dateTo, null);
+  assert.equal(document.querySelector('input[aria-label="합성학생A 1차 점수"]').value, '27');
+  assert.equal(window.localStorage.getItem('tips:word-retest:columns'), preferences);
+  await act(async () => document.querySelector('button[aria-label="직접입력 단어 재시험 보기"]').click());
+  const period = currentComponentProps('WordRetestPeriodFilterBar');
+  assert.equal(period.startDate, '2099-01-01'); assert.equal(period.endDate, '2099-01-31');
+  assert.ok(page.requests.every(request => ['list_ops_task_numbered_page_v1', 'get_ops_task_list_stats_v1'].includes(request.name)));
+});
+test('word phase1 search protects IME and retains its node, selection controls and drafts through read recovery', async t => {
+  const page = await workspace(t, { workspace: 'word_retest' }); await acceptWordFilterReads(page);
+  const input = document.querySelector('input[type="search"]');
+  const settings = document.querySelector('button[aria-label="컬럼 구성"]');
+  const manual = document.querySelector('button[aria-label="영어 단어 재시험 업무 매뉴얼"]');
+  await act(async () => document.querySelector('[role=checkbox][aria-label="합성학생A 단어 재시험 선택"]').click());
+  assert.equal(document.querySelector('input[type="search"]'), input);
+  assert.equal(document.querySelector('button[aria-label="컬럼 구성"]'), settings);
+  assert.equal(document.querySelector('button[aria-label="영어 단어 재시험 업무 매뉴얼"]'), manual);
+  assert.match(input.closest('[data-slot="data-table-command-row"]').textContent, /1건 선택/);
+  await act(async () => currentComponentProps('DataTableSelectionActions').onClear());
+  assert.equal(document.activeElement, input);
+  await searchWordFilter('합성학생A'); await acceptWordFilterReads(page);
+  const count = page.requests.length;
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...composition })));
+    assert.equal(input.value, '합성학생A'); assert.equal(page.requests.length, count);
+  }
+  await act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  exposeSyntheticDetailLayout(t);
+  await acceptWordFilterReads(page);
+  assert.equal(input.value, ''); assert.equal(document.activeElement, input);
+  const score = document.querySelector('input[aria-label="합성학생A 1차 점수"]');
+  await act(async () => score[Object.keys(score).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '26' } }));
+  await searchWordFilter('합성학생A');
+  const stableSettings = document.querySelector('button[aria-label="컬럼 구성"]');
+  const stableManual = document.querySelector('button[aria-label="영어 단어 재시험 업무 매뉴얼"]');
+  await act(async () => stableManual.click());
+  const manualDialog = document.querySelector('[role="dialog"]');
+  assert.match(manualDialog.textContent, /업무 매뉴얼/);
+  const failed = generalPageReads(page).at(-1); failed.wordFilterSettled = true;
+  await act(async () => failed.reject(new Error('synthetic read unavailable')));
+  assert.equal(document.querySelector('[role="dialog"]'), manualDialog, 'pending to failure cannot unmount or reopen the manual');
+  assert.equal(document.querySelector('button[aria-label="컬럼 구성"]'), stableSettings);
+  assert.equal(document.querySelector('button[aria-label="영어 단어 재시험 업무 매뉴얼"]'), stableManual);
+  await act(async () => document.querySelector('button[aria-label="영어 단어 재시험 업무 매뉴얼 닫기"]').click());
+  await settleDetailFocus();
+  assert.equal(document.activeElement, stableManual);
+  const retry = document.querySelector('button[aria-label="목록 다시 불러오기"]');
+  assert.ok(retry.closest('[data-slot="data-table-actions"]'));
+  assert.equal(document.querySelector('input[type="search"]'), input);
+  assert.match(document.querySelector('[role=alert]').textContent, /이전 조회 결과/);
+  await act(async () => retry.click()); await acceptWordFilterReads(page);
+  assert.equal(document.activeElement, input);
+  assert.equal(input.value, '합성학생A');
+  assert.equal(document.querySelector('input[aria-label="합성학생A 1차 점수"]').value, '26');
+  assert.equal(document.querySelector('button[aria-label="목록 다시 불러오기"]'), null);
+  assert.equal(document.querySelector('[role="dialog"]'), null, 'read recovery must not reopen the manual');
+  assert.equal(document.querySelector('button[aria-label="컬럼 구성"]'), stableSettings);
+  assert.ok(page.requests.every(request => ['list_ops_task_numbered_page_v1', 'get_ops_task_list_stats_v1'].includes(request.name)));
+});
+test('word phase1 reset restores the existing English teacher default rather than forcing all', async t => {
+  const page = await workspace(t, { workspace: 'word_retest', tableData: {
+    teacher_catalogs: [{ id: id(600), name: '합성담당A', subjects: ['영어'], is_visible: true, profile_id: 'actor-a', sort_order: 1 }],
+  } });
+  exposeSyntheticDetailLayout(t);
+  await acceptWordFilterReads(page);
+  // The normal filter opening loads the existing minimal catalog; no fixture
+  // invokes a private setter or changes the production default policy.
+  await act(async () => wordFilterTrigger('담당선생님').click()); await acceptWordFilterReads(page);
+  await act(async () => wordFilterTrigger('담당선생님').click());
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.teacherId, id(600));
+  await chooseWordFilter('담당선생님', '담당선생님 전체'); await acceptWordFilterReads(page);
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.teacherId, null);
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === '조건 초기화').click());
+  await acceptWordFilterReads(page);
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.teacherId, id(600));
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.queue, 'assistant');
+  await searchWordFilter('합성학생B'); await acceptWordFilterReads(page);
+  assert.equal(wordFilterTrigger('담당선생님').textContent, '선택한 선생님');
+  await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === '조건 초기화').click());
+  await acceptWordFilterReads(page); await acceptWordFilterReads(page);
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.teacherId, id(600), 'current authorized facets restore the existing own-teacher default after zero search');
+  assert.equal(generalPageReads(page).at(-1).args.p_filters.search, '');
+});
 test('registration fixture legacy Back restores the edited host before confirmation and cancellation keeps it', async (t) => {
   const env = process.env.NODE_ENV; process.env.NODE_ENV = 'test';
   t.after(() => { process.env.NODE_ENV = env; });

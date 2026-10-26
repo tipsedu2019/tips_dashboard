@@ -3489,9 +3489,9 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2"',
     '<WorkspaceTabsList className="lg:w-auto lg:flex-1"',
     "showClosedToggle && !isWordRetestWorkspace",
-    "{!isRegistrationList && (showSearch || (isWordRetestWorkspace && showClosedToggle)) && (",
+    '<DataTableWorkspaceToolbar search={workspaceSearchControl} filters={wordRetestFilters}',
     'className="relative min-w-0 flex-1"',
-    'className="h-9 shrink-0 whitespace-nowrap px-3"',
+    '<DataTableSearchField ref={taskSearchInputRef}',
     "!isWordRetestWorkspace && (",
     "getWorkspaceCreateActionLabel(workspace, workspaceLabel)",
     "담당선생님",
@@ -3819,15 +3819,10 @@ test("word retest workflow guidance lives in a global manual outside task dialog
     readSource(manualPath),
     readSource("scripts/verify-ops-task-browser-workflow.mjs"),
   ]);
-  const toolbarStart = workspaceSource.indexOf("{showClosedToggle && !isWordRetestWorkspace");
-  const toolbarControlEnd = workspaceSource.indexOf(
-    "{!isWordRetestWorkspace && !isRegistrationWorkspace",
-    toolbarStart,
-  );
-  const manualLauncherSource = workspaceSource.slice(
-    workspaceSource.indexOf("{isWordRetestWorkspace && (", toolbarStart),
-    toolbarControlEnd,
-  );
+  const toolbarStart = workspaceSource.indexOf("{isWordRetestWorkspace ? (\n          <DataTableWorkspaceToolbar");
+  assert.notEqual(toolbarStart, -1, "manual belongs to the word-retest common command row");
+  const manualLauncherSource = workspaceSource.slice(toolbarStart,
+    workspaceSource.indexOf(") : !isRegistrationList", toolbarStart));
   const detailSource = workspaceSource.slice(
     workspaceSource.indexOf("function WordRetestDetailPanel"),
     workspaceSource.indexOf("function Info("),
@@ -3865,7 +3860,7 @@ test("word retest workflow guidance lives in a global manual outside task dialog
     "open={wordRetestManualOpen}",
     "onOpenChange={setWordRetestManualOpen}",
   ]);
-  assert.match(manualLauncherSource, /^\{isWordRetestWorkspace && \(/);
+  assert.match(manualLauncherSource, /^\{isWordRetestWorkspace \? \(/);
   assertInOrder(manualLauncherSource, [
     "<WordRetestManualDialog",
     "open={wordRetestManualOpen}",
