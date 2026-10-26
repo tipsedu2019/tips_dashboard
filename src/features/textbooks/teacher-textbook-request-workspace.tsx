@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableHeader } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
-import { DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_TABLE_CLASS_NAME, DataTableToolbar, DataTableViewport, DataTableHeaderRow, DataTableHeaderCell, DataTableBodyRow, DataTableBodyCell } from "@/components/data-table/data-table-surface"
+import { DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_TABLE_CLASS_NAME, DataTableWorkspaceToolbar, DataTableReadFeedback, DataTableViewport, DataTableHeaderRow, DataTableHeaderCell, DataTableBodyRow, DataTableBodyCell } from "@/components/data-table/data-table-surface"
 import { isNumberedPagePermissionError } from "@/lib/numbered-page-controller"
 import type { DataTablePageSize, NumberedPage } from "@/lib/numbered-pagination"
 import { readTeacherTextbookRequestDetail, readTeacherTextbookRequests, type TeacherTextbookRequest } from "./teacher-textbook-request-read"
@@ -78,14 +78,22 @@ export function TeacherTextbookRequestWorkspace() {
     })
     return () => controller.abort()
   }, [deferredSearch, page, pageSize, reload, revokeCommonRead])
+  const readFeedback = error ? <DataTableReadFeedback
+    label={detailError ? "목록·상세 조회 실패" : "목록 조회 실패"}
+    message={`${error}${detailError ? ` 상세: ${detailError}` : ""}`}
+    retryLabel="교재요청 다시 조회" returnFocusRef={searchInput}
+    onRetry={() => { setReload(value => value + 1); setDetailRetry(value => value + 1) }}
+  /> : detailError ? <DataTableReadFeedback label="상세 조회 실패" message={detailError}
+    retryLabel="상세 다시 조회" returnFocusRef={searchInput} onRetry={() => setDetailRetry(value => value + 1)}
+  /> : loading ? <span role="status" className="min-w-0 text-xs text-muted-foreground">{accepted ? "목록 갱신 중…" : "조회 중…"}</span> : null
   return <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
-    <DataTableToolbar>
-      <DataTableSearchField ref={searchInput} label="교재요청 검색" placeholder="교재·수업·신청자 검색" value={search} onValueChange={value => { setSearch(value); setPage(1) }} className="w-full sm:max-w-sm" />
-      <span role="status" className="text-sm text-muted-foreground">{loading ? "조회 중…" : `전체 ${accepted?.totalCount ?? 0}건`}</span>
-      <TeacherTextbookRequestCreate onSaved={() => { setSearch(""); setPage(1); setReload(value => value + 1) }} />
-    </DataTableToolbar>
-    {detailError && <div role="alert" className="flex items-center gap-3 px-3 py-4 text-sm"><span>{detailError}</span><Button variant="outline" size="sm" onClick={() => setDetailRetry(value => value + 1)}>상세 다시 조회</Button></div>}
-    {error && <div role="alert" className="flex items-center gap-3 px-3 py-4 text-sm"><span>{error}</span><Button variant="outline" size="sm" onClick={() => { setReload(value => value + 1); setDetailRetry(value => value + 1) }}>다시 조회</Button></div>}
+    <DataTableWorkspaceToolbar
+      search={<DataTableSearchField ref={searchInput} label="교재요청 검색" placeholder="교재·수업·신청자 검색" value={search} onValueChange={value => { setSearch(value); setPage(1) }} />}
+      actions={<>{readFeedback}<div className="flex min-w-0 items-center gap-2">
+        <TeacherTextbookRequestCreate onSaved={() => { setSearch(""); setPage(1); setReload(value => value + 1) }} />
+      </div></>}
+      summary={accepted ? `전체 ${accepted.totalCount}건` : error ? "건수 미확인" : "건수 확인 중"}
+    />
     <DataTableViewport role="region" aria-label="교재요청 목록" tabIndex={0} className="[&>[data-slot=table-container]]:overflow-visible">
       <Table className={DATA_TABLE_TABLE_CLASS_NAME}>
         <TableHeader><DataTableHeaderRow>{["교재", "수업", "학생용", "교사용", "신청자", "요청일"].map(label => <DataTableHeaderCell key={label}>{label}</DataTableHeaderCell>)}</DataTableHeaderRow></TableHeader>
@@ -94,9 +102,9 @@ export function TeacherTextbookRequestWorkspace() {
           <DataTableBodyCell wrap>{row.className || "-"}</DataTableBodyCell><DataTableBodyCell>{row.studentQuantity}권</DataTableBodyCell><DataTableBodyCell>{row.teacherQuantity}권</DataTableBodyCell><DataTableBodyCell>{row.requesterLabel}</DataTableBodyCell><DataTableBodyCell>{row.requestedAt.slice(0, 10) || "-"}</DataTableBodyCell>
         </DataTableBodyRow>)}</TableBody>
       </Table>
-      {!loading && !error && accepted?.rows.length === 0 && <p className="px-3 py-10 text-center text-sm text-muted-foreground">교재요청 없음</p>}
+      {!loading && !error && accepted?.rows.length === 0 && <p role="status" className="px-3 py-10 text-center text-sm text-muted-foreground">{search.trim() ? "검색 조건에 맞는 교재요청이 없습니다." : "등록된 교재요청이 없습니다."}</p>}
     </DataTableViewport>
-    <DataTablePagination page={page} pageSize={pageSize} totalCount={accepted?.totalCount ?? 0} loading={loading} onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1) }} />
+    <DataTablePagination page={page} pageSize={pageSize} totalCount={accepted?.totalCount ?? null} loading={loading} onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1) }} />
     <Dialog open={selected !== null} onOpenChange={open => { if (!open) {
       detailGeneration.current += 1; detailAbort.current?.abort()
       setSelected(null)

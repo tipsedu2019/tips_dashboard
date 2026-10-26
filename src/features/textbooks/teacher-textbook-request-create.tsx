@@ -94,7 +94,7 @@ export function TeacherTextbookRequestCreate({ onSaved }: { onSaved: () => void 
   }
   return <>
     <Button onClick={() => { setSaved(false); setOpen(true) }}>요청 추가</Button>
-    {saved && <span role="status" className="text-sm text-muted-foreground">교재 요청을 등록했습니다.</span>}
+    {saved && <span role="status" className="min-w-0 truncate text-sm text-muted-foreground" title="교재 요청을 등록했습니다.">교재 요청을 등록했습니다.</span>}
     <Dialog open={open} onOpenChange={value => { if (!value) close() }}><DialogContent aria-describedby={undefined} restoreFocusToOpener className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>교재 요청</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="grid gap-4">
         <div className="grid gap-2"><Label htmlFor="teacher-request-book">등록 교재</Label><RequestOption triggerId="teacher-request-book" scope="textbooks" label="등록 교재 선택" value={book} disabled={locked} onChange={value => { setBook(value); if (value) setTitle(value.label) }} /></div>
