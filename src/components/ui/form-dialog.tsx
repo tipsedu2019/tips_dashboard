@@ -10,6 +10,26 @@ import { cn } from "@/lib/utils"
 
 const dialogBodyClassName = "min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 [scrollbar-gutter:stable] sm:px-6"
 const dialogActionsClassName = "shrink-0 space-y-3 border-t border-border/70 bg-muted/60 px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-6"
+const dialogFrameClassName = "flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 motion-reduce:animate-none"
+const dialogHeaderClassName = "shrink-0 border-b border-border/70 px-5 py-5 pr-14 text-left sm:px-6 sm:pr-14"
+
+/** Layout only for existing workflows: the caller retains submission, busy and draft guards. */
+function ScrollableDialogContent({ title, description, children, footer, className, ...props }: Omit<React.ComponentProps<typeof DialogContent>, "title"> & {
+  title: string
+  description: string
+  footer: React.ReactNode
+}) {
+  return (
+    <DialogContent {...props} className={cn(dialogFrameClassName, "sm:h-[min(42rem,calc(100dvh-2rem))] sm:max-w-2xl", className)}>
+      <DialogHeader className={dialogHeaderClassName}>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription className="sr-only">{description}</DialogDescription>
+      </DialogHeader>
+      <div data-slot="scrollable-dialog-body" className={dialogBodyClassName}>{children}</div>
+      <div data-slot="scrollable-dialog-footer" className={dialogActionsClassName}>{footer}</div>
+    </DialogContent>
+  )
+}
 
 type DialogFrameProps = { title: string; description: string; children: React.ReactNode; compact?: boolean; wide?: boolean; returnFocusRef?: React.RefObject<HTMLElement | null>; confirmation?: boolean; busy?: boolean; height?: number; initialFocusRef?: React.RefObject<HTMLElement | null> }
 
@@ -43,14 +63,14 @@ function DialogFrame({ title, description, children, compact = false, wide = fal
         }
       }}
       className={cn(
-        "flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 motion-reduce:animate-none",
+        dialogFrameClassName,
         wide ? "sm:max-w-5xl xl:max-w-6xl" : "sm:max-w-2xl",
         compact ? "sm:h-[min(34rem,calc(100dvh-2rem))]" : "sm:h-[min(42rem,calc(100dvh-2rem))]",
         confirmation && "sm:max-w-lg",
       )}
       overlayClassName="motion-reduce:animate-none"
     >
-      <DialogHeader className={cn("shrink-0 border-b border-border/70 px-5 py-5 pr-14 text-left sm:px-6 sm:pr-14", confirmation && "pr-5 sm:pr-6")}>
+      <DialogHeader className={cn(dialogHeaderClassName, confirmation && "pr-5 sm:pr-6")}>
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription className={confirmation ? "leading-relaxed" : "sr-only"}>{description}</DialogDescription>
       </DialogHeader>
@@ -202,4 +222,4 @@ function DocumentDialogContent({ title, description, children, toolbar, feedback
   )
 }
 
-export { FormDialogContent, DetailDialogContent, DocumentDialogContent, ConfirmationDialogContent }
+export { FormDialogContent, DetailDialogContent, DocumentDialogContent, ConfirmationDialogContent, ScrollableDialogContent }

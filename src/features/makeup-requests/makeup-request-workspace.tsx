@@ -40,6 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { ScrollableDialogContent } from "@/components/ui/form-dialog"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -2476,8 +2477,10 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           if (open) setRequestDialogOpen(true)
           else closeRequestDialog()
         }}>
-          <DialogContent
-            className="max-h-[86vh] overflow-y-auto sm:max-w-4xl"
+          <ScrollableDialogContent
+            className="sm:max-w-4xl"
+            title={editingRequestId ? "휴보강 보완 재상신" : "휴보강 신청"}
+            description="휴보강 신청 정보를 입력하고 결재자에게 상신합니다."
             closeButtonLabel="저장하지 않고 닫기"
             onCloseAutoFocus={(event) => {
               event.preventDefault()
@@ -2488,15 +2491,19 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
               target?.focus({ preventScroll: true })
             }}
             onCloseButtonClick={closeRequestDialog}
-            showCloseButtonText
+            footer={<>
+              {dialogError || error ? <div id="makeup-submit-feedback" role="alert" tabIndex={0} className="max-h-20 overflow-y-auto break-words text-sm text-destructive">{dialogError || error}</div> : null}
+              <div className="flex flex-wrap justify-end gap-2" aria-busy={saving}>
+                <Button type="button" variant="outline" className="h-11 sm:h-9" onClick={closeRequestDialog} disabled={saving}>
+                  저장하지 않고 닫기
+                </Button>
+                <Button type="button" className="h-11 sm:h-9" onClick={() => void handleSubmit()} disabled={saving || loading || !canSubmitRequest} aria-describedby={dialogError || error ? "makeup-submit-feedback" : undefined}>
+                  <Send className="size-4" aria-hidden="true" />
+                  {editingRequestId ? "재상신" : "상신"}
+                </Button>
+              </div>
+            </>}
           >
-            <DialogHeader>
-              <DialogTitle>{editingRequestId ? "휴보강 보완 재상신" : "휴보강 신청"}</DialogTitle>
-              <DialogDescription className="sr-only">
-                휴보강 신청 정보를 입력하고 결재자에게 상신합니다.
-              </DialogDescription>
-            </DialogHeader>
-            {dialogError || error ? <div role="alert" className="text-sm text-destructive">{dialogError || error}</div> : null}
             <fieldset disabled={saving} aria-busy={saving} className="grid min-w-0 gap-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5">
@@ -2736,17 +2743,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
               </Select>
             </div>
 
-            <div className="flex gap-2">
-              <Button type="button" onClick={() => void handleSubmit()} disabled={saving || loading || !canSubmitRequest}>
-                <Send className="size-4" aria-hidden="true" />
-                {editingRequestId ? "재상신" : "상신"}
-              </Button>
-              <Button type="button" variant="outline" onClick={closeRequestDialog} disabled={saving}>
-                저장하지 않고 닫기
-              </Button>
-            </div>
             </fieldset>
-          </DialogContent>
+          </ScrollableDialogContent>
         </Dialog>
 
         <MakeupRequestDataTable
