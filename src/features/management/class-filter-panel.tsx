@@ -1,10 +1,10 @@
 "use client";
 
-import type { ChangeEvent, ReactNode } from "react";
-import { Plus, Search, X } from "lucide-react";
+import type { ReactNode, Ref } from "react";
+import { Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DataTableSearchField } from "@/components/data-table/data-table-search-field";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -43,6 +43,8 @@ type ClassFilterPanelProps = {
   onSearchSubmit?: () => void;
   onSearchCompositionStart?: () => void;
   onSearchCompositionEnd?: (value: string) => void;
+  searchInputRef?: Ref<HTMLInputElement>;
+  readFeedback?: ReactNode;
   summaryLabel?: ReactNode;
   showReset?: boolean;
   onReset?: () => void;
@@ -59,10 +61,6 @@ function normalizeOptions(options: ClassFilterPanelOption[] = []) {
   return options.filter((option) => option.value);
 }
 
-function isComposingSearchInput(event: ChangeEvent<HTMLInputElement>) {
-  return "isComposing" in event.nativeEvent && Boolean(event.nativeEvent.isComposing);
-}
-
 export function ClassFilterPanel({
   selects,
   searchValue,
@@ -71,6 +69,8 @@ export function ClassFilterPanel({
   onSearchSubmit,
   onSearchCompositionStart,
   onSearchCompositionEnd,
+  searchInputRef,
+  readFeedback,
   summaryLabel,
   showReset = false,
   onReset,
@@ -83,7 +83,6 @@ export function ClassFilterPanel({
   className,
 }: ClassFilterPanelProps) {
   const hasCreate = Boolean(createLabel);
-  const hasSearchValue = searchValue.trim().length > 0;
 
   const renderSelectField = (select: ClassFilterPanelSelect) => {
     const options = normalizeOptions(select.options);
@@ -123,41 +122,18 @@ export function ClassFilterPanel({
   return (
     <div className={cn("flex flex-col gap-2 border border-border/70 bg-background px-3 py-3", className)}>
       <DataTableCommandRow
-        reserveActions={hasCreate || Boolean(toolbarAction) || Boolean(selectionActions)}
-        search={<div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1" role="search" aria-label={searchPlaceholder}>
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            aria-label={searchPlaceholder}
-            autoComplete="off"
-            enterKeyHint="search"
+        reserveActions={hasCreate || Boolean(toolbarAction) || Boolean(selectionActions) || Boolean(readFeedback)}
+        search={<DataTableSearchField ref={searchInputRef}
+            label={searchPlaceholder}
+            clearLabel={`${searchPlaceholder} 지우기`}
             placeholder={searchPlaceholder}
             value={searchValue}
-            onChange={(event) => onSearchChange(event.target.value, { syncUrl: !isComposingSearchInput(event) })}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
-                event.preventDefault();
-                onSearchSubmit?.();
-              }
-            }}
+            onValueChange={(value, detail) => onSearchChange(value, detail ? { syncUrl: !detail.isComposing } : undefined)}
+            onSubmit={() => onSearchSubmit?.()}
             onCompositionStart={onSearchCompositionStart}
-            onCompositionEnd={(event) => onSearchCompositionEnd?.(event.currentTarget.value)}
-            className="h-9 pl-9 pr-9"
-          />
-          {hasSearchValue ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1/2 size-7 -translate-y-1/2 rounded-md active:-translate-y-1/2"
-              onClick={() => onSearchChange("")}
-              aria-label={`${searchPlaceholder} 지우기`}
-            >
-              <X className="size-3.5" />
-            </Button>
-          ) : null}
-        </div>}
-        actions={selectionActions ?? <>
+            onCompositionEnd={onSearchCompositionEnd}
+          />}
+        actions={<>{readFeedback}{selectionActions ?? <>
         {hasCreate ? (
           <Button
             variant={createDisabled ? "outline" : "default"}
@@ -171,7 +147,7 @@ export function ClassFilterPanel({
           </Button>
         ) : null}
         {toolbarAction}
-        </>}
+        </>}</>}
       />
 
       <DataTableFilterPanel label={`${searchPlaceholder} 조건`} onReset={onReset} canReset={showReset}

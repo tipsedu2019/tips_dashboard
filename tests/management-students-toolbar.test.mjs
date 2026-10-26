@@ -13,10 +13,8 @@ test("class toolbar uses the shared class filter panel", async () => {
   assert.doesNotMatch(source, /CLASS_QUICK_FILTER_IDS|classFilterChips/);
   assert.match(panelSource, /selects\.map\(renderSelectField\)/);
   assert.match(panelSource, /searchPlaceholder/);
-  assert.match(panelSource, /role="search" aria-label=\{searchPlaceholder\}/);
-  assert.match(panelSource, /type="search"/);
-  assert.match(panelSource, /autoComplete="off"/);
-  assert.match(panelSource, /enterKeyHint="search"/);
+  assert.match(panelSource, /<DataTableSearchField ref=\{searchInputRef\}/);
+  assert.match(panelSource, /label=\{searchPlaceholder\}/);
   assert.match(panelSource, /createLabel/);
   assert.match(panelSource, /조건 초기화/);
 });
@@ -105,18 +103,17 @@ test("student edit dialog optimizes first entry and phone fields", async () => {
 test("management list search exposes the current data type to operators", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
-  assert.match(source, /role="search" aria-label=\{`\$\{emptyLabel\} 검색`\}/);
-  assert.match(source, /type="search"/);
-  assert.match(source, /aria-label=\{`\$\{emptyLabel\} 검색`\}/);
-  assert.match(source, /autoComplete="off"/);
-  assert.match(source, /enterKeyHint="search"/);
+  assert.match(source, /<DataTableSearchField ref=\{searchInputRef\}/);
+  assert.match(source, /label=\{`\$\{emptyLabel\} 검색`\}/);
+  assert.match(source, /clearLabel=\{`\$\{emptyLabel\} 검색어 지우기`\}/);
   assert.doesNotMatch(source, /aria-label="검색"/);
 });
 
 test("management table empty state stays compact and action-first", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
-  assert.match(source, /const emptyStateTitle = rows\.length === 0 \? `\$\{emptyLabel\} 없음` : `\$\{emptyLabel\} 결과 없음`/);
+  assert.match(source, /const emptyStateTitle = hasActiveFilters \? `\$\{emptyLabel\} 결과 없음` : `\$\{emptyLabel\} 없음`/);
+  assert.match(source, /const suppressEmptyState = Boolean\(readError && readErrorSource !== "metadata"\) \|\| totalCount === null/);
   assert.doesNotMatch(source, /emptyStateSummary/);
   assert.doesNotMatch(source, /관리 레코드가 아직 비어 있습니다/);
   assert.doesNotMatch(source, /현재 조건 적용 중/);
@@ -184,13 +181,15 @@ test("management search preserves Korean IME composition before syncing URL filt
 
   assert.match(tableSource, /const \[searchComposing, setSearchComposing\] = useState\(false\)/);
   assert.match(tableSource, /composing:\s*searchComposing/);
-  assert.match(tableSource, /onChange=\{handleGlobalFilterChange\}/);
+  assert.match(tableSource, /onValueChange=\{handleGlobalFilterChange\}/);
   assert.match(tableSource, /onCompositionStart=\{handleGlobalFilterCompositionStart\}/);
   assert.match(tableSource, /onCompositionEnd=\{handleGlobalFilterCompositionEnd\}/);
   assert.match(tableSource, /reconciliation\.pendingSearch === null && !searchComposing && globalFilter !== requestedSearch/);
   assert.match(panelSource, /onSearchChange: \(value: string, options\?: \{ syncUrl\?: boolean \}\) => void/);
-  assert.match(panelSource, /isComposingSearchInput\(event\)/);
-  assert.match(panelSource, /onCompositionEnd=\{\(event\) => onSearchCompositionEnd\?\.\(event\.currentTarget\.value\)\}/);
+  assert.match(tableSource, /syncUrl: !\(searchComposing \|\| detail\.isComposing\)/);
+  assert.match(panelSource, /detail \? \{ syncUrl: !detail\.isComposing \} : undefined/);
+  assert.match(panelSource, /onCompositionEnd=\{onSearchCompositionEnd\}/);
+  assert.match(panelSource, /onSubmit=\{\(\) => onSearchSubmit\?\.\(\)\}/);
 });
 
 test("management table exposes resize handles with a clear reset action", async () => {
@@ -331,7 +330,7 @@ test("management table keeps filter and search actions visible and reversible", 
   const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
 
   assert.doesNotMatch(panelSource, /Popover|primaryLabel/);
-  assert.match(panelSource, /aria-label=\{`\$\{searchPlaceholder\} 지우기`\}/);
+  assert.match(panelSource, /clearLabel=\{`\$\{searchPlaceholder\} 지우기`\}/);
   assert.match(panelSource, /<DataTableFilters/);
   assert.doesNotMatch(tableSource, /const DEFAULT_PAGE_SIZE = 30/);
   assert.match(tableSource, /onSearchChange=\{updateGlobalFilter\}/);

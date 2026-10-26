@@ -55,13 +55,16 @@ test("management read errors expose retry for both empty and retained-row recove
   );
 });
 
-test("the hook and page consume the tested loading and retry states", async () => {
+test("the page passes read state into a stable table command lane with guarded retry", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   // Hook lifecycle is exercised with deferred RPCs in management-numbered-pagination.test.mjs.
 
-  assert.match(pageSource, /getManagementListErrorRecoveryState\(\{[\s\S]*?error,[\s\S]*?loading,[\s\S]*?rowCount: rows\.length/);
-  assert.match(pageSource, /aria-label=\{`\$\{config\.emptyLabel\} 목록 다시 시도`\}/);
-  assert.match(pageSource, /onClick=\{\(\) => void refresh\(\)\}/);
-  assert.match(pageSource, /disabled=\{errorRecovery\.retryDisabled\}/);
-  assert.match(pageSource, /errorRecovery\.hasRetainedRows[\s\S]*?기존 목록은 유지됩니다\./);
+  assert.match(pageSource, /readError=\{error\}/);
+  assert.match(pageSource, /readErrorSource=\{errorSource\}/);
+  assert.match(pageSource, /onRetryRead=\{\(\) => void refresh\(\)\}/);
+  assert.match(tableSource, /const readFeedback = loading \? \([\s\S]*?role="status"[\s\S]*?\) : readError \? \(/);
+  assert.match(tableSource, /retryLabel=\{`\$\{emptyLabel\} 목록 다시 시도`\} returnFocusRef=\{searchInputRef\}/);
+  assert.match(tableSource, /rows\.length \? " 기존 목록은 유지됩니다\." : ""/);
+  assert.match(tableSource, /actions=\{<>\{readFeedback\}\{bulkActionBar \?\? <>\{createControl\}\{columnSettingsControl\}<\/*>\}<\/*>\}/);
 });

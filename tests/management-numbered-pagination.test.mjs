@@ -894,3 +894,336 @@ test("class roster preview producer preserves page continuation through the real
   assert.deepEqual(relationCalls.map(({ args }) => args.p_cursor_sort_key), [null, registered[29].name, null]);
   assert.ok(relationCalls.every(({ args }) => args.p_kind === "classes" && args.p_id === "synthetic-class"));
 });
+
+// Real hook + real table. Only readonly transport/auth-independent navigation are synthetic.
+async function mountManagementReadFeedback(t, { kind = "students", initialQuery = "", metadataError = null } = {}) {
+  const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?${initialQuery}` });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  for (const key of ["HTMLElement", "Element", "NodeFilter", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement", "HTMLSelectElement"]) globalThis[key] = dom.window[key];
+  globalThis.getComputedStyle = dom.window.getComputedStyle;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
+  window.cancelAnimationFrame = window.clearTimeout;
+  window.scrollTo = () => {};
+  window.matchMedia = (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {} });
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+  // react-dom was imported before JSDOM; its legacy input-event probe uses these in focus tests.
+  window.HTMLElement.prototype.attachEvent = () => {};
+  window.HTMLElement.prototype.detachEvent = () => {};
+  const io = transport(), rpc = io.supabase.rpc;
+  io.supabase.rpc = (name, args) => name === "get_management_stats_v1" ? {
+    abortSignal() { return this; }, retry() { return Promise.resolve({ data: metadataError ? null : { total: 2 }, error: metadataError }); },
+  } : rpc(name, args);
+  const { useManagementRecords } = loadHook(io.supabase);
+  const navigation = createContext("");
+  let updateQuery, state, created = 0, writes = 0;
+  const originalReplace = window.history.replaceState.bind(window.history);
+  window.history.replaceState = (data, unused, url) => { originalReplace(data, unused, url); updateQuery?.(window.location.search); };
+  const { ManagementDataTable } = loadHook(io.supabase, "src/features/management/management-data-table.tsx", {
+    "next/navigation": {
+      usePathname: () => `/admin/${kind}`,
+      useSearchParams: () => new URLSearchParams(useContext(navigation)),
+      useRouter: () => ({ replace: (url) => window.history.replaceState(null, "", url), push: (url) => window.history.replaceState(null, "", url) }),
+    },
+  });
+  const actions = { onCreate: () => { created += 1; }, onBulkUpdateRows: () => { writes += 1; throw new Error("unexpected synthetic write"); } };
+  function Probe() {
+    const params = new URLSearchParams(useContext(navigation)), search = params.get("q") || "";
+    const [page, setPage] = useState(1);
+    const listFilters = kind === "students" ? { ...filters, search, status: "재원" } : { kind, search, periodId: null, status: "수강", subject: null, grade: null, teacher: null, classroom: null };
+    const result = useManagementRecords(kind, listFilters, { pageSize: 10, page, enabled: true, authorizationScope: "synthetic:admin", onQueryChange: ({ page }) => setPage(page) });
+    useEffect(() => { state = result; }, [result]);
+    return createElement(ManagementDataTable, { ...result, kind, displayedScope: result.scope,
+      actions, badgeLabel: "과목", statusLabel: "상태", emptyLabel: kind === "students" ? "학생" : "수업",
+      onPageChange: result.goToPage, onSortChange: result.setSort, onPageSizePreferenceChange() {},
+      readError: result.error, readErrorSource: result.errorSource, onRetryRead: () => { void result.refresh(); } });
+  }
+  function Wrapper() {
+    const [query, setQuery] = useState(window.location.search);
+    useEffect(() => { updateQuery = setQuery; }, []);
+    return createElement(navigation.Provider, { value: query }, createElement(Probe));
+  }
+  const root = createRoot(document.getElementById("root"));
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  await act(async () => root.render(createElement(Wrapper)));
+  return { ...io, get state() { return state; }, get created() { return created; }, get writes() { return writes; },
+    finish(index, totalCount = 2, rowOverrides = []) {
+      // The shared pagination fixture defaults to student DTOs; classes have their own valid status.
+      const validRows = Array.from({ length: Math.min(10, totalCount) }, (_, index) => ({
+        ...(kind === "classes" ? { status: "수강", storedStatus: "수강" } : {}), ...rowOverrides[index],
+      }));
+      io.finish(index, totalCount, validRows);
+    },
+    setMetadataError(value) { metadataError = value; },
+    navigate(query) { window.history.replaceState(null, "", `/admin/${kind}${query}`); } };
+}
+
+async function waitForManagementFocus(element) {
+  if (document.activeElement === element) return;
+  await new Promise((resolve, reject) => {
+    const cleanup = () => { clearTimeout(timer); document.removeEventListener("focusin", onFocus); };
+    const onFocus = () => { if (document.activeElement === element) { cleanup(); resolve(); } };
+    const timer = setTimeout(() => { cleanup(); reject(new Error("dialog did not return focus to its trigger")); }, 1000);
+    document.addEventListener("focusin", onFocus);
+    onFocus();
+  });
+}
+
+function installManagementDebounceClock(t) {
+  const clockWindow = window;
+  const originalSetTimeout = clockWindow.setTimeout.bind(clockWindow);
+  const originalClearTimeout = clockWindow.clearTimeout.bind(clockWindow);
+  const pending = new Map();
+  let now = 0;
+  // Reuse the academic test clock pattern, but management owns a 300ms window timer.
+  // Leave React/Radix scheduling and read deadlines on their normal clocks.
+  clockWindow.setTimeout = (callback, delay, ...args) => {
+    if (delay !== 300 || typeof callback !== "function") return originalSetTimeout(callback, delay, ...args);
+    const timer = {};
+    pending.set(timer, { at: now + delay, callback, args });
+    return timer;
+  };
+  clockWindow.clearTimeout = (timer) => {
+    if (!pending.delete(timer)) originalClearTimeout(timer);
+  };
+  t.after(() => {
+    clockWindow.setTimeout = originalSetTimeout;
+    clockWindow.clearTimeout = originalClearTimeout;
+    pending.clear();
+  });
+  return {
+    get pendingCount() { return pending.size; },
+    advance(milliseconds) {
+      const target = now + milliseconds;
+      while (true) {
+        const next = [...pending].filter(([, task]) => task.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next) break;
+        const [timer, task] = next;
+        now = task.at;
+        pending.delete(timer);
+        task.callback(...task.args);
+      }
+      now = target;
+    },
+  };
+}
+
+for (const kind of ["students", "classes"]) {
+  test(`management search integration: ${kind} keeps 300ms, IME, Enter, clear and settled history policy`, async t => {
+    const page = await mountManagementReadFeedback(t, { kind });
+    await act(async () => page.finish(0, 2));
+    const clock = installManagementDebounceClock(t);
+    const label = kind === "students" ? "학생" : "수업";
+    const input = document.querySelector(`input[aria-label="${label} 검색"]`);
+    assert.ok(input);
+    // Invoke the actual rendered common input handlers, as the existing academic integration fixture does.
+    const handlers = () => input[Object.keys(input).find(key => key.startsWith("__reactProps"))];
+    const urlSearch = () => new URLSearchParams(window.location.search).get("q") || "";
+    for (const value of ["a", "ab", "합성검색"]) {
+      await act(async () => handlers().onChange({ target: { value }, nativeEvent: {} }));
+    }
+    assert.equal(clock.pendingCount, 1, "rapid input keeps only its latest 300ms timer");
+    assert.equal(page.requests.length, 1);
+    let enterPrevented = 0;
+    await act(async () => handlers().onKeyDown({ key: "Enter", nativeEvent: { isComposing: false, keyCode: 13 }, preventDefault() { enterPrevented += 1; } }));
+    assert.equal(enterPrevented, kind === "classes" ? 1 : 0, "management preserves the existing class no-submit Enter/default student Enter contract");
+    assert.equal(page.requests.length, 1, "Enter must not add immediate management search submission");
+    assert.equal(urlSearch(), "");
+    await act(async () => clock.advance(299));
+    assert.equal(page.requests.length, 1);
+    assert.equal(urlSearch(), "");
+    await act(async () => clock.advance(1));
+    assert.equal(page.requests.length, 2);
+    assert.equal(page.requests[1].args.p_filters.search, "합성검색");
+    assert.equal(urlSearch(), "합성검색");
+    await act(async () => page.finish(1, 2));
+
+    await act(async () => handlers().onCompositionStart());
+    await act(async () => handlers().onChange({ target: { value: "ㅎ" }, nativeEvent: { isComposing: true } }));
+    await act(async () => handlers().onKeyDown({ key: "Enter", nativeEvent: { isComposing: true, keyCode: 229 }, preventDefault() { throw new Error("IME Enter must not submit"); } }));
+    await act(async () => clock.advance(300));
+    assert.equal(page.requests.length, 2, "composition start plus native composing input cannot commit a read");
+    assert.equal(urlSearch(), "합성검색", "composing text cannot replace the accepted URL search");
+    await act(async () => handlers().onCompositionEnd({ currentTarget: { value: "한글" } }));
+    await act(async () => clock.advance(299));
+    assert.equal(page.requests.length, 2);
+    assert.equal(urlSearch(), "합성검색");
+    await act(async () => clock.advance(1));
+    assert.equal(page.requests.length, 3);
+    assert.equal(page.requests[2].args.p_filters.search, "한글");
+    assert.equal(urlSearch(), "한글");
+    await act(async () => page.finish(2, 2));
+
+    const clear = document.querySelector(`button[aria-label="${kind === "students" ? "학생 검색어 지우기" : "수업 검색 지우기"}"]`);
+    assert.ok(clear && !clear.disabled);
+    await act(async () => { clear.focus(); clear.click(); });
+    assert.equal(input.value, "");
+    assert.ok(document.activeElement === input, "clear returns focus to the same search input");
+    assert.equal(page.requests.length, 3, "clear preserves management's delayed empty-query commit");
+    assert.equal(urlSearch(), "한글");
+    await act(async () => clock.advance(299));
+    assert.equal(page.requests.length, 3);
+    await act(async () => clock.advance(1));
+    assert.equal(page.requests.length, 4);
+    assert.equal(page.requests[3].args.p_filters.search, "");
+    assert.equal(urlSearch(), "");
+    await act(async () => page.finish(3, 2));
+
+    // URL catch-up has released pending input ownership. Existing policy restores history only in this state.
+    await act(async () => page.navigate("?q=복원검색&keep=1"));
+    assert.equal(input.value, "복원검색");
+    assert.equal(page.requests.length, 5);
+    assert.equal(page.requests[4].args.p_filters.search, "복원검색");
+    await act(async () => clock.advance(300));
+    assert.equal(page.requests.length, 5, "the URL-owned restored input must not echo an extra read");
+    assert.equal(urlSearch(), "복원검색");
+    assert.equal(new URLSearchParams(window.location.search).get("keep"), "1");
+    await act(async () => page.finish(4, 2));
+    assert.deepEqual(page.requests.map(request => request.args.p_filters.search), ["", "합성검색", "한글", "", "복원검색"]);
+    assert.equal(page.created, 0);
+    assert.equal(page.writes, 0);
+  });
+}
+
+for (const kind of ["students", "classes"]) {
+  test(`management read feedback: initial ${kind} failure is unknown, never an empty registration prompt`, async t => {
+    const page = await mountManagementReadFeedback(t, { kind });
+    const label = kind === "students" ? "학생" : "수업";
+    const search = document.querySelector(`input[aria-label="${label} 검색"]`);
+    await act(async () => page.requests[0].reject(new Error("synthetic main read unavailable")));
+    assert.equal(page.state.totalCount, null);
+    assert.equal(page.state.rows.length, 0);
+    assert.doesNotMatch(document.body.textContent, new RegExp(`${label} (?:결과 )?없음`), "an unaccepted read must not become a successful empty state");
+    assert.equal(document.querySelectorAll('tbody button').length, 0, "failed empty table has no registration/reset CTA");
+    const mobile = document.querySelector(`[aria-label="${label} 모바일 ${kind === "students" ? "학생 " : ""}목록"]`);
+    assert.equal(mobile?.querySelectorAll('button').length, 0, "failed empty mobile list has no registration/reset CTA");
+    assert.equal(page.state.errorSource, "list");
+    const alert = document.querySelector('[role="alert"]');
+    assert.match(alert?.textContent || "", /synthetic main read unavailable/);
+    const retry = alert.querySelector("button");
+    await act(async () => { retry.focus(); retry.click(); });
+    assert.ok(document.activeElement === search, "retry returns focus to the same stable search input");
+    assert.ok(document.querySelector(`input[aria-label="${label} 검색"]`) === search, "retry preserves the search input owner");
+    assert.equal(document.querySelector('[role="alert"] button'), null, "pending retry cannot be submitted again");
+    assert.ok(document.querySelector('[role="status"]'), "pending retry has a status announcement");
+    await act(async () => page.finish(1, 2));
+    assert.equal(page.state.error, null);
+    assert.equal(page.state.errorSource, null);
+    assert.equal(document.querySelectorAll('tr[data-management-row="true"]').length, 2);
+    assert.equal(page.created, 0);
+    assert.equal(page.writes, 0);
+  });
+
+  test(`management read feedback: ${kind} successful zero and search zero keep different next actions`, async t => {
+    const page = await mountManagementReadFeedback(t, { kind });
+    const label = kind === "students" ? "학생" : "수업";
+    await act(async () => page.finish(0, 0));
+    assert.equal(page.state.totalCount, 0);
+    assert.equal(page.state.errorSource, null);
+    assert.match(document.querySelector("tbody").textContent, new RegExp(`${label} 없음`));
+    assert.ok([...document.querySelectorAll("tbody button")].some(button => button.textContent.includes(`${label} 등록`)), "true empty data keeps the authorized registration action");
+    await act(async () => page.navigate("?q=없는합성검색"));
+    assert.equal(page.requests.at(-1).args.p_filters.search, "없는합성검색");
+    await act(async () => page.finish(page.requests.length - 1, 0));
+    assert.match(document.querySelector("tbody").textContent, new RegExp(`${label} 결과 없음`));
+    assert.equal([...document.querySelectorAll("tbody button")].some(button => button.textContent.includes(`${label} 등록`)), false);
+    const reset = [...document.querySelectorAll("tbody button")].find(button => button.textContent.includes("조건 초기화"));
+    assert.ok(reset, "search zero offers a filter reset rather than another registration prompt");
+    await act(async () => reset.click());
+    assert.equal(page.requests.at(-1).args.p_filters.search, "");
+    await act(async () => page.finish(page.requests.length - 1, 2));
+    assert.equal(document.querySelectorAll('tr[data-management-row="true"]').length, 2);
+    assert.equal(page.created, 0);
+    assert.equal(page.writes, 0);
+  });
+
+  for (const total of [0, 2]) {
+    test(`management read feedback: ${kind} metadata-only failure keeps accepted ${total ? "rows" : "empty results"}`, async t => {
+      const page = await mountManagementReadFeedback(t, { kind, metadataError: new Error("synthetic metadata unavailable") });
+      const label = kind === "students" ? "학생" : "수업";
+      await act(async () => page.finish(0, total));
+      assert.equal(page.state.errorSource, "metadata");
+      assert.equal(page.state.error, "synthetic metadata unavailable");
+      assert.equal(page.state.totalCount, total);
+      assert.equal(page.state.rows.length, total);
+      assert.equal(document.querySelectorAll('tr[data-management-row="true"]').length, total);
+      const alert = document.querySelector('[role="alert"]');
+      assert.match(alert?.textContent || "", /부가 정보 조회 실패/);
+      if (total === 0) {
+        assert.match(document.querySelector("tbody").textContent, new RegExp(`${label} 없음`));
+        assert.ok([...document.querySelectorAll("tbody button")].some(button => button.textContent.includes(`${label} 등록`)), "successful empty data remains trustworthy when only metadata fails");
+      } else assert.doesNotMatch(document.querySelector("tbody").textContent, new RegExp(`${label} (?:결과 )?없음`));
+      page.setMetadataError(null);
+      await act(async () => alert.querySelector("button").click());
+      assert.equal(document.querySelector('[role="alert"] button'), null);
+      await act(async () => page.finish(1, total));
+      assert.equal(page.state.error, null);
+      assert.equal(page.state.errorSource, null);
+      assert.equal(page.state.rows.length, total);
+      assert.equal(page.created, 0);
+      assert.equal(page.writes, 0);
+    });
+  }
+
+  test(`management read feedback: ${kind} retained rows preserve settings, selection and bulk draft owners`, async t => {
+    const page = await mountManagementReadFeedback(t, { kind });
+    const label = kind === "students" ? "학생" : "수업";
+    await act(async () => page.finish(0, 2));
+    const search = document.querySelector(`input[aria-label="${label} 검색"]`);
+    const settingsTrigger = document.querySelector('button[aria-label="표 설정"]');
+    await act(async () => settingsTrigger.click());
+    const settings = document.querySelector('[role="dialog"]');
+    assert.match(settings?.textContent || "", new RegExp(`${label} 표 설정`));
+    const settingsSearch = settings.querySelector('input[aria-label="컬럼 검색"]');
+    await act(async () => { void page.state.refresh(); });
+    assert.ok(document.querySelector('[role="dialog"]') === settings, "read loading does not unmount an open settings owner");
+    await act(async () => page.requests[1].reject(new Error("synthetic retained read unavailable")));
+    assert.equal(page.state.errorSource, "list");
+    assert.equal(page.state.totalCount, 2);
+    assert.ok(document.querySelector('[role="dialog"]') === settings, "read failure preserves the settings dialog owner");
+    assert.ok(settings.querySelector('input[aria-label="컬럼 검색"]') === settingsSearch, "read failure preserves the settings search input owner");
+    assert.equal(document.querySelectorAll('tr[data-management-row="true"]').length, 2);
+    await act(async () => document.querySelector('button[aria-label="표 설정 닫기"]').click());
+    assert.ok(document.querySelector('button[aria-label="표 설정"]') === settingsTrigger, "closing settings preserves its trigger owner");
+    const checkbox = document.querySelector(`tbody button[role="checkbox"][aria-label="${label} 항목 선택"]`);
+    await act(async () => checkbox.click());
+    const edit = document.querySelector('button[aria-label="선택 항목 일괄 수정"]');
+    assert.ok(edit);
+    await act(async () => { edit.focus(); edit.click(); });
+    const dialog = document.querySelector('[role="dialog"]');
+    assert.match(dialog?.textContent || "", /선택 1건 수정/);
+    const value = document.getElementById("management-bulk-value");
+    await act(async () => value.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const chosen = [...document.querySelectorAll('[role="option"]')].find(option => option.textContent.trim() === (kind === "students" ? "고등" : "수강"));
+    assert.ok(chosen);
+    await act(async () => chosen.click());
+    const draft = value.textContent;
+    assert.match(draft, kind === "students" ? /고등/ : /수강/);
+    await act(async () => { void page.state.refresh(); });
+    assert.ok(document.querySelector('[role="dialog"]') === dialog, "read loading preserves the bulk editor owner");
+    await act(async () => page.requests[2].reject(new Error("synthetic retained read unavailable again")));
+    assert.ok(document.querySelector('[role="dialog"]') === dialog, "feedback is a stable sibling of the bulk editor owner");
+    assert.ok(document.getElementById("management-bulk-value") === value, "read failure preserves the bulk draft input owner");
+    assert.equal(value.textContent, draft);
+    assert.equal(checkbox.getAttribute("aria-checked"), "true");
+    assert.equal(page.state.rows.length, 2);
+    const cancel = dialog.querySelector('button[aria-label="일괄 수정 취소"]');
+    assert.ok(cancel);
+    await act(async () => cancel.click());
+    assert.ok(document.querySelector('[role="dialog"]') === null, "cancel closes the bulk editor");
+    assert.ok(document.querySelector('button[aria-label="선택 항목 일괄 수정"]') === edit, "cancel preserves the bulk edit trigger owner");
+    // Radix schedules close autofocus for the next turn. Wait for the observable focus return before the next user action.
+    await act(async () => waitForManagementFocus(edit));
+    assert.ok(document.activeElement === edit, "cancel returns focus to the preserved bulk edit trigger");
+    const retry = document.querySelector('[role="alert"] button');
+    await act(async () => { retry.focus(); retry.click(); });
+    assert.ok(document.activeElement === search, "retry after cancel returns focus to the preserved search input");
+    assert.equal(document.querySelector('[role="alert"] button'), null);
+    await act(async () => page.finish(3, 2));
+    assert.equal(checkbox.getAttribute("aria-checked"), "true");
+    assert.ok(document.querySelector(`input[aria-label="${label} 검색"]`) === search, "accepted retry preserves the search input owner");
+    assert.equal(page.state.error, null);
+    assert.equal(page.created, 0);
+    assert.equal(page.writes, 0);
+  });
+}

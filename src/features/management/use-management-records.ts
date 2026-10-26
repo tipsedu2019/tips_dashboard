@@ -1027,12 +1027,14 @@ export function useManagementRecords(
   const loading = !displayed || (enabled && displayed.loading);
   const fetchError = displayed?.error;
   const error = fetchError ? fetchError instanceof Error ? fetchError.message : "목록을 불러오지 못했습니다." : metadataFailure?.owner === owner ? metadataFailure.error : null;
+  const errorSource = fetchError ? "list" as const : metadataFailure?.owner === owner ? "metadata" as const : null;
 
   return {
     rows,
     stats: metadataOwner === owner ? stats : [],
     loading,
     error,
+    errorSource,
     classFormReferences: classFormReferences?.owner === owner ? classFormReferences.references : EMPTY_CLASS_FORM_REFERENCES,
     classFormReferencesStatus: classFormReferences?.owner === owner ? classFormReferences.status : "loading",
     retryClassFormReferences,
