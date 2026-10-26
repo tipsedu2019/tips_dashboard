@@ -252,3 +252,5 @@ CI의 `Verify shared dashboard design contracts` 단계는 공통 표, 선택 �
 긴 휴보강 신청·재상신 입력창은 `ScrollableDialogContent`로 기존 `FormDialogContent`의 머리·본문·하단 토큰을 공유한다. 제목과 닫기·상신 버튼을 화면 안에 두고 입력 본문만 스크롤한다. 이 조합은 form이나 제출 이벤트를 만들지 않는다. 기존 상신 handler, 저장 중 잠금, 미저장 확인과 열기 요소로의 초점 복귀는 업무 소유자가 유지한다. 저장 오류는 하단 행동 옆에서 읽고 다시 시도한다. 등록 상세의 짧은 높이 대응과 짧은 처리 메모창에는 일괄 적용하지 않는다.
 
 일반 Ops 입력·편집(단어 재시험·전반·퇴원·일반 업무)은 같은 `ScrollableDialogContent`를 사용한다. 본문 native form과 기존 onSubmit을 유지하며 본문 밖 하단 submit 버튼은 HTML form 속성으로 같은 form id에 연결한다. Enter·필드 검증·저장 guard를 별도 클릭 handler로 재구현하지 않는다. 단계 이동/닫기는 type=button, 오류와 필수 입력 안내는 기존 필드 위치를 유지한다. 등록의 단일 신규/상세 host와 Shell의 단계별 행동·짧은 높이 대응은 별도 구조로 보존한다.
+
+등록 신규창은 같은 DialogContent host와 native form 안에서 `ScrollableDialogBody`와 `ScrollableDialogFooter`만 재사용한다. 데스크톱의 자연 높이를 유지하고 가용 높이가 부족할 때 본문만 줄어들며 제출 영역은 겹침 없이 남는다. 모바일의 제출·보조 행동과 단일 닫기는 44px, 데스크톱은 기존 36px 기준이다. Shell의 제목·닫기 소유권과 600px 미만에서 제목을 본문과 함께 스크롤하는 예외를 보존하고, 본문 padding은 Shell의 기준선에 맞춘다. 상세·불러오기·재조회 실패 상태는 기존 구조를 유지하며 저장/초안/receipt/권한 로직을 표시 컴포넌트로 옮기지 않는다.

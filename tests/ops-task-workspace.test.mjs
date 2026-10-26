@@ -298,7 +298,6 @@ test("todo form keeps requester metadata readonly and assignee selectors team-aw
     "ReadonlyInfoField label=\"요청일시\"",
     "className=\"grid gap-3 pt-1 md:grid-cols-[160px_minmax(0,1fr)]\"",
     "className=\"grid gap-3 md:grid-cols-2\"",
-    '"-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end"',
     "profiles={assigneeProfileOptions}",
     "onChange={handleAssigneeChange}",
     "onClick={() => handleAssigneeChange(currentUserId)}",
@@ -2323,10 +2322,13 @@ test("registration create keeps counselor assignment out of inquiry-only intake"
   );
 });
 
-test("registration form actions remain in normal flow and wrap safely on narrow screens", async () => {
+test("registration create actions use a bounded native form footer and wrap safely on narrow screens", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  assert.match(source, /const formActionBarClassName = "-mx-6 -mb-6[^"\n]*"/);
-  assert.match(source, /className=\{formActionBarClassName\}/);
+  assert.match(source, /<form onSubmit=\{submitForm\} className="flex min-h-0 min-w-0 flex-1 flex-col">/);
+  assert.match(source, /<ScrollableDialogBody className="min-w-0 px-6 py-6">/);
+  assert.match(source, /<ScrollableDialogFooter className="flex flex-col gap-2 space-y-0 px-6 sm:flex-row sm:items-center sm:justify-end">/);
+  assert.match(source, /<Button type="submit" disabled=\{saving\} className="min-h-11 w-full sm:min-h-9 sm:w-auto">/);
+  assert.doesNotMatch(source, /formActionBarClassName|sticky bottom-0|fixed bottom-0/);
   assert.doesNotMatch(source, /form\.type === "registration" \? "sticky bottom-0/);
   assert.match(source, /form\.type === "registration" \? "sm:max-w-4xl"/);
   assert.match(source, /form\.type === "registration" \? "h-auto min-h-9 whitespace-normal" : ""/);

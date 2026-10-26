@@ -22,7 +22,7 @@ import { readOpsTaskListNavigation, writeOpsTaskListNavigation } from "./ops-tas
 import type { DataTablePageSize } from "@/lib/numbered-pagination"
 import { isNumberedPagePermissionError } from "@/lib/numbered-page-controller"
 import { Button } from "@/components/ui/button"
-import { ScrollableDialogContent } from "@/components/ui/form-dialog"
+import { ScrollableDialogBody, ScrollableDialogContent, ScrollableDialogFooter } from "@/components/ui/form-dialog"
 import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs"
 import {
   Dialog,
@@ -9696,7 +9696,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ? "할 일 추가"
           : `${workspaceLabel} 추가`
   const formCloseLabel = "닫기"
-  const formActionBarClassName = "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end"
 
   async function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate || isTeacherReadOnlyTask(resolvedViewerRole, type)) return
@@ -14147,82 +14146,86 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 ? "loading"
                 : "ready"}
           showCloseButton={false}
-          className={`z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh] ${registrationApplicationHost.kind === "detail"
-            ? "sm:max-w-[min(96vw,84rem)]"
-            : "sm:max-w-4xl"
-          }`}
+          className={registrationApplicationHost.kind === "create"
+            ? "z-[80] flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[92vh] sm:max-w-4xl"
+            : `z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh] ${registrationApplicationHost.kind === "detail"
+              ? "sm:max-w-[min(96vw,84rem)]"
+              : "sm:max-w-4xl"
+            }`}
         >
           {registrationApplicationHost.kind === "detail" ? (
             <span data-registration-state="saved" className="sr-only">저장된 신청서</span>
           ) : null}
           {registrationApplicationHost.kind === "create" ? (
-            <form onSubmit={submitForm} className="grid gap-3">
+            <form onSubmit={submitForm} className="flex min-h-0 min-w-0 flex-1 flex-col">
               <DialogTitle className="sr-only">등록 신청서</DialogTitle>
               <DialogDescription className="sr-only">새 등록 신청서 내용을 입력합니다.</DialogDescription>
-              {message ? (
-                <div role="alert" className="rounded-md border border-destructive/30 whitespace-pre-line bg-background px-3 py-2 text-sm text-destructive">
-                  <span>{message}</span>
-                  {formCompletionBlockers.length > 0 ? (
-                    <span className="mt-2 flex flex-wrap gap-1">
-                      {formCompletionBlockers.map((blocker) => (
-                        <button
-                          key={blocker}
-                          type="button"
-                          onClick={() => focusRegistrationFormSection(blocker)}
-                          aria-label={`${blocker} ${getCompletionBlockerNeedLabel(blocker)} 입력 단계로 이동`}
-                          className="inline-flex min-h-7 items-center rounded-full border border-destructive/25 bg-background px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/10"
-                        >
-                          {blocker} {getCompletionBlockerNeedLabel(blocker)}
-                        </button>
-                      ))}
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
-              <RegistrationApplicationCreate
-                form={form}
-                draft={registrationInitialWorkflowDraft}
-                persistence={registrationPersistence}
-                resolvedDirectorIds={registrationResolvedDirectorIds}
-                directorOptionsBySubject={registrationDirectorOptionsBySubject}
-                subjectCapabilities={registrationSubjectCapabilities}
-                subjectCapabilityError={registrationSubjectCapabilityError}
-                disabled={saving}
-                catalogStatus={registrationCreateCatalogStatus}
-                catalogError={registrationOptionsError}
-                onRetryCatalog={() => void retryRegistrationOptions()}
-                schools={registrationOptionsDataRef.current?.schools || []}
-                schoolCatalogStatus={registrationOptionsLoading
-                  ? "loading"
-                  : registrationOptionsDataRef.current?.schoolCatalogStatus
-                    || (registrationOptionsError ? "error" : "loading")}
-                schoolCatalogError={registrationOptionsDataRef.current?.schoolCatalogError || registrationOptionsError}
-                onRetrySchools={() => void retryRegistrationOptions()}
-                closeAction={(
-                  <Button type="button" variant="ghost" size="icon" onClick={requestRegistrationApplicationClose} aria-label={formCloseLabel}>
-                    <X className="size-4" />
-                  </Button>
-                )}
-                onFormPatch={updateFormPatch}
-                onRegistrationFieldChange={updateRegistration}
-                onDraftChange={setRegistrationInitialWorkflowDraft}
-              />
-              <div className={formActionBarClassName}>
+              <ScrollableDialogBody className="min-w-0 px-6 py-6">
+                {message ? (
+                  <div role="alert" className="mb-9 rounded-md border border-destructive/30 whitespace-pre-line break-words bg-background px-3 py-2 text-sm text-destructive [overflow-wrap:anywhere]">
+                    <span>{message}</span>
+                    {formCompletionBlockers.length > 0 ? (
+                      <span className="mt-2 flex flex-wrap gap-1">
+                        {formCompletionBlockers.map((blocker) => (
+                          <button
+                            key={blocker}
+                            type="button"
+                            onClick={() => focusRegistrationFormSection(blocker)}
+                            aria-label={`${blocker} ${getCompletionBlockerNeedLabel(blocker)} 입력 단계로 이동`}
+                            className="inline-flex min-h-7 items-center rounded-full border border-destructive/25 bg-background px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/10"
+                          >
+                            {blocker} {getCompletionBlockerNeedLabel(blocker)}
+                          </button>
+                        ))}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+                <RegistrationApplicationCreate
+                  form={form}
+                  draft={registrationInitialWorkflowDraft}
+                  persistence={registrationPersistence}
+                  resolvedDirectorIds={registrationResolvedDirectorIds}
+                  directorOptionsBySubject={registrationDirectorOptionsBySubject}
+                  subjectCapabilities={registrationSubjectCapabilities}
+                  subjectCapabilityError={registrationSubjectCapabilityError}
+                  disabled={saving}
+                  catalogStatus={registrationCreateCatalogStatus}
+                  catalogError={registrationOptionsError}
+                  onRetryCatalog={() => void retryRegistrationOptions()}
+                  schools={registrationOptionsDataRef.current?.schools || []}
+                  schoolCatalogStatus={registrationOptionsLoading
+                    ? "loading"
+                    : registrationOptionsDataRef.current?.schoolCatalogStatus
+                      || (registrationOptionsError ? "error" : "loading")}
+                  schoolCatalogError={registrationOptionsDataRef.current?.schoolCatalogError || registrationOptionsError}
+                  onRetrySchools={() => void retryRegistrationOptions()}
+                  closeAction={(
+                    <Button type="button" variant="ghost" size="icon" className="size-11 sm:size-9" onClick={requestRegistrationApplicationClose} aria-label={formCloseLabel}>
+                      <X className="size-4" />
+                    </Button>
+                  )}
+                  onFormPatch={updateFormPatch}
+                  onRegistrationFieldChange={updateRegistration}
+                  onDraftChange={setRegistrationInitialWorkflowDraft}
+                />
+              </ScrollableDialogBody>
+              <ScrollableDialogFooter className="flex flex-col gap-2 space-y-0 px-6 sm:flex-row sm:items-center sm:justify-end">
                 {formCompletionBlockers.length > 0 ? (
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => focusRegistrationFormSection(formCompletionBlockers[0])}
                     aria-label={`${getCompletionBlockerActionLabel(formCompletionBlockers)} 바로 입력`}
-                    className="w-full sm:w-auto"
+                    className="min-h-11 w-full sm:min-h-9 sm:w-auto"
                   >
                     {getCompletionBlockerActionLabel(formCompletionBlockers)}
                   </Button>
                 ) : null}
-                <Button type="submit" disabled={saving} className="w-full sm:w-auto">
+                <Button type="submit" disabled={saving} className="min-h-11 w-full sm:min-h-9 sm:w-auto">
                   {saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent, form.type, false)}
                 </Button>
-              </div>
+              </ScrollableDialogFooter>
             </form>
           ) : registrationApplicationHost.kind === "loading_detail" ? (
             <div className="grid gap-6">
