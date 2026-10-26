@@ -22,6 +22,7 @@ import { readOpsTaskListNavigation, writeOpsTaskListNavigation } from "./ops-tas
 import type { DataTablePageSize } from "@/lib/numbered-pagination"
 import { isNumberedPagePermissionError } from "@/lib/numbered-page-controller"
 import { Button } from "@/components/ui/button"
+import { ScrollableDialogContent } from "@/components/ui/form-dialog"
 import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs"
 import {
   Dialog,
@@ -8020,6 +8021,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ))
   const registrationPersistence = FACT_ONLY_REGISTRATION_PERSISTENCE
   const formBaselineRef = useRef(serializeOpsTaskInput(form))
+  const taskFormId = useId()
   const formOpenerRef = useRef<{ element: HTMLElement; pathname: string } | null>(null)
   const taskSearchInputRef = useRef<HTMLInputElement>(null)
   const [saving, setSaving] = useState(false)
@@ -13295,11 +13297,72 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       </div>
       {registrationApplicationHost.kind === "closed" ? (
       <Dialog open={workspaceDataBelongsToCurrentViewer && formOpen} onOpenChange={handleFormOpenChange}>
-        <DialogContent className={[
-          "z-[80] max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
-          form.type === "registration" ? "scroll-pb-24 sm:max-w-4xl" : "scroll-pb-24",
-          form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : form.type === "registration" ? "" : isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
-        ].join(" ")}
+        <ScrollableDialogContent
+          title={formDialogTitle}
+          description="운영 업무를 입력하고 저장합니다."
+          footer={(
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== "word_retest_retry" && (
+                (() => {
+                  const firstBlocker = formCompletionBlockers[0]
+                  return (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => focusRegistrationFormSection(firstBlocker)}
+                      aria-label={`${getCompletionBlockerActionLabel(formCompletionBlockers)} 바로 입력`}
+                      className="min-h-11 flex-1 sm:min-h-9 sm:flex-none"
+                    >
+                      {getCompletionBlockerActionLabel(formCompletionBlockers)}
+                    </Button>
+                  )
+                })()
+              )}
+	              {shouldShowFormDetailTabs && (
+                <div className="flex w-full items-center gap-2 sm:mr-auto sm:w-auto">
+                  {previousFormDetailStep && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setFormDetailStep(previousFormDetailStep.key)}
+                      aria-label="이전 단계"
+                      className={`min-w-0 flex-1 sm:flex-none ${form.type === "registration" ? "h-auto min-h-9 whitespace-normal" : ""}`}
+                    >
+                      <ChevronLeft className="size-4" />
+                      <span className={form.type === "registration" ? "break-words text-center leading-tight" : "truncate"}>{previousFormStepLabel}</span>
+                    </Button>
+                  )}
+                  {nextFormDetailStep && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setFormDetailStep(nextFormDetailStep.key)}
+                      aria-label="다음 단계"
+                      className={`min-w-0 flex-1 sm:flex-none ${form.type === "registration" ? "h-auto min-h-9 whitespace-normal" : ""}`}
+                    >
+                      <span className={form.type === "registration" ? "break-words text-center leading-tight" : "truncate"}>{nextFormStepLabel}</span>
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  )}
+                </div>
+              )}
+              {!registrationCreateApplicationRendered && (
+                <Button type="button" variant="outline" onClick={closeForm} className="min-h-11 flex-1 sm:min-h-9 sm:flex-none">
+                  {formCloseLabel}
+                </Button>
+              )}
+	              {!isEditingLockedCompletedTask && (
+	                <Button type="submit" form={taskFormId} disabled={saving || (!canSubmitCurrentForm && form.type !== "registration")} className="min-h-11 flex-1 sm:min-h-9 sm:flex-none">
+	                  {saving
+                      ? "저장 중"
+                      : wordRetestEditMode === "expected_only"
+                        ? "응시예정일시 저장"
+                        : getFormCompletionIntentSubmitLabel(formCompletionIntent, form.type, Boolean(editingTask))}
+	                </Button>
+	              )}
+            </div>
+          )}
+          className={cn("z-[80]", form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : form.type === "registration" ? "sm:max-w-4xl" : isTemplateForm ? "sm:max-w-3xl" : "sm:max-w-2xl")}
           closeButtonLabel={formCloseLabel}
           onCloseAutoFocus={(event) => {
             const opener = formOpenerRef.current
@@ -13314,13 +13377,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           onCloseButtonClick={closeForm}
           showCloseButton={!registrationCreateApplicationRendered}
         >
-          <DialogHeader className="-mx-6 -mt-6 border-b px-6 pb-5 pt-4">
-            <DialogTitle>{formDialogTitle}</DialogTitle>
-            <DialogDescription className="sr-only">
-              운영 업무를 입력하고 저장합니다.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitForm} className="grid gap-3">
+          <form id={taskFormId} onSubmit={submitForm} className="grid min-w-0 gap-3">
             {form.type === "registration" && registrationOptionsLoading && (
               <div role="status" aria-live="polite" className="rounded-md border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
                 상담 책임자·수업·교재 선택 정보를 불러오는 중입니다.
@@ -13665,68 +13722,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 )}
               </section>
             )}
-            <div className={formActionBarClassName}>
-              {!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== "word_retest_retry" && (
-                (() => {
-                  const firstBlocker = formCompletionBlockers[0]
-                  return (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => focusRegistrationFormSection(firstBlocker)}
-                      aria-label={`${getCompletionBlockerActionLabel(formCompletionBlockers)} 바로 입력`}
-                      className="w-full sm:w-auto"
-                    >
-                      {getCompletionBlockerActionLabel(formCompletionBlockers)}
-                    </Button>
-                  )
-                })()
-              )}
-	              {shouldShowFormDetailTabs && (
-                <div className="flex w-full items-center gap-2 sm:mr-auto sm:w-auto">
-                  {previousFormDetailStep && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setFormDetailStep(previousFormDetailStep.key)}
-                      aria-label="이전 단계"
-                      className={`min-w-0 flex-1 sm:flex-none ${form.type === "registration" ? "h-auto min-h-9 whitespace-normal" : ""}`}
-                    >
-                      <ChevronLeft className="size-4" />
-                      <span className={form.type === "registration" ? "break-words text-center leading-tight" : "truncate"}>{previousFormStepLabel}</span>
-                    </Button>
-                  )}
-                  {nextFormDetailStep && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setFormDetailStep(nextFormDetailStep.key)}
-                      aria-label="다음 단계"
-                      className={`min-w-0 flex-1 sm:flex-none ${form.type === "registration" ? "h-auto min-h-9 whitespace-normal" : ""}`}
-                    >
-                      <span className={form.type === "registration" ? "break-words text-center leading-tight" : "truncate"}>{nextFormStepLabel}</span>
-                      <ChevronRight className="size-4" />
-                    </Button>
-                  )}
-                </div>
-              )}
-              {!registrationCreateApplicationRendered && (
-                <Button type="button" variant="outline" onClick={closeForm} className="w-full sm:w-auto">
-                  {formCloseLabel}
-                </Button>
-              )}
-	              {!isEditingLockedCompletedTask && (
-	                <Button type="submit" disabled={saving || (!canSubmitCurrentForm && form.type !== "registration")} className="w-full sm:w-auto">
-	                  {saving
-                      ? "저장 중"
-                      : wordRetestEditMode === "expected_only"
-                        ? "응시예정일시 저장"
-                        : getFormCompletionIntentSubmitLabel(formCompletionIntent, form.type, Boolean(editingTask))}
-	                </Button>
-	              )}
-            </div>
           </form>
-        </DialogContent>
+        </ScrollableDialogContent>
       </Dialog>
       ) : null}
 
