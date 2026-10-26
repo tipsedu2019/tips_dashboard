@@ -698,14 +698,14 @@ test("makeup request route remains exposed to full roles but not the assistant s
   assert.doesNotMatch(assistantAllowedPathsSource, /"\/admin\/makeup-requests"/);
 });
 
-test("assistant makeup approval is rejected from the actor profile before body or service work", () => {
+test("teacher and assistant makeup approval is rejected from the actor profile before body or service work", () => {
   const postSource = makeupApprovalRouteSource.slice(
     makeupApprovalRouteSource.indexOf("export async function POST"),
   );
   const authIndex = postSource.indexOf("actorClient.auth.getUser(token)");
   const profileLookupIndex = postSource.indexOf('.from("profiles")');
   const lookupFailureIndex = postSource.indexOf("if (actorProfileError || !isRecord(actorProfile))");
-  const assistantDenialIndex = postSource.indexOf('if (text(actorProfile.role) === "assistant")');
+  const restrictedRoleDenialIndex = postSource.indexOf('if (["teacher", "assistant"].includes(text(actorProfile.role)))');
   const serviceClientIndex = postSource.indexOf("const serverClient = serviceClient()");
   const bodyIndex = postSource.indexOf("request.json()");
   const replayIndex = postSource.indexOf("attemptMakeupApprovalReplay");
@@ -720,15 +720,15 @@ test("assistant makeup approval is rejected from the actor profile before body o
   );
   assert.match(
     postSource,
-    /if \(text\(actorProfile\.role\) === "assistant"\) return response\(\{ ok: false, error: "휴보강 접근 권한이 없습니다\." \}, 403\)/,
+    /if \(\["teacher", "assistant"\]\.includes\(text\(actorProfile\.role\)\)\) return response\(\{ ok: false, error: "휴보강 접근 권한이 없습니다\." \}, 403\)/,
   );
   assert.doesNotMatch(postSource, /serverClient\s*\.from\("profiles"\)/);
   assert.ok(authIndex >= 0 && authIndex < profileLookupIndex, "actor authentication must precede the profile role lookup");
   assert.ok(profileLookupIndex < lookupFailureIndex, "profile lookup errors must fail closed");
-  assert.ok(lookupFailureIndex < assistantDenialIndex, "assistant role denial must follow the authoritative lookup");
-  assert.ok(assistantDenialIndex < serviceClientIndex, "assistant denial must precede service-role client creation");
-  assert.ok(assistantDenialIndex < bodyIndex, "assistant denial must precede request body parsing");
-  assert.ok(assistantDenialIndex < replayIndex, "assistant denial must precede approval replay");
+  assert.ok(lookupFailureIndex < restrictedRoleDenialIndex, "teacher/assistant role denial must follow the authoritative lookup");
+  assert.ok(restrictedRoleDenialIndex < serviceClientIndex, "teacher/assistant denial must precede service-role client creation");
+  assert.ok(restrictedRoleDenialIndex < bodyIndex, "teacher/assistant denial must precede request body parsing");
+  assert.ok(restrictedRoleDenialIndex < replayIndex, "teacher/assistant denial must precede approval replay");
 });
 
 test("makeup request migration creates request event and notification tables", () => {
