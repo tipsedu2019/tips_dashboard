@@ -6,6 +6,7 @@ import { useDraftNavigation } from "@/hooks/use-draft-navigation"
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -16,7 +17,7 @@ import {
 } from "react"
 import { ArrowDown, ArrowUp, Check, ChevronRight, ChevronsUpDown, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
 import { useSearchParams } from "next/navigation"
-import { DataTableToolbar, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { DataTableWorkspaceToolbar, DataTableFilters, DataTableReadFeedback, DATA_TABLE_FILTER_FIELD_CLASS_NAME, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
 import { DataTableSearchField } from "@/components/data-table/data-table-search-field"
 import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel"
 import { useDataTableColumns } from "@/components/data-table/data-table-columns"
@@ -926,6 +927,7 @@ function MakeupRequestDetailCard({
 function MakeupRequestCardList({
   requests,
   loading,
+  emptyLabel,
   data,
   currentUserId,
   canManage,
@@ -942,6 +944,7 @@ function MakeupRequestCardList({
 }: Omit<MakeupRequestActionControlsProps, "request" | "align"> & {
   requests: MakeupRequest[]
   loading: boolean
+  emptyLabel: string
   onOpenDetail: (request: MakeupRequest) => void
 }) {
   if (loading) {
@@ -958,7 +961,7 @@ function MakeupRequestCardList({
     return (
       <div className="grid gap-2 md:hidden" role="list" aria-label="휴보강 신청 카드목록">
         <div className="rounded-lg border px-4 py-10 text-center text-sm text-muted-foreground">
-          표시할 신청서가 없습니다.
+          {emptyLabel}
         </div>
       </div>
     )
@@ -1074,6 +1077,7 @@ type MakeupRequestSelectFilterOption = {
 }
 
 function MakeupRequestFilterSelect({
+  label,
   ariaLabel,
   value,
   allLabel,
@@ -1081,6 +1085,7 @@ function MakeupRequestFilterSelect({
   options,
   onChange,
 }: {
+  label: string
   ariaLabel: string
   value: string
   allLabel: string
@@ -1088,20 +1093,25 @@ function MakeupRequestFilterSelect({
   options: MakeupRequestSelectFilterOption[]
   onChange: (value: string) => void
 }) {
+  const id = useId()
+  const selectedLabel = value === "all" ? allLabel : options.find(option => option.value === value)?.label || "선택됨"
   return (
+    <div className={DATA_TABLE_FILTER_FIELD_CLASS_NAME}>
+    <Label htmlFor={id} className="text-xs text-muted-foreground">{label}</Label>
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger aria-label={ariaLabel} className="h-8 w-[8rem] bg-background">
-        <SelectValue placeholder={allLabel} />
+      <SelectTrigger id={id} aria-label={ariaLabel} className="w-full bg-background">
+        <SelectValue>{selectedLabel}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {includeAll ? <SelectItem value="all">{allLabel}</SelectItem> : null}
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <SelectItem key={option.value} value={option.value} textValue={option.label}>
             {option.label}{option.count ? ` ${option.count}` : ""}
           </SelectItem>
         ))}
       </SelectContent>
     </Select>
+    </div>
   )
 }
 
@@ -1121,26 +1131,26 @@ function MakeupRequestPeriodFilterBar({
   onEndDateChange: (value: string) => void
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="휴보강 기간 필터">
-      <div className="inline-flex max-w-full overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <fieldset className="grid min-w-0 gap-1.5" aria-label="휴보강 기간 필터">
+      <legend className="mb-1.5 text-xs font-medium text-muted-foreground">기간</legend>
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
         {MAKEUP_REQUEST_PERIOD_FILTERS.map((filter) => (
-          <button
+          <Button
             key={filter.key}
             type="button"
             aria-pressed={value === filter.key}
             aria-label={`${filter.label} 휴보강 보기`}
             onClick={() => onChange(filter.key)}
-            className={[
-              "shrink-0 rounded px-3 py-1.5 text-sm font-medium",
-              value === filter.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
-            ].join(" ")}
+            variant={value === filter.key ? "secondary" : "ghost"}
+            size="form"
+            className="px-3"
           >
             {filter.label}
-          </button>
+          </Button>
         ))}
       </div>
       {value === "custom" ? (
-        <div className="grid min-w-[18rem] flex-1 gap-2 sm:max-w-sm sm:grid-cols-2">
+        <div className="grid min-w-0 gap-2 sm:max-w-sm sm:grid-cols-2">
           <DatePickerControl
             value={startDate}
             onChange={onStartDateChange}
@@ -1155,7 +1165,7 @@ function MakeupRequestPeriodFilterBar({
           />
         </div>
       ) : null}
-    </div>
+    </fieldset>
   )
 }
 
@@ -1163,6 +1173,10 @@ function MakeupRequestDataTable({
   requests,
   loading,
   readError = false,
+  readErrorMessage,
+  acceptedCriteriaLabel,
+  onRetry,
+  createAction,
   data,
   currentUserId,
   canManage,
@@ -1184,6 +1198,10 @@ function MakeupRequestDataTable({
   requests: MakeupRequest[]
   loading: boolean
   readError?: boolean
+  readErrorMessage: string
+  acceptedCriteriaLabel: string
+  onRetry: () => unknown
+  createAction: ReactNode
   data: MakeupRequestWorkspaceData
   currentUserId: string
   canManage: boolean
@@ -1203,6 +1221,7 @@ function MakeupRequestDataTable({
   teacherFilterOptions: MakeupRequestSelectFilterOption[]
 }) {
   const { role } = useAuth()
+  const searchRef = useRef<HTMLInputElement>(null)
   const tableColumns = useMemo(() => MAKEUP_REQUEST_TABLE_COLUMNS.filter(column => role !== "teacher" || column.columnKey === "action" || MAKEUP_COMMON_COLUMNS.some(key => key === column.columnKey)), [role])
   const [columnWidths, setColumnWidths] = useState<Record<MakeupRequestTableColumnKey, number>>(MAKEUP_REQUEST_TABLE_COLUMN_WIDTHS)
   const makeupTableSort: MakeupRequestTableSort = filters.sortColumn && filters.sortDirection ? { columnKey: filters.sortColumn, direction: filters.sortDirection } : null
@@ -1225,6 +1244,16 @@ function MakeupRequestDataTable({
   const gridTemplateStyle = { "--makeup-request-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = tableColumns.find((column) => column.columnKey === filterColumnKey) || tableColumns[1]
   const visibleRequests = requests
+  const hasResultFilters = Boolean(filterValue.trim()) || selectedSubjectFilter !== "all" || selectedTeacherFilter !== "all" || makeupPeriodFilter !== "all"
+  const canResetFilters = Boolean(filterValue) || filterColumnKey !== "className" || hasResultFilters
+  const resetFilters = () => onFiltersChange({ search: "", filterColumn: "className", subject: "all", teacher: "all", period: "all" })
+  const emptyLabel = hasResultFilters ? "검색 조건에 맞는 신청서가 없습니다." : "표시할 신청서가 없습니다."
+  const readFeedback = readError ? <DataTableReadFeedback label="조회 실패" message={readErrorMessage}
+    retryLabel="휴보강 목록 다시 불러오기" onRetry={onRetry} returnFocusRef={searchRef} /> : loading ? (
+      <span role="status" className="min-w-0 text-xs text-muted-foreground" title={acceptedCriteriaLabel}>
+        조회 중<span className="sr-only">{acceptedCriteriaLabel ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}</span>
+      </span>
+    ) : null
 
   function handleHeaderSelect(columnKey: MakeupRequestTableColumnKey) {
     if (columnKey === "action") return
@@ -1254,20 +1283,20 @@ function MakeupRequestDataTable({
   return (
     <div className="grid min-w-0 gap-2">
       <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
-        <DataTableToolbar aria-label="휴보강 전체 필터">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <MakeupRequestFilterSelect ariaLabel="휴보강 검색 범위" includeAll={false} value={filterColumnKey} allLabel="수업" options={tableColumns.filter(column => column.columnKey !== "action").map(column => ({value: column.columnKey, label: column.label, count: 0}))} onChange={value => onFiltersChange({filterColumn: value as MakeupNumberedFilters["filterColumn"]})} />
-            <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="휴보강 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
-            {columnSettingsControl}
-          </div>
-          <DataTableFilterPanel label="휴보강 검색 조건" activeFilters={[
+        <DataTableWorkspaceToolbar aria-label="휴보강 전체 필터"
+          search={<DataTableSearchField ref={searchRef} value={filterValue} onValueChange={setFilterValue} label="휴보강 검색" placeholder={`${filterColumn.label} 검색`} />}
+          actions={<>{readFeedback}{columnSettingsControl}{createAction}</>}
+          filters={<DataTableFilterPanel label="휴보강 검색 조건" onReset={resetFilters} canReset={canResetFilters} activeFilters={[
+            ...(filterValue ? [{ label: "검색", value: filterValue }] : []),
+            ...(filterColumnKey !== "className" ? [{ label: "검색 범위", value: filterColumn.label }] : []),
             ...(selectedSubjectFilter !== "all" ? [{label: "과목", value: selectedSubjectFilter}] : []),
             ...(selectedTeacherFilter !== "all" ? [{label: "선생님", value: teacherFilterOptions.find(option => option.value === selectedTeacherFilter)?.label || "선택됨"}] : []),
             ...(makeupPeriodFilter !== "all" ? [{label: "기간", value: MAKEUP_REQUEST_PERIOD_FILTERS.find(item => item.key === makeupPeriodFilter)?.label || "기간"}] : []),
           ]}>
-          <div className="flex flex-wrap items-center gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="휴보강 선택 필터">
+          <DataTableFilters aria-label="휴보강 선택 필터">
+            <MakeupRequestFilterSelect label="검색 범위" ariaLabel="휴보강 검색 범위" includeAll={false} value={filterColumnKey} allLabel="수업" options={tableColumns.filter(column => column.columnKey !== "action").map(column => ({value: column.columnKey, label: column.label, count: 0}))} onChange={value => onFiltersChange({filterColumn: value as MakeupNumberedFilters["filterColumn"]})} />
             <MakeupRequestFilterSelect
+              label="과목"
               ariaLabel="과목 필터"
               value={selectedSubjectFilter}
               allLabel="과목 전체"
@@ -1277,13 +1306,13 @@ function MakeupRequestDataTable({
               }}
             />
             <MakeupRequestFilterSelect
+              label="선생님"
               ariaLabel="선생님 필터"
               value={selectedTeacherFilter}
               allLabel="선생님 전체"
               options={teacherFilterOptions}
               onChange={(teacher) => onFiltersChange({ teacher })}
             />
-          </div>
           <MakeupRequestPeriodFilterBar
             value={makeupPeriodFilter}
             startDate={makeupPeriodStartDate}
@@ -1292,9 +1321,10 @@ function MakeupRequestDataTable({
             onStartDateChange={(dateFrom) => onFiltersChange({ dateFrom })}
             onEndDateChange={(dateTo) => onFiltersChange({ dateTo })}
           />
-          </div>
-          </DataTableFilterPanel>
-        </DataTableToolbar>
+          <Button type="button" variant="ghost" size="form" className="hidden md:inline-flex" onClick={resetFilters} disabled={!canResetFilters}>조건 초기화</Button>
+          </DataTableFilters>
+          </DataTableFilterPanel>}
+        />
         <div className="hidden md:block">
           <div className="w-full overflow-x-auto" role="table" aria-label="휴보강 신청 데이터테이블">
             <div
@@ -1315,7 +1345,7 @@ function MakeupRequestDataTable({
             {loading && visibleRequests.length === 0 ? (
               <div className="px-4 py-12 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
             ) : readError && visibleRequests.length === 0 ? null : visibleRequests.length === 0 ? (
-              <div className="px-4 py-12 text-center text-sm text-muted-foreground">표시할 신청서가 없습니다.</div>
+              <div className="px-4 py-12 text-center text-sm text-muted-foreground">{emptyLabel}</div>
             ) : visibleRequests.map((request) => {
               const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
               return (
@@ -1376,6 +1406,7 @@ function MakeupRequestDataTable({
       {!(readError && visibleRequests.length === 0) && <MakeupRequestCardList
         requests={visibleRequests}
         loading={loading && visibleRequests.length === 0}
+        emptyLabel={emptyLabel}
         data={data}
         currentUserId={currentUserId}
         canManage={canManage}
@@ -2419,18 +2450,11 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
               )
             })}
           </WorkspaceTabsList>
-          <div className="flex items-center justify-end gap-2">
-            {canProcessRequest ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
-              <Plus className="size-4" aria-hidden="true" />
-              휴보강 신청
-            </Button> : null}
-          </div>
         </div>
       </div>
 
       <WorkspaceTabsPanel className="flex flex-col gap-4">
       {message ? notificationWarning ? <Alert variant="destructive"><AlertDescription>{message} {notificationWarning}</AlertDescription></Alert> : <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
-      {pageState.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}{pageState.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}<Button variant="outline" onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void controllerRef.current?.retry() }}>다시 시도</Button></div> : null}
       {role !== "teacher" && (contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null)}
       {error ? (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -2729,6 +2753,13 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           key={`makeup:${navigation.filters.view}`}
           requests={filteredRequests}
           readError={Boolean(pageState.error)}
+          readErrorMessage={pageState.error ? `${getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}${pageState.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}` : ""}
+          acceptedCriteriaLabel={pageState.totalCount !== null ? acceptedCriteriaLabel : ""}
+          onRetry={() => controllerRef.current?.retry()}
+          createAction={canProcessRequest ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
+            <Plus className="size-4" aria-hidden="true" />
+            휴보강 신청
+          </Button> : null}
           loading={loading}
           data={data}
           currentUserId={currentUserId}

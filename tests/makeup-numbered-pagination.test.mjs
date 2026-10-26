@@ -5,6 +5,105 @@ import test from 'node:test';
 import { act } from 'react';
 import { modules, id, stamp, filters, row, counts, facets, response, transport, servicePath, setup, button, tab } from './helpers/makeup-numbered-harness.mjs';
 
+test('makeup condition reset preserves workflow and personal state while returning to the unfiltered first page', async t => {
+  const dates = { dateFrom: '2026-09-01', dateTo: '2026-09-12' };
+  const selected = { ...filters, view: 'closed', search: '가상사유', filterColumn: 'reason', subject: '영어', teacher: 'name:교사', period: 'custom', ...dates, sortColumn: 'teacher', sortDirection: 'desc' };
+  const query = new URLSearchParams({ view: 'closed', page: '2', makeupFilters: JSON.stringify(selected), makeupCustomDates: JSON.stringify(dates) });
+  const p = await setup(t, { search: `?${query}` });
+  await act(async () => p.finish(p.numbered()[0], 30));
+  await act(async () => button('컬럼 구성').click());
+  await act(async () => button('과목 표시').click());
+  const columns = window.localStorage.getItem('tips:makeup:closed:columns');
+  await act(async () => button('컬럼 구성 닫기').click());
+  const command = document.querySelector('[data-slot="data-table-command-row"]');
+  const search = command.querySelector('input[type="search"]');
+  const create = button('휴보강 신청');
+  await act(async () => button('조건 초기화').click());
+  const reset = p.numbered().at(-1);
+  assert.equal(reset.args.p_page, 1);
+  assert.equal(reset.args.p_page_size, 10);
+  assert.deepEqual(reset.args.p_filters, { ...filters, view: 'closed', sortColumn: 'teacher', sortDirection: 'desc' });
+  assert.equal(button('조건 초기화').disabled, true);
+  assert.ok(search === document.querySelector('input[type="search"]'), 'search keeps its DOM identity');
+  assert.ok(create === button('휴보강 신청'), 'create keeps its DOM identity');
+  assert.equal(window.localStorage.getItem('tips:makeup:closed:columns'), columns);
+  assert.equal(tab('승인/반려').getAttribute('aria-selected'), 'true');
+  await act(async () => p.finish(reset, 30));
+  assert.deepEqual(JSON.parse(new URLSearchParams(window.location.search).get('makeupCustomDates')), dates);
+  await act(async () => button('직접입력 휴보강 보기').click());
+  assert.equal(p.numbered().at(-1).args.p_filters.dateFrom, dates.dateFrom);
+  assert.equal(p.numbered().at(-1).args.p_filters.dateTo, dates.dateTo);
+  assert.equal(p.requests.some(r => r.name && !['list_makeup_numbered_page_v1', 'get_makeup_reservation_context_v1', 'get_makeup_effective_occupancy_v1'].includes(r.name)), false);
+});
+
+test('makeup read feedback keeps search, create and column settings mounted while retry retains accepted rows', async t => {
+  const p = await setup(t, { search: '?view=approvalPending' });
+  await act(async () => p.finish(p.numbered()[0], 2));
+  const search = document.querySelector('input[type="search"]'), create = button('휴보강 신청'), settings = button('컬럼 구성');
+  await act(async () => p.observed.changeFilters({ search: '없는 가상수업' }));
+  const pending = p.numbered().at(-1);
+  await act(async () => settings.click());
+  const settingsClose = button('컬럼 구성 닫기');
+  await act(async () => pending.reject(new Error('Synthetic read unavailable')));
+  const feedback = document.querySelector('[data-slot="data-table-command-row"] [role="alert"]');
+  assert.ok(feedback);
+  assert.match(feedback.textContent, /조회 실패.*이전 조회 결과/);
+  assert.ok(settingsClose === button('컬럼 구성 닫기'), 'an open settings panel is not remounted by feedback');
+  assert.ok(settings === button('컬럼 구성'), 'settings trigger keeps its DOM identity');
+  assert.ok(create === button('휴보강 신청'), 'create keeps its DOM identity');
+  assert.ok(search === document.querySelector('input[type="search"]'), 'search keeps its DOM identity');
+  assert.match(document.querySelector('[role="table"]').textContent, /수업 1/);
+  assert.doesNotMatch(document.querySelector('[role="table"]').textContent, /신청서가 없습니다/);
+  await act(async () => settingsClose.click());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
+  await act(async () => button('휴보강 목록 다시 불러오기').click());
+  assert.ok(document.activeElement === search, 'retry returns focus to search');
+  assert.equal(p.numbered().at(-1).args.p_filters.search, '없는 가상수업');
+  assert.match(document.querySelector('[data-slot="data-table-command-row"] [role="status"]').textContent, /조회 중.*이전 조회 결과/);
+  assert.ok(create === button('휴보강 신청'), 'create stays mounted while retrying');
+  await act(async () => p.finish(p.numbered().at(-1), 0));
+  assert.equal(document.querySelector('[data-slot="data-table-command-row"] [role="alert"]'), null);
+  assert.match(document.querySelector('[role="table"]').textContent, /검색 조건에 맞는 신청서가 없습니다/);
+});
+
+test('makeup initial failure is not a successful empty result and the two empty states remain distinct', async t => {
+  const p = await setup(t, { auth: { role: 'teacher' } });
+  assert.match(document.querySelector('[role="table"]').textContent, /불러오는 중/);
+  await act(async () => p.numbered()[0].reject(new Error('Synthetic initial read failure')));
+  assert.doesNotMatch(document.querySelector('[role="table"]').textContent, /신청서가 없습니다/);
+  assert.equal(button('휴보강 신청'), undefined);
+  await act(async () => button('휴보강 목록 다시 불러오기').click());
+  await act(async () => p.finish(p.numbered().at(-1), 0));
+  assert.match(document.querySelector('[role="table"]').textContent, /표시할 신청서가 없습니다/);
+  await act(async () => p.observed.changeFilters({ subject: '영어', teacher: 'name:교사', filterColumn: 'className', search: '가상검색' }));
+  await act(async () => p.finish(p.numbered().at(-1), 0, { teacherOptions: [] }));
+  assert.match(document.querySelector('[role="table"]').textContent, /검색 조건에 맞는 신청서가 없습니다/);
+  assert.equal(document.querySelector('[aria-label="선생님 필터"]').textContent.trim(), '선택됨', 'a missing choice is not mislabeled as all or disclosed from a stale cache');
+  assert.match(document.querySelector('[data-slot="data-table-mobile-filters"]').textContent, /가상검색.*영어.*선택됨/);
+  await act(async () => button('조건 초기화').click());
+  assert.equal(p.numbered().at(-1).args.p_filters.filterColumn, 'className');
+  assert.equal(p.numbered().at(-1).args.p_filters.teacher, 'all');
+  assert.equal(p.requests.some(r => r.name && !['list_makeup_numbered_page_v1'].includes(r.name)), false, 'teacher reset must not invoke restricted reservation or write RPCs');
+});
+
+test('makeup open request draft and its return trigger survive an in-flight list read failure', async t => {
+  const p = await setup(t, { search: '?view=approvalPending' });
+  await act(async () => p.finish(p.numbered()[0], 2));
+  await p.catalogs();
+  await act(async () => p.observed.changeFilters({ subject: '영어' }));
+  const pending = p.numbered().at(-1), create = button('휴보강 신청');
+  await act(async () => { create.focus(); create.click(); });
+  await p.catalogs();
+  await act(async () => p.observed.patch(current => ({ ...current, reason: '전송하지 않는 가상 초안' })));
+  const dialog = document.querySelector('[role="dialog"]');
+  await act(async () => pending.reject(new Error('Synthetic late read failure')));
+  assert.ok(document.querySelector('[role="dialog"]') === dialog, 'the open request dialog keeps its DOM identity');
+  assert.equal(dialog.querySelector('textarea').value, '전송하지 않는 가상 초안');
+  assert.ok(button('휴보강 신청') === create, 'create remains a valid return target');
+  assert.equal(create.isConnected, true);
+  assert.equal(p.requests.some(r => r.name && /create|transition|approve|refund/.test(r.name)), false);
+});
+
 test('mounted query navigation adopts list, custom dates and off-page detail without native popstate or URL replay', async (t) => {
   const p = await setup(t, { search: '?view=approvalPending&page=11&keep=1' });
   await act(async () => p.finish(p.numbered()[0]));

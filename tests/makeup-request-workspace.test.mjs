@@ -842,8 +842,11 @@ test("makeup workspace includes approver queues form fields and room availabilit
     workspaceSource.indexOf("{message ?"),
   );
   assert.doesNotMatch(headerActionSource, /휴보강 알림 설정|<Bell/);
-  assert.match(headerActionSource, /<Plus className="size-4"/);
-  assert.match(headerActionSource, />\s*휴보강 신청\s*</);
+  const createActionSource = workspaceSource.slice(workspaceSource.indexOf('createAction={canProcessRequest'), workspaceSource.indexOf('loading={loading}', workspaceSource.indexOf('createAction={canProcessRequest')));
+  assert.doesNotMatch(headerActionSource, />\s*휴보강 신청\s*</, 'create is in the list command row, not a separate tab header');
+  assert.match(createActionSource, /<Plus className="size-4"/);
+  assert.match(createActionSource, />\s*휴보강 신청\s*</);
+  assert.match(workspaceSource, /actions=\{<>\{readFeedback\}\{columnSettingsControl\}\{createAction\}<\/?>\}/, 'read feedback must retain the column and create owners');
   assert.doesNotMatch(headerActionSource, /<Settings className/);
   assert.doesNotMatch(workspaceSource, /새로고침/);
   assert.doesNotMatch(workspaceSource, /RefreshCw/);
