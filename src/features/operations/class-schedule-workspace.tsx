@@ -2925,7 +2925,11 @@ export function ClassScheduleWorkspace() {
     });
 
     setFocusedLessonMonthKey((current) => {
+      // Legacy metadata can arrive before the authoritative schedule read. Do
+      // not let its earliest month replace the month that is being requested.
+      if (!lessonScheduleReadReady) return current;
       if (isNormalizedLessonSchedule && /^\d{4}-\d{2}$/.test(current)) return current;
+      if (isNormalizedLessonSchedule) return normalizedReadMonthKey;
       const normalizedCurrent = normalizeSelectedLessonMonthKeys(
         current ? [current] : [],
         lessonDesignSnapshot.monthSummaries,
@@ -2943,7 +2947,7 @@ export function ClassScheduleWorkspace() {
       }
       return lessonDesignSnapshot.billingPeriods[0]?.id || "all";
     });
-  }, [isNormalizedLessonSchedule, lessonDesignSnapshot]);
+  }, [isNormalizedLessonSchedule, lessonDesignSnapshot, lessonScheduleReadReady, normalizedReadMonthKey]);
 
   const filteredLessonSessions = useMemo(() => {
     const sessions = uniqueLessonSessionsByIdentity(lessonDesignSnapshot?.sessions || []);
