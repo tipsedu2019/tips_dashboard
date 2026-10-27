@@ -1,4 +1,5 @@
 import { validatePageSize } from '../../lib/numbered-pagination.ts';
+import { parseClassScheduleMonthSummary } from './class-schedule-month-summary.ts';
 
 /**
  * @typedef {{termId:string|null,search:string,subject:string|null,grade:string|null,teacher:string|null,syncGroupId:string|null}} ClassScheduleNumberedFilters
@@ -604,6 +605,14 @@ export function createOperationsReadService(options = {}) {
           .abortSignal(AbortSignal.timeout(8_000))
           .retry(false),
       );
+    },
+    async loadClassScheduleMonthSummary({ classId, year }) {
+      const id = text(classId);
+      if (!UUID.test(id)) throw operationsError("operations_class_id_invalid");
+      if (!Number.isInteger(year) || year < 1 || year > 9998) throw operationsError("operations_range_invalid");
+      const value = await unwrapRpc(client.rpc("get_class_schedule_month_summary_v1", { p_class_id: id, p_year: year })
+        .abortSignal(AbortSignal.timeout(8_000)).retry(false));
+      return parseClassScheduleMonthSummary(value, id, year);
     },
     async loadClassLessonDesignDetail(classId) {
       const id = text(classId);

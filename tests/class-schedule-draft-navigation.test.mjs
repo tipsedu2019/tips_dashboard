@@ -1066,7 +1066,8 @@ test('normalized month display separates loading, error, retry and confirmed emp
   assert.equal(page.observed.normalizedScheduleRefreshNonce,nonce+1);
   await normalizedMonth(page,'2026-11',[]);
   assert.match(monthRow('2026-11').textContent,/0회/);
-  assert.equal(monthRow('2026-10'),null,'previous loaded-only hint is not retained as a count cache');
+  assert.match(monthRow('2026-10').textContent,/미조회/,'annual navigation retains the month but never the previous detail count');
+  assert.doesNotMatch(monthRow('2026-10').textContent,/1회|0회/);
   assert.match(document.querySelector('[data-lesson-calendar-empty]').textContent,/2026.11.*등록된 일정이 없습니다/);
   assert.equal(saveRequests(page).length,0);
 });
@@ -1078,9 +1079,10 @@ test('normalized month display uses calendar months across legacy period and yea
   await refreshDetail(page,next);
   const storedBefore=structuredClone(page.observed.lessonPlanForSave.billingPeriods);
   await normalizedMonth(page,'2027-01',[{...octoberSession(),session_date:'2027-01-04'}]);
-  assert.match(monthRow('2026-06').textContent,/미조회/);
-  assert.match(monthRow('2026-07').textContent,/미조회/);
-  assert.match(monthRow('2026-12').textContent,/미조회/);
+  assert.equal(Boolean(monthRow('2026-06')),false,'old-year metadata cannot leak into selected annual summary');
+  assert.equal(Boolean(monthRow('2026-07')),false);
+  assert.equal(Boolean(monthRow('2026-12')),false);
+  assert.equal(document.querySelectorAll('[data-lesson-month]').length,12);
   assert.match(monthRow('2027-01').textContent,/1회/);
   assert.match(monthRow('2027-01').textContent,/2027.01.01.*2027.01.31/);
   assert.deepEqual(page.observed.lessonPlanForSave.billingPeriods,storedBefore);
@@ -1119,13 +1121,16 @@ test('normalized month display first-read failure has no false counts and can re
  assert.equal(saveRequests(page).length,0);
 });
 
-test('normalized exception overrides still count as occupied lessons', async t => {
+test('normalized exception remains a calendar row without counting as an actual lesson', async t => {
   const page = await editor(t, 'curriculum/lesson-design');
   await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:1,contentHash:'override',sessions:[
     {id:id(600),session_key:'session-one',session_date:'2026-08-03',session_number:1,revision:1,schedule_state:'exception'},
   ]}}});
-  const period = document.querySelector('[id^="lesson-design-period-detail-"]');
-  assert.equal(period.querySelector('[data-slot="badge"]').textContent, '1회');
+  const period = monthRow('2026-08');
+  assert.equal(period.querySelector('[data-slot="badge"]').textContent, '전체 0회');
+  assert.equal(page.observed.lessonDesignSnapshot.sessions.length, 1);
+  assert.equal(page.observed.lessonDesignSnapshot.sessions[0].scheduleState, 'exception');
+  assert.equal(saveRequests(page).length, 0);
 });
 test('plan: same-class refreshed source preserves an authored draft', async t => {
   const page = await editor(t); await editPlan(page, 'ADDITIONAL INPUT');
@@ -2319,4 +2324,120 @@ test('initial legacy month keeps its established first-period selection after au
   assert.equal(page.observed.focusedLessonMonthKey, '2026-04');
   assert.match(document.querySelector('[data-lesson-period-sidebar]').textContent, /4월/);
   assert.equal(saveRequests(page).length, 0);
+});
+
+const annualReads = page => page.requests.filter(r => r.name === 'get_class_schedule_month_summary_v1');
+const annualPayload = (year = 2026, counts = { 10: 1, 11: 2 }, classId = id(999)) => ({
+  classId, year, authoritativeSource: 'normalized', months: Array.from({ length: 12 }, (_, i) => ({ month: i + 1, count: counts[i + 1] || 0 })),
+});
+const acceptAnnual = (request, payload = annualPayload()) => act(async () => request.resolve({ data: payload, error: null }));
+
+test('annual lesson counts use one bounded summary without loading twelve detail months', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], [initialMonthSession('2026-10-02')]);
+  assert.equal(annualReads(page).length, 1);
+  assert.deepEqual(annualReads(page)[0].args, { p_class_id: id(999), p_year: 2026 });
+  await acceptAnnual(annualReads(page)[0]);
+  assert.equal(document.querySelectorAll('[data-lesson-month]').length, 12);
+  assert.match(monthRow('2026-11').textContent, /2회/);
+  assert.match(monthRow('2026-02').textContent, /0회/);
+  assert.equal(authoritativeReads(page).length, 1);
+  assert.equal(saveRequests(page).length, 0);
+});
+
+test('confirmed empty annual month remains selected and detail is still requested independently', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], [initialMonthSession('2026-10-02')]);
+  await acceptAnnual(annualReads(page)[0]);
+  await act(async () => monthRow('2026-02').querySelector('button').click());
+  assert.equal(page.observed.focusedLessonMonthKey, '2026-02');
+  assert.equal(authoritativeReads(page).at(-1).args.p_date_from, '2026-02-01');
+  await acceptAuthoritativeMonth(authoritativeReads(page).at(-1));
+  assert.equal(page.observed.focusedLessonMonthKey, '2026-02');
+  assert.match(monthRow('2026-02').textContent, /0회/);
+  assert.equal(annualReads(page).length, 1, 'same-year selection reuses the current summary only');
+});
+
+test('annual failure is not zero and retry preserves the loaded month and filters', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], [initialMonthSession('2026-10-02')]);
+  await act(async () => annualReads(page)[0].resolve({ data: null, error: { code: 'synthetic', message: 'synthetic' } }));
+  assert.doesNotMatch(monthRow('2026-11').textContent, /0회/);
+  assert.match(monthRow('2026-10').textContent, /1회/);
+  await act(async () => page.observed.setSelectedLessonScheduleState('makeup'));
+  await act(async () => document.querySelector('button[aria-label="월별 회차 집계 다시 조회"]').click());
+  await acceptAnnual(annualReads(page).at(-1));
+  assert.equal(page.observed.selectedLessonScheduleState, 'makeup');
+  assert.match(monthRow('2026-10').textContent, /전체 1회.*조건 0회/);
+  assert.match(monthRow('2026-11').textContent, /2회/);
+  assert.doesNotMatch(monthRow('2026-11').textContent, /조건/);
+  assert.equal(authoritativeReads(page).length, 1, 'summary-only retry does not refetch loaded detail');
+});
+
+test('annual responses cannot cross year or actor boundaries', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], [initialMonthSession('2026-10-02')]);
+  const old = annualReads(page)[0];
+  await act(async () => page.observed.setFocusedLessonMonthKey('2027-01'));
+  await acceptAuthoritativeMonth(authoritativeReads(page).at(-1));
+  const next = annualReads(page).at(-1);
+  assert.equal(next.args.p_year, 2027);
+  await acceptAnnual(old);
+  assert.equal(monthRow('2026-11'), null);
+  await acceptAnnual(next, annualPayload(2027, { 3: 4 }));
+  assert.match(monthRow('2027-03').textContent, /4회/);
+  await page.auth({ user: null, role: null });
+  assert.equal(document.querySelector('[data-lesson-month]'), null);
+});
+
+test('summary and selected-detail disagreement is marked unconfirmed without an automatic request loop', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], [initialMonthSession('2026-10-02')]);
+  await acceptAnnual(annualReads(page)[0], annualPayload(2026, { 10: 2, 11: 6 }));
+  assert.match(monthRow('2026-10').textContent, /1회/);
+  assert.doesNotMatch(monthRow('2026-11').textContent, /6회|0회/);
+  assert.ok(document.querySelector('button[aria-label="월별 회차 집계 다시 조회"]'));
+  assert.equal(annualReads(page).length, 1);
+  assert.equal(authoritativeReads(page).length, 1);
+});
+
+test('annual and selected counts exclude cancellation states without removing their calendar cells', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], ['active','makeup','exception','skipped','tbd'].map((state,i) => ({
+    ...initialMonthSession(`2026-10-0${i+2}`, 651+i), schedule_state: state,
+  })));
+  await acceptAnnual(annualReads(page)[0], annualPayload(2026, { 10: 2, 11: 3 }));
+  assert.match(monthRow('2026-10').textContent, /전체 2회/);
+  assert.match(monthRow('2026-11').textContent, /전체 3회/);
+  assert.equal(Boolean(document.querySelector('button[aria-label="월별 회차 집계 다시 조회"]')), false);
+  assert.ok(page.observed.lessonDesignSnapshot.sessions.some(row => row.scheduleState === 'exception'));
+  await act(async () => page.observed.setSelectedLessonScheduleState('exception'));
+  assert.match(monthRow('2026-10').textContent, /전체 2회.*조건 0회/);
+});
+
+test('accepted mutation invalidates the annual summary even when metadata refresh fails', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], [initialMonthSession('2026-10-02')]);
+  await acceptAnnual(annualReads(page)[0]);
+  let refresh;
+  await act(async () => { refresh = page.observed.refreshSelectedLessonDetail(page.observed.mutationToken).catch(() => 'failed'); });
+  assert.equal(annualReads(page).length,2,'annual invalidation starts before metadata success');
+  assert.doesNotMatch(monthRow('2026-11').textContent,/전체 2회/);
+  await act(async () => page.requests.filter(r=>r.name==='get_operations_class_lesson_design_detail_v1').at(-1).resolve({data:null,error:{code:'synthetic',message:'synthetic'}}));
+  assert.equal(await refresh,'failed');
+  await acceptAuthoritativeMonth(authoritativeReads(page).at(-1),[initialMonthSession('2026-10-02')]);
+  await acceptAnnual(annualReads(page).at(-1),annualPayload(2026,{10:1,11:3}));
+  assert.match(monthRow('2026-11').textContent,/전체 3회/);
+  assert.equal(saveRequests(page).length,0,'fixture models the post-mutation refresh without any real mutation');
+});
+
+test('leaving the selected class hides an in-flight annual reply', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0],[initialMonthSession('2026-10-02')]);
+  const old=annualReads(page)[0];
+  window.history.replaceState(null,'',`/admin/curriculum/lesson-design?classId=${id(998)}&section=lesson-design-periods`);
+  await page.render();
+  await acceptAnnual(old);
+  assert.equal(Boolean(document.querySelector('[data-lesson-month]')),false,'old class counts hidden before new detail');
+  assert.equal(saveRequests(page).length,0);
 });

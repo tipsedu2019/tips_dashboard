@@ -225,6 +225,12 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest, 
     if (serviceRef.current !== service) throw new Error("stale_actor");
     return detail;
   }, [service]);
+  const loadClassScheduleMonthSummary = useCallback(async (input: { classId: string; year: number }) => {
+    if (!service || serviceRef.current !== service) throw new Error("operations_client_missing");
+    const value = await service.loadClassScheduleMonthSummary(input);
+    if (serviceRef.current !== service) throw new Error("stale_actor");
+    return value;
+  }, [service]);
   const loadClassLessonDesignDetail = useCallback(async (input: Parameters<NonNullable<typeof service>["loadClassLessonDesignDetail"]>[0]) => {
     if (!service || serviceRef.current !== service) throw new Error("operations_client_missing");
     const detail = await service.loadClassLessonDesignDetail(input);
@@ -247,6 +253,6 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest, 
     page: snapshot?.page || 1, pageSize: snapshot?.scope ? snapshot.pageSize : size.pageSize,
     totalCount: snapshot?.totalCount ?? null,
     setPageSizePreference, goToPage, refresh,
-    loadEventDetail, loadClassScheduleDetail, loadClassLessonDesignDetail, loadLessonTextbookCandidates,
+    loadEventDetail, loadClassScheduleDetail, loadClassScheduleMonthSummary, loadClassLessonDesignDetail, loadLessonTextbookCandidates,
   };
 }

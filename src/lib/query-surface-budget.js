@@ -26,6 +26,8 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   // The standard 8s deadline and retry(false) remain mandatory.
   "move_academic_event_dates_v1",
   "get_class_schedule_v1",
+  // One class/year; the SQL returns exactly 12 aggregate rows, never sessions.
+  "get_class_schedule_month_summary_v1",
   "get_class_schedule_defaults_v1",
   "get_operations_class_lesson_design_detail_v1",
   "list_operations_catalogs_v1",

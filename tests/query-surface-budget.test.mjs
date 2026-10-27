@@ -3375,3 +3375,18 @@ test("boolean preflight classification never enables automatic retry", async () 
     assert.deepEqual(inspectWordRetestReference(candidate), ["list_retry_false_missing"])
   }
 })
+
+
+test("monthly class summary is one exact aggregate contract, with deadlines and no retry still required", async () => {
+  const rpc = 'client.rpc("get_class_schedule_month_summary_v1", {p_class_id:id,p_year:2026})';
+  assert.deepEqual(inspectReleaseQuery(`${rpc}.abortSignal(AbortSignal.timeout(8_000)).retry(false)`), []);
+  assert.ok(inspectReleaseQuery(`${rpc}.retry(false)`).some(v => v.reason === 'list_abort_signal_missing'));
+  assert.ok(inspectReleaseQuery(`${rpc}.abortSignal(AbortSignal.timeout(8_000))`).some(v => v.reason === 'list_retry_false_missing'));
+  for (const candidate of ['get_class_schedule_month_summary_v2', 'get_class_schedule_month_summary_v1_page', 'list_class_schedule_month_summary_v1']) {
+    assert.ok(inspectReleaseQuery(`${rpc.replace('get_class_schedule_month_summary_v1', candidate)}.abortSignal(AbortSignal.timeout(8_000)).retry(false)`).some(v => v.reason === 'rpc_page_limit_missing'));
+  }
+  const sql = await readFile('supabase/migrations/20261027152314_class_schedule_month_summary.sql', 'utf8');
+  assert.match(sql, /generate_series\(1, 12\)/);
+  assert.match(sql, /s\.class_id = p_class_id and s\.session_date >= v_from and s\.session_date < v_to/);
+  assert.match(sql, /group by extract\(month from s\.session_date\)::integer/);
+});
