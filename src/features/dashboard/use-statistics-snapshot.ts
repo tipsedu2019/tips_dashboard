@@ -68,12 +68,14 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
   const [forceRevision, setForceRevision] = useState(0)
   const forceIntentRef = useRef(createDashboardStatisticsForceIntent())
 
+  // An explicit refresh must rebuild relative dates even when the preset is unchanged.
   const request = useMemo(() => buildDashboardStatisticsRequest({
     tab: input.tab,
     subject: input.subject,
     division: input.division,
     range,
-  }), [input.division, input.subject, input.tab, range])
+    now: forceRevision > 0 ? new Date() : undefined,
+  }), [forceRevision, input.division, input.subject, input.tab, range])
 
   const userId = user?.id ?? ""
   const accessToken = session?.access_token ?? ""
