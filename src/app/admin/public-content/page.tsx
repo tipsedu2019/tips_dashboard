@@ -17,7 +17,8 @@ export default function PublicContentPage() {
     );
   return (
     <PublicContentWorkspace
-      key={session.access_token}
+      // Renewed credentials keep this owner's draft; account changes reset it.
+      key={session.user.id}
       accessToken={session.access_token}
     />
   );

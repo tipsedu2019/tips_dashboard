@@ -352,6 +352,7 @@ export function buildMakeupNotificationPresentation(
   add("approval_actor", () => formattedPerson(input.payload, ["actor_name", "approver_name"]))
   add("processing_actor", () => formattedPerson(input.payload, ["actor_name"]))
   add("return_actor", () => formattedPerson(input.payload, ["actor_name", "approver_name"]))
+  add("request_actor", () => formattedPerson(input.payload, ["actor_name", "approver_name"]))
   add("processed_at", () => processedAt(input))
   add("reason_line", () => buildOptionalNotificationLine("사유", selectedFreeText.reason))
   add("memo_line", () => buildOptionalNotificationLine("메모", selectedFreeText.memo))

@@ -20,7 +20,7 @@ function modules(supabase, overrides, sourceOverrides = {}) {
     const runtime = { exports: {} }; cache.set(file, runtime);
     let inputSource = sourceOverrides[path.relative(rootPath, file)] ?? readFileSync(file, 'utf8');
     if (file.endsWith('/class-schedule-workspace.tsx')) inputSource = inputSource.replace('  const classScheduleWorkspaceContent = (',
-      '  require("@test/observer").observe({ generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, focusedLessonMonthKey, selectedLessonMonthKeys, selectedLessonSessionId, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
+      '  require("@test/observer").observe({ setSelectedLessonScheduleState, selectedLessonScheduleState, normalizedScheduleRefreshNonce, generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, focusedLessonMonthKey, selectedLessonMonthKeys, selectedLessonSessionId, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
     if (file.endsWith('/class-schedule-workspace.tsx')) inputSource += '\nexport { buildLessonDesignSnapshot as __testBuildLessonDesignSnapshot };\n';
     const source = ts.transpileModule(inputSource, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
@@ -87,7 +87,7 @@ async function setup(t, domain, initial = {}) {
     const pending = Promise.withResolvers(), request = { name, args, ...pending }; requests.push(request);
     return { then: pending.promise.then.bind(pending.promise), abortSignal(signal) { request.signal = signal; return this; }, retry(enabled) { request.retryEnabled = enabled; return pending.promise; } };
   } };
-  let normalized = { status: 'ready', value: {source: 'legacy', sessions: []} }; // Explicit read-only synthetic backend state; no network.
+  let normalized = initial.normalized || { status: 'ready', value: {source: 'legacy', sessions: []} }; // Explicit read-only synthetic backend state; no network.
 
   let previousSearch = '', params = new URLSearchParams();
   let observed;
@@ -963,6 +963,157 @@ async function normalizedEditor(t, sessionPatch = {}) {
   assert.ok(page.observed.normalizedLessonSessionDraft, JSON.stringify(page.observed.lessonDesignSnapshot?.sessions));
   return page;
 }
+
+test('normalized display: newly generated October lessons use display ordinals without changing identities', async t => {
+  const page = await normalizedEditor(t);
+  await act(async () => page.observed.setFocusedLessonMonthKey('2026-10'));
+  const sessions = [
+    {id:id(650),session_key:'generated-october-a',session_date:'2026-10-02',revision:3,schedule_state:'active',start_time:'19:30:00',end_time:'21:30:00'},
+    {id:id(651),session_key:'generated-october-b',session_date:'2026-10-05',revision:4,schedule_state:'active',start_time:'19:30:00',end_time:'21:30:00'},
+  ];
+  const before = structuredClone(sessions);
+  await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:2,contentHash:'synthetic-october',sessions}}});
+  assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.map(row => row.label), ['1회차','2회차']);
+  assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.map(row => row.id), sessions.map(row => row.id));
+  assert.deepEqual(sessions,before,'read DTO is immutable');
+  assert.ok(page.observed.lessonPlanForSave.sessions.every(row => row.sessionNumber == null),'display ordinal never becomes a stored number');
+  assert.equal(saveRequests(page).length,0,'read-only projection never writes');
+  assert.equal(dirty(),false,'display projection cannot dirty the form');
+});
+
+test('normalized display: old month labels retain the successful response range during a new read and failure', async t => {
+  const page = await normalizedEditor(t);
+  await act(async () => page.observed.setFocusedLessonMonthKey('2026-10'));
+  await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:2,contentHash:'october',sessions:[
+    {id:id(650),session_key:'new-october',session_date:'2026-10-02',revision:3,schedule_state:'active'},
+  ]}}});
+  const labels = () => page.observed.lessonDesignSnapshot.sessions.map(row=>row.label);
+  assert.deepEqual(labels(),['1회차']);
+  await act(async () => page.observed.setFocusedLessonMonthKey('2026-11'));
+  assert.deepEqual(labels(),['1회차'],'previous ready object is not relabelled with the new range');
+  await page.normalized({status:'loading'});
+  assert.deepEqual(labels(),['1회차']);
+  await page.normalized({status:'ready',value:{source:'error',error:{message:'synthetic read failure'}}});
+  assert.deepEqual(labels(),['1회차']);
+  await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:2,contentHash:'november',sessions:[
+    {id:id(651),session_key:'new-november',session_date:'2026-11-02',revision:1,schedule_state:'active'},
+  ]}}});
+  assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.map(row=>[row.dateValue,row.label]),[['2026-11-02','1회차']]);
+  assert.equal(saveRequests(page).length,0);
+});
+
+test('normalized display: synthetic save still uses UUID and revision, never a display ordinal', async t => {
+  const page = await normalizedEditor(t);
+  await act(async () => page.observed.setFocusedLessonMonthKey('2026-11'));
+  await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:2,contentHash:'november',sessions:[
+    {id:id(650),session_key:'new-november',session_date:'2026-11-02',revision:7,schedule_state:'active',start_time:'19:30:00',end_time:'21:30:00'},
+  ]}}});
+  await act(async () => page.observed.setSelectedLessonSessionId(id(650)));
+  await act(async () => page.observed.updateNormalizedLessonSessionDraft({memo:'synthetic only'}));
+  await act(async () => { void page.observed.saveNormalizedLessonSession(); });
+  const request = saveRequests(page)[0];
+  assert.equal(saveRequests(page).length,1);
+  assert.equal(request.name,'save_class_lesson_session_v1');
+  assert.equal(request.args.p_session_id,id(650));
+  assert.equal(request.args.p_expected_revision,7);
+  assert.equal(request.args.p_session_date,'2026-11-02');
+  assert.doesNotMatch(JSON.stringify(request.args),/displaySession|sessionNumber|session_number/);
+  await act(async () => request.resolve({data:null,error:{code:'synthetic_failure',message:'synthetic response only'}}));
+  assert.equal(page.observed.normalizedLessonSessionDraft.memo,'synthetic only');
+});
+const monthRow = key => document.querySelector(`[data-lesson-month="${key}"]`);
+const normalizedMonth = async (page, key, sessions) => {
+  await act(async () => page.observed.setFocusedLessonMonthKey(key));
+  await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:2,sessions}}});
+};
+const octoberSession = () => ({id:id(650),session_key:'month-display-october',session_date:'2026-10-02',revision:3,schedule_state:'active'});
+
+test('normalized month display never represents unqueried months as zero',async t=>{
+  const page=await normalizedEditor(t);
+  await normalizedMonth(page,'2026-10',[octoberSession()]);
+  const sidebar=document.querySelector('[data-lesson-period-sidebar]');
+  assert.match(sidebar.textContent,/미조회/);
+  assert.match(monthRow('2026-08').textContent,/미조회/);
+  assert.doesNotMatch(monthRow('2026-08').textContent,/0회/);
+  assert.match(monthRow('2026-10').textContent,/1회/);
+  const before=structuredClone(page.observed.lessonPlanForSave);
+  const query=monthRow('2026-08').querySelector('button');
+  await act(async()=>query.click());
+  assert.equal(page.observed.focusedLessonMonthKey,'2026-08','unqueried month is a real navigation target');
+  assert.deepEqual(page.observed.lessonPlanForSave,before);
+  assert.equal(saveRequests(page).length,0);
+  assert.equal(dirty(),false);
+});
+
+test('normalized month display separates loading, error, retry and confirmed empty from old results',async t=>{
+  const page=await normalizedEditor(t);
+  await normalizedMonth(page,'2026-10',[octoberSession()]);
+  await act(async()=>page.observed.setFocusedLessonMonthKey('2026-11'));
+  await page.normalized({status:'loading'});
+  assert.match(monthRow('2026-11').textContent,/조회 중/);
+  assert.doesNotMatch(monthRow('2026-11').textContent,/0회/);
+  assert.match(document.querySelector('[data-lesson-month-feedback]').textContent,/2026.10.*이전 조회/);
+  await page.normalized({status:'ready',value:{source:'error',error:{message:'synthetic failure'}}});
+  assert.match(monthRow('2026-11').textContent,/조회 오류/);
+  assert.doesNotMatch(monthRow('2026-11').textContent,/0회/);
+  const nonce=page.observed.normalizedScheduleRefreshNonce;
+  await act(async()=>monthRow('2026-11').querySelector('button').click());
+  assert.equal(page.observed.normalizedScheduleRefreshNonce,nonce+1);
+  await normalizedMonth(page,'2026-11',[]);
+  assert.match(monthRow('2026-11').textContent,/0회/);
+  assert.equal(monthRow('2026-10'),null,'previous loaded-only hint is not retained as a count cache');
+  assert.match(document.querySelector('[data-lesson-calendar-empty]').textContent,/2026.11.*등록된 일정이 없습니다/);
+  assert.equal(saveRequests(page).length,0);
+});
+
+test('normalized month display uses calendar months across legacy period and year boundaries without changing stored metadata',async t=>{
+  const page=await normalizedEditor(t);
+  const next=detail();
+  next.classItem.schedulePlan.billingPeriods=[{id:'legacy-july',label:'7월',startDate:'2026-06-29',endDate:'2026-07-31'},{id:'legacy-year',label:'1월',startDate:'2026-12-28',endDate:'2027-01-29'}];
+  await refreshDetail(page,next);
+  const storedBefore=structuredClone(page.observed.lessonPlanForSave.billingPeriods);
+  await normalizedMonth(page,'2027-01',[{...octoberSession(),session_date:'2027-01-04'}]);
+  assert.match(monthRow('2026-06').textContent,/미조회/);
+  assert.match(monthRow('2026-07').textContent,/미조회/);
+  assert.match(monthRow('2026-12').textContent,/미조회/);
+  assert.match(monthRow('2027-01').textContent,/1회/);
+  assert.match(monthRow('2027-01').textContent,/2027.01.01.*2027.01.31/);
+  assert.deepEqual(page.observed.lessonPlanForSave.billingPeriods,storedBefore);
+  assert.equal(saveRequests(page).length,0);
+});
+
+test('normalized month display separates filtered zero and allows recovery without changing month or drafts',async t=>{
+ const page=await normalizedEditor(t);
+ await normalizedMonth(page,'2026-10',[octoberSession()]);
+ const before=structuredClone(page.observed.lessonPlanForSave);
+ await act(async()=>page.observed.setSelectedLessonScheduleState('makeup'));
+ assert.match(monthRow('2026-10').textContent,/조건 0회/);
+ assert.match(document.querySelector('[data-lesson-calendar-empty]').textContent,/현재 조건/);
+ const clear=[...document.querySelectorAll('button')].find(b=>b.textContent==='조건 초기화');
+ assert.ok(clear);await act(async()=>clear.click());
+ assert.equal(page.observed.selectedLessonScheduleState,'all');
+ assert.equal(page.observed.focusedLessonMonthKey,'2026-10');
+ assert.match(monthRow('2026-10').textContent,/1회/);
+ assert.deepEqual(page.observed.lessonPlanForSave,before);
+ assert.equal(saveRequests(page).length,0);
+});
+test('normalized month display first-read failure has no false counts and can retry without an accepted snapshot',async t=>{
+ const page=await setup(t,'operations',{workspace:true,search:`?lessonDesign=1&classId=${id(999)}&section=lesson-design-periods`,route:'curriculum/lesson-design',normalized:{status:'loading'}});
+ await act(async()=>page.requests.find(r=>r.name==='get_operations_class_lesson_design_detail_v1').resolve({data:detail(),error:null}));
+ assert.match(document.querySelector('[data-lesson-month-feedback]').textContent,/조회하고 있습니다/);
+ await page.normalized({status:'ready',value:{source:'error',error:{message:'synthetic first failure'}}});
+ assert.match(document.querySelector('[data-lesson-month-feedback]').textContent,/조회하지 못했습니다/);
+ const sidebar=document.querySelector('[data-lesson-period-sidebar]');
+ assert.doesNotMatch(sidebar.textContent,/0회/);
+ const retry=[...sidebar.querySelectorAll('button')].find(b=>b.textContent==='다시 조회');
+ assert.ok(retry);const nonce=page.observed.normalizedScheduleRefreshNonce;
+ await act(async()=>retry.click());assert.equal(page.observed.normalizedScheduleRefreshNonce,nonce+1);
+ const requested=page.observed.focusedLessonMonthKey;
+ await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:2,sessions:[]}}});
+ assert.match(monthRow(requested).textContent,/0회/);
+ assert.equal(saveRequests(page).length,0);
+});
+
 test('normalized exception overrides still count as occupied lessons', async t => {
   const page = await editor(t, 'curriculum/lesson-design');
   await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:1,contentHash:'override',sessions:[
@@ -2005,7 +2156,7 @@ for (const scenario of [
   const targetId = scenario.normalized ? id(601) : 'same-date-second';
   assert.notEqual(originalId, targetId);
   const originalSession = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === originalId);
-  const open = document.querySelector('button[aria-label="8월 상세 보기"]');
+  const open = document.querySelector(`button[aria-label="${scenario.normalized ? '2026.08' : '8월'} 상세 보기"]`);
   if (open) await act(async () => open.click());
   const memo = `  unsaved ${scenario.name}\n마지막 입력 보존  `;
   await changeTextarea(document.querySelector(`textarea[aria-label="${originalSession.label} 메모"]`), memo);
