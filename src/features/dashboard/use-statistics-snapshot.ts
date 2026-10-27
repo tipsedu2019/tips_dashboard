@@ -131,6 +131,7 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
           cache: dashboardStatisticsMemoryCache,
           key: cacheKey,
           force,
+          signal: controller.signal,
           loader: () => fetchDashboardStatisticsSnapshot({
             accessToken,
             request,
