@@ -41,6 +41,7 @@ type PageReader<C, P extends PageEnvelope<unknown>> = (
 
 type PageDisplay<P> = {
   actorScope: string | null;
+  dataScopeKey: string | null;
   acceptedKey: string | null;
   page: P | null;
   loading: boolean;
@@ -65,6 +66,7 @@ export type TextbookSettingsPageResource<T, P extends PageEnvelope<T>> = {
 
 const emptyDisplay = <P,>(): PageDisplay<P> => ({
   actorScope: null,
+  dataScopeKey: null,
   acceptedKey: null,
   page: null,
   loading: false,
@@ -77,6 +79,7 @@ function useSettingsPage<C, T, P extends PageEnvelope<T>>({
   tableId,
   context,
   contextKey,
+  dataScope = "",
   reloadVersion,
   readPage,
   fixedPageSize,
@@ -86,6 +89,7 @@ function useSettingsPage<C, T, P extends PageEnvelope<T>>({
   tableId: string;
   context: C;
   contextKey: string;
+  dataScope?: string;
   reloadVersion: number;
   readPage: PageReader<C, P>;
   fixedPageSize?: DataTablePageSize;
@@ -99,6 +103,9 @@ function useSettingsPage<C, T, P extends PageEnvelope<T>>({
   const abortRef = useRef<AbortController | null>(null);
   const alive = useRef(true);
   const requestKey = JSON.stringify({ actorScope, tableId, contextKey, reloadVersion, pageSize, requestedPage });
+  // Page/search retries may retain accepted rows, but a different subject may
+  // not inherit editable rows or counts from the previous subject.
+  const dataScopeKey = JSON.stringify({ actorScope, tableId, dataScope });
 
   useLayoutEffect(() => {
     alive.current = true;
@@ -116,9 +123,9 @@ function useSettingsPage<C, T, P extends PageEnvelope<T>>({
     abortRef.current = abort;
     // The loading snapshot is the external request lifecycle, not derived render state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDisplay((current) => current.actorScope === actorScope
+    setDisplay((current) => current.dataScopeKey === dataScopeKey
       ? { ...current, loading: true, error: null }
-      : { ...emptyDisplay<P>(), actorScope, loading: true });
+      : { ...emptyDisplay<P>(), actorScope, dataScopeKey, loading: true });
 
     void readPage(context, requestedPage, pageSize, abort.signal).then((result) => {
       if (!alive.current || abort.signal.aborted || generation !== requestGeneration.current) return;
@@ -127,15 +134,15 @@ function useSettingsPage<C, T, P extends PageEnvelope<T>>({
         setRequestedPage(lastPage);
         return;
       }
-      setDisplay({ actorScope, acceptedKey: requestKey, page: result, loading: false, error: null });
+      setDisplay({ actorScope, dataScopeKey, acceptedKey: requestKey, page: result, loading: false, error: null });
     }).catch((error: unknown) => {
       if (!alive.current || abort.signal.aborted || generation !== requestGeneration.current) return;
-      setDisplay((current) => current.actorScope === actorScope
+      setDisplay((current) => current.dataScopeKey === dataScopeKey
         ? { ...current, loading: false, error }
-        : { ...emptyDisplay<P>(), actorScope, error });
+        : { ...emptyDisplay<P>(), actorScope, dataScopeKey, error });
     });
     return () => abort.abort();
-  }, [actorScope, context, enabled, pageSize, preference.ready, readPage, reloadVersion, requestKey, requestedPage, retryGeneration]);
+  }, [actorScope, context, dataScopeKey, enabled, pageSize, preference.ready, readPage, reloadVersion, requestKey, requestedPage, retryGeneration]);
 
   const goToPage = useCallback((page: number) => setRequestedPage(normalizePage(page)), []);
   const retry = useCallback(() => setRetryGeneration((value) => value + 1), []);
@@ -144,7 +151,7 @@ function useSettingsPage<C, T, P extends PageEnvelope<T>>({
     setRequestedPage(1);
     preference.setPreference(value);
   }, [preference]);
-  const visible = display.actorScope === actorScope ? display : emptyDisplay<P>();
+  const visible = display.dataScopeKey === dataScopeKey ? display : emptyDisplay<P>();
   const accepted = visible.page;
 
   return {
@@ -154,7 +161,7 @@ function useSettingsPage<C, T, P extends PageEnvelope<T>>({
     requestedPage,
     pageSize: accepted?.pageSize || pageSize,
     totalCount: accepted?.totalCount ?? null,
-    loading: Boolean(actorScope && enabled && (!preference.ready || visible.loading)),
+    loading: Boolean(actorScope && enabled && (!preference.ready || visible.dataScopeKey !== dataScopeKey || visible.loading)),
     error: visible.error,
     current: visible.acceptedKey === requestKey,
     goToPage,
@@ -382,6 +389,7 @@ export function useTextbookSettingsPages({
     tableId: "textbooks:subsubjects",
     context: subSubjectContext,
     contextKey: subSubjectContextKey,
+    dataScope: activeSubject,
     reloadVersion,
     readPage: readSubSubjectPage,
   });
