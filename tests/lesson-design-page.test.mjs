@@ -74,11 +74,11 @@ test("lesson design page keeps schedule controls direct and non-duplicative", as
   assert.doesNotMatch(source, /xl:grid-cols-\[minmax\(18rem,0\.85fr\)_minmax\(34rem,1\.45fr\)\]/);
   assert.match(
     source,
-    /data-lesson-period-sidebar="true"[\s\S]*className="[^"]*xl:col-start-1[^"]*xl:sticky[^"]*xl:max-h-\[calc\(100dvh-8rem\)\][^"]*xl:overflow-y-auto[^"]*xl:pr-5[^"]*"/,
+    /data-lesson-period-sidebar="true"[\s\S]*className=\{cn\([\s\S]*isLessonDesignPage[\s\S]*xl:top-\[var\(--lesson-sticky-top\)\][\s\S]*max-height:600px[\s\S]*xl:top-0 xl:max-h-\[calc\(100dvh-8rem\)\]/,
   );
   assert.match(
     source,
-    /id=\{LESSON_DESIGN_SECTION_IDS\.calendar\}[\s\S]*className="[^"]*xl:col-start-2[^"]*xl:row-span-2[^"]*xl:border-l[^"]*xl:border-t-0[^"]*xl:px-5[^"]*"/,
+    /id=\{LESSON_DESIGN_SECTION_IDS\.calendar\}[\s\S]*className=\{cn\("[^"]*xl:col-start-2[^"]*xl:border-l[^"]*xl:border-t-0[^"]*xl:px-5[^"]*", !isLessonDesignPage && "xl:row-span-2"\)/,
   );
   assert.doesNotMatch(source, /aria-label="수업 일정 현황"/);
   assert.doesNotMatch(source, /생성 \{month\.activeCount\}회 · 대기 \{month\.pendingCount\}회/);

@@ -8,7 +8,7 @@ import { scheduleOnlyDraft } from "./schedule-only-plan";
 import { authoredLegacyLessonDraft, applyAuthoredLegacyLessonEdit, patchAuthoredLegacyLesson,
   setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyMakeupSource, authoredLegacyLessonValidationError } from "./legacy-authored-lesson-plan";
 import { projectMaterializedLessonOrdinals } from "@/lib/materialized-lesson-ordinals";
-import { normalizedLessonDisplayOrdinals, normalizedLessonMonths } from "./normalized-lesson-display";
+import { normalizedLessonDisplayOrdinals } from "./normalized-lesson-display";
 import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectionDraft,
   type LegacyPastStateCorrectionInput, type LegacyPastStateCorrectionTarget } from "./legacy-past-state-correction";
 import { LegacyPastStateCorrectionDialog } from "./legacy-past-state-correction-dialog";
@@ -61,6 +61,8 @@ import { createBoundedContinuousScheduleReader } from "@/features/academic/conti
 import type { SaveClassLessonSessionInput } from "@/features/academic/continuous-class-schedule-contract";
 import { probeContinuousScheduleRuntime, resetContinuousScheduleRuntimeProbe } from "@/features/academic/continuous-class-schedule-runtime-probe";
 import { useContinuousClassSchedule } from "./use-continuous-class-schedule";
+import { classScheduleYearMonths, countNormalizedLessons } from "./class-schedule-month-summary";
+import { useClassScheduleMonthSummary } from "./use-class-schedule-month-summary";
 import { createContinuousScheduleMutationAction } from "@/features/academic/continuous-class-schedule-service";
 
 import { formatClassScheduleProgress, getClassScheduleProgressState } from "./class-schedule-presentation.js";
@@ -2090,6 +2092,16 @@ export function ClassScheduleWorkspace() {
   const isLessonDesignPage = pathname.endsWith("/lesson-design") || (pathname.endsWith("/curriculum") && searchParams.get("lessonDesign") === "1");
   const isLessonDesignRouteActive = isLessonDesignPage || searchParams.get("lessonDesign") === "1";
   const isLessonDesignModalRoute = searchParams.get("lessonDesign") === "1" && !isLessonDesignPage;
+  const [lessonPageToolbar, setLessonPageToolbar] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!lessonPageToolbar) return;
+    const region = lessonPageToolbar.parentElement;
+    const measure = () => region?.style.setProperty("--lesson-toolbar-height", `${lessonPageToolbar.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(lessonPageToolbar);
+    return () => { observer.disconnect(); region?.style.removeProperty("--lesson-toolbar-height"); };
+  }, [lessonPageToolbar]);
   const requestedClassId = text(searchParams.get("classId"));
   const classScheduleListRef = useRef<HTMLDivElement | null>(null);
   const searchInput = useCommittedSearch(text(searchParams.get("q")));
@@ -2169,6 +2181,7 @@ export function ClassScheduleWorkspace() {
   const [generationSaving, setGenerationSaving] = useState(false);
   const lessonGenerationRequestRef = useRef<symbol | null>(null);
   const [normalizedScheduleRefreshNonce, setNormalizedScheduleRefreshNonce] = useState(0);
+  const [monthSummaryRetryNonce, setMonthSummaryRetryNonce] = useState(0);
   const [normalizedLessonSessionDrafts, setNormalizedLessonSessionDrafts] = useState<Record<string, Partial<SaveClassLessonSessionInput>>>({});
   const [normalizedLessonSessionDetailsOpenSessionId, setNormalizedLessonSessionDetailsOpenSessionId] = useState("");
   const [isNormalizedLessonSessionSaving, setIsNormalizedLessonSessionSaving] = useState(false);
@@ -2210,6 +2223,7 @@ export function ClassScheduleWorkspace() {
     error,
     refresh,
     loadClassScheduleDetail,
+    loadClassScheduleMonthSummary,
     loadClassLessonDesignDetail,
   } = useOperationsWorkspaceData(operationsRequest, { enabled: !isLessonDesignRouteActive });
   useEffect(() => {
@@ -2665,11 +2679,18 @@ export function ClassScheduleWorkspace() {
   const lessonMonthReadPhase = normalizedScheduleRead.status !== "ready" ? "loading"
     : normalizedScheduleRead.value.source === "error" ? "error" : "ready";
   const isNormalizedLessonSchedule = Boolean(normalizedScheduleData);
+  const normalizedReadYear = Number(normalizedReadMonthKey.slice(0, 4));
+  const annualLessonSummary = useClassScheduleMonthSummary(loadClassScheduleMonthSummary,
+    isLessonDesignRouteActive && actorScope && !teacherScheduleReadDenied && isNormalizedLessonSchedule && selectedRow
+      ? { classId: selectedRow.id, year: normalizedReadYear } : null,
+    `${normalizedScheduleRefreshNonce}:${monthSummaryRetryNonce}`);
   const legacyEffectiveContext = scheduleReadSnapshotRef.current?.source === "legacy" ? scheduleReadSnapshotRef.current.data : null;
   const refreshSelectedLessonDetail = useCallback(async (mutationToken: { revision: number; classId: string } | null) => {
     if (!mutationToken) return;
     const mutationLifecycle = lessonMutationLifecycleRef.current;
     if (!mutationLifecycle?.isCurrent(mutationToken)) return;
+    // The mutation already succeeded. Invalidate reads even if metadata reload fails.
+    setNormalizedScheduleRefreshNonce((current) => current + 1);
     const currentDetail = lessonDesignDetail;
     await refreshClassMutationIfCurrent({
       token: mutationToken,
@@ -2678,7 +2699,6 @@ export function ClassScheduleWorkspace() {
       loadDetail: async (classId: string) => await loadClassLessonDesignDetail(classId) as Record<string, unknown>,
       commitDetail: async (detail: Record<string, unknown>) => {
         setLessonDesignDetail(detail);
-        setNormalizedScheduleRefreshNonce((current) => current + 1);
         if (currentDetail && hasClassScheduleListSummaryChange(currentDetail, detail)) {
           await refresh();
         }
@@ -2970,14 +2990,22 @@ export function ClassScheduleWorkspace() {
   ]);
 
   const lessonSidebarPeriods = useMemo(() => isNormalizedLessonSchedule
-    ? normalizedLessonMonths(lessonDesignSnapshot?.billingPeriods || [], normalizedReadMonthKey, normalizedLoadedMonth)
+    ? classScheduleYearMonths(normalizedReadYear)
       .map(period => ({ ...period, label: formatLessonMonthLabel(period.month), rangeLabel: formatScheduleRange(period.startDate, period.endDate) }))
     : lessonDesignSnapshot?.billingPeriods || [],
-  [isNormalizedLessonSchedule, lessonDesignSnapshot, normalizedReadMonthKey, normalizedLoadedMonth]);
+  [isNormalizedLessonSchedule, lessonDesignSnapshot, normalizedReadYear]);
   const normalizedMonthPending = isNormalizedLessonSchedule && (lessonMonthReadPhase === "loading"
     || (lessonMonthReadPhase === "ready" && normalizedLoadedMonth !== normalizedReadMonthKey));
   const normalizedMonthError = isNormalizedLessonSchedule && lessonMonthReadPhase === "error";
   const lessonMonthFiltersActive = selectedLessonScheduleState !== "all" || selectedLessonPeriodId !== "all";
+  const annualLessonCounts = annualLessonSummary.status === "ready" && annualLessonSummary.value.authoritativeSource === "normalized"
+    ? new Map(annualLessonSummary.value.months.map(row => [row.month, row.count])) : null;
+  const loadedMonthTotal = countNormalizedLessons(lessonDesignSnapshot?.sessions || []);
+  const annualLessonSummaryMismatch = Boolean(annualLessonCounts && lessonMonthReadPhase === "ready" && !normalizedMonthPending
+    && normalizedLoadedMonth === normalizedReadMonthKey
+    && annualLessonCounts.get(Number(normalizedLoadedMonth.slice(5, 7))) !== loadedMonthTotal);
+  const annualLessonSummaryUnavailable = annualLessonSummary.status === "error" || annualLessonSummaryMismatch
+    || (annualLessonSummary.status === "ready" && !annualLessonCounts);
 
   const selectedLessonMonthSummaryMap = useMemo(
     () => new Map((lessonDesignSnapshot?.monthSummaries || []).map((month) => [month.key, month])),
@@ -2989,7 +3017,7 @@ export function ClassScheduleWorkspace() {
     lessonDesignSnapshot?.monthSummaries[0]?.key ||
     "";
   const activeLessonMonthKey =
-    focusedLessonMonthKey && selectedLessonMonthSummaryMap.has(focusedLessonMonthKey)
+    isNormalizedLessonSchedule ? normalizedReadMonthKey : focusedLessonMonthKey && selectedLessonMonthSummaryMap.has(focusedLessonMonthKey)
       ? focusedLessonMonthKey
       : defaultActiveLessonMonthKey;
 
@@ -3056,6 +3084,12 @@ export function ClassScheduleWorkspace() {
   }, [lessonFlowReferenceDate]);
 
   const focusLessonMonthKey = (monthKey: string) => {
+    if (isNormalizedLessonSchedule && lessonSidebarPeriods.some(period => buildLessonMonthKey(period.startDate) === monthKey)) {
+      setFocusedLessonMonthKey(monthKey);
+      setSelectedLessonPeriodId("all"); setSelectedLessonScheduleState("all");
+      setGenerationPreview(null);
+      return;
+    }
     const monthSummaries = lessonDesignSnapshot?.monthSummaries || [];
     const focusedMonthKeys = normalizeSelectedLessonMonthKeys(
       [monthKey],
@@ -4761,7 +4795,9 @@ export function ClassScheduleWorkspace() {
           <section
             id={LESSON_DESIGN_SECTION_IDS.periods}
             data-lesson-period-sidebar="true"
-            className="min-w-0 bg-background py-4 xl:col-start-1 xl:sticky xl:top-0 xl:max-h-[calc(100dvh-8rem)] xl:self-start xl:overflow-y-auto xl:overscroll-contain xl:pr-5"
+            className={cn("min-w-0 bg-background py-4 xl:col-start-1 xl:self-start xl:pr-5", isLessonDesignPage
+              ? "xl:sticky xl:top-[var(--lesson-sticky-top)] xl:h-[calc(100dvh-var(--lesson-sticky-top)-1rem)] xl:overflow-y-auto xl:overscroll-contain [@media(max-height:600px)]:static [@media(max-height:600px)]:h-auto [@media(max-height:600px)]:overflow-visible"
+              : "xl:sticky xl:top-0 xl:max-h-[calc(100dvh-8rem)] xl:overflow-y-auto xl:overscroll-contain")}
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-lg font-semibold text-foreground">월별 회차</p>
@@ -4791,6 +4827,15 @@ export function ClassScheduleWorkspace() {
             {!isNormalizedLessonSchedule && lessonMonthAddition.error ? <p id="lesson-month-add-error" role="status" className="mt-2 text-sm text-destructive">{lessonMonthAddition.error}</p> : null}
 
             {isNormalizedLessonSchedule ? <p className="mt-2 text-sm text-muted-foreground">기존 날짜를 선택해 일정을 수정하세요. 새 회차는 선택한 월의 일정 미리보기에서 생성합니다.</p> : null}
+            {isNormalizedLessonSchedule ? <div data-lesson-annual-feedback role={annualLessonSummaryUnavailable ? "alert" : "status"} className="mt-2 text-sm text-muted-foreground">
+              {annualLessonSummaryUnavailable ? "월별 전체 회차를 확인하지 못했습니다. 선택한 월의 조회 결과는 유지됩니다."
+                : annualLessonSummary.status === "loading" ? "월별 전체 회차를 조회하고 있습니다." : `${normalizedReadYear}년 전체 회차`}
+              {annualLessonSummaryUnavailable ? <Button type="button" size="sm" variant="outline" className="ml-2"
+                aria-label="월별 회차 집계 다시 조회" onClick={() => {
+                  if (annualLessonSummaryMismatch) setNormalizedScheduleRefreshNonce(value => value + 1);
+                  else setMonthSummaryRetryNonce(value => value + 1);
+                }}>다시 조회</Button> : null}
+            </div> : null}
             {(normalizedMonthPending || lessonMonthReadPhase === "error" || (!isNormalizedLessonSchedule && lessonMonthReadPhase === "loading")) ? (
               <div data-lesson-month-feedback role={lessonMonthReadPhase === "error" ? "alert" : "status"} className="mt-2 text-sm text-muted-foreground">
                 {formatLessonMonthLabel(normalizedReadMonthKey)} {lessonMonthReadPhase === "error" ? "일정을 조회하지 못했습니다." : "일정을 조회하고 있습니다."}
@@ -4819,6 +4864,8 @@ export function ClassScheduleWorkspace() {
                       : periodMonthKey === normalizedReadMonthKey && normalizedMonthError ? "error"
                         : periodMonthKey === normalizedReadMonthKey && normalizedMonthPending ? "loading"
                           : periodMonthKey === normalizedLoadedMonth ? "ready" : "unread";
+                    const periodTotal = periodReadState === "ready" && isNormalizedLessonSchedule ? loadedMonthTotal
+                      : !annualLessonSummaryUnavailable ? annualLessonCounts?.get(Number(periodMonthKey.slice(5, 7))) : undefined;
                     const periodSessionMonthKeys = [
                       ...new Set(periodSessions.map((session) => text(session.monthKey)).filter(Boolean)),
                     ];
@@ -4865,9 +4912,11 @@ export function ClassScheduleWorkspace() {
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-medium text-foreground">{period.label}</p>
-                            <Badge variant="secondary">{periodReadState === "ready"
-                              ? `${isNormalizedLessonSchedule && lessonMonthFiltersActive ? "조건 " : ""}${countLessonGroupSessions(periodSessions, isNormalizedLessonSchedule)}회`
+                            <Badge variant="secondary">{isNormalizedLessonSchedule && periodTotal !== undefined ? `전체 ${periodTotal}회` : periodReadState === "ready"
+                              ? `${countLessonGroupSessions(periodSessions, isNormalizedLessonSchedule)}회`
                               : periodReadState === "loading" ? "조회 중" : periodReadState === "error" ? "조회 오류" : "미조회"}</Badge>
+                            {isNormalizedLessonSchedule && lessonMonthFiltersActive && periodReadState === "ready"
+                              ? <Badge variant="outline">조건 {countNormalizedLessons(periodSessions)}회</Badge> : null}
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {isNormalizedLessonSchedule && ["unread", "error"].includes(periodReadState) ? (
@@ -4946,7 +4995,7 @@ export function ClassScheduleWorkspace() {
 
           <section
             id={LESSON_DESIGN_SECTION_IDS.calendar}
-            className="border-t bg-background py-6 xl:col-start-2 xl:row-span-2 xl:border-l xl:border-t-0 xl:px-5"
+            className={cn("border-t bg-background py-6 xl:col-start-2 xl:border-l xl:border-t-0 xl:px-5", !isLessonDesignPage && "xl:row-span-2")}
           >
                   <div className="flex flex-wrap items-start justify-between gap-3">
 	                    <div className="space-y-1">
@@ -5645,8 +5694,9 @@ export function ClassScheduleWorkspace() {
           aria-label="일정 편성 작업 영역"
           tabIndex={0}
           className="min-w-0 space-y-5 outline-none"
+          style={{ "--lesson-sticky-top": "calc(var(--shell-header-height) + var(--lesson-toolbar-height, 96px) + 0.5rem)" } as CSSProperties}
         >
-          <div className="sticky top-[var(--header-height)] z-30 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-4 py-3">
+          <div ref={setLessonPageToolbar} className="sticky top-[var(--shell-header-height-mobile)] z-30 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-4 py-3 md:top-[var(--shell-header-height)]">
             <div className="min-w-0">
               <p className="truncate text-xl font-semibold text-foreground">{lessonDesignTitle}</p>
               <p className="text-sm text-muted-foreground">{lessonDesignDescription}</p>
@@ -5669,7 +5719,7 @@ export function ClassScheduleWorkspace() {
               <Skeleton className="h-64 w-full" />
             </div>
           ) : lessonDesignSnapshot ? (
-            <div className="overflow-hidden rounded-[var(--radius-surface)] border bg-background">
+            <div className="overflow-clip rounded-[var(--radius-surface)] border bg-background">
               {lessonDesignWorkspaceContent}
             </div>
           ) : (

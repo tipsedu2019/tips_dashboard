@@ -924,6 +924,11 @@
       "fileName": "20261026124608_makeup_legacy_canonical_render_bridge.sql",
       "status": "final",
       "sha256": "3b11e40988854ed2e64a4a1e4dd5513820f075d183f639f5c49e9aadcf908329"
+    },
+    {
+      "fileName": "20261027152314_class_schedule_month_summary.sql",
+      "status": "final",
+      "sha256": "ef8167164cbe81c2a577e045e632bcdc5474cd1e5033e5973c6fa0140787fb01"
     }
   ]
 }
