@@ -597,7 +597,7 @@ export async function POST(request: Request) {
     .eq("id", actor.user.id)
     .single()
   if (actorProfileError || !isRecord(actorProfile)) return response({ ok: false, error: "휴보강 권한을 확인할 수 없습니다." }, 503)
-  if (["teacher", "assistant"].includes(text(actorProfile.role))) return response({ ok: false, error: "휴보강 접근 권한이 없습니다." }, 403)
+  if (text(actorProfile.role) === "assistant") return response({ ok: false, error: "휴보강 접근 권한이 없습니다." }, 403)
 
   const serverClient = serviceClient()
   if (!serverClient) return response({ ok: false, error: "알림 저장소를 사용할 수 없습니다." }, 503)
@@ -612,6 +612,12 @@ export async function POST(request: Request) {
   if (!UUID.test(sourceEventId)) return response({ ok: false, error: "Invalid request" }, 400)
 
   try {
+    if (text(actorProfile.role) === "teacher") {
+      const permitted = await rpc(serverClient, "get_makeup_director_dispatch_authorization_v1", {
+        p_actor: actor.user.id, p_source_event: sourceEventId,
+      })
+      if (permitted !== true) return response({ ok: false, error: "휴보강 알림 후처리 권한이 없습니다." }, 403)
+    }
     const plan = await rpc(serverClient, "get_makeup_legacy_dispatch_plan_v1", {
       p_source_event_id: sourceEventId,
       p_actor_profile_id: actor.user.id,

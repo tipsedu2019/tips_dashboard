@@ -2722,14 +2722,24 @@ test('general stats service shares settled sorts but isolates selecting filters 
   assert.equal(await invalid, undefined);
 });
 
-for (const kind of ['transfer', 'withdrawal']) test(`teacher operational ${kind} shared list has no create or edit action`, async t => {
+for (const kind of ['transfer', 'withdrawal']) test(`teacher operational ${kind} offers own application creation while shared rows stay read-only`, async t => {
   const page = await workspace(t, { workspace: kind, viewerRole: 'teacher' });
   const numbered = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
   await act(async () => numbered.resolve({ data: { rows: [row(1, operationPatch(kind))], page: numbered.args.p_page, pageSize: numbered.args.p_page_size, totalCount: 1 }, error: null }));
   assert.ok(document.body.textContent.includes("서버 학생"), "actual teacher row renders before asserting read-only controls");
   const controls = [...document.querySelectorAll('button')];
-  assert.equal(controls.some(b => /추가|수정/.test(b.textContent.trim()) && !/필터/.test(b.getAttribute('aria-label') || '')), false);
+  assert.equal(controls.some(b => /수정/.test(b.textContent.trim()) && !/필터/.test(b.getAttribute('aria-label') || '')), false);
+  assert.ok(controls.find(b => b.textContent.trim() === '내 신청'));
+  const create = controls.find(b => b.textContent.trim() === '추가');
+  assert.ok(create, 'the approved teacher policy exposes a separate own-application entry');
   assert.equal(page.queries.includes('students'), false, 'read-only view never loads editing options');
+  await act(async () => create.click());
+  const references = page.requests.filter(r => r.name === 'get_teacher_request_references_v1');
+  assert.equal(references.length, 0, 'opening a blank application does not fetch global references');
+  assert.equal(document.querySelector(`[aria-label="${kind === 'transfer' ? '전 수업' : '퇴원 수업'}"]`).disabled, false, 'select the source class through the existing paged picker first');
+  assert.equal(document.querySelector('[aria-label="신청 학생"]').disabled, true, 'students are unavailable until the selected class references load');
+  assert.equal(page.queries.includes('students'), false, 'own creation never uses the legacy raw editor');
+  assert.equal(page.requests.some(r => r.name === 'mutate_teacher_own_request_v1'), false, 'opening a blank application never writes');
 });
 
 // Role-specific common-reader regressions use the same real workspace harness.

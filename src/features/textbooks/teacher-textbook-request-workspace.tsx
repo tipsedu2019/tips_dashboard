@@ -11,6 +11,7 @@ import { isNumberedPagePermissionError } from "@/lib/numbered-page-controller"
 import type { DataTablePageSize, NumberedPage } from "@/lib/numbered-pagination"
 import { readTeacherTextbookRequestDetail, readTeacherTextbookRequests, type TeacherTextbookRequest } from "./teacher-textbook-request-read"
 import { TeacherTextbookRequestCreate } from "./teacher-textbook-request-create"
+import { TeacherRequestActions } from "@/features/teacher-requests/teacher-request-actions"
 
 export function TeacherTextbookRequestWorkspace() {
   const [search, setSearch] = useState("")
@@ -90,6 +91,7 @@ export function TeacherTextbookRequestWorkspace() {
     <DataTableWorkspaceToolbar
       search={<DataTableSearchField ref={searchInput} label="교재요청 검색" placeholder="교재·수업·신청자 검색" value={search} onValueChange={value => { setSearch(value); setPage(1) }} />}
       actions={<>{readFeedback}<div className="flex min-w-0 items-center gap-2">
+        <TeacherRequestActions domain="textbook" includeCreate={false} onChanged={() => setReload(value => value + 1)} />
         <TeacherTextbookRequestCreate onSaved={() => { setSearch(""); setPage(1); setReload(value => value + 1) }} />
       </div></>}
       summary={accepted ? `전체 ${accepted.totalCount}건` : error ? "건수 미확인" : "건수 확인 중"}

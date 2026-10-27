@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase"
+import { mutateOwnRequest } from "@/features/teacher-requests/teacher-request-service"
 
 export type TeacherBookOptionScope = "textbooks" | "classes" | "locations"
 export type TeacherBookOption = { id: string; label: string }
@@ -24,12 +25,10 @@ export async function readTeacherTextbookRequestOptions(input: { scope: TeacherB
   return { rows, totalCount: data.totalCount as number }
 }
 
-export async function submitTeacherTextbookRequest(requestId: string, input: TeacherTextbookSubmission): Promise<{ orderId: string }> {
+export async function submitTeacherTextbookRequest(requestId: string, input: TeacherTextbookSubmission, actorId: string): Promise<{ orderId: string }> {
   if (!supabase) throw new Error("로그인 연결을 확인하세요.")
   if (!uuid(requestId) || !input.title.trim() || ![input.studentQuantity, input.teacherQuantity].every(value => Number.isSafeInteger(value) && value >= 0 && value <= 2147483647)
     || input.studentQuantity + input.teacherQuantity < 1 || ![input.textbookId, input.classId, input.locationId].every(value => value === null || uuid(value)) || typeof input.memo !== "string") throw invalid()
-  const { data, error } = await supabase.rpc("submit_teacher_textbook_request_v1", { p_request_id: requestId, p_input: input }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
-  if (error) throw error
-  if (!object(data) || Object.keys(data).length !== 1 || !uuid(data.orderId)) throw invalid()
-  return { orderId: data.orderId }
+  const detail = await mutateOwnRequest(actorId, { domain: "textbook", id: null, action: "create", input, revision: null, requestId })
+  return { orderId: detail.id }
 }

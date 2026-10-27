@@ -209,7 +209,7 @@ export async function POST(request: Request) {
     .eq("id", actor.user.id)
     .single()
   if (actorProfileError || !isRecord(actorProfile)) return response({ ok: false, error: "휴보강 권한을 확인할 수 없습니다." }, 503)
-  if (["teacher", "assistant"].includes(text(actorProfile.role))) return response({ ok: false, error: "휴보강 접근 권한이 없습니다." }, 403)
+  if (text(actorProfile.role) === "assistant") return response({ ok: false, error: "휴보강 접근 권한이 없습니다." }, 403)
 
   const serverClient = serviceClient()
   if (!serverClient) return response({ ok: false, error: "휴보강 승인 저장소를 사용할 수 없습니다." }, 503)
@@ -232,6 +232,11 @@ export async function POST(request: Request) {
   ) return response({ ok: false, error: "승인 요청 형식이 올바르지 않습니다." }, 400)
 
   try {
+    // Current subject authority is checked before old receipts as well as by the
+    // locked transition. The caller cannot choose an actor or subject.
+    const { data: canDecide, error: capabilityError } = await actorClient.rpc("get_makeup_director_capability_v1", { p_request: requestId })
+    if (capabilityError) return response({ ok: false, error: "원장 승인 권한을 확인할 수 없습니다." }, 503)
+    if (canDecide !== true) return response({ ok: false, error: "해당 과목의 원장만 승인할 수 있습니다." }, 403)
     const replay = await attemptMakeupApprovalReplay({
       client: serverClient,
       requestId,
@@ -243,9 +248,6 @@ export async function POST(request: Request) {
     if (replay.kind === "completed") return completedApprovalResponse(replay.data)
 
     const requestRow = await readOne(serverClient, "makeup_requests", requestId)
-    if (!["admin", "staff"].includes(text(actorProfile.role)) && text(requestRow.approver_profile_id) !== actor.user.id) {
-      return response({ ok: false, error: "결재 승인 권한이 없습니다." }, 403)
-    }
     const classId = text(requestRow.class_id)
     if (!UUID.test(classId)) throw new Error("makeup_request_source_changed")
 

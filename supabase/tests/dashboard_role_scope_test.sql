@@ -128,13 +128,17 @@ reset role;
 select set_config('request.jwt.claim.role','service_role',true);
 select set_config('request.jwt.claims',jsonb_build_object('role','service_role')::text,true);
 set local role service_role;
-select throws_ok($q$select public.transition_makeup_request_v2(pg_temp.scope_id(531),'approve',jsonb_build_object('actor_profile_id',pg_temp.scope_id(3)),'approval_pending',pg_temp.scope_id(533))$q$,'42501','makeup_request_transition_forbidden','server approval rejects actual teacher actor');
+
 reset role;
 insert into public.makeup_requests(id,status,subject,approval_group,requester_id,approver_profile_id,class_name,request_kind,reason)
 values(pg_temp.scope_id(531),'approval_pending','영어','english',pg_temp.scope_id(3),pg_temp.scope_id(1),'합성 수업','cancel_only','합성 사유');
+select set_config('request.jwt.claim.role','service_role',true);
+set local role service_role;
+select throws_ok($q$select public.transition_makeup_request_v2(pg_temp.scope_id(531),'approve',jsonb_build_object('actor_profile_id',pg_temp.scope_id(3)),'approval_pending',pg_temp.scope_id(533))$q$,'42501','makeup_request_transition_forbidden','server approval rejects actual teacher actor');
+reset role;
 select pg_temp.scope_actor(2);
 set local role authenticated;
-select lives_ok($q$select public.transition_makeup_request_v2(pg_temp.scope_id(531),'revision_requested','{"note":"관리팀 보완"}','approval_pending',pg_temp.scope_id(534))$q$,'staff processes another assigned request without changing its ownership');
+select throws_ok($q$select public.transition_makeup_request_v2(pg_temp.scope_id(531),'revision_requested','{"note":"관리팀 보완"}','approval_pending',pg_temp.scope_id(534))$q$,'42501','makeup_request_transition_forbidden','non-director staff cannot decide revision');
 reset role;
 select is((select requester_id from public.makeup_requests where id=pg_temp.scope_id(531)),pg_temp.scope_id(3),'manager processing preserves original requester');
 select is((select approver_profile_id from public.makeup_requests where id=pg_temp.scope_id(531)),pg_temp.scope_id(1),'manager processing preserves original approver');

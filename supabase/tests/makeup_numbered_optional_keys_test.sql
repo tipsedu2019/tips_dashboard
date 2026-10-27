@@ -161,6 +161,7 @@ create temp table teacher_common_fixture_rows as
 select r.id,r.status,r.requester_id,r.teacher_profile_id,r.approver_profile_id,r.created_at,r.subject,
  jsonb_build_object(
   'id',coalesce(to_jsonb(r)->>'id',''),
+  'canDecideSubject',false,
   'status',coalesce(to_jsonb(r)->>'status',''),
   'approvalGroup',coalesce(to_jsonb(r)->>'approval_group',''),
   'requestKind',coalesce(to_jsonb(r)->>'request_kind',''),

@@ -150,7 +150,8 @@ select is((pg_temp.page('{"view":"mine"}')->>'totalCount')::integer,1,'teacher c
 select ok((
  select
   (select array_agg(k order by k) from jsonb_object_keys(detail) k)
-   = (select array_agg(k order by k) from unnest(array['id','status','approvalGroup','requestKind','requesterId','teacherCatalogId','teacherProfileId','classId','className','subject','cancelDate','makeupStartAt','makeupEndAt','makeupClassroom','approverTeacherCatalogId','approverProfileId','approvedBy','approvedAt','completedBy','completedAt','canceledBy','canceledAt','cancelAcademicEventId','makeupAcademicEventId','createdAt','updatedAt','requesterLabel','teacherLabel','approverLabel','approvedByLabel','completedByLabel','canceledByLabel','reason','returnedReason','rejectedReason','finalNote','events','schedulePlanBefore','schedulePlanAfter','makeupAcademicEventIds','makeupSlots']::text[]) k)
+   = (select array_agg(k order by k) from unnest(array['canDecideSubject','id','status','approvalGroup','requestKind','requesterId','teacherCatalogId','teacherProfileId','classId','className','subject','cancelDate','makeupStartAt','makeupEndAt','makeupClassroom','approverTeacherCatalogId','approverProfileId','approvedBy','approvedAt','completedBy','completedAt','canceledBy','canceledAt','cancelAcademicEventId','makeupAcademicEventId','createdAt','updatedAt','requesterLabel','teacherLabel','approverLabel','approvedByLabel','completedByLabel','canceledByLabel','reason','returnedReason','rejectedReason','finalNote','events','schedulePlanBefore','schedulePlanAfter','makeupAcademicEventIds','makeupSlots']::text[]) k)
+  and detail->'canDecideSubject'='false'::jsonb
   and detail->>'id'=pg_temp.mid(112)::text
   and detail->>'status'='approval_pending'
   and detail->>'approvalGroup'='english' and detail->>'requestKind'='makeup_only'

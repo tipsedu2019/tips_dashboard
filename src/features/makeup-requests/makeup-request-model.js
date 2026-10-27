@@ -30,7 +30,7 @@ export const MAKEUP_REQUEST_STATUS_LABELS = {
   makeup_pending: "보강대기",
   refund_pending: "환불대기",
   completed: "완료",
-  canceled: "승인 취소",
+  canceled: "취소·철회",
 };
 
 export const MAKEUP_REQUEST_KINDS = [

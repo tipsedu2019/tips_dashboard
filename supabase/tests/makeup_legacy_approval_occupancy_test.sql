@@ -8,6 +8,8 @@ insert into auth.users(id,instance_id,aud,role,email) values(pg_temp.sid(901),'0
 insert into public.profiles(id,role,name) values(pg_temp.sid(901),'admin','Synthetic approval admin') on conflict(id) do update set role='admin';
 delete from public.teacher_catalogs where profile_id=pg_temp.sid(901);
 insert into public.teacher_catalogs(id,name,subjects,profile_id) values(pg_temp.sid(1),'Synthetic requested teacher',array['영어'],pg_temp.sid(901)),(pg_temp.sid(9),'Synthetic historical teacher',array['영어'],null);
+update public.profiles set teacher_catalog_id=pg_temp.sid(1) where id=pg_temp.sid(901);
+insert into dashboard_private.makeup_subject_directors_v1 values('영어',pg_temp.sid(901),pg_temp.sid(1));
 insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.sid(2),'Synthetic requested room',array['영어']),(pg_temp.sid(8),'Synthetic historical room',array['영어']);
 insert into public.classes(id,name,subject,teacher,room,schedule,status,schedule_storage_mode,schedule_plan)
 values(pg_temp.sid(4),'Synthetic approval','영어','Synthetic requested teacher','Synthetic requested room','금 18:00-20:00','수강','legacy',pg_temp.fixture()->'plan');
@@ -350,6 +352,8 @@ insert into auth.users(id,instance_id,aud,role,email) values(pg_temp.eid(901),'0
 insert into public.profiles(id,role,name) values(pg_temp.eid(901),'admin','Synthetic inheritance operator') on conflict(id) do update set role='admin';
 delete from public.teacher_catalogs where profile_id=pg_temp.eid(901);
 insert into public.teacher_catalogs(id,name,subjects,profile_id) values(pg_temp.eid(1),'Inheritance teacher 1',array['영어'],pg_temp.eid(901)),(pg_temp.eid(2),'Inheritance teacher 2',array['영어'],null);
+update public.profiles set teacher_catalog_id=pg_temp.eid(1) where id=pg_temp.eid(901);
+insert into dashboard_private.makeup_subject_directors_v1 values('영어',pg_temp.eid(901),pg_temp.eid(1));
 insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.eid(11),'Inheritance room 11',array['영어']),(pg_temp.eid(12),'Inheritance room 12',array['영어']);
 create temp table effective_approval_fixtures as select f from jsonb_array_elements(pg_temp.effective_approvals()) f;
 insert into public.classes(id,name,subject,schedule_storage_mode,status,teacher,room,schedule,schedule_plan)

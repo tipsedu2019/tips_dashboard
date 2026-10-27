@@ -58,7 +58,7 @@ function normalizeWireSlots<T extends MakeupReservation>(wire: T): T {
 }
 const stringKeys = ["subject", "approvalGroup", "requesterId", "requesterLabel", "teacherCatalogId", "teacherProfileId", "teacherLabel", "classId", "className", "requestKind", "reason", "cancelDate", "makeupStartAt", "makeupEndAt", "makeupClassroom", "approverTeacherCatalogId", "approverProfileId", "approverLabel", "returnedReason", "rejectedReason", "finalNote", "approvedBy", "approvedByLabel", "approvedAt", "completedBy", "completedByLabel", "completedAt", "canceledBy", "canceledByLabel", "canceledAt", "cancelAcademicEventId", "makeupAcademicEventId", "createdAt", "updatedAt"]
 function isRequest(value: unknown): value is MakeupRequest {
-  return object(value) && isRawSlotsEnvelope(value) && uuid(value.id) && typeof value.status === "string" && statuses.includes(value.status)
+  return object(value) && (value.canDecideSubject === undefined || typeof value.canDecideSubject === "boolean") && isRawSlotsEnvelope(value) && uuid(value.id) && typeof value.status === "string" && statuses.includes(value.status)
     && stringKeys.every((key) => typeof value[key] === "string") && Boolean(value.createdAt) && Boolean(value.updatedAt)
     && ["cancel_makeup", "cancel_only", "makeup_only"].includes(String(value.requestKind))
     && ["requesterId", "teacherCatalogId", "teacherProfileId", "classId", "approverTeacherCatalogId", "approverProfileId", "approvedBy", "completedBy", "canceledBy", "cancelAcademicEventId", "makeupAcademicEventId"].every((key) => optionalId(value[key]))

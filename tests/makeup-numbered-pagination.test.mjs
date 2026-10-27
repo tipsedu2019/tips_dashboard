@@ -33,7 +33,7 @@ test('makeup condition reset preserves workflow and personal state while returni
   await act(async () => button('직접입력 휴보강 보기').click());
   assert.equal(p.numbered().at(-1).args.p_filters.dateFrom, dates.dateFrom);
   assert.equal(p.numbered().at(-1).args.p_filters.dateTo, dates.dateTo);
-  assert.equal(p.requests.some(r => r.name && !['list_makeup_numbered_page_v1', 'get_makeup_reservation_context_v1', 'get_makeup_effective_occupancy_v1'].includes(r.name)), false);
+  assert.equal(p.requests.some(r => r.name && !['list_makeup_numbered_page_v1', 'get_makeup_reservation_context_v1', 'get_makeup_effective_occupancy_v1', 'get_my_makeup_director_subjects_v1'].includes(r.name)), false);
 });
 
 test('makeup read feedback keeps search, create and column settings mounted while retry retains accepted rows', async t => {
@@ -83,7 +83,7 @@ test('makeup initial failure is not a successful empty result and the two empty 
   await act(async () => button('조건 초기화').click());
   assert.equal(p.numbered().at(-1).args.p_filters.filterColumn, 'className');
   assert.equal(p.numbered().at(-1).args.p_filters.teacher, 'all');
-  assert.equal(p.requests.some(r => r.name && !['list_makeup_numbered_page_v1'].includes(r.name)), false, 'teacher reset must not invoke restricted reservation or write RPCs');
+  assert.equal(p.requests.some(r => r.name && !['list_makeup_numbered_page_v1', 'get_my_makeup_director_subjects_v1'].includes(r.name)), false, 'teacher reset must not invoke restricted reservation or write RPCs');
 });
 
 test('makeup open request draft and its return trigger survive an in-flight list read failure', async t => {
@@ -372,7 +372,7 @@ function isolatePeriodClock(t, timezone = 'Asia/Seoul') {
   });
 }
 function assertPeriodReadsOnly(page) {
-  const allowed = new Set(['list_makeup_numbered_page_v1', 'get_makeup_reservation_context_v1', 'get_makeup_effective_occupancy_v1']);
+  const allowed = new Set(['list_makeup_numbered_page_v1', 'get_makeup_reservation_context_v1', 'get_makeup_effective_occupancy_v1', 'get_my_makeup_director_subjects_v1']);
   assert.deepEqual(page.requests.filter(request => request.name && !allowed.has(request.name)).map(request => request.name), []);
   assert.equal(page.requests.some(request => request.steps?.some(step => ['insert', 'update', 'delete', 'upsert'].includes(step.name))), false);
 }
@@ -481,7 +481,7 @@ test('off-page exact detail preserves editor identity and draft through page bac
   assert.equal(p.observed.editingRequestId, ''); assert.equal(p.observed.input.reason, '');
 });
 test('context errors retain approval safety, explicit retry succeeds and old context cannot replace a new scope', async (t) => {
-  const p = await setup(t, { search: '?view=approvalPending' }); await act(async () => p.finish(p.numbered()[0])); await p.catalogs();
+  const p = await setup(t, { search: '?view=approvalPending' }); await act(async () => p.finish(p.numbered()[0],112,{rows:Array.from({length:10},(_,i)=>row(i+1,{canDecideSubject:true}))})); await p.catalogs();
   const failed = p.context().at(-1); await act(async () => failed.reject(new Error('CONTEXT FAILURE')));
   assert.match(document.body.textContent, /예약 충돌 정보를 불러오지 못했습니다/);
   assert.ok([...document.querySelectorAll('button')].filter((b) => b.textContent.trim()==='승인').every((b) => b.disabled));
@@ -490,7 +490,7 @@ test('context errors retain approval safety, explicit retry succeeds and old con
   await act(async () => retry.resolve({ data: { reservations: [], activeEventRequestIds: [] }, error: null }));
   assert.ok([...document.querySelectorAll('button')].some((b) => b.textContent.trim()==='승인' && !b.disabled));
   await act(async () => button('2 페이지').click());
-  await act(async () => p.finish(p.numbered().at(-1), 112, { rows: Array.from({length:10}, (_,i) => row(i+11,{ makeupStartAt:'2026-09-02T00:00:00Z',makeupEndAt:'2026-09-02T01:00:00Z' })) }));
+  await act(async () => p.finish(p.numbered().at(-1), 112, { rows: Array.from({length:10}, (_,i) => row(i+11,{ canDecideSubject:true, makeupStartAt:'2026-09-02T00:00:00Z',makeupEndAt:'2026-09-02T01:00:00Z' })) }));
   assert.ok([...document.querySelectorAll('button')].filter((b) => b.textContent.trim()==='승인').every((b) => b.disabled));
 });
 test('required collision catalog failure cannot become empty confirmed availability', async (t) => {
@@ -824,13 +824,13 @@ test('teacher operational makeup view hides writes even when teacher is requeste
   assert.equal(p.requests.some(r => /create_makeup|transition_makeup|approve_makeup/.test(r.name || '')), false);
 });
 
-for (const owns of [true, false]) test(`unchanged viewer makeup exact approver controls: ${owns}`, async t => {
+for (const owns of [true, false]) test(`displayed viewer assignment cannot grant subject director controls: ${owns}`, async t => {
   const p = await setup(t, { auth: { role: 'viewer' }, search: `?requestId=${id(999)}` });
   const entry = row(999, { status: 'approval_pending', requesterId: id(805), approverProfileId: owns ? id(804) : id(805) });
   await act(async () => p.finish(p.numbered()[0], 1, { rows: [entry] }));
   const detail = p.requests.find(r => r.name === 'get_makeup_detail_v1');
   await act(async () => detail.resolve({ data: entry, error: null }));
-  assert.equal(Boolean(button('승인')), owns);
+  assert.equal(Boolean(button('승인')), false);
   assert.equal(Boolean(button('휴보강 신청')), true, 'unchanged pre-existing viewer create entry');
   assert.equal(p.requests.some(r => /create_makeup|transition_makeup|approve_makeup/.test(r.name || '')), false);
 });

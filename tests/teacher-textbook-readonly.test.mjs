@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, button, id } from './helpers/textbook-numbered-harness.mjs';
+import { waitForFocus } from './helpers/dom-focus.mjs';
 
 globalThis.fetch = async () => { throw new Error('external network forbidden by independent audit'); };
 const teacher = n => ({ user: { id: id(n), email: 'synthetic-teacher@test.invalid' }, role: 'teacher', isTeacher: true, isAdmin: false, isStaff: false, canManageAll: false });
@@ -76,7 +77,8 @@ test('teacher request read recovery keeps the creation owner, draft guard and re
   assert.equal(title.value, '전송하지 않는 가상 초안');
   await h.act(() => button('취소').click());
   await h.act(() => button('변경사항 버리기').click());
-  await h.act(() => new Promise(resolve => setTimeout(resolve, 25)));
+  // The confirmation releases its scope before the editor queues its own cleanup.
+  await waitForFocus(h, create);
   assert.equal(document.querySelector('form'), null);
   assert.ok(document.activeElement === create, 'the stable create button receives close focus after list failure');
   await h.act(() => button('교재요청 다시 조회').click());

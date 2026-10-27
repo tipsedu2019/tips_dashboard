@@ -26,7 +26,7 @@ test('approval reads exact detail and preserves labels without loading workspace
   assert.deepEqual(sends.map(s => s.url), ['/api/makeup-requests/approve', '/api/notifications/legacy/makeup']);
 });
 
-function routeFixture({ role = "admin", approverId = id(804), kind = 'cancel_only', collision = false, denied = false, contextError = null, invalidContext = false, transitionError = null, missingTeacher = false, makeupSlots, effectiveRead } = {}) {
+function routeFixture({ role = "admin", approverId = id(804), kind = 'cancel_only', collision = false, denied = false, contextError = null, invalidContext = false, transitionError = null, missingTeacher = false, makeupSlots, effectiveRead, canDecide = role === "admin" || role === "staff" } = {}) {
   const calls = [], request = { id: id(1), status: 'approval_pending', approver_profile_id: approverId, class_id: id(600), class_name: '수업', subject: '영어', request_kind: kind, cancel_date: '2026-10-01', makeup_start_at: '2026-10-02T09:00:00+09:00', makeup_end_at: '2026-10-02T10:00:00+09:00', makeup_classroom: 'A', teacher_catalog_id: id(802) };
   if (makeupSlots) request.makeup_slots = makeupSlots;
   let attempts = 0, effectiveCalls = 0;
@@ -46,6 +46,7 @@ function routeFixture({ role = "admin", approverId = id(804), kind = 'cancel_onl
   const client = { auth: { getUser: async () => ({ data: { user: { id: id(804) } }, error: null }) }, from: query,
     rpc(name, args) {
       const call = { name, args }; calls.push(call);
+      if (name === 'get_makeup_director_capability_v1') return Promise.resolve({ data: canDecide, error: null });
       if (name === 'get_makeup_effective_occupancy_v1') return {
         abortSignal(signal) { call.signal = signal; return this; },
         retry(value) { call.retry = value; return Promise.resolve(effectiveRead ? effectiveRead(args.p_slots, ++effectiveCalls) : { error: null, data: { version: 1, occupancies: collision ? [{ id: 'weekly', classId: id(601), className: '다른 반', date: '2026-10-02', startMinute: 540, endMinute: 600, classroom: 'A', uncertain: false, allRooms: false }] : [] } }); },
@@ -572,9 +573,9 @@ for (const role of ['teacher', 'assistant']) test(`operational approval rejects 
  const p=routeFixture({role});
  const response=await p.run();
  assert.equal(response.status,403);
- assert.deepEqual(p.calls.map(c=>c.table||c.name),['profiles']);
+ assert.deepEqual(p.calls.map(c=>c.table||c.name),role === 'assistant' ? ['profiles'] : ['profiles','get_makeup_director_capability_v1']);
 });
-for (const role of ['admin', 'staff']) test(`management ${role} processes another assigned approver without rewriting assignment`, async t => {
+for (const role of ['admin', 'staff']) test(`subject director with role ${role} processes another assigned approver without rewriting assignment`, async t => {
 
  const keys=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'];
  const before=keys.map(k=>process.env[k]);
@@ -603,7 +604,7 @@ test('management resubmission can keep the original requester instead of imperso
  assert.equal('requester_id' in mutations(fixture)[0].args.p_patch,false);
 });
 
-for (const role of ['teacher', 'assistant']) test(`legacy makeup follow-up rejects ${role} before service construction and body parsing`, async t => {
+for (const role of ['assistant']) test(`legacy makeup follow-up rejects ${role} before service construction and body parsing`, async t => {
   const keys = ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
   const before = keys.map(key => process.env[key]);
   keys.forEach(key => process.env[key] = key.includes('URL') ? 'https://fixture.invalid' : 'fixture');
@@ -618,18 +619,33 @@ for (const role of ['teacher', 'assistant']) test(`legacy makeup follow-up rejec
   assert.equal(response.status, 403); assert.equal(constructions, 1); assert.deepEqual(calls, ['profiles']);
 });
 
-for (const owns of [true, false]) test(`existing viewer approval still requires its exact assignment: ${owns}`, async t => {
-  const keys = ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
-  const before = keys.map(key => process.env[key]);
-  keys.forEach(key => process.env[key] = key.includes('URL') ? 'https://fixture.invalid' : 'fixture');
-  t.after(() => keys.forEach((key, index) => before[index] === undefined ? delete process.env[key] : process.env[key] = before[index]));
-  const p = routeFixture({role:'viewer', approverId:owns ? id(804) : id(805)});
-  const response = await p.run();
-  assert.equal(response.status, owns ? 200 : 403);
-  if (!owns) {
-    const commands = p.calls.filter(call => call.name === 'transition_makeup_request_v2');
-    assert.equal(commands.length, 1, 'unchanged receipt/effects probe only; no second effects-bearing approval');
-    assert.deepEqual(Object.keys(commands[0].args.p_patch).sort(), ['actor_profile_id', 'final_note']);
-    assert.equal(p.calls.some(call => call.table === 'classes'), false);
-  }
+for (const role of ['admin','staff','viewer','teacher']) for (const owns of [true,false]) test('non-director '+role+' cannot approve even with assignment '+owns, async t => {
+  const keys=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'];
+  const before=keys.map(k=>process.env[k]);keys.forEach(k=>process.env[k]=k.includes('URL')?'https://fixture.invalid':'fixture');
+  t.after(()=>keys.forEach((k,i)=>before[i]===undefined?delete process.env[k]:process.env[k]=before[i]));
+  const p=routeFixture({role,approverId:owns?id(804):id(805),canDecide:false});
+  assert.equal((await p.run()).status,403);
+  assert.deepEqual(p.calls.map(c=>c.table||c.name),['profiles','get_makeup_director_capability_v1']);
+});
+test('teacher subject director approves another designated account after current capability check',async t=>{
+ const keys=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'];
+ const before=keys.map(k=>process.env[k]);keys.forEach(k=>process.env[k]=k.includes('URL')?'https://fixture.invalid':'fixture');
+ t.after(()=>keys.forEach((k,i)=>before[i]===undefined?delete process.env[k]:process.env[k]=before[i]));
+ const p=routeFixture({role:'teacher',approverId:id(805),canDecide:true});
+ assert.equal((await p.run()).status,200);
+ assert.deepEqual(p.calls.slice(0,3).map(c=>c.table||c.name),['profiles','get_makeup_director_capability_v1','transition_makeup_request_v2']);
+});
+for(const allowed of [false,true]) test('teacher notification requires own current director event: '+allowed,async t=>{
+ const keys=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'];
+ const before=keys.map(k=>process.env[k]);keys.forEach(k=>process.env[k]=k.includes('URL')?'https://fixture.invalid':'fixture');
+ t.after(()=>keys.forEach((k,i)=>before[i]===undefined?delete process.env[k]:process.env[k]=before[i]));
+ const calls=[];
+ const client={auth:{getUser:async()=>({data:{user:{id:id(804)}},error:null})},
+  from:()=>({select(){return this},eq(){return this},single:async()=>({data:{role:'teacher'},error:null})}),
+  rpc:async(name,args)=>{calls.push({name,args});if(name==='get_makeup_director_dispatch_authorization_v1')return{data:allowed,error:null};if(name==='get_makeup_legacy_dispatch_plan_v1')return{data:{items:[]},error:null};throw Error('unexpected provider path');}};
+ const {POST}=modules(null,{'@supabase/supabase-js':{createClient:()=>client}})('src/app/api/notifications/legacy/makeup/route.ts');
+ const res=await POST(new Request('https://fixture.invalid/api/notifications/legacy/makeup',{method:'POST',headers:{authorization:'Bearer fixture'},body:JSON.stringify({sourceEventId:id(999)})}));
+ assert.equal(res.status,allowed?200:403);
+ assert.deepEqual(calls.map(c=>c.name),allowed?['get_makeup_director_dispatch_authorization_v1','get_makeup_legacy_dispatch_plan_v1']:['get_makeup_director_dispatch_authorization_v1']);
+ assert.deepEqual(calls[0].args,{p_actor:id(804),p_source_event:id(999)});
 });

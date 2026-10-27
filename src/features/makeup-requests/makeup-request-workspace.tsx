@@ -41,6 +41,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ScrollableDialogContent } from "@/components/ui/form-dialog"
+import { TeacherRequestActions } from "@/features/teacher-requests/teacher-request-actions"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -467,8 +468,8 @@ const MAKEUP_REQUEST_TABLE_COLUMNS: Array<{
   { columnKey: "finalNote", label: "승인 메모", width: 230, minWidth: 160 },
   { columnKey: "rejectedAt", label: "반려일시", width: 160, minWidth: 132 },
   { columnKey: "rejectedReason", label: "반려 사유", width: 190, minWidth: 140 },
-  { columnKey: "canceledAt", label: "승인취소일시", width: 160, minWidth: 132 },
-  { columnKey: "canceledNote", label: "승인취소 메모", width: 230, minWidth: 160 },
+  { columnKey: "canceledAt", label: "취소·철회 일시", width: 160, minWidth: 132 },
+  { columnKey: "canceledNote", label: "취소·철회 사유", width: 230, minWidth: 160 },
   { columnKey: "approver", label: "결재자", width: 118, minWidth: 96 },
   { columnKey: "action", label: "액션", width: 250, minWidth: 230, align: "right" },
 ]
@@ -487,8 +488,8 @@ const MAKEUP_REQUEST_CARD_COLUMNS: Array<{ columnKey: MakeupRequestCardColumnKey
   { columnKey: "finalNote", label: "승인 메모" },
   { columnKey: "rejectedAt", label: "반려일시" },
   { columnKey: "rejectedReason", label: "반려 사유" },
-  { columnKey: "canceledAt", label: "승인취소일시" },
-  { columnKey: "canceledNote", label: "승인취소 메모" },
+  { columnKey: "canceledAt", label: "취소·철회 일시" },
+  { columnKey: "canceledNote", label: "취소·철회 사유" },
   { columnKey: "approver", label: "결재자" },
 ]
 
@@ -550,7 +551,7 @@ function isSystemMakeupScheduleNote(value: string) {
 
 function getMakeupApprovalNoteValue(request: MakeupRequest) {
   const approvalNote = getRequestEvent(request, ["approved"])?.note || ""
-  const canceledNote = getRequestEvent(request, ["approval_canceled", "completed_canceled"])?.note || ""
+  const canceledNote = getRequestEvent(request, ["approval_canceled", "completed_canceled", "withdrawn"])?.note || ""
   const note = String(approvalNote || request.finalNote || "").trim()
   if (!note || isSystemMakeupScheduleNote(note) || (canceledNote && note === canceledNote)) return "-"
   return note
@@ -598,7 +599,7 @@ function getMakeupRequestTableValue(request: MakeupRequest, columnKey: MakeupReq
     case "rejectedAt":
       return formatRequestEventDateTime(request, ["rejected"])
     case "canceledAt":
-      return formatRequestEventDateTime(request, ["approval_canceled", "completed_canceled"], request.canceledAt)
+      return formatRequestEventDateTime(request, ["approval_canceled", "completed_canceled", "withdrawn"], request.canceledAt)
     case "returnedReason":
       return request.returnedReason || "-"
     case "rejectedReason":
@@ -606,7 +607,7 @@ function getMakeupRequestTableValue(request: MakeupRequest, columnKey: MakeupReq
     case "finalNote":
       return getMakeupApprovalNoteValue(request)
     case "canceledNote":
-      return getRequestEvent(request, ["approval_canceled", "completed_canceled"])?.note || "-"
+      return getRequestEvent(request, ["approval_canceled", "completed_canceled", "withdrawn"])?.note || "-"
     case "action":
       return ""
     default:
@@ -691,7 +692,8 @@ function MakeupRequestActionControls({
   const legacyViewer = role === "viewer"
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
   const requesterAction = canManage || (legacyViewer && request.requesterId === currentUserId)
-  const approverAction = canManage || (legacyViewer && request.approverProfileId === currentUserId)
+  const approverAction = request.canDecideSubject === true
+  const serverApprovalPreflight = role === "teacher" && approverAction
   const canRevise = requesterAction && request.status === "revision_requested"
   const canApprove = approverAction && request.status === "approval_pending"
   const canHandleMakeupPending = requesterAction && request.status === "makeup_pending"
@@ -709,7 +711,7 @@ function MakeupRequestActionControls({
       ) : null}
       {canApprove ? (
         <>
-          <Button type="button" size="sm" disabled={hasRoomCollision || saving || data.collisionContextReady === false} onClick={() => onApprove(request)}>
+          <Button type="button" size="sm" disabled={saving || (!serverApprovalPreflight && (hasRoomCollision || data.collisionContextReady === false))} onClick={() => onApprove(request)}>
             <Check className="size-4" aria-hidden="true" />
             승인
           </Button>
@@ -788,7 +790,7 @@ function MakeupRequestDetailCard({
   variant?: "full" | "compact" | "detail"
 }) {
   const { role } = useAuth()
-  const commonRead = role === "teacher"
+  const commonRead = role === "teacher" && request.canDecideSubject !== true
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
   const isCompact = variant === "compact"
   const detailColumns = getVisibleMakeupRequestCardColumns(request).filter(column => !isCompact || ["reason", "cancelDate", "makeupAt", "makeupRoom", "returnedReason", "rejectedReason", "finalNote"].includes(column.columnKey))
@@ -834,8 +836,8 @@ function MakeupRequestDetailCard({
             {!commonRead && <MakeupDetailInfo label="승인 메모" value={getMakeupApprovalNoteValue(request)} />}
             <MakeupDetailInfo label="반려일시" value={formatRequestEventDateTime(request, ["rejected"])} />
             {!commonRead && <MakeupDetailInfo label="반려 사유" value={request.rejectedReason || "-"} />}
-            <MakeupDetailInfo label="승인취소일시" value={formatRequestEventDateTime(request, ["approval_canceled", "completed_canceled"], request.canceledAt)} />
-            {!commonRead && <MakeupDetailInfo label="승인취소 메모" value={getRequestEvent(request, ["approval_canceled", "completed_canceled"])?.note || "-"} />}
+            <MakeupDetailInfo label="취소·철회 일시" value={formatRequestEventDateTime(request, ["approval_canceled", "completed_canceled", "withdrawn"], request.canceledAt)} />
+            {!commonRead && <MakeupDetailInfo label="취소·철회 사유" value={getRequestEvent(request, ["approval_canceled", "completed_canceled", "withdrawn"])?.note || "-"} />}
             <MakeupDetailInfo label="결재자" value={request.approverLabel || "-"} />
           </dl>
         </details>
@@ -2262,8 +2264,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     }
   }, [currentUserId, data.teachers, data.collisionContextReady, formCatalogReady, editingRequest?.createdAt, editingRequestId, input, isManager, canProcessRequest, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision, setView])
 
-  const runAction = useCallback(async (action: () => Promise<MakeupRequest>, successMessage: string) => {
-    if (!canProcessRequest) return false
+  const runAction = useCallback(async (action: () => Promise<MakeupRequest>, successMessage: string, directorRequest?: MakeupRequest) => {
+    if (!canProcessRequest && directorRequest?.canDecideSubject !== true) return false
     if (!lifetime.current || savingRef.current) return false
     savingRef.current = true
     setSaving(true)
@@ -2296,7 +2298,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [requestLocalAction])
 
   const handleApproveWithNote = useCallback(async () => {
-    if (!approvalRequest || !data.collisionContextReady || hasMakeupRequestRoomCollision(approvalRequest, data)) return
+    if (!approvalRequest || approvalRequest.canDecideSubject !== true) return
+    if (role !== "teacher" && (!data.collisionContextReady || hasMakeupRequestRoomCollision(approvalRequest, data))) return
     const approved = await runAction(
       () => approveMakeupRequest(approvalRequest.id, currentUserId, approvalNote),
       isRefundApprovalRequest(approvalRequest)
@@ -2304,13 +2307,14 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
         : hasMakeupPart(approvalRequest)
           ? "결재 승인 및 자동 처리를 완료했습니다."
           : "결재 승인 후 보강대기로 이동했습니다.",
+      approvalRequest,
     )
     if (approved) {
       setApprovalRequest(null)
       setApprovalNote("")
       closeDetailRequest()
     }
-  }, [approvalNote, approvalRequest, closeDetailRequest, currentUserId, runAction, data])
+  }, [approvalNote, approvalRequest, closeDetailRequest, currentUserId, runAction, data, role])
 
   const handleOpenActionNoteRequest = useCallback((request: MakeupRequest, kind: MakeupActionNoteKind) => {
     setDialogError("")
@@ -2345,7 +2349,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
         return completeMakeupRefund(actionNoteRequest.request.id, currentUserId, actionNote)
       }
       return requestMakeupRefund(actionNoteRequest.request.id, currentUserId, actionNote)
-    }, actionNoteConfig.successMessage)
+    }, actionNoteConfig.successMessage, ["revision", "reject"].includes(actionNoteRequest.kind) ? actionNoteRequest.request : undefined)
 
     if (handled) {
       setActionNoteRequest(null)
@@ -2367,6 +2371,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     const canceled = await runAction(
       () => cancelCompletedMakeupRequest(finalCancelRequest.id, currentUserId, finalCancelNote),
       "휴보강 승인을 취소했습니다.",
+      finalCancelRequest,
     )
     if (canceled) {
       setFinalCancelRequest(null)
@@ -2754,10 +2759,10 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           readErrorMessage={pageState.error ? `${getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}${pageState.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}` : ""}
           acceptedCriteriaLabel={pageState.totalCount !== null ? acceptedCriteriaLabel : ""}
           onRetry={() => controllerRef.current?.retry()}
-          createAction={canProcessRequest ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
+          createAction={<><TeacherRequestActions domain="makeup" onChanged={() => { void refresh() }} />{canProcessRequest ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
             <Plus className="size-4" aria-hidden="true" />
             휴보강 신청
-          </Button> : null}
+          </Button> : null}</>}
           loading={loading}
           data={data}
           currentUserId={currentUserId}
@@ -2863,7 +2868,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
             <Button type="button" variant="outline" onClick={closeApprovalDialog} disabled={saving}>
               닫기
             </Button>
-            <Button type="button" onClick={() => void handleApproveWithNote()} disabled={saving || !approvalRequest || !approvalNote.trim() || !data.collisionContextReady || Boolean(approvalRequest && hasMakeupRequestRoomCollision(approvalRequest, data))}>
+            <Button type="button" onClick={() => void handleApproveWithNote()} disabled={saving || !approvalRequest?.canDecideSubject || !approvalNote.trim() || (role !== "teacher" && (!data.collisionContextReady || Boolean(approvalRequest && hasMakeupRequestRoomCollision(approvalRequest, data))))}>
               <Check className="size-4" aria-hidden="true" />
               승인 처리
             </Button>
