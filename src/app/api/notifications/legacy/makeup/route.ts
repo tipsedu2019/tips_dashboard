@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { readLegacyGoogleChatWebhookUrl } from "@/features/notifications/server/legacy-google-chat-connection"
 import { requireRegisteredNotificationExternalAttempt } from "@/features/notifications/server/external-attempt-gate"
 import { recordLegacyNotificationDeliveryIntent } from "@/features/notifications/server/legacy-delivery-intent"
+import { renderLegacyMakeupSnapshot } from "@/features/notifications/server/legacy-makeup-render-snapshot"
 import { createGoogleChatProvider } from "@/features/notifications/server/providers/google-chat-provider"
 import { createWebPushProvider } from "@/features/notifications/server/providers/web-push-provider"
 
@@ -32,6 +33,7 @@ type LegacyDispatchItem = Readonly<{
   renderedBody: string
   href: string
   scheduledFor: string
+  canonicalRender?: boolean
 }>
 
 type LegacyWebPushItem = Readonly<{
@@ -442,13 +444,20 @@ async function dispatchGoogleChat(
     item.connectionKey || "",
     item.targetGeneration,
   )
-  const materialized = await rpc(client, "materialize_makeup_legacy_google_chat_v1", {
+  const materialized = await rpc(client, item.canonicalRender
+    ? "materialize_makeup_legacy_google_chat_v2" : "materialize_makeup_legacy_google_chat_v1", {
     p_source_event_id: sourceEventId,
     p_rule_id: item.ruleId,
     p_connection_key: item.connectionKey,
     p_target_generation: item.targetGeneration,
     p_actor_profile_id: actorProfileId,
     p_request_id: materializeRequestId,
+    ...(item.canonicalRender ? {
+      p_template_id: item.templateId,
+      p_template_checksum: item.templateChecksum,
+      p_rendered_title: item.renderedTitle,
+      p_rendered_body: item.renderedBody,
+    } : {}),
   })
   const deliveryId = isRecord(materialized) ? text(materialized.deliveryId) : ""
   if (
@@ -609,12 +618,19 @@ export async function POST(request: Request) {
     })
     const items = parsePlan(plan)
     const outcomes: string[] = []
+    // Keep retired in-app/web-push compatibility untouched. Only Google Chat
+    // uses the immutable snapshot; no render inputs come from the HTTP caller.
     for (const item of items) {
       try {
         if (item.channelKey === "in_app") {
           outcomes.push(...await dispatchInApp(serverClient, sourceEventId, item))
         } else {
-          outcomes.push(await dispatchGoogleChat(serverClient, sourceEventId, actor.user.id, item))
+          const snapshot = await rpc(serverClient, "get_notification_render_snapshot_v1", {
+            p_event_id: item.eventId, p_rule_id: item.ruleId, p_rule_revision: item.ruleRevision,
+          })
+          const rendered = renderLegacyMakeupSnapshot(item, sourceEventId, snapshot)
+          const prepared = rendered ? { ...item, ...rendered, canonicalRender: true } : item
+          outcomes.push(await dispatchGoogleChat(serverClient, sourceEventId, actor.user.id, prepared))
         }
       } catch (error) {
         outcomes.push("failed")

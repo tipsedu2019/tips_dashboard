@@ -8,6 +8,7 @@ import { scheduleOnlyDraft } from "./schedule-only-plan";
 import { authoredLegacyLessonDraft, applyAuthoredLegacyLessonEdit, patchAuthoredLegacyLesson,
   setAuthoredLegacyLessonFields, setAuthoredLegacyMakeupDate, authoredLegacyMakeupSource, authoredLegacyLessonValidationError } from "./legacy-authored-lesson-plan";
 import { projectMaterializedLessonOrdinals } from "@/lib/materialized-lesson-ordinals";
+import { normalizedLessonDisplayOrdinals, normalizedLessonMonths } from "./normalized-lesson-display";
 import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectionDraft,
   type LegacyPastStateCorrectionInput, type LegacyPastStateCorrectionTarget } from "./legacy-past-state-correction";
 import { LegacyPastStateCorrectionDialog } from "./legacy-past-state-correction-dialog";
@@ -2637,7 +2638,7 @@ export function ClassScheduleWorkspace() {
       ? { classId: selectedRow.id, ...activeLessonMonthRange, refreshKey: normalizedScheduleRefreshNonce }
       : null,
   );
-  const scheduleReadSnapshotRef = useRef<{ owner: string; source: "normalized" | "legacy"; data: Record<string, unknown> | null } | null>(null);
+  const scheduleReadSnapshotRef = useRef<{ owner: string; source: "normalized" | "legacy"; data: Record<string, unknown> | null; range: { dateFrom: string; dateTo: string } | null } | null>(null);
   const scheduleReadOwner = `${actorScope || ""}:${requestedClassId}`;
   const scheduleReadDeniedOwnerRef = useRef("");
   if (scheduleReadSnapshotRef.current?.owner !== scheduleReadOwner && scheduleReadDeniedOwnerRef.current !== scheduleReadOwner) scheduleReadDeniedOwnerRef.current = "";
@@ -2649,11 +2650,20 @@ export function ClassScheduleWorkspace() {
   if (scheduleReadSnapshotRef.current?.owner !== scheduleReadOwner) scheduleReadSnapshotRef.current = null;
   if (normalizedScheduleRead.status === "ready" && (normalizedScheduleRead.value.source === "normalized" || normalizedScheduleRead.value.source === "legacy")) {
     scheduleReadDeniedOwnerRef.current = "";
+    const data = normalizedScheduleRead.value.source === "normalized" ? normalizedScheduleRead.value.data : normalizedScheduleRead.value.effectiveScheduleContext || null;
+    // An input change can render once with the preceding ready value. Keep the
+    // range attached to that response until a new read result is accepted.
+    const range = scheduleReadSnapshotRef.current?.data === data
+      ? scheduleReadSnapshotRef.current.range : activeLessonMonthRange;
     scheduleReadSnapshotRef.current = { owner: scheduleReadOwner, source: normalizedScheduleRead.value.source,
-      data: normalizedScheduleRead.value.source === "normalized" ? normalizedScheduleRead.value.data : normalizedScheduleRead.value.effectiveScheduleContext || null };
+      data, range };
   }
   const teacherScheduleReadDenied = actorRole === "teacher" && scheduleReadDeniedOwnerRef.current === scheduleReadOwner;
   const normalizedScheduleData = scheduleReadSnapshotRef.current?.source === "normalized" ? scheduleReadSnapshotRef.current.data : null;
+  const normalizedScheduleRange = scheduleReadSnapshotRef.current?.range || null;
+  const normalizedLoadedMonth = normalizedScheduleRange?.dateFrom.slice(0, 7) || null;
+  const lessonMonthReadPhase = normalizedScheduleRead.status !== "ready" ? "loading"
+    : normalizedScheduleRead.value.source === "error" ? "error" : "ready";
   const isNormalizedLessonSchedule = Boolean(normalizedScheduleData);
   const legacyEffectiveContext = scheduleReadSnapshotRef.current?.source === "legacy" ? scheduleReadSnapshotRef.current.data : null;
   const refreshSelectedLessonDetail = useCallback(async (mutationToken: { revision: number; classId: string } | null) => {
@@ -2827,10 +2837,17 @@ export function ClassScheduleWorkspace() {
         periods.push({ id: `normalized-${month}`, label: formatLessonMonthLabel(month), startDate: range.dateFrom, endDate: range.dateTo });
       }
     }
-    return buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, { ...displayPlan, billingPeriods: periods.map((period) => ({ ...period,
+    const snapshot = buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, { ...displayPlan, billingPeriods: periods.map((period) => ({ ...period,
       totalSessions: (displayPlan.sessions as Record<string, unknown>[] || []).filter((session) => isDateWithinRange(text(session.date), text(period.startDate), text(period.endDate))).length,
     })) });
-  }, [isNormalizedLessonSchedule, legacyEffectiveContext, lessonDesignEditorTextbooks, lessonDisplayOrdinals, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, selectedRow, selectedRowClassItem, teacherScheduleReadDenied]);
+    if (!snapshot) return snapshot;
+    const ordinals = normalizedLessonDisplayOrdinals(displayPlan.sessions as Record<string, unknown>[], normalizedScheduleRange);
+    return { ...snapshot, sessions: snapshot.sessions.map(session => {
+      const displaySessionNumber = ordinals.get(session.id) ?? null;
+      return { ...session, displaySessionNumber, label: displaySessionNumber !== null ? `${displaySessionNumber}회차`
+        : session.scheduleStateLabel !== "정상" ? session.scheduleStateLabel : "회차 미정" };
+    }) };
+  }, [isNormalizedLessonSchedule, legacyEffectiveContext, lessonDesignEditorTextbooks, lessonDisplayOrdinals, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, normalizedScheduleRange, selectedRow, selectedRowClassItem, teacherScheduleReadDenied]);
   useEffect(() => {
     const owner = isLessonDesignRouteActive ? requestedClassId : text(selectedRow?.id);
     const ownerChanged = lessonPlanOwnerRef.current !== owner;
@@ -2947,6 +2964,16 @@ export function ClassScheduleWorkspace() {
     selectedLessonPeriodId,
     selectedLessonScheduleState,
   ]);
+
+  const lessonSidebarPeriods = useMemo(() => isNormalizedLessonSchedule
+    ? normalizedLessonMonths(lessonDesignSnapshot?.billingPeriods || [], normalizedReadMonthKey, normalizedLoadedMonth)
+      .map(period => ({ ...period, label: formatLessonMonthLabel(period.month), rangeLabel: formatScheduleRange(period.startDate, period.endDate) }))
+    : lessonDesignSnapshot?.billingPeriods || [],
+  [isNormalizedLessonSchedule, lessonDesignSnapshot, normalizedReadMonthKey, normalizedLoadedMonth]);
+  const normalizedMonthPending = isNormalizedLessonSchedule && (lessonMonthReadPhase === "loading"
+    || (lessonMonthReadPhase === "ready" && normalizedLoadedMonth !== normalizedReadMonthKey));
+  const normalizedMonthError = isNormalizedLessonSchedule && lessonMonthReadPhase === "error";
+  const lessonMonthFiltersActive = selectedLessonScheduleState !== "all" || selectedLessonPeriodId !== "all";
 
   const selectedLessonMonthSummaryMap = useMemo(
     () => new Map((lessonDesignSnapshot?.monthSummaries || []).map((month) => [month.key, month])),
@@ -4760,10 +4787,17 @@ export function ClassScheduleWorkspace() {
             {!isNormalizedLessonSchedule && lessonMonthAddition.error ? <p id="lesson-month-add-error" role="status" className="mt-2 text-sm text-destructive">{lessonMonthAddition.error}</p> : null}
 
             {isNormalizedLessonSchedule ? <p className="mt-2 text-sm text-muted-foreground">기존 날짜를 선택해 일정을 수정하세요. 새 회차는 선택한 월의 일정 미리보기에서 생성합니다.</p> : null}
+            {(normalizedMonthPending || lessonMonthReadPhase === "error" || (!isNormalizedLessonSchedule && lessonMonthReadPhase === "loading")) ? (
+              <div data-lesson-month-feedback role={lessonMonthReadPhase === "error" ? "alert" : "status"} className="mt-2 text-sm text-muted-foreground">
+                {formatLessonMonthLabel(normalizedReadMonthKey)} {lessonMonthReadPhase === "error" ? "일정을 조회하지 못했습니다." : "일정을 조회하고 있습니다."}
+                {isNormalizedLessonSchedule && normalizedLoadedMonth ? ` ${formatLessonMonthLabel(normalizedLoadedMonth)} 이전 조회 결과를 표시합니다.` : " 회차 수는 조회가 완료된 뒤 확인할 수 있습니다."}
+                {!isNormalizedLessonSchedule && lessonMonthReadPhase === "error" ? <Button type="button" size="sm" variant="outline" className="ml-2" onClick={() => setNormalizedScheduleRefreshNonce(value => value + 1)}>다시 조회</Button> : null}
+              </div>
+            ) : null}
             <div className="mt-4">
               <div className="space-y-3">
-                {lessonDesignSnapshot.billingPeriods.length > 0 ? (
-                  lessonDesignSnapshot.billingPeriods.map((period) => {
+                {lessonSidebarPeriods.length > 0 ? (
+                  lessonSidebarPeriods.map((period) => {
                     const periodStartMonthKey = buildLessonMonthKey(period.startDate);
                     const savedPeriods = (lessonPlanBaseline?.billingPeriods || []) as Record<string, unknown>[];
                     const addedMonthRange = savedPeriods.some(saved => text(saved.id) === period.id) ? null
@@ -4771,11 +4805,16 @@ export function ClassScheduleWorkspace() {
                     const periodSessions = filteredLessonSessions
                       .filter(
                         (session) =>
-                          session.periodId === period.id ||
-                          (!text(session.periodId) && periodStartMonthKey && session.monthKey === periodStartMonthKey),
+                          isNormalizedLessonSchedule ? session.monthKey === periodStartMonthKey
+                            : session.periodId === period.id ||
+                              (!text(session.periodId) && periodStartMonthKey && session.monthKey === periodStartMonthKey),
                       )
                       .sort(compareLessonSessionsByDate);
                     const periodMonthKey = periodStartMonthKey || periodSessions[0]?.monthKey || "";
+                    const periodReadState = !isNormalizedLessonSchedule ? lessonMonthReadPhase
+                      : periodMonthKey === normalizedReadMonthKey && normalizedMonthError ? "error"
+                        : periodMonthKey === normalizedReadMonthKey && normalizedMonthPending ? "loading"
+                          : periodMonthKey === normalizedLoadedMonth ? "ready" : "unread";
                     const periodSessionMonthKeys = [
                       ...new Set(periodSessions.map((session) => text(session.monthKey)).filter(Boolean)),
                     ];
@@ -4805,6 +4844,7 @@ export function ClassScheduleWorkspace() {
                     return (
                       <div
                         key={period.id}
+                        data-lesson-month={isNormalizedLessonSchedule ? periodMonthKey : undefined}
                         id={getLessonDesignPeriodDetailId(periodMonthKey || period.id)}
                         className="scroll-mt-24 border-t px-2 py-4 first:border-t-0"
                       >
@@ -4821,10 +4861,22 @@ export function ClassScheduleWorkspace() {
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-medium text-foreground">{period.label}</p>
-                            <Badge variant="secondary">{countLessonGroupSessions(periodSessions, isNormalizedLessonSchedule)}회</Badge>
+                            <Badge variant="secondary">{periodReadState === "ready"
+                              ? `${isNormalizedLessonSchedule && lessonMonthFiltersActive ? "조건 " : ""}${countLessonGroupSessions(periodSessions, isNormalizedLessonSchedule)}회`
+                              : periodReadState === "loading" ? "조회 중" : periodReadState === "error" ? "조회 오류" : "미조회"}</Badge>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {periodSessions.length > 0 ? (
+                            {isNormalizedLessonSchedule && ["unread", "error"].includes(periodReadState) ? (
+                              <Button type="button" size="sm" variant="outline"
+                                aria-label={`${period.label} ${periodReadState === "error" ? "다시 조회" : "조회"}`}
+                                onClick={() => {
+                                  if (periodReadState === "error") setNormalizedScheduleRefreshNonce(value => value + 1);
+                                  else { setFocusedLessonMonthKey(periodMonthKey); setGenerationPreview(null); }
+                                }}>
+                                {periodReadState === "error" ? "다시 조회" : "조회"}
+                              </Button>
+                            ) : null}
+                            {periodReadState === "ready" && periodSessions.length > 0 ? (
                               <Button
                                 type="button"
                                 size="sm"
@@ -4875,7 +4927,7 @@ export function ClassScheduleWorkspace() {
                             />
                           </div>
                         </div>}
-                        {isPeriodDetailsOpen ? renderLessonMonthSessionDetails(periodSessions) : null}
+                        {isPeriodDetailsOpen && periodReadState === "ready" ? renderLessonMonthSessionDetails(periodSessions) : null}
                       </div>
                     );
                   })
@@ -5131,6 +5183,14 @@ export function ClassScheduleWorkspace() {
                           </div>
                         );
                         })}
+                      </div>
+                    ) : isNormalizedLessonSchedule || lessonMonthReadPhase !== "ready" ? (
+                      <div data-lesson-calendar-empty className="rounded-[var(--radius-surface)] border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                        {lessonMonthReadPhase === "error" ? `${formatLessonMonthLabel(normalizedReadMonthKey)} 일정을 조회하지 못했습니다.`
+                          : normalizedMonthPending || lessonMonthReadPhase === "loading" ? `${formatLessonMonthLabel(normalizedReadMonthKey)} 일정을 조회하고 있습니다.`
+                            : lessonMonthFiltersActive ? "현재 조건에 맞는 일정이 없습니다."
+                              : `${formatLessonMonthLabel(normalizedReadMonthKey)} 등록된 일정이 없습니다.`}
+                        {lessonMonthFiltersActive ? <Button type="button" size="sm" variant="outline" className="mt-3 block" onClick={() => { setSelectedLessonPeriodId("all"); setSelectedLessonScheduleState("all"); }}>조건 초기화</Button> : null}
                       </div>
                     ) : (
                       <div className="rounded-[var(--radius-surface)] border border-dashed px-4 py-6 text-sm text-muted-foreground">

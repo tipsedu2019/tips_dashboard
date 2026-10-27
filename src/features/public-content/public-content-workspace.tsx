@@ -1,6 +1,6 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- Private signed previews load directly; a public image optimizer must not cache them. */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -285,6 +285,27 @@ export function PublicContentWorkspace({
     description: "작성 중인 홈페이지 내용을 버리고 닫을까요?",
   });
   const mutationPending = useRef(false);
+  // Only the latest review lookup may change the current editing flow.
+  // Credential renewal alone keeps that flow; navigation or a new intent ends it.
+  const reviewRead = useRef<AbortController | null>(null);
+  const cancelReviewRead = useCallback(() => {
+    reviewRead.current?.abort();
+    reviewRead.current = null;
+  }, []);
+  useEffect(() => cancelReviewRead, [cancelReviewRead]);
+  function startReviewRead() {
+    cancelReviewRead();
+    const controller = new AbortController();
+    reviewRead.current = controller;
+    return controller;
+  }
+  function ownsReviewRead(controller: AbortController) {
+    return reviewRead.current === controller && !controller.signal.aborted;
+  }
+  function refreshList() {
+    cancelReviewRead();
+    setRevision((value) => value + 1);
+  }
   const opener = useRef<HTMLElement | null>(null);
   const addButton = useRef<HTMLButtonElement | null>(null);
   const importReviewOpening = useRef(false);
@@ -374,6 +395,7 @@ export function PublicContentWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, kind, page, pageSize, q, subject, status, revision, ready]);
   function switchKind(next: ContentKind) {
+    cancelReviewRead();
     setKind(next);
     setPage(1);
     setList(null);
@@ -383,6 +405,7 @@ export function PublicContentWorkspace({
     setStatus("all");
   }
   function edit(entry?: ContentEntry) {
+    cancelReviewRead();
     rememberOpener();
     setFieldErrors({});
     setDialogError("");
@@ -432,6 +455,7 @@ export function PublicContentWorkspace({
     title: string,
     allowBulkStatus = false,
   ) {
+    cancelReviewRead();
     setDialogError("");
     setReviewPage(1);
     setReview({
@@ -497,10 +521,12 @@ export function PublicContentWorkspace({
     }
   }
   async function bootstrap() {
+    const controller = startReviewRead();
     rememberOpener();
     setError("");
     try {
-      const data = await request(`${BASE}?action=bootstrap`);
+      const data = await request(`${BASE}?action=bootstrap`, undefined, controller.signal);
+      if (!ownsReviewRead(controller)) return;
       if (!data.canApply) {
         setError(messages.bootstrap_not_empty);
         return;
@@ -515,11 +541,14 @@ export function PublicContentWorkspace({
         counts: data.counts,
       });
     } catch (failure) {
+      if (!ownsReviewRead(controller)) return;
       setError(
         failure instanceof Error
           ? failure.message
           : "자료를 확인하지 못했습니다.",
       );
+    } finally {
+      if (reviewRead.current === controller) reviewRead.current = null;
     }
   }
   async function upload(key: string, file?: File) {
@@ -584,12 +613,16 @@ export function PublicContentWorkspace({
     }
   }
   async function reorder(entry: ContentEntry, direction: number) {
+    const controller = startReviewRead();
     rememberOpener();
     setError("");
     try {
       const data = await request(
         `${BASE}?action=reorder&id=${entry.id}&direction=${direction}`,
+        undefined,
+        controller.signal,
       );
+      if (!ownsReviewRead(controller)) return;
       if (!data.changes.length) {
         setNotice(
           direction < 0
@@ -600,11 +633,14 @@ export function PublicContentWorkspace({
       }
       showReview(data.changes, "표시 순서 확인");
     } catch (failure) {
+      if (!ownsReviewRead(controller)) return;
       setError(
         failure instanceof Error
           ? failure.message
           : "순서를 확인하지 못했습니다.",
       );
+    } finally {
+      if (reviewRead.current === controller) reviewRead.current = null;
     }
   }
   const rows = list?.entries || [];
@@ -612,6 +648,7 @@ export function PublicContentWorkspace({
   const closeModal = () => {
     if (saving || uploading) return;
     requestLocalAction(() => {
+      cancelReviewRead();
       setEditing(null);
       setReview(null);
       setDialogError("");
@@ -631,7 +668,7 @@ export function PublicContentWorkspace({
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
-            onClick={() => setRevision((value) => value + 1)}
+            onClick={refreshList}
             disabled={loading}
             aria-label="홈페이지 자료 새로고침"
           >
@@ -641,6 +678,7 @@ export function PublicContentWorkspace({
             <Button
               variant="outline"
               onClick={() => {
+                cancelReviewRead();
                 rememberOpener();
                 importReviewOpening.current = false;
                 setImporting(true);
@@ -658,11 +696,12 @@ export function PublicContentWorkspace({
       </div>
       <WorkspaceTabsPanel className={DATA_TABLE_LAYOUT_CLASS_NAME}>
       <DataTableToolbar className="sm:flex-row">
-        <DataTableSearchField value={query} onValueChange={value => setQuery(value.slice(0, 100))} label="콘텐츠 검색" placeholder={kind === "result" ? "학교, 공개 이름, 시험 검색" : kind === "review" ? "공개 이름, 후기 내용 검색" : "선생님 이름 검색"} />
+        <DataTableSearchField value={query} onValueChange={value => { cancelReviewRead(); setQuery(value.slice(0, 100)); }} label="콘텐츠 검색" placeholder={kind === "result" ? "학교, 공개 이름, 시험 검색" : kind === "review" ? "공개 이름, 후기 내용 검색" : "선생님 이름 검색"} />
         <div className="grid grid-cols-2 gap-3 sm:w-72">
           {options(
             subject,
             (value) => {
+              cancelReviewRead();
               setSubject(value);
               setPage(1);
             },
@@ -681,6 +720,7 @@ export function PublicContentWorkspace({
           {options(
             status,
             (value) => {
+              cancelReviewRead();
               setStatus(value);
               setPage(1);
             },
@@ -703,7 +743,7 @@ export function PublicContentWorkspace({
           <p>{error}</p>
           <Button
             variant="outline"
-            onClick={() => setRevision((value) => value + 1)}
+            onClick={refreshList}
           >
             다시 불러오기
           </Button>
@@ -822,8 +862,9 @@ export function PublicContentWorkspace({
         pageSize={pageSize}
         totalCount={list?.totalCount ?? null}
         loading={loading}
-        onPageChange={setPage}
+        onPageChange={(value) => { cancelReviewRead(); setPage(value); }}
         onPageSizeChange={(value) => {
+          cancelReviewRead();
           setPreference(value);
           setPage(1);
         }}
@@ -852,7 +893,7 @@ export function PublicContentWorkspace({
           onReturnFocus={() => {
             if (!importReviewOpening.current) returnFocus();
           }}
-          onClose={() => setImporting(false)}
+          onClose={() => { cancelReviewRead(); setImporting(false); }}
           onReview={(entries) => {
             importReviewOpening.current = true;
             setImporting(false);
@@ -1247,6 +1288,7 @@ export function PublicContentWorkspace({
                 variant="outline"
                 onClick={() => {
                   if (review && editing) {
+                    cancelReviewRead();
                     setReview(null);
                     setDialogError("");
                   } else closeModal();

@@ -919,6 +919,11 @@
       "fileName": "20261023091500_dashboard_operational_role_scope.sql",
       "status": "final",
       "sha256": "dfa81cdeedcd307d8337235d7b2d2e0bf41eff059e63b66a43295c538ff3bdf5"
+    },
+    {
+      "fileName": "20261026124608_makeup_legacy_canonical_render_bridge.sql",
+      "status": "final",
+      "sha256": "3b11e40988854ed2e64a4a1e4dd5513820f075d183f639f5c49e9aadcf908329"
     }
   ]
 }

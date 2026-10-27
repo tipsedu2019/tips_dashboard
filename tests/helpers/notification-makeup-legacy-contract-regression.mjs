@@ -11,6 +11,8 @@ import { modules, setup, button, row, id, stamp } from "./makeup-numbered-harnes
 import { buildNotificationAppLink } from "../../src/features/notifications/server/notification-app-deep-link.ts"
 import { createGoogleChatProvider } from "../../src/features/notifications/server/providers/google-chat-provider.ts"
 import { requireRegisteredNotificationExternalAttempt } from "../../src/features/notifications/server/external-attempt-gate.js"
+import { renderLegacyMakeupSnapshot } from "../../src/features/notifications/server/legacy-makeup-render-snapshot.ts"
+import { fixture as canonicalFixture, want as canonicalWant } from "./makeup-canonical-render-fixture.mjs"
 import { recordLegacyNotificationDeliveryIntent } from "../../src/features/notifications/server/legacy-delivery-intent.js"
 
 const require = createRequire(import.meta.url)
@@ -44,7 +46,8 @@ function item(patch = {}) {
 }
 
 function routeHarness(options = {}) {
-  const rpcCalls = [], requests = [], providerContexts = [], warnings = []
+  const rpcCalls = [], requests = [], providerContexts = [], warnings = [], pushContexts = []
+  const parentBodies = new Map()
   const materialized = { deliveryId: id(5), acquired: true, recoveredUnknown: false, claimId: id(6), ownerGeneration: "0", dispatchToken: id(7), replayOutcome: "", ...options.materialized }
   const actorClient = {
     auth: { async getUser() { return { data: { user: options.unauthorized ? null : { id: id(804) } }, error: null } } },
@@ -57,7 +60,32 @@ function routeHarness(options = {}) {
     async rpc(name, args) {
       rpcCalls.push({ name, args })
       if (name === "get_makeup_legacy_dispatch_plan_v1") return { data: { items: options.items || [item(options.item)] }, error: options.planError || null }
-      if (name === "materialize_makeup_legacy_google_chat_v1") return { data: materialized, error: null }
+      if (name === "get_notification_render_snapshot_v1") {
+        const planItem = (options.items || [item(options.item)]).find(value => value.ruleId === args.p_rule_id)
+        const canonical = canonicalFixture(planItem.eventKey)
+        const snapshot = { ...canonical.snapshot,
+          event_id: planItem.eventId, event_key: planItem.eventKey, occurrence_key: planItem.occurrenceKey,
+          source_id: id(2), rule_id: planItem.ruleId, rule_revision: planItem.ruleRevision,
+          template_id: planItem.templateId, channel_key: planItem.channelKey, audience_key: planItem.audienceKey,
+          occurred_at: planItem.scheduledFor,
+          ...(options.canonical ? {} : {allowed_variables: [{key:"class_name",token:"수업",piiClass:"class_name"}]}),
+          ...options.snapshot,
+        }
+        return { data: snapshot, error: options.snapshotError || null }
+      }
+      if (["materialize_makeup_legacy_google_chat_v1", "materialize_makeup_legacy_google_chat_v2"].includes(name)) return { data: materialized, error: options.materializeError || null }
+      if (name === "materialize_makeup_legacy_in_app_v1") {
+        const deliveryId = id(50 + parentBodies.size)
+        const frozen = options.items.find(value => value.targetProfileId === args.p_profile_id)
+        parentBodies.set(deliveryId, {title:frozen.renderedTitle,body:frozen.renderedBody})
+        return {data:{deliveryId,acquired:true,projectionCommitted:true},error:null}
+      }
+      if (name === "prepare_makeup_legacy_web_push_v1") {
+        const parent = parentBodies.get(args.p_parent_delivery_id)
+        assert.ok(parent, "push must start from a committed parent")
+        return {data:{items:[{deliveryId:id(80+parentBodies.size),acquired:true,recoveredUnknown:false,replayOutcome:"",claimId:id(81),ownerGeneration:"0",dispatchToken:id(82),templateChecksum:"a".repeat(64),subscription:{endpoint:"https://fcm.googleapis.com/fcm/send/synthetic-only",keys:{p256dh:"synthetic-only",auth:"synthetic-only"}},renderedTitle:parent.title,renderedBody:parent.body,href:finalSqlHref(id(900))}]},error:null}
+      }
+      if (name === "finalize_makeup_legacy_web_push_v1") return {data:{outcome:args.p_outcome},error:null}
       if (name === "record_legacy_notification_delivery_intent_v1") return { data: { recorded: true }, error: null }
       if (name === "register_notification_external_attempt_v1") return { data: options.deniedAttempt ? { allowed: false } : { allowed: true, attempt_id: id(8) }, error: null }
       if (name === "finalize_makeup_legacy_google_chat_v1") return { data: { outcome: args.p_outcome }, error: null }
@@ -69,16 +97,18 @@ function routeHarness(options = {}) {
     "@supabase/supabase-js": { createClient(_url, key) { return key === "test-anon" ? actorClient : serverClient } },
     "@/features/notifications/server/legacy-google-chat-connection": { async readLegacyGoogleChatWebhookUrl() { if (options.connectionError) throw new Error("mock connection unavailable"); return WEBHOOK } },
     "@/features/notifications/server/external-attempt-gate": { requireRegisteredNotificationExternalAttempt },
+    "@/features/notifications/server/legacy-makeup-render-snapshot": { renderLegacyMakeupSnapshot },
     "@/features/notifications/server/legacy-delivery-intent": { recordLegacyNotificationDeliveryIntent },
     "@/features/notifications/server/providers/google-chat-provider": { createGoogleChatProvider(input) { const provider = createGoogleChatProvider(input); return { send(context) { providerContexts.push(context); return provider.send(context) } } } },
-    "@/features/notifications/server/providers/web-push-provider": { createWebPushProvider() { throw new Error("Web Push is outside this mock") } },
+    "@/features/notifications/server/providers/web-push-provider": { createWebPushProvider() { assert.equal(options.inApp,true); return {async send(context){pushContexts.push(context); return {status:"sent",providerResponseCode:"201"}}} } },
+    "web-push": {default:{setVapidDetails(){assert.equal(options.inApp,true)},sendNotification(){throw Error("Network transport is forbidden in this fixture")}}},
   }
   const source = ts.transpileModule(readFileSync("src/app/api/notifications/legacy/makeup/route.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const runtime = { exports: {} }
   vm.runInNewContext(source, {
     module: runtime, exports: runtime.exports,
     require(specifier) { assert.ok(specifier in mocks, `Unexpected module: ${specifier}`); return mocks[specifier] },
-    process: { env: { NEXT_PUBLIC_SUPABASE_URL: "https://supabase.test.invalid", NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon", SUPABASE_SERVICE_ROLE_KEY: "test-service" } },
+    process: { env: { NEXT_PUBLIC_SUPABASE_URL: "https://supabase.test.invalid", NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon", SUPABASE_SERVICE_ROLE_KEY: "test-service", ...(options.inApp ? {NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY:"synthetic-only",WEB_PUSH_PRIVATE_KEY:"synthetic-only",WEB_PUSH_CONTACT:"mailto:fixture@example.invalid"} : {}) } },
     Response, AbortSignal, Buffer,
     console: { warn(...args) { warnings.push(args) } },
     async fetch(url, init) {
@@ -89,7 +119,7 @@ function routeHarness(options = {}) {
       return new Response(JSON.stringify({ name: "spaces/TESTMAKEUPSPACE/messages/mock-message" }), { status: options.providerStatus || 200 })
     },
   }, { filename: "actual-legacy-makeup-route.ts" })
-  return { rpcCalls, requests, providerContexts, warnings, post(body = { sourceEventId: id(2) }) { return runtime.exports.POST(new Request("https://test.invalid/api/notifications/legacy/makeup", { method: "POST", headers: { Authorization: "Bearer test-token", "Content-Type": "application/json" }, body: JSON.stringify(body) })) } }
+  return { rpcCalls, requests, providerContexts, warnings, pushContexts, parentBodies, post(body = { sourceEventId: id(2) }) { return runtime.exports.POST(new Request("https://test.invalid/api/notifications/legacy/makeup", { method: "POST", headers: { Authorization: "Bearer test-token", "Content-Type": "application/json" }, body: JSON.stringify(body) })) } }
 }
 
 test("final SQL legacy href reaches the actual POST route and actual card provider with its workflow", async () => {
@@ -101,7 +131,7 @@ test("final SQL legacy href reaches the actual POST route and actual card provid
   assert.equal(harness.providerContexts[0].href, finalSqlHref(id(900)), "durable legacy intent retains the original producer href")
   assert.equal(harness.requests.length, 1)
   assert.equal(harness.requests[0].payload.cardsV2[0].card.sections[0].widgets[1].buttonList.buttons[0].onClick.openLink.url, `https://tipsedu.co.kr/admin/makeup-requests?request=${id(900)}`)
-  assert.deepEqual(harness.rpcCalls.map((call) => call.name), ["get_makeup_legacy_dispatch_plan_v1", "materialize_makeup_legacy_google_chat_v1", "record_legacy_notification_delivery_intent_v1", "register_notification_external_attempt_v1", "finalize_makeup_legacy_google_chat_v1"])
+  assert.deepEqual(harness.rpcCalls.map((call) => call.name), ["get_makeup_legacy_dispatch_plan_v1", "get_notification_render_snapshot_v1", "materialize_makeup_legacy_google_chat_v1", "record_legacy_notification_delivery_intent_v1", "register_notification_external_attempt_v1", "finalize_makeup_legacy_google_chat_v1"])
   const intent = harness.rpcCalls.find((call) => call.name === "record_legacy_notification_delivery_intent_v1")
   const expectedHash = createHash("sha256").update(JSON.stringify({ title: "휴보강 신청", body: "고1 영어 휴강 신청", href: finalSqlHref(id(900)) })).digest("hex")
   assert.equal(intent.args.p_normalized_rendered_hash, expectedHash)
@@ -381,4 +411,68 @@ test("mounted approval closes the committed approval and shows notification warn
   assert.equal(requests.filter((request) => request.url === "/api/makeup-requests/approve").length, 1)
   assert.equal(requests.filter((request) => request.url === "/api/notifications/legacy/makeup").length, 1)
   assert.equal(p.requests.some((request) => request.name === "transition_makeup_request_v2"), false)
+})
+
+
+test("canonical makeup body is identical in v2 materialization, intent and actual card candidate; no real network", async () => {
+  const harness = routeHarness({ canonical: true })
+  const response = await harness.post()
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { ok: true, sent: 1, deduped: 0, failed: 0 })
+  const call = harness.rpcCalls.find(call => call.name === "materialize_makeup_legacy_google_chat_v2")
+  assert.ok(call)
+  assert.equal(call.args.p_rendered_title, canonicalWant["makeup.submitted"][0])
+  assert.equal(call.args.p_rendered_body, canonicalWant["makeup.submitted"][1])
+  assert.equal(harness.providerContexts[0].rendered_body, call.args.p_rendered_body)
+  assert.equal(harness.providerContexts[0].rendered_title, call.args.p_rendered_title)
+  assert.equal(call.args.p_template_id, item().templateId)
+  assert.equal(call.args.p_template_checksum, item().templateChecksum)
+  const intent = harness.rpcCalls.find(call => call.name === "record_legacy_notification_delivery_intent_v1")
+  assert.ok(intent)
+  assert.equal(intent.args.p_normalized_rendered_hash, createHash("sha256").update(JSON.stringify({
+    title: call.args.p_rendered_title, body: call.args.p_rendered_body, href: finalSqlHref(id(900)),
+  })).digest("hex"))
+  assert.equal(harness.requests.length, 1)
+})
+
+test("invalid/mismatched canonical snapshot is rejected before any materialize, claim or transport", async () => {
+  for (const options of [{snapshot:{template_id:id(777)}}, {snapshot:{source_id:id(777)}}, {snapshotError:{code:"P0002"}}]) {
+    const harness = routeHarness({canonical:true,...options})
+    const response = await harness.post()
+    assert.equal((await response.json()).failed, 1)
+    assert.equal(harness.requests.length, 0)
+    assert.equal(harness.rpcCalls.some(call => call.name.startsWith("materialize_")), false)
+  }
+})
+
+test("v2 replay mismatch and already sent/unknown ownership cannot produce another transport", async () => {
+  for (const options of [
+    {materializeError:{code:"22023",message:"notification_delivery_replay_mismatch"}},
+    {materialized:{acquired:false,replayOutcome:"sent"}},
+    {materialized:{acquired:false,replayOutcome:"delivery_unknown"}},
+    {materialized:{acquired:false,recoveredUnknown:true}},
+  ]) {
+    const harness=routeHarness({canonical:true,...options})
+    await harness.post()
+    assert.equal(harness.requests.length,0)
+    assert.equal(harness.rpcCalls.some(call=>call.name === "register_notification_external_attempt_v1"),false)
+  }
+})
+
+
+test("existing in-app POST and push retain v1 semantics without canonical snapshot reads", async () => {
+  const items = [804,805].map(profile=>item({channelKey:"in_app",targetKind:"profile",targetKey:`profile:${id(profile)}`,targetProfileId:id(profile),connectionKey:null,targetSnapshot:{profile_id:id(profile)}}))
+  const harness=routeHarness({canonical:true,inApp:true,items})
+  const response=await harness.post()
+  assert.deepEqual(await response.json(),{ok:true,sent:4,deduped:0,failed:0})
+  assert.equal(harness.rpcCalls.filter(call=>call.name==="get_notification_render_snapshot_v1").length,0)
+  const writes=harness.rpcCalls.filter(call=>call.name==="materialize_makeup_legacy_in_app_v1")
+  assert.deepEqual(writes.map(call=>call.args.p_profile_id),[id(804),id(805)])
+  assert.equal(new Set(writes.map(call=>call.args.p_request_id)).size,2)
+  assert.equal(harness.pushContexts.length,2)
+  for(const context of harness.pushContexts){
+    assert.equal(context.rendered_title,items[0].renderedTitle)
+    assert.equal(context.rendered_body,items[0].renderedBody)
+  }
+  assert.equal(harness.requests.length,0,"in-app/push fixture cannot call Google Chat")
 })

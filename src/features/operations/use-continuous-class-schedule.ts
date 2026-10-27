@@ -16,31 +16,40 @@ export function useContinuousClassSchedule(
   reader: ContinuousScheduleBoundedReader | null,
   input: ContinuousScheduleBoundedReadInput | null,
 ): ContinuousScheduleReadState {
-  const [state, setState] = useState<ContinuousScheduleReadState>({ status: "idle" });
   const classId = input?.classId;
   const dateFrom = input?.dateFrom;
   const dateTo = input?.dateTo;
   const refreshKey = input?.refreshKey;
+  const scope = JSON.stringify([classId, dateFrom, dateTo, refreshKey]);
+  const [snapshot, setSnapshot] = useState<{
+    reader: ContinuousScheduleBoundedReader | null;
+    scope: string;
+    state: ContinuousScheduleReadState;
+  } | null>(null);
 
   useEffect(() => {
     if (!reader || !classId || !dateFrom || !dateTo) return undefined;
     let active = true;
     void Promise.resolve().then(async () => {
       if (!active) return;
-      setState({ status: "loading" });
+      const publish = (state: ContinuousScheduleReadState) => setSnapshot({ reader, scope, state });
+      publish({ status: "loading" });
       try {
         const value = await reader.load({ classId, dateFrom, dateTo });
-        if (active) setState({ status: "ready", value });
+        if (active) publish({ status: "ready", value });
       } catch (error) {
-        if (active) setState({ status: "ready", value: { source: "error", error } });
+        if (active) publish({ status: "ready", value: { source: "error", error } });
       }
     });
     return () => {
       active = false;
       reader.reset();
     };
-  }, [classId, dateFrom, dateTo, reader, refreshKey]);
+  }, [classId, dateFrom, dateTo, reader, scope]);
 
   if (!reader || !classId || !dateFrom || !dateTo) return { status: "idle" };
-  return state;
+  // An input/actor change renders before effect cleanup. Never lend the old
+  // response to that new owner, month, or refresh attempt during that render.
+  return snapshot?.reader === reader && snapshot.scope === scope
+    ? snapshot.state : { status: "loading" };
 }
