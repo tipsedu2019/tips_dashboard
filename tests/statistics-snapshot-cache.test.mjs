@@ -387,6 +387,61 @@ test("client memory cache loads only the active tab, deduplicates in flight, and
   )
 })
 
+for (const outcome of ["reject", "resolve"]) {
+  test(`aborted cache owner is replaced before its late ${outcome} without evicting the replacement`, async () => {
+    const cache = cacheModule.createDashboardStatisticsMemoryCache({ now: () => Date.parse(GENERATED_AT) })
+    const owner = new AbortController()
+    const abandoned = deferred()
+    const first = cache.load("synthetic", () => abandoned.promise, { signal: owner.signal })
+    const firstOutcome = first.catch(error => error)
+    owner.abort()
+    const replacement = deferred()
+    let replacementCalls = 0
+    const second = cache.load("synthetic", () => { replacementCalls++; return replacement.promise })
+    const duplicate = cache.load("synthetic", () => { throw new Error("duplicate transport") })
+    assert.equal(replacementCalls, 1)
+    assert.equal(second, duplicate)
+    if (outcome === "reject") abandoned.reject(new DOMException("Synthetic abort", "AbortError"))
+    else abandoned.resolve(snapshot({ value: 1 }))
+    await firstOutcome
+    assert.equal(cache.load("synthetic", () => { throw new Error("replacement was evicted") }), second)
+    replacement.resolve(snapshot({ value: 2 }))
+    assert.deepEqual(await second, snapshot({ value: 2 }))
+    assert.deepEqual(await cache.load("synthetic", () => { throw new Error("ready cache was lost") }), snapshot({ value: 2 }))
+  })
+}
+
+test("a cancelled joining consumer does not replace a live cache owner", async () => {
+  const cache = cacheModule.createDashboardStatisticsMemoryCache({ now: () => Date.parse(GENERATED_AT) })
+  const owner = new AbortController()
+  const joiner = new AbortController()
+  const pending = deferred()
+  const first = cache.load("synthetic", () => pending.promise, { signal: owner.signal })
+  const joined = cache.load("synthetic", () => { throw new Error("duplicate") }, { signal: joiner.signal })
+  joiner.abort()
+  assert.equal(joined, first)
+  assert.equal(owner.signal.aborted, false)
+  assert.equal(cache.load("synthetic", () => { throw new Error("live owner lost") }), first)
+  pending.resolve(snapshot())
+  await joined
+  owner.abort()
+  assert.deepEqual(await cache.load("synthetic", () => { throw new Error("settled value lost") }), snapshot())
+})
+
+test("an aborted loader that ignores its signal never populates a ready cache entry", async () => {
+  const cache = cacheModule.createDashboardStatisticsMemoryCache({ now: () => Date.parse(GENERATED_AT) })
+  const owner = new AbortController()
+  const pending = deferred()
+  const first = cache.load("synthetic", () => pending.promise, { signal: owner.signal })
+  owner.abort()
+  pending.resolve(snapshot({ value: 1 }))
+  await first
+  let calls = 0
+  const fresh = await cache.load("synthetic", async () => { calls++; return snapshot({ value: 2 }) })
+  assert.equal(calls, 1)
+  assert.deepEqual(fresh, snapshot({ value: 2 }))
+})
+
 test("browser cache never extends a server hit beyond authoritative expiresAt", async () => {
   let now = Date.parse("2026-08-14T00:09:59.000Z")
   let calls = 0

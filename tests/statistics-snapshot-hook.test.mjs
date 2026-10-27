@@ -266,3 +266,118 @@ test("explicit refresh keeps date-free statistics filters and requests date-free
   assert.equal(h.requests[2].refresh, false)
   assert.equal(h.requests.length, 3)
 })
+
+async function authLifecycleHarness(t, { ignoreAbort = false, consumers = 1 } = {}) {
+  const dom = installDom()
+  const originalFetch = globalThis.fetch
+  const contract = await import("../src/features/dashboard/statistics-contract.ts")
+  const actualCache = await import("../src/features/dashboard/statistics-cache.ts")
+  const cache = actualCache.createDashboardStatisticsMemoryCache()
+  let auth = { user: { id: "synthetic-auth-user" }, role: "admin", session: { access_token: "synthetic-A" } }
+  const requests = []
+  const states = new Map()
+  globalThis.fetch = (url, options) => {
+    const parsed = contract.parseDashboardStatisticsRequest(new URL(url, "https://synthetic.invalid").searchParams)
+    assert.deepEqual(parsed.request, { tab: "students_classes", subject: "english", division: "all", dateFrom: "", dateTo: "" })
+    assert.equal(options.method, "GET")
+    return new Promise((resolve, reject) => {
+      requests.push({ signal: options.signal, authorization: options.headers.Authorization, resolve })
+      const abort = () => { if (!ignoreAbort) reject(new DOMException("Synthetic abort", "AbortError")) }
+      if (options.signal.aborted) abort()
+      else options.signal.addEventListener("abort", abort, { once: true })
+    })
+  }
+  const { useStatisticsSnapshot } = await loadTypeScript(new URL("src/features/dashboard/use-statistics-snapshot.ts", root), new Map([
+    ["./statistics-contract.ts", contract],
+    ["./statistics-cache.ts", { ...actualCache, dashboardStatisticsMemoryCache: cache }],
+    ["@/providers/auth-provider", { useAuth: () => auth }],
+  ]))
+  function Harness({ id }) {
+    const value = useStatisticsSnapshot({ tab: "students_classes", subject: "english" })
+    useEffect(() => { states.set(id, value) }, [id, value])
+    return null
+  }
+  const reactRoot = createRoot(document.createElement("div"))
+  const flush = action => act(async () => { action(); await new Promise(resolve => setTimeout(resolve, 0)) })
+  const render = () => flush(() => reactRoot.render(Array.from({ length: consumers }, (_, id) => createElement(Harness, { key: id, id }))))
+  t.after(async () => {
+    await act(async () => reactRoot.unmount())
+    globalThis.fetch = originalFetch
+    dom.window.close()
+  })
+  await render()
+  return {
+    requests,
+    state: (id = 0) => states.get(id),
+    rotate: () => { auth = { ...auth, session: { access_token: auth.session.access_token === "synthetic-A" ? "synthetic-B" : "synthetic-C" } }; return render() },
+    auth: value => { auth = value; return render() },
+    refresh: () => flush(() => states.get(0).refresh()),
+    settle: (index, count, status = 200) => flush(() => requests[index].resolve(new Response(JSON.stringify(status === 200 ? {
+      ok: true, tab: "students_classes", contractVersion: "dashboard-statistics-v1", data: { count },
+      generatedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString(), cacheStatus: "miss",
+    } : {}), { status }))),
+  }
+}
+
+test("same-actor credential renewal replaces an aborted statistics read exactly once", async t => {
+  const h = await authLifecycleHarness(t, { consumers: 2 })
+  assert.equal(h.requests.length, 1, "live consumers share one transport")
+  await h.rotate()
+  assert.equal(h.requests[0].signal.aborted, true)
+  assert.equal(h.requests.length, 2, "renewed consumers share one replacement instead of the cancelled promise")
+  assert.equal(h.requests[1].authorization, "Bearer synthetic-B")
+  await h.settle(1, 2)
+  for (const id of [0, 1]) {
+    assert.deepEqual(h.state(id).data, { count: 2 })
+    assert.equal(h.state(id).error, null)
+    assert.equal(h.state(id).loading, false)
+  }
+})
+
+test("late cancelled statistics response cannot overwrite or cache over the renewed read", async t => {
+  const h = await authLifecycleHarness(t, { ignoreAbort: true })
+  await h.rotate()
+  assert.equal(h.requests.length, 2)
+  await h.settle(1, 2)
+  await h.settle(0, 1)
+  assert.deepEqual(h.state().data, { count: 2 })
+  await h.rotate()
+  assert.equal(h.requests.length, 2, "settled cache is preserved after credential renewal")
+  assert.deepEqual(h.state().data, { count: 2 })
+})
+
+test("auth renewal preserves accepted statistics and supports retry after a real failure", async t => {
+  const h = await authLifecycleHarness(t)
+  await h.settle(0, 1)
+  await h.refresh()
+  await h.rotate()
+  assert.equal(h.requests.length, 3)
+  assert.deepEqual(h.state().data, { count: 1 })
+  await h.settle(2, null, 500)
+  assert.deepEqual(h.state().data, { count: 1 })
+  assert.match(h.state().error, /불러오지 못/)
+  await h.refresh()
+  assert.equal(h.requests.length, 4)
+  await h.settle(3, 2)
+  assert.deepEqual(h.state().data, { count: 2 })
+  assert.equal(h.state().error, null)
+})
+
+test("credential renewal cannot carry late statistics across role, account or logout", async t => {
+  const h = await authLifecycleHarness(t, { ignoreAbort: true })
+  await h.rotate()
+  await h.auth({ user: { id: "synthetic-auth-user" }, role: "staff", session: { access_token: "synthetic-staff" } })
+  assert.equal(h.state().data, null)
+  await h.settle(1, 2)
+  assert.equal(h.state().data, null)
+  await h.settle(2, 3)
+  assert.deepEqual(h.state().data, { count: 3 })
+  await h.auth({ user: { id: "synthetic-other" }, role: "staff", session: { access_token: "synthetic-other" } })
+  assert.equal(h.state().data, null)
+  await h.auth({ user: null, role: null, session: null })
+  await h.settle(3, 4)
+  await h.settle(0, 1)
+  assert.equal(h.state().data, null)
+  assert.match(h.state().error, /로그인/)
+  assert.equal(h.requests.length, 4)
+})

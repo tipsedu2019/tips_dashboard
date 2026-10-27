@@ -32,6 +32,7 @@ export function buildDashboardStatisticsCacheKey(input: Readonly<{
 type MemoryEntry = {
   generation: number
   promise?: Promise<DashboardStatisticsSnapshot>
+  signal?: AbortSignal
   value?: DashboardStatisticsSnapshot
   expiresAt?: number
 }
@@ -100,13 +101,14 @@ export function createDashboardStatisticsMemoryCache({
   function load(
     key: string,
     loader: () => Promise<DashboardStatisticsSnapshot>,
-    options: { force?: boolean } = {},
+    options: { force?: boolean; signal?: AbortSignal } = {},
   ) {
     if (options.force) invalidate(key)
     const requestGeneration = generation(key)
     const current = entries.get(key)
     if (current?.value && (current.expiresAt ?? 0) > now()) return Promise.resolve(current.value)
-    if (current?.promise && current.generation === requestGeneration) return current.promise
+    // Effect cleanup can abort the owner before its rejection removes the entry.
+    if (current?.promise && current.generation === requestGeneration && !current.signal?.aborted) return current.promise
 
     let loadResult: Promise<DashboardStatisticsSnapshot>
     try {
@@ -122,6 +124,7 @@ export function createDashboardStatisticsMemoryCache({
         throw new Error("dashboard_statistics_snapshot_expired")
       }
       if (
+        !options.signal?.aborted &&
         generation(key) === requestGeneration &&
         entries.get(key)?.promise === promise
       ) {
@@ -136,7 +139,7 @@ export function createDashboardStatisticsMemoryCache({
       if (entries.get(key)?.promise === promise) entries.delete(key)
       throw error
     })
-    entries.set(key, { generation: requestGeneration, promise })
+    entries.set(key, { generation: requestGeneration, promise, signal: options.signal })
     return promise
   }
 
@@ -151,9 +154,10 @@ export function loadActiveDashboardStatisticsSnapshot(input: Readonly<{
   key: string
   loader: () => Promise<DashboardStatisticsSnapshot>
   force?: boolean
+  signal?: AbortSignal
 }>) {
   if (!input.active) return Promise.resolve(null)
-  return input.cache.load(input.key, input.loader, { force: input.force })
+  return input.cache.load(input.key, input.loader, { force: input.force, signal: input.signal })
 }
 
 export async function fetchDashboardStatisticsSnapshot(input: Readonly<{
