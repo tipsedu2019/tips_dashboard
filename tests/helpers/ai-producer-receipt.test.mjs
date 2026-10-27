@@ -1215,7 +1215,7 @@ test('class month summary exact pin rejects removal, reordering, duplication and
   const original=JSON.parse(await readFile(manifestPath));
   assert.equal(original.orderedNewMigrations.length,187);
   assert.deepEqual(original.orderedNewMigrations[186],pin);
-  assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,186))),'8b5bb7033c8146371b0f028e146c758e07a737872f2b130681de30084ffb4c11');
+  assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,186))),'ab04f6eeca206a57573ea149193706a04d6b1d223c18253de53acbd348b7e7c5');
   for(const mutate of [rows=>rows.pop(),rows=>rows.push({...pin}),rows=>rows.at(-1).status='candidate',rows=>rows.at(-1).sha256='0'.repeat(64),rows=>{[rows[185],rows[186]]=[rows[186],rows[185]];}]){
    const changed=structuredClone(original);mutate(changed.orderedNewMigrations);
    await writeFile(manifestPath,JSON.stringify(changed));

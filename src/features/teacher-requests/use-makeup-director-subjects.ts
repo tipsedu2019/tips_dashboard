@@ -19,4 +19,3 @@ export function useMakeupDirectorSubjects(enabled: boolean) {
   }, [scope])
   return state.scope === scope && scope ? state.subjects : []
 }
-
