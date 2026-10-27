@@ -624,8 +624,14 @@ test('operations: exact detail opens independently and progress draft/lifecycle 
   assert.equal(page.numbered().length, 0);
   await act(async () => page.requests.find(r => r.name === 'continuous_class_schedule_runtime_version').resolve({ data: 1, error: null }));
   await act(async () => page.requests.find(r => r.name === 'get_class_schedule_v1').resolve({ data: { authoritativeSource: 'legacy' }, error: null }));
+  // The authoritative legacy response selects its first saved month. Finish
+  // that bounded read before exercising editing, which is gated while loading.
+  const savedMonthRead = page.requests.filter(r => r.name === 'get_class_schedule_v1').at(-1);
+  assert.equal(savedMonthRead.args.p_date_from, '2026-08-01');
+  await act(async () => savedMonthRead.resolve({ data: { authoritativeSource: 'legacy' }, error: null }));
   const input = document.querySelector('input[aria-label="8월 종료일"]');
   assert.ok(input, 'actual schedule period editor');
+  assert.equal(input.disabled, false, 'edit only after the authoritative read is ready');
   const reactProps = input[Object.keys(input).find((key) => key.startsWith('__reactProps'))];
   await act(async () => reactProps.onChange({ target: { value: '2026-09-07' } }));
   const observed = { ...page.observed };

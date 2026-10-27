@@ -20,14 +20,14 @@ function modules(supabase, overrides, sourceOverrides = {}) {
     const runtime = { exports: {} }; cache.set(file, runtime);
     let inputSource = sourceOverrides[path.relative(rootPath, file)] ?? readFileSync(file, 'utf8');
     if (file.endsWith('/class-schedule-workspace.tsx')) inputSource = inputSource.replace('  const classScheduleWorkspaceContent = (',
-      '  require("@test/observer").observe({ setSelectedLessonScheduleState, selectedLessonScheduleState, normalizedScheduleRefreshNonce, generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, focusedLessonMonthKey, selectedLessonMonthKeys, selectedLessonSessionId, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
+      '  require("@test/observer").observe({ normalizedReadMonthKey, setSelectedLessonScheduleState, selectedLessonScheduleState, normalizedScheduleRefreshNonce, generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, focusedLessonMonthKey, selectedLessonMonthKeys, selectedLessonSessionId, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
     if (file.endsWith('/class-schedule-workspace.tsx')) inputSource += '\nexport { buildLessonDesignSnapshot as __testBuildLessonDesignSnapshot };\n';
     const source = ts.transpileModule(inputSource, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
     const resolve = (specifier) => {
       if (specifier in overrides) return overrides[specifier];
-      if (specifier === '@/lib/supabase') return { supabase };
+      if (specifier === '@/lib/supabase' || specifier === '../../lib/supabase.ts') return { supabase };
       if (!specifier.startsWith('.') && !specifier.startsWith('@/')) return require(specifier);
       const base = specifier.startsWith('@/') ? path.join(rootPath, 'src', specifier.slice(2)) : path.resolve(path.dirname(file), specifier);
       const target = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`].find(existsSync);
@@ -94,7 +94,12 @@ async function setup(t, domain, initial = {}) {
   const load = modules(supabase, {
     '@test/observer': { observe(value) { observed = value; } },
     '@/providers/auth-provider': { useAuth: () => auth },
-    './use-continuous-class-schedule': { useContinuousClassSchedule: () => normalized },
+    ...(initial.realSchedule ? {
+      '@/features/academic/continuous-class-schedule-runtime-probe': {
+        probeContinuousScheduleRuntime: async () => ({ mode: 'ready', version: 1 }),
+        resetContinuousScheduleRuntimeProbe() {},
+      },
+    } : { './use-continuous-class-schedule': { useContinuousClassSchedule: () => normalized } }),
     '@/lib/public-classes-cache-invalidation.js': { invalidatePublicClassesCacheAfterMutation: async () => ({status: 'ready'}) },
     'next/navigation': { useRouter: () => router, usePathname: () => window.location.pathname, useSearchParams: () => {
       if (previousSearch !== window.location.search) { previousSearch = window.location.search; params = new URLSearchParams(previousSearch); } return params;
@@ -1108,7 +1113,7 @@ test('normalized month display first-read failure has no false counts and can re
  const retry=[...sidebar.querySelectorAll('button')].find(b=>b.textContent==='다시 조회');
  assert.ok(retry);const nonce=page.observed.normalizedScheduleRefreshNonce;
  await act(async()=>retry.click());assert.equal(page.observed.normalizedScheduleRefreshNonce,nonce+1);
- const requested=page.observed.focusedLessonMonthKey;
+ const requested=page.observed.normalizedReadMonthKey;
  await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:2,sessions:[]}}});
  assert.match(monthRow(requested).textContent,/0회/);
  assert.equal(saveRequests(page).length,0);
@@ -2222,5 +2227,96 @@ test('teacher operations planning reads and selects sessions without creating dr
   await act(async () => session.click());
   assert.ok(page.observed.selectedLessonSessionId);
   assert.deepEqual(page.observed.lessonPlanDraft, saved);
+  assert.equal(saveRequests(page).length, 0);
+});
+
+
+async function initialAuthoritativeMonth(t, now = '2026-10-27T10:42:00Z') {
+  const NativeDate = Date;
+  class Clock extends NativeDate {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return new NativeDate(now).getTime(); }
+  }
+  globalThis.Date = Clock;
+  t.after(() => { globalThis.Date = NativeDate; });
+  const page = await setup(t, 'operations', { workspace: true, realSchedule: true, route: 'curriculum',
+    auth: { role: 'teacher' }, search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-periods` });
+  const payload = detail();
+  payload.classItem.scheduleStorageMode = 'normalized';
+  payload.classItem.schedulePlan = buildSchedulePlanForSave({ className: 'SYNTHETIC', selectedDays: [1],
+    billingPeriods: [{ id: 'saved-april', month: 4, label: '4월', startDate: '2026-04-01', endDate: '2026-04-30' }], sessions: [] });
+  await act(async () => page.requests.find(r => r.name === 'get_operations_class_lesson_design_detail_v1').resolve({ error: null, data: payload }));
+  return page;
+}
+const authoritativeReads = page => page.requests.filter(r => r.name === 'get_class_schedule_v1');
+const acceptAuthoritativeMonth = (request, sessions = [], source = 'normalized') => act(async () => request.resolve({ error: null,
+  data: { authoritativeSource: source, scheduleRevision: 1, sessions } }));
+const initialMonthSession = (date, n = 651) => ({ id: id(n), session_key: `synthetic-${n}`, session_date: date, schedule_state: 'active', revision: 1 });
+
+test('initial normalized month waits for the actual read instead of selecting the earliest legacy period', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  assert.equal(authoritativeReads(page).length, 1);
+  assert.equal(authoritativeReads(page)[0].args.p_date_from, '2026-10-01');
+  assert.equal(page.observed.focusedLessonMonthKey, '', 'pending metadata cannot change the requested month');
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], [initialMonthSession('2026-10-02')]);
+  assert.equal(page.observed.focusedLessonMonthKey, '2026-10');
+  assert.equal(document.querySelector('input[aria-label="일정 조회·생성 월"]').value, '2026-10');
+  assert.match(monthRow('2026-10').textContent, /1회/);
+  assert.match(monthRow('2026-04').textContent, /미조회/);
+  assert.equal(authoritativeReads(page).length, 1, 'no all-month fanout or redundant read');
+  assert.equal(saveRequests(page).length, 0);
+  assert.equal(dirty(), false);
+});
+
+test('initial normalized month preserves an explicitly selected month and rejects the old initial response', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  const initial = authoritativeReads(page)[0];
+  await act(async () => page.observed.setFocusedLessonMonthKey('2026-11'));
+  const selected = authoritativeReads(page).at(-1);
+  assert.equal(selected.args.p_date_from, '2026-11-01');
+  await acceptAuthoritativeMonth(initial, [initialMonthSession('2026-10-02')]);
+  assert.equal(page.observed.focusedLessonMonthKey, '2026-11');
+  await acceptAuthoritativeMonth(selected, [initialMonthSession('2026-11-02', 652)]);
+  assert.match(monthRow('2026-11').textContent, /1회/);
+  assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.map(row => row.dateValue), ['2026-11-02']);
+  assert.equal(authoritativeReads(page).length, 2);
+  assert.equal(saveRequests(page).length, 0);
+});
+
+test('initial normalized month retry keeps the requested month after a read error', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await act(async () => authoritativeReads(page)[0].resolve({ data: null, error: { code: 'synthetic', message: 'synthetic read failure' } }));
+  assert.equal(page.observed.focusedLessonMonthKey, '');
+  const retry = [...document.querySelectorAll('button')].find(el => el.textContent === '다시 조회');
+  assert.ok(retry);
+  await act(async () => retry.click());
+  const request = authoritativeReads(page).at(-1);
+  assert.equal(request.args.p_date_from, '2026-10-01');
+  await acceptAuthoritativeMonth(request, [initialMonthSession('2026-10-02')]);
+  assert.equal(page.observed.focusedLessonMonthKey, '2026-10');
+  assert.match(monthRow('2026-10').textContent, /1회/);
+  assert.equal(saveRequests(page).length, 0);
+});
+
+test('initial normalized month retains the current year and a confirmed empty month', async t => {
+  const page = await initialAuthoritativeMonth(t, '2027-01-05T12:00:00Z');
+  const request = authoritativeReads(page)[0];
+  assert.equal(request.args.p_date_from, '2027-01-01');
+  await acceptAuthoritativeMonth(request);
+  assert.equal(page.observed.focusedLessonMonthKey, '2027-01');
+  assert.match(monthRow('2027-01').textContent, /0회/);
+  assert.equal(authoritativeReads(page).length, 1);
+  assert.equal(saveRequests(page).length, 0);
+});
+
+test('initial legacy month keeps its established first-period selection after authoritative fallback', async t => {
+  const page = await initialAuthoritativeMonth(t);
+  await acceptAuthoritativeMonth(authoritativeReads(page)[0], [], 'legacy');
+  assert.equal(page.observed.focusedLessonMonthKey, '2026-04');
+  const request = authoritativeReads(page).at(-1);
+  assert.equal(request.args.p_date_from, '2026-04-01');
+  await acceptAuthoritativeMonth(request, [], 'legacy');
+  assert.equal(page.observed.focusedLessonMonthKey, '2026-04');
+  assert.match(document.querySelector('[data-lesson-period-sidebar]').textContent, /4월/);
   assert.equal(saveRequests(page).length, 0);
 });
