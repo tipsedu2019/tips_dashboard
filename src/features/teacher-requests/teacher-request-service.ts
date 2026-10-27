@@ -11,6 +11,7 @@ const uuid = z.string().uuid()
 const text = z.string()
 const date = text.regex(/^\d{4}-\d{2}-\d{2}$/).nullable()
 const note = text.max(4000)
+const makeupSlotInputSchema = z.object({ startAt: text, endAt: text, classroom: text }).strict()
 const inputSchemas = {
   transfer: z.object({ student_id: uuid, memo: note, from_class_id: uuid, to_class_id: uuid, transfer_reason: note,
     from_class_end_date: date, from_class_end_session: note, to_class_start_date: date, to_class_start_session: note,
@@ -18,10 +19,15 @@ const inputSchemas = {
   withdrawal: z.object({ student_id: uuid, memo: note, class_id: uuid, withdrawal_date: date, withdrawal_session: note,
     customer_reason: note, teacher_opinion: note, undistributed_textbooks: note }).strict(),
   makeup: z.object({ request_kind: z.enum(["cancel_makeup", "cancel_only", "makeup_only"]), class_id: uuid, reason: note,
-    cancel_date: date, original_lesson_session_id: uuid.nullable(), makeup_slots: z.array(z.object({ startAt: text, endAt: text, classroom: text }).strict()).max(30) }).strict(),
+    cancel_date: date, original_lesson_session_id: uuid.nullable(), makeup_slots: z.array(makeupSlotInputSchema).max(30) }).strict(),
   textbook: z.object({ title: text, textbookId: uuid.nullable(), classId: uuid.nullable(), locationId: uuid.nullable(),
     studentQuantity: z.number().int().min(0).max(2147483647), teacherQuantity: z.number().int().min(0).max(2147483647), memo: note }).strict(),
 }
+// Management may persist a UI slot id; it is read metadata, never owner input.
+const makeupDetailInputSchema = inputSchemas.makeup.extend({
+  makeup_slots: z.array(makeupSlotInputSchema.extend({ id: text.optional() })
+    .transform(({ startAt, endAt, classroom }) => ({ startAt, endAt, classroom }))).max(30),
+})
 export type RequestInput = Record<string, unknown>
 export type MakeupSlot = { startAt: string; endAt: string; classroom: string }
 const labelsSchema = z.object({ student: text.optional(), class: text.optional(), fromClass: text.optional(), toClass: text.optional(), textbook: text.optional(), location: text.optional() }).strict()
@@ -55,7 +61,9 @@ export function parseRequestInput(domain: RequestDomain, value: unknown): Reques
 function parseDetail(value: unknown, domain: RequestDomain, actorId: string, id?: string) {
   const detail = parse(detailSchema, value)
   if (detail.domain !== domain || detail.requesterId !== actorId || id && detail.id !== id) throw invalid()
-  if (detail.input) detail.input = parseRequestInput(domain, detail.input)
+  if (detail.input) detail.input = domain === "makeup"
+    ? parse<RequestInput>(makeupDetailInputSchema, detail.input)
+    : parseRequestInput(domain, detail.input)
   if (!detail.input && detail.allowedActions.some(action => action === "update" || action === "withdraw")) throw invalid()
   return detail
 }

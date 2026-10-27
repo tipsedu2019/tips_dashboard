@@ -6,6 +6,39 @@ import { inputs, references, makeupReferences, classOptions, ownDetail, ownSumma
 const calls=(h,name)=>h.requests.filter(request=>request.name===name);
 const latest=(h,name)=>calls(h,name).at(-1);
 
+function persistedMakeupInput() {
+ const {normalizeMakeupSlots}=loadNotificationComponent('src/features/makeup-requests/makeup-request-model.js');
+ return {...inputs.makeup,request_kind:'cancel_makeup',makeup_slots:normalizeMakeupSlots({makeup_slots:[{startAt:'2026-11-04T10:30:00Z',endAt:'2026-11-04T12:30:00Z',classroom:'가상 교실'}]})};
+}
+for(const processed of [false,true])test(`persisted management slots open ${processed?'change-only':'editable'} own detail without submitting metadata`,async t=>{
+ const input=persistedMakeupInput();assert.equal(input.makeup_slots[0].id,'slot-1');
+ const {h,record}=await detail(t,'makeup',{input,effectState:processed?'observed':'none',allowedActions:processed?['change_request','cancel_request']:['update','withdraw']});
+ if(processed){
+  assert.equal(button('신청 수정'),undefined);await click(h,'변경 요청');await change(h,'요청 사유','가상 일정 변경 문의');await submit(h);
+ }else{
+  await edit(h,'makeup');await change(h,'휴보강 사유','보존된 일정 수정 사유');await submit(h);
+ }
+ const write=latest(h,'mutate_teacher_own_request_v1');assert.ok(write);
+ if(processed)assert.deepEqual(write.args.p_input,{note:'가상 일정 변경 문의'});
+ else assert.deepEqual(write.args.p_input,{...input,reason:'보존된 일정 수정 사유',makeup_slots:input.makeup_slots.map(({startAt,endAt,classroom})=>({startAt,endAt,classroom}))});
+ await h.resolve(write,ownDetail('makeup',{...record,input,revision:'revision-b'}));assert.equal(h.changed(),1,'persisted metadata in a mutation response must not become a false failure');
+});
+test('persisted slot read metadata rejects unknown fields, invalid ids and foreign ownership',async()=>{
+ const input=persistedMakeupInput(),slot=input.makeup_slots[0];let response;
+ const api=loadNotificationComponent('src/features/teacher-requests/teacher-request-service.ts',new Map([['@/lib/supabase',{supabase:{rpc(){return{abortSignal(){return this},retry(){return Promise.resolve({data:response,error:null})}}}}}]]));
+ for(const invalidSlot of [{...slot,id:1},{...slot,id:null},{...slot,id:{}},{...slot,status:'approved'}]){
+  response=ownDetail('makeup',{input:{...input,makeup_slots:[invalidSlot]}});
+  await assert.rejects(api.readOwnRequest('makeup',teacherActor,response.id,new AbortController().signal),/형식/);
+ }
+ response=ownDetail('makeup',{input,requesterId:id(1805)});
+ await assert.rejects(api.readOwnRequest('makeup',teacherActor,response.id,new AbortController().signal),/형식/);
+});
+test('direct owner create and update still reject persisted slot metadata before RPC',async()=>{
+ let sent=0;const api=loadNotificationComponent('src/features/teacher-requests/teacher-request-service.ts',new Map([['@/lib/supabase',{supabase:{rpc(){sent++;throw Error('unexpected RPC')}}}]]));
+ for(const action of ['create','update'])await assert.rejects(api.mutateOwnRequest(teacherActor,{domain:'makeup',id:action==='create'?null:id(600),action,input:persistedMakeupInput(),revision:action==='create'?null:'revision-a',requestId:id(998)}),e=>e.code==='22023');
+ assert.equal(sent,0);
+});
+
 test('new student request reads no bulk references before a class is selected', async t => {
  const h=await mount(t,'transfer');await click(h,'추가');
  assert.equal(calls(h,'get_teacher_request_references_v1').length,0);
