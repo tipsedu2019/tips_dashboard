@@ -85,6 +85,60 @@ test('reason-only makeup edit preserves overnight timestamps and precision exact
  const {h}=await edit(t,'makeup',{input:{...inputs.makeup,request_kind:'cancel_makeup',makeup_slots:slots}});
  await change(h,document.getElementById('makeup-reason'),'사유만 수정');await submit(h);assert.deepEqual(latest(h,rpc.write).args.p_input.makeup_slots,slots);
 });
+async function selectMakeupEndTime(h, row, label) {
+ const trigger = [...document.querySelectorAll('button')].find(node => node.getAttribute('aria-label')?.match(new RegExp(`^보강일시 ${row} 종료시각(?::|$)`)));
+ assert.ok(trigger);
+ await h.act(() => trigger.click());
+ const option = [...document.querySelectorAll('[role="option"]')].find(node => node.textContent.trim() === label);
+ assert.ok(option, label);
+ await h.act(() => option.click());
+}
+const overnightSlot = {startAt:'2026-11-02T14:00:00.000Z',endAt:'2026-11-02T15:00:00.000Z',classroom:'가상 교실'};
+for (const [label, expectedEnd] of [['오전 12:00','2026-11-02T15:00:00.000Z'],['오전 09:00','2026-11-03T00:00:00.000Z']]) test(`overnight end-time selection retains the next day: ${label}`, async t => {
+ const {h} = await edit(t, 'makeup', {input:{...inputs.makeup,makeup_slots:[overnightSlot]}});
+ await selectMakeupEndTime(h, 1, label);
+ assert.match(document.body.textContent, /종료시각 · 2026-11-03/);
+ await submit(h);
+ assert.deepEqual(latest(h,rpc.write).args.p_input.makeup_slots, [{...overnightSlot,endAt:expectedEnd}]);
+});
+test('same-day end-time selection keeps its original date', async t => {
+ const slot = {...overnightSlot,startAt:'2026-11-02T01:00:00.000Z',endAt:'2026-11-02T02:00:00.000Z'};
+ const {h} = await edit(t, 'makeup', {input:{...inputs.makeup,makeup_slots:[slot]}});
+ await selectMakeupEndTime(h, 1, '오후 12:00');
+ await submit(h);
+ assert.deepEqual(latest(h,rpc.write).args.p_input.makeup_slots, [{...slot,endAt:'2026-11-02T03:00:00.000Z'}]);
+});
+test('overnight end-time edits remain isolated across rows and repeated selections', async t => {
+ const second = {...overnightSlot,startAt:'2026-11-04T01:00:12.345Z',endAt:'2026-11-04T02:00:23.456Z'};
+ const {h} = await edit(t, 'makeup', {input:{...inputs.makeup,makeup_slots:[overnightSlot,second]}});
+ await selectMakeupEndTime(h, 1, '오전 09:00');
+ await selectMakeupEndTime(h, 1, '오전 10:00');
+ await submit(h);
+ assert.deepEqual(latest(h,rpc.write).args.p_input.makeup_slots, [{...overnightSlot,endAt:'2026-11-03T01:00:00.000Z'},second]);
+});
+test('clearing and reselecting an overnight end time preserves the end date across a month boundary', async t => {
+ const slot = {...overnightSlot,startAt:'2026-10-31T14:00:00.000Z',endAt:'2026-10-31T15:00:00.000Z'};
+ const {h} = await edit(t, 'makeup', {input:{...inputs.makeup,makeup_slots:[slot]}});
+ await click(h, '보강일시 1 종료시각 초기화');
+ await submit(h);
+ assert.equal(calls(h,rpc.write).length,0,'an incomplete slot cannot be submitted');
+ await selectMakeupEndTime(h, 1, '오전 09:00');
+ await submit(h);
+ assert.deepEqual(latest(h,rpc.write).args.p_input.makeup_slots, [{...slot,endAt:'2026-11-01T00:00:00.000Z'}]);
+});
+test('discarding an overnight end-time edit performs no write and reopening restores the original', async t => {
+ const {h,record} = await edit(t, 'makeup', {input:{...inputs.makeup,makeup_slots:[overnightSlot]}});
+ await selectMakeupEndTime(h, 1, '오전 09:00');
+ await click(h,'닫기');await click(h,'변경사항 버리기');
+ assert.equal(calls(h,rpc.write).length,0);
+ await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));
+ await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
+ await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});
+ await h.resolve(latest(h,rpc.detail),{classItem:classRow()});
+ assert.match(document.body.textContent,/종료시각 · 2026-11-03/);
+ await submit(h);
+ assert.deepEqual(latest(h,rpc.write).args.p_input.makeup_slots,[overnightSlot]);
+});
 test('legacy empty schedule permits a real date without inventing sessions',async t=>{
  const h=await mount(t,'makeup');const record=ownDetail('makeup');await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
  await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});await h.resolve(latest(h,rpc.detail),{classItem:{...classRow(),schedulePlan:{sessions:[]}}});

@@ -1600,6 +1600,10 @@ function hasSlotRoomCollision(
   return slots.some((slot) => Boolean(getSlotRoomCollisionState(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents)?.collisions.length))
 }
 
+type TeacherMakeupInput = Omit<MakeupRequestInput, "makeupSlots"> & {
+  makeupSlots: Array<MakeupRequestInput["makeupSlots"][number] & { endDate?: string }>
+}
+
 export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
   const { input: ownerInput, onChange, editing, references, disabled, month, onMonthChange, onPermissionDenied } = props
   const value = (key: string) => typeof ownerInput[key] === "string" ? ownerInput[key] as string : ""
@@ -1608,10 +1612,10 @@ export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
   const selectedSubject = subjectFilter ?? context.selected?.subject ?? ""
   const selectedTeacherKey = teacherFilter ?? context.selected?.teacher.split(/\s*[,/&·]\s*/)[0] ?? ""
   const slotSequence = useRef((ownerInput.makeup_slots as MakeupSlot[]).length || 1)
-  const [slots, setSlots] = useState<MakeupRequestInput["makeupSlots"]>(() => {
+  const [slots, setSlots] = useState<TeacherMakeupInput["makeupSlots"]>(() => {
     const result = (ownerInput.makeup_slots as MakeupSlot[]).map((slot, index) => {
       const start = isoToSeoulDateTimeInput(slot.startAt), end = isoToSeoulDateTimeInput(slot.endAt)
-      return { id: `owner-slot-${index}`, date: start.slice(0, 10), startTime: start.slice(11, 16), endTime: end.slice(11, 16), classroom: slot.classroom, startAt: slot.startAt, endAt: slot.endAt }
+      return { id: `owner-slot-${index}`, date: start.slice(0, 10), endDate: end.slice(0, 10), startTime: start.slice(11, 16), endTime: end.slice(11, 16), classroom: slot.classroom, startAt: slot.startAt, endAt: slot.endAt }
     })
     return result.length ? result : [{ id: "owner-slot-0", date: "", startTime: "", endTime: "", classroom: "" }]
   })
@@ -1626,23 +1630,23 @@ export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
   })
   const selectedClass = context.selected ? toClass(context.selected) : null
   const assignedApprover = editing ? props.approver?.profileId ? props.approver : null : references?.approver?.status === "resolved" ? references.approver : null
-  const input: MakeupRequestInput = { requestKind: ownerInput.request_kind as MakeupRequestKind, classId: value("class_id"), reason: value("reason"), cancelDate: value("cancel_date"), originalLessonSessionId: value("original_lesson_session_id"), makeupSlots: slots, makeupClassroom: "", approverTeacherCatalogId: assignedApprover ? "assigned" : "" }
+  const input: TeacherMakeupInput = { requestKind: ownerInput.request_kind as MakeupRequestKind, classId: value("class_id"), reason: value("reason"), cancelDate: value("cancel_date"), originalLessonSessionId: value("original_lesson_session_id"), makeupSlots: slots, makeupClassroom: "", approverTeacherCatalogId: assignedApprover ? "assigned" : "" }
   const ready = isMakeupFormInputReady(input, Boolean(selectedClass && !context.detailLoading && !context.error && references)) && !context.error && !context.detailLoading
   const onReadyChange = props.onReadyChange
   useEffect(() => { onReadyChange?.(ready) }, [ready, onReadyChange])
-  const commit = (next: MakeupRequestInput) => {
+  const commit = (next: TeacherMakeupInput) => {
     if (disabled) return
     const meaningful = next.makeupSlots.filter(slot => slot.date || slot.startTime || slot.endTime || slot.classroom)
     onChange({ ...ownerInput, class_id: next.classId, reason: next.reason, cancel_date: next.cancelDate || null, original_lesson_session_id: next.originalLessonSessionId || null,
       request_kind: next.cancelDate ? meaningful.length ? "cancel_makeup" : "cancel_only" : "makeup_only",
-      makeup_slots: meaningful.map(slot => ({ startAt: slot.startAt || (slot.date && slot.startTime ? seoulDateTimeInputToIso(`${slot.date}T${slot.startTime}`) : ""), endAt: slot.endAt || (slot.date && slot.endTime ? seoulDateTimeInputToIso(`${slot.date}T${slot.endTime}`) : ""), classroom: slot.classroom || "" })) })
+      makeup_slots: meaningful.map(slot => ({ startAt: slot.startAt || (slot.date && slot.startTime ? seoulDateTimeInputToIso(`${slot.date}T${slot.startTime}`) : ""), endAt: slot.endAt || (slot.date && slot.endTime ? seoulDateTimeInputToIso(`${slot.endDate || slot.date}T${slot.endTime}`) : ""), classroom: slot.classroom || "" })) })
     setSlots(next.makeupSlots)
   }
-  const patchInput = (patch: Partial<MakeupRequestInput>) => commit({ ...input, ...patch })
+  const patchInput = (patch: Partial<TeacherMakeupInput>) => commit({ ...input, ...patch })
   const scheduleDates = selectedClass?.scheduleStorageMode === "normalized"
     ? [...new Set((references?.sessions || []).map(session => session.date))].map(value => ({ value, label: value }))
     : getMakeupClassScheduleDateOptions(selectedClass)
-  const resetClass = () => ({ classId: "", cancelDate: "", originalLessonSessionId: "", makeupSlots: slots.map(slot => ({ ...slot, date: "", startTime: "", endTime: "", startAt: "", endAt: "", classroom: "" })) })
+  const resetClass = () => ({ classId: "", cancelDate: "", originalLessonSessionId: "", makeupSlots: slots.map(slot => ({ ...slot, date: "", endDate: "", startTime: "", endTime: "", startAt: "", endAt: "", classroom: "" })) })
   return <MakeupRequestFormFields owner={{ editing, month, onMonthChange, pager: <TeacherFormClassPager context={context} label="수업" /> }} bindings={{
     saving: disabled, selectedSubject, selectedTeacherKey, input, selectedClass,
     subjectOptions: [...new Set([...context.subjects, selectedSubject].filter(Boolean))], teacherOptions: [...new Set([...context.teachers, selectedTeacherKey].filter(Boolean))].map(name => ({ value: name, label: name })),
@@ -1663,10 +1667,15 @@ export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
       const next = { ...slot, ...patch }
       if ("date" in patch || "startTime" in patch) next.startAt = ""
       if ("date" in patch || "endTime" in patch) next.endAt = ""
+      if ("date" in patch) next.endDate = next.date
       if ((patch.date || patch.startTime) && next.date && next.startTime && !("endTime" in patch)) {
         const endAt = getDefaultMakeupEndAt(buildSlotDateTime(next.date, next.startTime), selectedClass || {})
         next.endTime = getTimePart(endAt) || next.endTime
         next.endAt = endAt
+        next.endDate = isoToSeoulDateTimeInput(endAt).slice(0, 10)
+      }
+      if ("endTime" in patch && next.endTime && next.date) {
+        next.endAt = seoulDateTimeInputToIso(`${next.endDate || next.date}T${next.endTime}`)
       }
       return next
     }) }),
