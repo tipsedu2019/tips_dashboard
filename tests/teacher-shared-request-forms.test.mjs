@@ -1,0 +1,116 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { setup, button, id } from './helpers/textbook-numbered-harness.mjs';
+import { teacherAuth, inputs, ownDetail, ownSummary, page, references, makeupReferences } from './helpers/teacher-own-request-fixtures.mjs';
+import { loadNotificationComponent } from './helpers/notification-component-loader.mjs';
+const calls=(h,name)=>h.requests.filter(r=>r.name===name), latest=(h,name)=>calls(h,name).at(-1);
+const rpc={list:'get_operations_class_schedule_numbered_page_v1',detail:'get_operations_class_lesson_design_detail_v1',schedule:'get_class_schedule_v1',write:'mutate_teacher_own_request_v1'};
+const classRow=(n=20,mode='legacy')=>({id:id(n),name:n===20?'가상 원래 반':'가상 새 반',subject:'영어',grade:'중2',teacher:'가상 교사',schedule:'월수 19:30~21:30',room:'가상 교실',scheduleStorageMode:mode,schedulePlan:{sessions:[{id:id(31),date:'2026-11-02',scheduleState:'active',sessionNumber:1,startTime:'19:30',endTime:'21:30'},{id:id(32),date:'2026-11-04',scheduleState:'active',sessionNumber:2,startTime:'19:30',endTime:'21:30'}]}});
+async function click(h,label){const node=button(label);assert.ok(node,label);await h.act(()=>node.click());}
+async function change(h,node,value){assert.ok(node);await h.act(()=>node[Object.keys(node).find(k=>k.startsWith('__reactProps$'))].onChange({target:{value}}));}
+async function submit(h){const form=document.querySelector('form');await h.act(()=>form[Object.keys(form).find(k=>k.startsWith('__reactProps$'))].onSubmit({preventDefault(){}}));}
+async function mount(t,domain){
+ const props={domain,onChanged(){}};
+ const h=await setup(t,{auth:teacherAuth,component:{file:'src/features/teacher-requests/teacher-request-actions.tsx',name:'TeacherRequestActions'},props});
+ props.Fields=domain==='makeup'?h.load('src/features/makeup-requests/makeup-request-workspace.tsx').TeacherMakeupRequestFields:h.load('src/features/tasks/ops-task-workspace.tsx').TeacherTransitionRequestFields;
+ await h.render();return h;
+}
+async function edit(t,domain,patch={}){
+ const h=await mount(t,domain),record=ownDetail(domain,patch);
+ await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
+ if(domain==='makeup')await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});
+ for(const request of calls(h,rpc.detail))await h.resolve(request,{classItem:classRow(request.args.p_class_id===id(21)?21:20)});
+ return {h,record};
+}
+for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: production shared form preserves safe update, duplicate guard and failed draft`,async t=>{
+ const {h}=await edit(t,domain);
+ assert.equal(document.body.textContent.includes('메이크에듀'),false);assert.equal(document.body.textContent.includes('교재비 처리'),false);
+ if(domain==='makeup'){
+  assert.ok(document.getElementById('makeup-subject'));assert.ok(document.getElementById('makeup-teacher'));assert.ok(document.getElementById('cancel-date'));
+  assert.ok(button('보강일시 1 시작시각'));assert.ok(button('보강일시 1 날짜'));
+  await change(h,document.getElementById('makeup-reason'),'공통 양식 수정');
+ }else{
+  assert.ok(document.querySelector('[role="grid"]'),'actual management calendar');assert.ok(button('미배부 교재 추가')||button('전 미배부 교재 추가')||[...document.querySelectorAll('button')].some(el=>el.textContent.includes('교재 추가')),'textbook list controls');
+  await change(h,[...document.querySelectorAll('textarea')].at(-1),'공통 양식 수정');
+ }
+ await submit(h);await submit(h);assert.equal(calls(h,rpc.write).length,1);
+ const write=latest(h,rpc.write);assert.deepEqual(Object.keys(write.args.p_input).sort(),Object.keys(inputs[domain]).sort());assert.equal(write.args.p_input[domain==='makeup'?'class_id':'student_id'],inputs[domain][domain==='makeup'?'class_id':'student_id']);
+ await h.reject(write,{code:'23514',message:'teacher_request_stale'});assert.match(document.body.textContent,/최신/);
+ assert.ok([...document.querySelectorAll('textarea')].some(node=>node.value==='공통 양식 수정'));
+ await click(h,'닫기');assert.ok(button('계속 편집'));await click(h,'계속 편집');assert.equal(calls(h,rpc.write).length,1);
+ assert.equal(h.requests.some(r=>r.table),false);assert.equal(h.requests.some(r=>/create_makeup|complete_ops|transition_makeup/.test(r.name)),false);
+});
+test('normalized display keeps same-day identities/billing and refuses incomplete reads',()=>{
+ const api=loadNotificationComponent('src/features/teacher-requests/teacher-form-context.tsx',new Map([['@/providers/auth-provider',{useAuth(){return teacherAuth;}}]]));
+ const row=classRow(20,'normalized');const before=structuredClone(row);
+ const sessions=[{id:id(32),session_key:'b',session_date:'2026-11-02',schedule_state:'makeup',start_time:'20:30:00',end_time:'21:30:00',legacy_billing_id:'cycle',legacy_billing_label:'11월',legacy_billing_color:'#abc'},{id:id(31),session_key:'a',session_date:'2026-11-02',schedule_state:'active',start_time:'19:30:00',end_time:'20:30:00'}];
+ const mapped=api.teacherFormClass(row,{sessions},'2026-11');assert.equal(mapped.schedulePlan.sessions.length,2);assert.deepEqual(mapped.schedulePlan.sessions.map(s=>s.sessionNumber),[2,1]);assert.equal(mapped.schedulePlan.sessions[0].billingId,'cycle');assert.deepEqual(row,before);
+ assert.throws(()=>api.teacherFormClass(row),/schedule_missing/);
+ assert.deepEqual(api.teacherFormMonthRange('2028-02'),{dateFrom:'2028-02-01',dateTo:'2028-02-29'});
+});
+test('management form owners actually call the same shared bodies',()=>{
+ // Structural wiring supplements the rendered interaction cases above.
+ const {readFileSync}=awaitImportFs();
+ for(const [path,component,teacher] of [['tasks/ops-task-workspace.tsx','TransitionRequestFormFields','TeacherTransitionRequestFields'],['makeup-requests/makeup-request-workspace.tsx','MakeupRequestFormFields','TeacherMakeupRequestFields']]){
+  const source=readFileSync(`src/features/${path}`,'utf8');assert.ok(source.includes(`Fields={${teacher}}`));assert.equal((source.match(new RegExp(`<${component}\\b`,'g'))||[]).length,2);
+ }
+});
+import * as fs from 'node:fs';
+function awaitImportFs(){return fs;}
+function catalog(request, {total=2, rows=[20,21]}={}) { return {page:request.args.p_page,pageSize:15,totalCount:total,rows:rows.map(n=>({id:id(n),name:classRow(n).name,subject:'영어',grade:'중2',schedule:'월수',status:'active',teacherName:'가상 교사',termId:null,termName:null,syncGroupId:null,syncGroupName:null,updatedAt:null})),stats:{total,active:total,draft:0},filterOptions:{terms:[],subjects:['영어'],grades:['중2'],teachers:['가상 교사'],syncGroups:[]},syncGroupCounts:[]}; }
+async function catalogs(h){ h.finished ||= new Set();for(const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))){h.finished.add(r);await h.resolve(r,catalog(r));}}
+function labelled(label){return [...document.querySelectorAll('button[aria-labelledby]')].find(el=>document.getElementById(el.getAttribute('aria-labelledby'))?.textContent.replace(/필수 입력|필수입력|\*/g,'').trim()===label);}
+async function pick(h,label,option){const node=document.getElementById(`makeup-${label}`)||labelled(label);assert.ok(node,label);await h.act(()=>node.id.startsWith('makeup-')?node.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})):node.click());const opt=[...document.querySelectorAll('[role="option"]')].find(el=>el.textContent.trim()===option);assert.ok(opt,option);await h.act(()=>opt.click());}
+for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: existing subject/teacher/class sequence creates with the owner API only`,async t=>{
+ const h=await mount(t,domain);await click(h,'추가');await catalogs(h);
+ await pick(h,domain==='makeup'?'subject':'과목','영어');await catalogs(h);
+ await pick(h,domain==='makeup'?'teacher':domain==='transfer'?'전 선생님':'선생님','가상 교사');await catalogs(h);
+ await pick(h,domain==='makeup'?'class':domain==='transfer'?'전 수업':'수업','가상 원래 반');await h.resolve(latest(h,rpc.detail),{classItem:classRow()});
+ await h.resolve(latest(h,'get_teacher_request_references_v1'),domain==='makeup'?{...makeupReferences,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]}:references);
+ if(domain!=='makeup'){
+  await pick(h,'학생','가상 학생');
+  if(domain==='transfer'){await pick(h,'후 선생님','가상 교사');await catalogs(h);await pick(h,'후 수업','가상 새 반');await h.resolve(latest(h,rpc.detail),{classItem:classRow(21)});
+   await submit(h);assert.equal(calls(h,rpc.write).length,0,'management required-date gate also applies to teachers');
+   for(let index=0;index<2;index++){const grid=document.querySelectorAll('[role="grid"]')[index];const day=[...grid.querySelectorAll('[role="gridcell"]')].find(el=>!el.disabled);assert.ok(day);await h.act(()=>day.click());const read=latest(h,rpc.detail);await h.resolve(read,{classItem:classRow(read.args.p_class_id===id(21)?21:20)});}
+  }
+  await change(h,[...document.querySelectorAll('textarea')].at(-1),'신규 합성 신청');
+ }else{await change(h,document.getElementById('makeup-reason'),'신규 합성 휴강');await h.act(()=>document.getElementById('cancel-date').click());const day=[...document.querySelectorAll('button')].find(el=>el.getAttribute('data-day')==='2026-11-02');
+  // Navigate through the real picker to its linked date, independent of today's month.
+  const linked=[...document.querySelectorAll('button')].find(el=>el.textContent.includes('11-02')&&el.textContent.includes('회차'));assert.ok(day||linked);await h.act(()=>(day||linked).click());}
+ await submit(h);const write=latest(h,rpc.write);assert.ok(write);assert.equal(write.args.p_action,'create');assert.equal(write.args.p_expected_revision,null);assert.deepEqual(Object.keys(write.args.p_input).sort(),Object.keys(inputs[domain]).sort());
+ assert.equal(h.requests.some(r=>r.table),false);
+});
+test('reason-only makeup edit preserves overnight timestamps and precision exactly',async t=>{
+ const slots=[{startAt:'2026-11-02T14:00:12.345Z',endAt:'2026-11-02T16:30:23.456Z',classroom:'가상 교실'}];
+ const {h}=await edit(t,'makeup',{input:{...inputs.makeup,request_kind:'cancel_makeup',makeup_slots:slots}});
+ await change(h,document.getElementById('makeup-reason'),'사유만 수정');await submit(h);assert.deepEqual(latest(h,rpc.write).args.p_input.makeup_slots,slots);
+});
+test('legacy empty schedule permits a real date without inventing sessions',async t=>{
+ const h=await mount(t,'makeup');const record=ownDetail('makeup');await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
+ await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});await h.resolve(latest(h,rpc.detail),{classItem:{...classRow(),schedulePlan:{sessions:[]}}});
+ await h.act(()=>document.getElementById('cancel-date').click());assert.ok([...document.querySelectorAll('[role="gridcell"] button,button[data-day]')].some(el=>!el.disabled));assert.equal(calls(h,rpc.write).length,0);
+});
+test('same-day normalized sessions retain time labels, makeup state and exact UUID selection',async t=>{
+ const h=await mount(t,'makeup'), record=ownDetail('makeup');await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
+ await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,sessions:[...makeupReferences.sessions,{id:id(32),date:'2026-11-02',startTime:'21:30:00',endTime:'22:30:00',revision:1}]});await h.resolve(latest(h,rpc.detail),{classItem:classRow(20,'normalized')});
+ await h.resolve(latest(h,rpc.schedule),{authoritativeSource:'normalized',sessions:[{id:id(31),session_key:'regular',session_date:'2026-11-02',schedule_state:'active',start_time:'19:30:00',end_time:'21:30:00'},{id:id(32),session_key:'makeup',session_date:'2026-11-02',schedule_state:'makeup',start_time:'21:30:00',end_time:'22:30:00'}]});
+ await h.act(()=>document.getElementById('original-lesson-session').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+ const option=[...document.querySelectorAll('[role="option"]')].find(el=>el.textContent==='21:30–22:30 · 보강 수업');assert.ok(option);await h.act(()=>option.click());await submit(h);assert.equal(latest(h,rpc.write).args.p_input.original_lesson_session_id,id(32));
+});
+test('failed schedule and permission loss do not synthesize dates or retain the old form',async t=>{
+ const h=await mount(t,'withdrawal'),record=ownDetail('withdrawal');await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
+ await h.reject(latest(h,rpc.detail),{code:'57014',message:'PRIVATE_SCHEDULE_ERROR'});assert.equal(document.querySelector('[role="grid"]'),null);assert.ok(button('일정 다시 조회'));assert.equal(document.body.textContent.includes('PRIVATE_SCHEDULE_ERROR'),false);
+ await click(h,'일정 다시 조회');await h.reject(latest(h,rpc.detail),{code:'42501',message:'PRIVATE_DENIAL'});assert.equal(document.querySelector('form'),null);assert.equal(document.body.textContent.includes('가상 원문 메모'),false);assert.equal(calls(h,rpc.write).length,0);
+});
+test('actual SQL captured legacy projection is preserved by the new display adapter',()=>{
+ const payload=JSON.parse(fs.readFileSync('tests/fixtures/teacher-planning-common-response.json','utf8'));
+ const api=loadNotificationComponent('src/features/teacher-requests/teacher-form-context.tsx',new Map([['@/providers/auth-provider',{useAuth(){return teacherAuth;}}]]));
+ const result=api.teacherFormClass(payload.detail.classItem);assert.equal(result.id,payload.detail.classItem.id);assert.deepEqual(result.schedulePlan,payload.detail.classItem.schedulePlan);assert.equal(JSON.stringify(result).includes('PRIVATE_'),false);
+});
+import { useState, useLayoutEffect } from 'react';
+test('class context is paged and ignores a superseded selected-class response',async t=>{
+ const h=await mount(t,'withdrawal');const {useTeacherFormClass}=h.load('src/features/teacher-requests/teacher-form-context.tsx');let current,select;const denied=()=>assert.fail('unexpected denial');
+ function Probe(){const [selected,setSelected]=useState(id(20));const result=useTeacherFormClass({id:selected,month:'2026-11',subject:'영어',teacher:'가상 교사',onPermissionDenied:denied});useLayoutEffect(()=>{current=result;select=setSelected;});return null;}
+ await h.mountTestComponent(Probe,{});const old=latest(h,rpc.detail);await h.act(()=>select(id(21)));const fresh=latest(h,rpc.detail);await h.resolve(fresh,{classItem:classRow(21)});await h.resolve(old,{classItem:classRow(20)});assert.equal(current.selected.id,id(21));
+ await h.resolve(latest(h,rpc.list),catalog(latest(h,rpc.list),{total:20}));await h.act(()=>current.setPage(2));const next=latest(h,rpc.list);assert.equal(next.args.p_page,2);assert.equal(next.args.p_page_size,15);assert.equal(current.options.some(row=>row.id===id(20)),false,'old page is not the current page');await h.resolve(next,catalog(next,{total:20,rows:[22]}));assert.equal(current.totalCount,20);assert.equal(current.page,2);assert.ok(current.options.some(row=>row.id===id(22)));assert.equal(h.requests.some(r=>r.table),false);
+});

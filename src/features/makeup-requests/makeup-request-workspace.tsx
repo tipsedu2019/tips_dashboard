@@ -41,6 +41,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ScrollableDialogContent } from "@/components/ui/form-dialog"
+import { useTeacherFormClass, TeacherFormClassPager } from "@/features/teacher-requests/teacher-form-context"
+import type { TeacherRequestFieldProps } from "@/features/teacher-requests/teacher-request-fields"
+import type { MakeupSlot } from "@/features/teacher-requests/teacher-request-service"
+import { isoToSeoulDateTimeInput, seoulDateTimeInputToIso } from "@/features/tasks/ops-task-service"
 import { TeacherRequestActions } from "@/features/teacher-requests/teacher-request-actions"
 import { Label } from "@/components/ui/label"
 import {
@@ -1488,6 +1492,15 @@ function hasIncompleteStartedMakeupSlot(input: MakeupRequestInput) {
   return input.makeupSlots.some((slot) => hasStartedMakeupSlot(slot) && !isCompleteSlotDateTime(slot))
 }
 
+function isMakeupFormInputReady(input: MakeupRequestInput, selectedClassSchedulePlanReady: boolean) {
+  const materializedMakeupSlots = materializeSlots(input)
+  const requestHasCancelDate = Boolean(input.cancelDate)
+  const requestHasMakeupSlots = materializedMakeupSlots.length > 0
+  return Boolean(input.classId && input.reason.trim() && input.approverTeacherCatalogId &&
+    (requestHasCancelDate || requestHasMakeupSlots) && (!requestHasCancelDate || selectedClassSchedulePlanReady) &&
+    !hasIncompleteStartedMakeupSlot(input) && (!requestHasMakeupSlots || materializedMakeupSlots.every(slot => slot.classroom)))
+}
+
 function getInputRequestKind(input: MakeupRequestInput, makeupSlots = materializeSlots(input)): MakeupRequestKind {
   const hasCancel = Boolean(input.cancelDate)
   const hasMakeup = makeupSlots.length > 0
@@ -1585,6 +1598,351 @@ function hasSlotRoomCollision(
   canIgnoreOrphanedMakeupEvents = false,
 ) {
   return slots.some((slot) => Boolean(getSlotRoomCollisionState(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents)?.collisions.length))
+}
+
+export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
+  const { input: ownerInput, onChange, editing, references, disabled, month, onMonthChange, onPermissionDenied } = props
+  const value = (key: string) => typeof ownerInput[key] === "string" ? ownerInput[key] as string : ""
+  const [subjectFilter, setSubject] = useState<string | null>(null), [teacherFilter, setTeacher] = useState<string | null>(null)
+  const context = useTeacherFormClass({ id: value("class_id"), month, subject: subjectFilter || "", teacher: teacherFilter || "", onPermissionDenied })
+  const selectedSubject = subjectFilter ?? context.selected?.subject ?? ""
+  const selectedTeacherKey = teacherFilter ?? context.selected?.teacher.split(/\s*[,/&·]\s*/)[0] ?? ""
+  const slotSequence = useRef((ownerInput.makeup_slots as MakeupSlot[]).length || 1)
+  const [slots, setSlots] = useState<MakeupRequestInput["makeupSlots"]>(() => {
+    const result = (ownerInput.makeup_slots as MakeupSlot[]).map((slot, index) => {
+      const start = isoToSeoulDateTimeInput(slot.startAt), end = isoToSeoulDateTimeInput(slot.endAt)
+      return { id: `owner-slot-${index}`, date: start.slice(0, 10), startTime: start.slice(11, 16), endTime: end.slice(11, 16), classroom: slot.classroom, startAt: slot.startAt, endAt: slot.endAt }
+    })
+    return result.length ? result : [{ id: "owner-slot-0", date: "", startTime: "", endTime: "", classroom: "" }]
+  })
+  const toClass = (row: NonNullable<typeof context.selected>): MakeupClassOption => ({
+    id: row.id, name: row.label, subject: row.subject, grade: row.grade, teacher: row.teacher, teacherCatalogId: "", room: row.room, classroom: row.room,
+    schedule: row.schedule, schedulePlan: row.schedulePlan || {}, schedulePlanLoaded: !context.detailLoading && !context.error,
+    scheduleStorageMode: row.scheduleStorageMode === "normalized" ? "normalized" : row.scheduleStorageMode === "shadow" ? "shadow" : "legacy",
+    lessonSessions: (references?.sessions || []).map(session => {
+      const planned = (row.schedulePlan?.sessions as Array<Record<string, unknown>> || []).find(item => item.id === session.id)
+      return { id: session.id, date: session.date, state: planned?.scheduleState === "makeup" ? "makeup" : "active" }
+    }), textbooks: [], textbookIds: [],
+  })
+  const selectedClass = context.selected ? toClass(context.selected) : null
+  const input: MakeupRequestInput = { requestKind: ownerInput.request_kind as MakeupRequestKind, classId: value("class_id"), reason: value("reason"), cancelDate: value("cancel_date"), originalLessonSessionId: value("original_lesson_session_id"), makeupSlots: slots, makeupClassroom: "", approverTeacherCatalogId: references?.approver?.status === "resolved" ? "assigned" : "" }
+  const ready = isMakeupFormInputReady(input, Boolean(selectedClass && !context.detailLoading && !context.error && references)) && !context.error && !context.detailLoading
+  const onReadyChange = props.onReadyChange
+  useEffect(() => { onReadyChange?.(ready) }, [ready, onReadyChange])
+  const commit = (next: MakeupRequestInput) => {
+    if (disabled) return
+    const meaningful = next.makeupSlots.filter(slot => slot.date || slot.startTime || slot.endTime || slot.classroom)
+    onChange({ ...ownerInput, class_id: next.classId, reason: next.reason, cancel_date: next.cancelDate || null, original_lesson_session_id: next.originalLessonSessionId || null,
+      request_kind: next.cancelDate ? meaningful.length ? "cancel_makeup" : "cancel_only" : "makeup_only",
+      makeup_slots: meaningful.map(slot => ({ startAt: slot.startAt || (slot.date && slot.startTime ? seoulDateTimeInputToIso(`${slot.date}T${slot.startTime}`) : ""), endAt: slot.endAt || (slot.date && slot.endTime ? seoulDateTimeInputToIso(`${slot.date}T${slot.endTime}`) : ""), classroom: slot.classroom || "" })) })
+    setSlots(next.makeupSlots)
+  }
+  const patchInput = (patch: Partial<MakeupRequestInput>) => commit({ ...input, ...patch })
+  const scheduleDates = selectedClass?.scheduleStorageMode === "normalized"
+    ? [...new Set((references?.sessions || []).map(session => session.date))].map(value => ({ value, label: value }))
+    : getMakeupClassScheduleDateOptions(selectedClass)
+  const resetClass = () => ({ classId: "", cancelDate: "", originalLessonSessionId: "", makeupSlots: slots.map(slot => ({ ...slot, date: "", startTime: "", endTime: "", startAt: "", endAt: "", classroom: "" })) })
+  return <MakeupRequestFormFields owner={{ editing, month, onMonthChange, pager: <TeacherFormClassPager context={context} label="수업" /> }} bindings={{
+    saving: disabled, selectedSubject, selectedTeacherKey, input, selectedClass,
+    subjectOptions: [...new Set([...context.subjects, selectedSubject].filter(Boolean))], teacherOptions: [...new Set([...context.teachers, selectedTeacherKey].filter(Boolean))].map(name => ({ value: name, label: name })),
+    availableClasses: context.options.map(toClass),
+    handleSubjectChange: value => { if (!editing) { setSubject(value); setTeacher(""); context.setPage(1); patchInput(resetClass()) } },
+    handleTeacherChange: value => { if (!editing) { setTeacher(value); context.setPage(1); patchInput(resetClass()) } },
+    handleClassChange: classId => { if (!editing) patchInput({ classId, cancelDate: "", originalLessonSessionId: "" }) }, patchInput,
+    selectedClassScheduleDateOptions: scheduleDates, selectedClassSchedulePlanReady: Boolean(selectedClass && !context.detailLoading && !context.error && references),
+    normalizedCancelSessions: (selectedClass?.lessonSessions.filter(session => session.date === input.cancelDate) || []).map(session => {
+      const reference = references?.sessions.find(item => item.id === session.id)
+      return { ...session, label: `${reference?.startTime?.slice(0, 5) || "시각 미정"}–${reference?.endTime?.slice(0, 5) || ""} · ${session.state === "makeup" ? "보강 수업" : "정규 수업"}` }
+    }),
+    canEditMakeupSlots: Boolean(selectedClass),
+    addMakeupSlot: () => { if (slots.length < 30) patchInput({ makeupSlots: [...slots, { id: `owner-slot-${slotSequence.current++}`, date: slots[slots.length - 1]?.date || input.cancelDate || "", startTime: "", endTime: "", classroom: "" }] }) },
+    removeMakeupSlot: id => patchInput({ makeupSlots: slots.filter(slot => slot.id !== id) }),
+    patchMakeupSlot: (id, patch) => patchInput({ makeupSlots: slots.map(slot => {
+      if (slot.id !== id) return slot
+      const next = { ...slot, ...patch }
+      if ("date" in patch || "startTime" in patch) next.startAt = ""
+      if ("date" in patch || "endTime" in patch) next.endAt = ""
+      if ((patch.date || patch.startTime) && next.date && next.startTime && !("endTime" in patch)) {
+        const endAt = getDefaultMakeupEndAt(buildSlotDateTime(next.date, next.startTime), selectedClass || {})
+        next.endTime = getTimePart(endAt) || next.endTime
+        next.endAt = endAt
+      }
+      return next
+    }) }),
+    approverOptions: references?.approver?.label ? [{ id: "assigned", name: references.approver.label, profileId: "assigned" }] : [],
+    roomAvailability: () => (references?.rooms || []).map(room => ({ name: room.name, available: null, collisions: [] })),
+  }} />
+}
+
+type MakeupRequestFormBindings = {
+ saving: boolean
+ selectedSubject: string
+ handleSubjectChange: (value: string) => void
+ subjectOptions: string[]
+ selectedTeacherKey: string
+ handleTeacherChange: (value: string) => void
+ teacherOptions: Array<{ value: string; label: string }>
+ input: MakeupRequestInput
+ handleClassChange: (value: string) => void
+ availableClasses: MakeupClassOption[]
+ patchInput: (patch: Partial<MakeupRequestInput>) => void
+ selectedClass: MakeupClassOption | null | undefined
+ selectedClassScheduleDateOptions: Array<{ value: string; label?: string }>
+ selectedClassSchedulePlanReady: boolean
+ normalizedCancelSessions: Array<MakeupClassOption["lessonSessions"][number] & { label?: string }>
+ addMakeupSlot: () => void
+ canEditMakeupSlots: boolean
+ patchMakeupSlot: (id: string, patch: Partial<MakeupRequestInput["makeupSlots"][number]>) => void
+ removeMakeupSlot: (id: string) => void
+ approverOptions: Array<{ id: string; name: string; profileId?: string }>
+ roomAvailability: (slot: MakeupRequestInput["makeupSlots"][number]) => Array<{ name: string; available: boolean | null; collisions: Array<{ title?: string; detail?: string; source?: string }> }>
+}
+function MakeupRequestFormFields({ bindings, owner }: { bindings: MakeupRequestFormBindings; owner?: { editing: boolean; pager: ReactNode; month: string; onMonthChange: (month: string) => void } }) {
+ const { saving, selectedSubject, handleSubjectChange, subjectOptions, selectedTeacherKey, handleTeacherChange, teacherOptions, input, handleClassChange, availableClasses, patchInput, selectedClass, selectedClassScheduleDateOptions, selectedClassSchedulePlanReady, normalizedCancelSessions, addMakeupSlot, canEditMakeupSlots, patchMakeupSlot, removeMakeupSlot, approverOptions, roomAvailability } = bindings
+ return (<fieldset disabled={saving} aria-busy={saving} className="grid min-w-0 gap-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-1.5">
+	                <RequiredFormLabel htmlFor="makeup-subject">과목</RequiredFormLabel>
+	                <Select value={selectedSubject} onValueChange={handleSubjectChange} disabled={owner?.editing}>
+	                  <SelectTrigger id="makeup-subject" className={getSequencedSelectTriggerClassName({ active: !selectedSubject })}>
+	                    <SelectValue placeholder="과목 선택" />
+	                  </SelectTrigger>
+                  <SelectContent>
+                    {subjectOptions.map((subject) => (
+                      <SelectItem key={subject} value={subject}>{subject}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+	              <div className="grid gap-1.5">
+	                <RequiredFormLabel htmlFor="makeup-teacher">선생님</RequiredFormLabel>
+	                <Select value={selectedTeacherKey} onValueChange={handleTeacherChange} disabled={Boolean(owner?.editing) || !selectedSubject}>
+	                  <SelectTrigger id="makeup-teacher" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedSubject) && !selectedTeacherKey, dependency: !selectedSubject })}>
+	                    <SelectValue placeholder={selectedSubject ? "선생님 선택" : "과목 먼저"} />
+	                  </SelectTrigger>
+                  <SelectContent>
+                    {teacherOptions.map((teacher) => (
+                      <SelectItem key={teacher.value} value={teacher.value}>{teacher.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+	              <div className="grid gap-1.5">
+	                <RequiredFormLabel htmlFor="makeup-class">수업</RequiredFormLabel>
+	                <Select value={input.classId} onValueChange={handleClassChange} disabled={Boolean(owner?.editing) || !selectedTeacherKey}>
+	                  <SelectTrigger id="makeup-class" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedTeacherKey) && !input.classId, dependency: !selectedTeacherKey })}>
+	                    <SelectValue placeholder={selectedTeacherKey ? "수업 선택" : "선생님 먼저"} />
+	                  </SelectTrigger>
+                  <SelectContent>
+                    {availableClasses.map((classItem) => (
+                      <SelectItem key={classItem.id} value={classItem.id}>
+                        {classItem.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {owner?.pager}
+            <div className="grid gap-2">
+              <RequiredFormLabel htmlFor="makeup-reason">사유</RequiredFormLabel>
+              <Textarea
+                id="makeup-reason"
+                value={input.reason}
+                onChange={(event) => patchInput({ reason: event.target.value })}
+                placeholder="휴강 및 보강 사유"
+                rows={3}
+                required
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="cancel-date">휴강일</Label>
+	              <div className="relative">
+	                <DatePickerControl
+	                  id="cancel-date"
+                      month={owner ? getDateFromKey(`${owner.month}-01`) || undefined : undefined}
+                      onMonthChange={owner ? date => owner.onMonthChange(toDateKey(date).slice(0, 7)) : undefined}
+                      strictLinkedDates={Boolean(owner && selectedClass?.scheduleStorageMode === "normalized")}
+	                  value={input.cancelDate}
+	                  onChange={(value) => {
+                    const sessions = selectedClass?.scheduleStorageMode === "normalized"
+                      ? selectedClass.lessonSessions.filter((session) => session.date === value)
+                      : []
+                    patchInput({ cancelDate: value, originalLessonSessionId: sessions.length === 1 ? sessions[0].id : "" })
+                  }}
+	                  placeholder={!selectedClass ? "수업을 먼저 선택" : selectedClassScheduleDateOptions.length > 0 ? "수업일정에서 휴강일 선택" : "휴강일 선택"}
+	                  ariaLabel="휴강일 선택"
+	                  disabled={!selectedClass || !selectedClassSchedulePlanReady}
+	                  linkedDates={selectedClassScheduleDateOptions}
+	                  linkedDatesLabel="수업일정"
+	                  restrictToLinkedDates={selectedClassScheduleDateOptions.length > 0}
+	                  className={cn(input.cancelDate ? "pr-14" : "", !selectedClass && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
+	                />
+                <FieldClearButton
+                  aria-label="휴강일 초기화"
+                  show={Boolean(input.cancelDate)}
+                  onClick={() => patchInput({ cancelDate: "", originalLessonSessionId: "" })}
+                />
+              </div>
+            </div>
+
+            {selectedClass?.scheduleStorageMode === "normalized" && input.cancelDate ? (
+              <div className="grid gap-2">
+                <Label htmlFor="original-lesson-session">휴강 수업 회차</Label>
+                <Select value={input.originalLessonSessionId} onValueChange={(value) => patchInput({ originalLessonSessionId: value })}>
+                  <SelectTrigger id="original-lesson-session"><SelectValue placeholder="실제 수업 회차 선택" /></SelectTrigger>
+                  <SelectContent>
+                    {normalizedCancelSessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.label || (session.state === "makeup" ? "보강 수업" : "정규 수업")}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label>보강일시</Label>
+                <Button type="button" variant="outline" size="sm" onClick={addMakeupSlot} disabled={!canEditMakeupSlots}>
+                  <Plus className="size-4" aria-hidden="true" />
+                  보강일시 추가
+                </Button>
+              </div>
+              <div className="grid gap-2">
+                {input.makeupSlots.map((slot, index) => {
+                  const slotRoomAvailability = roomAvailability(slot)
+                  const selectedSlotRoomState = slotRoomAvailability.find(room => room.name === slot.classroom)
+                  const slotDateTimeReady = isCompleteSlotDateTime(slot)
+
+                  return (
+                    <div key={slot.id} className="rounded-md border bg-muted/15 p-2">
+                      <div className="grid gap-2 md:grid-cols-[minmax(150px,1fr)_minmax(96px,0.55fr)_minmax(96px,0.55fr)_32px]">
+                        <div className="grid gap-1">
+                          <span className="text-[11px] font-medium text-muted-foreground">날짜</span>
+                          <div className="relative">
+                            <DatePickerControl
+                              value={slot.date || ""}
+                              onChange={(value) => patchMakeupSlot(slot.id || "", { date: value })}
+                              placeholder={canEditMakeupSlots ? "날짜 선택" : "수업을 먼저 선택"}
+                              ariaLabel={`보강일시 ${index + 1} 날짜`}
+                              disabled={!canEditMakeupSlots}
+                              className={cn(slot.date ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
+                            />
+                            <FieldClearButton
+                              aria-label={`보강일시 ${index + 1} 날짜 초기화`}
+                              show={Boolean(slot.date)}
+                              onClick={() => patchMakeupSlot(slot.id || "", { date: "" })}
+                              disabled={!canEditMakeupSlots}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid gap-1">
+                          <span className="text-[11px] font-medium text-muted-foreground">시작시각</span>
+                          <div className="relative">
+                            <TimePickerControl
+                              value={slot.startTime || ""}
+                              onChange={(value) => patchMakeupSlot(slot.id || "", { startTime: value })}
+                              placeholder={canEditMakeupSlots ? "시작" : "수업 먼저"}
+                              ariaLabel={`보강일시 ${index + 1} 시작시각`}
+                              disabled={!canEditMakeupSlots}
+                              className={cn(slot.startTime ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
+                            />
+                            <FieldClearButton
+                              aria-label={`보강일시 ${index + 1} 시작시각 초기화`}
+                              show={Boolean(slot.startTime)}
+                              onClick={() => patchMakeupSlot(slot.id || "", { startTime: "" })}
+                              disabled={!canEditMakeupSlots}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid gap-1">
+                          <span className="text-[11px] font-medium text-muted-foreground">종료시각{owner && slot.endAt && isoToSeoulDateTimeInput(slot.endAt).slice(0, 10) !== slot.date ? ` · ${isoToSeoulDateTimeInput(slot.endAt).slice(0, 10)}` : ""}</span>
+                          <div className="relative">
+                            <TimePickerControl
+                              value={slot.endTime || ""}
+                              onChange={(value) => patchMakeupSlot(slot.id || "", { endTime: value })}
+                              placeholder={canEditMakeupSlots ? "종료" : "수업 먼저"}
+                              ariaLabel={`보강일시 ${index + 1} 종료시각`}
+                              disabled={!canEditMakeupSlots}
+                              className={cn(slot.endTime ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
+                            />
+                            <FieldClearButton
+                              aria-label={`보강일시 ${index + 1} 종료시각 초기화`}
+                              show={Boolean(slot.endTime)}
+                              onClick={() => patchMakeupSlot(slot.id || "", { endTime: "" })}
+                              disabled={!canEditMakeupSlots}
+                            />
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="self-end justify-self-end"
+                          onClick={() => removeMakeupSlot(slot.id || "")}
+                          disabled={input.makeupSlots.length <= 1}
+                          aria-label={`보강일시 ${index + 1} 삭제`}
+                        >
+                          <Trash2 className="size-4" aria-hidden="true" />
+                        </Button>
+                        <div className="grid gap-1 md:col-span-3">
+                          <span className="flex items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground">
+                            보강 강의실
+                            <span>{owner ? "사용 가능 여부는 신청 시 확인" : "빈 강의실 우선"}</span>
+                          </span>
+                          <Select
+                            value={slot.classroom || ""}
+                            onValueChange={(value) => patchMakeupSlot(slot.id || "", { classroom: value })}
+                            disabled={!slotDateTimeReady}
+                          >
+                            <div className="relative">
+                              <SelectTrigger aria-label={`보강일시 ${index + 1} 강의실`} className={slot.classroom ? "w-full pr-14" : "w-full"}>
+                                <SelectValue placeholder="강의실 선택" />
+                              </SelectTrigger>
+                              <FieldClearButton
+                                aria-label={`보강일시 ${index + 1} 강의실 초기화`}
+                                show={Boolean(slot.classroom)}
+                                onClick={() => patchMakeupSlot(slot.id || "", { classroom: "" })}
+                              />
+                            </div>
+                            <SelectContent>
+                              {slotRoomAvailability.map((room) => (
+                                <SelectItem key={room.name} value={room.name} disabled={room.available === false}>
+                                  {room.name}{room.available === null ? "" : room.available ? " · 빈 강의실" : " · 충돌"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      {selectedSlotRoomState?.collisions.length ? (
+                        <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                          {selectedSlotRoomState.collisions.map((collision) => `${collision.title || collision.detail} (${collision.source})`).join(" · ")}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <RequiredFormLabel htmlFor="makeup-approver">결재자</RequiredFormLabel>
+              <Select value={input.approverTeacherCatalogId} onValueChange={(value) => patchInput({ approverTeacherCatalogId: value })} disabled={Boolean(owner) || !selectedClass}>
+                <SelectTrigger id="makeup-approver" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedClass) && !input.approverTeacherCatalogId, dependency: !selectedClass })}>
+                  <SelectValue placeholder={selectedClass ? "결재자 선택" : "수업을 먼저 선택"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {approverOptions.map((teacher) => (
+                    <SelectItem key={teacher.id} value={teacher.id}>
+                      {teacher.name}{teacher.profileId ? "" : " · 계정 연결 필요"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            </fieldset>)
 }
 
 function isMakeupClassSchedulePlanReady(classItem: MakeupClassOption | null) {
@@ -2045,17 +2403,9 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   ), [input.cancelDate, selectedClass])
   const canEditMakeupSlots = Boolean(selectedClass)
   const materializedMakeupSlots = useMemo(() => materializeSlots(input), [input])
-  const requestHasCancelDate = Boolean(input.cancelDate)
   const requestHasMakeupSlots = materializedMakeupSlots.length > 0
   const canSubmitRequest = Boolean(
-    canProcessRequest && currentUserId &&
-    input.classId &&
-    input.reason.trim() &&
-    input.approverTeacherCatalogId &&
-    (requestHasCancelDate || requestHasMakeupSlots) &&
-    (!requestHasCancelDate || selectedClassSchedulePlanReady) &&
-    !hasIncompleteStartedMakeupSlot(input) &&
-    (!requestHasMakeupSlots || materializedMakeupSlots.every((slot) => slot.classroom)) &&
+    canProcessRequest && currentUserId && isMakeupFormInputReady(input, selectedClassSchedulePlanReady) &&
     !selectedRoomHasCollision && formCatalogReady && (!requestHasMakeupSlots || data.collisionContextReady),
   )
 
@@ -2509,246 +2859,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
               </div>
             </>}
           >
-            <fieldset disabled={saving} aria-busy={saving} className="grid min-w-0 gap-4">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="grid gap-1.5">
-	                <RequiredFormLabel htmlFor="makeup-subject">과목</RequiredFormLabel>
-	                <Select value={selectedSubject} onValueChange={handleSubjectChange}>
-	                  <SelectTrigger id="makeup-subject" className={getSequencedSelectTriggerClassName({ active: !selectedSubject })}>
-	                    <SelectValue placeholder="과목 선택" />
-	                  </SelectTrigger>
-                  <SelectContent>
-                    {subjectOptions.map((subject) => (
-                      <SelectItem key={subject} value={subject}>{subject}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-	              <div className="grid gap-1.5">
-	                <RequiredFormLabel htmlFor="makeup-teacher">선생님</RequiredFormLabel>
-	                <Select value={selectedTeacherKey} onValueChange={handleTeacherChange} disabled={!selectedSubject}>
-	                  <SelectTrigger id="makeup-teacher" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedSubject) && !selectedTeacherKey, dependency: !selectedSubject })}>
-	                    <SelectValue placeholder={selectedSubject ? "선생님 선택" : "과목 먼저"} />
-	                  </SelectTrigger>
-                  <SelectContent>
-                    {teacherOptions.map((teacher) => (
-                      <SelectItem key={teacher.value} value={teacher.value}>{teacher.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-	              <div className="grid gap-1.5">
-	                <RequiredFormLabel htmlFor="makeup-class">수업</RequiredFormLabel>
-	                <Select value={input.classId} onValueChange={handleClassChange} disabled={!selectedTeacherKey}>
-	                  <SelectTrigger id="makeup-class" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedTeacherKey) && !input.classId, dependency: !selectedTeacherKey })}>
-	                    <SelectValue placeholder={selectedTeacherKey ? "수업 선택" : "선생님 먼저"} />
-	                  </SelectTrigger>
-                  <SelectContent>
-                    {availableClasses.map((classItem) => (
-                      <SelectItem key={classItem.id} value={classItem.id}>
-                        {classItem.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <RequiredFormLabel htmlFor="makeup-reason">사유</RequiredFormLabel>
-              <Textarea
-                id="makeup-reason"
-                value={input.reason}
-                onChange={(event) => patchInput({ reason: event.target.value })}
-                placeholder="휴강 및 보강 사유"
-                rows={3}
-                required
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="cancel-date">휴강일</Label>
-	              <div className="relative">
-	                <DatePickerControl
-	                  id="cancel-date"
-	                  value={input.cancelDate}
-	                  onChange={(value) => {
-                    const sessions = selectedClass?.scheduleStorageMode === "normalized"
-                      ? selectedClass.lessonSessions.filter((session) => session.date === value)
-                      : []
-                    patchInput({ cancelDate: value, originalLessonSessionId: sessions.length === 1 ? sessions[0].id : "" })
-                  }}
-	                  placeholder={!selectedClass ? "수업을 먼저 선택" : selectedClassScheduleDateOptions.length > 0 ? "수업일정에서 휴강일 선택" : "휴강일 선택"}
-	                  ariaLabel="휴강일 선택"
-	                  disabled={!selectedClass || !selectedClassSchedulePlanReady}
-	                  linkedDates={selectedClassScheduleDateOptions}
-	                  linkedDatesLabel="수업일정"
-	                  restrictToLinkedDates={selectedClassScheduleDateOptions.length > 0}
-	                  className={cn(input.cancelDate ? "pr-14" : "", !selectedClass && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
-	                />
-                <FieldClearButton
-                  aria-label="휴강일 초기화"
-                  show={Boolean(input.cancelDate)}
-                  onClick={() => patchInput({ cancelDate: "" })}
-                />
-              </div>
-            </div>
-
-            {selectedClass?.scheduleStorageMode === "normalized" && input.cancelDate ? (
-              <div className="grid gap-2">
-                <Label htmlFor="original-lesson-session">휴강 수업 회차</Label>
-                <Select value={input.originalLessonSessionId} onValueChange={(value) => patchInput({ originalLessonSessionId: value })}>
-                  <SelectTrigger id="original-lesson-session"><SelectValue placeholder="실제 수업 회차 선택" /></SelectTrigger>
-                  <SelectContent>
-                    {normalizedCancelSessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.state === "makeup" ? "보강 수업" : "정규 수업"}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
-
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label>보강일시</Label>
-                <Button type="button" variant="outline" size="sm" onClick={addMakeupSlot} disabled={!canEditMakeupSlots}>
-                  <Plus className="size-4" aria-hidden="true" />
-                  보강일시 추가
-                </Button>
-              </div>
-              <div className="grid gap-2">
-                {input.makeupSlots.map((slot, index) => {
-                  const slotRoomAvailability = getSlotRoomAvailability(slot, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role))
-                  const selectedSlotRoomState = getSlotRoomCollisionState(slot, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role))
-                  const slotDateTimeReady = isCompleteSlotDateTime(slot)
-
-                  return (
-                    <div key={slot.id} className="rounded-md border bg-muted/15 p-2">
-                      <div className="grid gap-2 md:grid-cols-[minmax(150px,1fr)_minmax(96px,0.55fr)_minmax(96px,0.55fr)_32px]">
-                        <div className="grid gap-1">
-                          <span className="text-[11px] font-medium text-muted-foreground">날짜</span>
-                          <div className="relative">
-                            <DatePickerControl
-                              value={slot.date || ""}
-                              onChange={(value) => patchMakeupSlot(slot.id || "", { date: value })}
-                              placeholder={canEditMakeupSlots ? "날짜 선택" : "수업을 먼저 선택"}
-                              ariaLabel={`보강일시 ${index + 1} 날짜`}
-                              disabled={!canEditMakeupSlots}
-                              className={cn(slot.date ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
-                            />
-                            <FieldClearButton
-                              aria-label={`보강일시 ${index + 1} 날짜 초기화`}
-                              show={Boolean(slot.date)}
-                              onClick={() => patchMakeupSlot(slot.id || "", { date: "" })}
-                              disabled={!canEditMakeupSlots}
-                            />
-                          </div>
-                        </div>
-                        <div className="grid gap-1">
-                          <span className="text-[11px] font-medium text-muted-foreground">시작시각</span>
-                          <div className="relative">
-                            <TimePickerControl
-                              value={slot.startTime || ""}
-                              onChange={(value) => patchMakeupSlot(slot.id || "", { startTime: value })}
-                              placeholder={canEditMakeupSlots ? "시작" : "수업 먼저"}
-                              ariaLabel={`보강일시 ${index + 1} 시작시각`}
-                              disabled={!canEditMakeupSlots}
-                              className={cn(slot.startTime ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
-                            />
-                            <FieldClearButton
-                              aria-label={`보강일시 ${index + 1} 시작시각 초기화`}
-                              show={Boolean(slot.startTime)}
-                              onClick={() => patchMakeupSlot(slot.id || "", { startTime: "" })}
-                              disabled={!canEditMakeupSlots}
-                            />
-                          </div>
-                        </div>
-                        <div className="grid gap-1">
-                          <span className="text-[11px] font-medium text-muted-foreground">종료시각</span>
-                          <div className="relative">
-                            <TimePickerControl
-                              value={slot.endTime || ""}
-                              onChange={(value) => patchMakeupSlot(slot.id || "", { endTime: value })}
-                              placeholder={canEditMakeupSlots ? "종료" : "수업 먼저"}
-                              ariaLabel={`보강일시 ${index + 1} 종료시각`}
-                              disabled={!canEditMakeupSlots}
-                              className={cn(slot.endTime ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
-                            />
-                            <FieldClearButton
-                              aria-label={`보강일시 ${index + 1} 종료시각 초기화`}
-                              show={Boolean(slot.endTime)}
-                              onClick={() => patchMakeupSlot(slot.id || "", { endTime: "" })}
-                              disabled={!canEditMakeupSlots}
-                            />
-                          </div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="self-end justify-self-end"
-                          onClick={() => removeMakeupSlot(slot.id || "")}
-                          disabled={input.makeupSlots.length <= 1}
-                          aria-label={`보강일시 ${index + 1} 삭제`}
-                        >
-                          <Trash2 className="size-4" aria-hidden="true" />
-                        </Button>
-                        <div className="grid gap-1 md:col-span-3">
-                          <span className="flex items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground">
-                            보강 강의실
-                            <span>빈 강의실 우선</span>
-                          </span>
-                          <Select
-                            value={slot.classroom || ""}
-                            onValueChange={(value) => patchMakeupSlot(slot.id || "", { classroom: value })}
-                            disabled={!slotDateTimeReady}
-                          >
-                            <div className="relative">
-                              <SelectTrigger aria-label={`보강일시 ${index + 1} 강의실`} className={slot.classroom ? "w-full pr-14" : "w-full"}>
-                                <SelectValue placeholder="강의실 선택" />
-                              </SelectTrigger>
-                              <FieldClearButton
-                                aria-label={`보강일시 ${index + 1} 강의실 초기화`}
-                                show={Boolean(slot.classroom)}
-                                onClick={() => patchMakeupSlot(slot.id || "", { classroom: "" })}
-                              />
-                            </div>
-                            <SelectContent>
-                              {slotRoomAvailability.map((room) => (
-                                <SelectItem key={room.name} value={room.name} disabled={!room.available}>
-                                  {room.name} · {room.available ? "빈 강의실" : "충돌"}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      {selectedSlotRoomState?.collisions.length ? (
-                        <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                          {selectedSlotRoomState.collisions.map((collision) => `${collision.title || collision.detail} (${collision.source})`).join(" · ")}
-                        </div>
-                      ) : null}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <RequiredFormLabel htmlFor="makeup-approver">결재자</RequiredFormLabel>
-              <Select value={input.approverTeacherCatalogId} onValueChange={(value) => patchInput({ approverTeacherCatalogId: value })} disabled={!selectedClass}>
-                <SelectTrigger id="makeup-approver" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedClass) && !input.approverTeacherCatalogId, dependency: !selectedClass })}>
-                  <SelectValue placeholder={selectedClass ? "결재자 선택" : "수업을 먼저 선택"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {approverOptions.map((teacher) => (
-                    <SelectItem key={teacher.id} value={teacher.id}>
-                      {teacher.name}{teacher.profileId ? "" : " · 계정 연결 필요"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            </fieldset>
+            <MakeupRequestFormFields bindings={{ saving, selectedSubject, handleSubjectChange, subjectOptions, selectedTeacherKey, handleTeacherChange, teacherOptions, input, handleClassChange, availableClasses, patchInput, selectedClass, selectedClassScheduleDateOptions, selectedClassSchedulePlanReady, normalizedCancelSessions, addMakeupSlot, canEditMakeupSlots, patchMakeupSlot, removeMakeupSlot, approverOptions, roomAvailability: slot => getSlotRoomAvailability(slot, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role)) }} />
           </ScrollableDialogContent>
         </Dialog>
 
@@ -2759,7 +2870,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           readErrorMessage={pageState.error ? `${getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}${pageState.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}` : ""}
           acceptedCriteriaLabel={pageState.totalCount !== null ? acceptedCriteriaLabel : ""}
           onRetry={() => controllerRef.current?.retry()}
-          createAction={<><TeacherRequestActions domain="makeup" onChanged={() => { void refresh() }} />{canProcessRequest ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
+          createAction={<><TeacherRequestActions Fields={TeacherMakeupRequestFields} domain="makeup" onChanged={() => { void refresh() }} />{canProcessRequest ? <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
             <Plus className="size-4" aria-hidden="true" />
             휴보강 신청
           </Button> : null}</>}

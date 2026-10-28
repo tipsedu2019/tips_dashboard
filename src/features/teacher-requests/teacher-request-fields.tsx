@@ -29,11 +29,13 @@ function Option({ label, value, fallback, options, disabled, onChange }: { label
     {filtered.map(option => <SearchComboboxItem key={option.id} value={option.id} onSelect={() => { onChange(option.id); setOpen(false) }}><SearchComboboxOptionContent label={option.label} selected={option.id === value} /></SearchComboboxItem>)}
   </SearchCombobox></div>
 }
-export function TeacherRequestFields({ domain, input, onChange, editing, labels, references, disabled, month, onMonthChange, onPermissionDenied }: {
+export type TeacherRequestFieldProps = {
   domain: RequestDomain; input: RequestInput; onChange: (input: RequestInput) => void; editing: boolean;
   labels: OwnRequestDetail["referenceLabels"]; references: RequestReferences | null; disabled: boolean;
+  onReadyChange?: (ready: boolean) => void
   month: string; onMonthChange: (value: string) => void; onPermissionDenied: () => void
-}) {
+}
+export function TeacherRequestFields({ domain, input, onChange, editing, labels, references, disabled, month, onMonthChange, onPermissionDenied }: TeacherRequestFieldProps) {
   const prefix = useId()
   const [selectedLabels, setSelectedLabels] = useState(labels)
   const value = (key: string) => typeof input[key] === "string" ? input[key] as string : ""

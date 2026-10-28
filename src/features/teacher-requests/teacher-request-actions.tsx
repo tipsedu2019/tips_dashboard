@@ -1,5 +1,5 @@
 "use client"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ComponentType } from "react"
 import { useAuth } from "@/providers/auth-provider"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
@@ -7,18 +7,19 @@ import { ScrollableDialogContent } from "@/components/ui/form-dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
+import type { TeacherRequestFieldProps } from "./teacher-request-fields"
 import { TeacherOwnRequests } from "./teacher-own-requests"
 import { useRequestNavigation } from "./use-request-navigation"
 import { useMakeupDirectorSubjects } from "./use-makeup-director-subjects"
 import { actionLabels, domainLabels, failureCode, isDefinitiveRequestFailure, originalRequestHref, readRequestChanges, requestFailureMessage, requestStatusLabel, resolveRequestChange,
   type RequestChange, type RequestDomain, type RequestPage, type ResolveAttempt } from "./teacher-request-service"
 
-export function TeacherRequestActions({ domain, onChanged, includeCreate = true }: { domain: RequestDomain; onChanged: () => void; includeCreate?: boolean }) {
+export function TeacherRequestActions({ domain, onChanged, includeCreate = true, Fields }: { Fields?: ComponentType<TeacherRequestFieldProps>; domain: RequestDomain; onChanged: () => void; includeCreate?: boolean }) {
   const { user, role } = useAuth()
   const directorSubjects = useMakeupDirectorSubjects(domain === "makeup")
   if (!user?.id || !role) return null
   const scope = `${user.id}:${role}:${domain}`
-  if (role === "teacher") return <><TeacherOwnRequests key={scope} domain={domain} actorId={user.id} onChanged={onChanged} includeCreate={includeCreate} />{domain === "makeup" && directorSubjects.length > 0 && <TeacherRequestChangeInbox key={scope + ":director"} domain={domain} />}</>
+  if (role === "teacher") return <><TeacherOwnRequests key={scope} domain={domain} actorId={user.id} onChanged={onChanged} includeCreate={includeCreate} Fields={Fields} />{domain === "makeup" && directorSubjects.length > 0 && <TeacherRequestChangeInbox key={scope + ":director"} domain={domain} />}</>
   if (role === "admin" || role === "staff" || domain === "makeup" && directorSubjects.length > 0) return <TeacherRequestChangeInbox key={scope} domain={domain} />
   return null
 }

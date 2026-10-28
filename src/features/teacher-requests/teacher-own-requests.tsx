@@ -1,5 +1,5 @@
 "use client"
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState, type ComponentType } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
@@ -8,14 +8,14 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
 import { isoToSeoulDateTimeInput } from "@/features/tasks/ops-task-service"
-import { TeacherRequestFields, blankRequestInput } from "./teacher-request-fields"
+import { TeacherRequestFields, blankRequestInput, type TeacherRequestFieldProps } from "./teacher-request-fields"
 import { useRequestNavigation } from "./use-request-navigation"
 import { actionLabels, domainLabels, failureCode, isDefinitiveRequestFailure, mutateOwnRequest, readOwnRequest, readOwnRequests, readRequestReferences, requestFailureMessage, requestStatusLabel,
   type MakeupSlot, type OwnRequest, type OwnRequestDetail, type RequestAction, type RequestAttempt, type RequestDomain, type RequestInput, type RequestPage, type RequestReferences } from "./teacher-request-service"
 
 function currentMonth() { return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit" }).format(new Date()) }
 const dateLabel = (value: string | null) => value?.slice(0, 10) || "—"
-export function TeacherOwnRequests({ domain, actorId, onChanged, includeCreate = true }: { domain: RequestDomain; actorId: string; onChanged: () => void; includeCreate?: boolean }) {
+export function TeacherOwnRequests({ domain, actorId, onChanged, includeCreate = true, Fields = TeacherRequestFields }: { Fields?: ComponentType<TeacherRequestFieldProps>; domain: RequestDomain; actorId: string; onChanged: () => void; includeCreate?: boolean }) {
   const [open, setOpen] = useState(false), [stage, setStage] = useState<"list" | "detail" | "form" | "action">("list")
   const [page, setPage] = useState(1), [reload, setReload] = useState(0)
   const [list, setList] = useState<RequestPage<OwnRequest> | null>(null), [detail, setDetail] = useState<OwnRequestDetail | null>(null)
@@ -24,6 +24,7 @@ export function TeacherOwnRequests({ domain, actorId, onChanged, includeCreate =
   const [action, setAction] = useState<RequestAction>("create"), [input, setInput] = useState<RequestInput>(() => blankRequestInput(domain)), [baseline, setBaseline] = useState("")
   const [note, setNote] = useState(""), [pending, setPending] = useState(false), [uncertain, setUncertain] = useState(false)
   const [referenceState, setReferenceState] = useState<{ key: string; data: RequestReferences | null; loading: boolean; error: boolean } | null>(null), [referenceRetry, setReferenceRetry] = useState(0)
+  const [fieldsReady, setFieldsReady] = useState(Fields === TeacherRequestFields)
   const [month, setMonth] = useState(currentMonth)
   const formId = useId(), heading = useRef<HTMLElement | null>(null), opener = useRef<HTMLElement | null>(null)
   const lastRow = useRef<string | null>(null)
@@ -68,7 +69,7 @@ export function TeacherOwnRequests({ domain, actorId, onChanged, includeCreate =
   const references = needsReferences && classId ? currentReferences?.data || null : null
   const referenceLoading = Boolean(needsReferences && classId && (!currentReferences || currentReferences.loading))
   const referenceError = Boolean(needsReferences && classId && currentReferences?.error)
-  const referenceBlocked = needsReferences && (!classId || referenceLoading || referenceError || !references)
+  const referenceBlocked = !fieldsReady || needsReferences && (!classId || referenceLoading || referenceError || !references)
   useEffect(() => {
     if (!open || stage !== "form" || !needsReferences || !classId || permissionLost) return
     const controller = new AbortController(), epoch = lifetime.current
@@ -90,6 +91,7 @@ export function TeacherOwnRequests({ domain, actorId, onChanged, includeCreate =
     if (record && (!record.input || !record.allowedActions.includes("update"))) return
     const next = record?.input ? structuredClone(record.input) : blankRequestInput(domain)
     referenceAbort.current?.abort(); setReferenceState(null)
+    setFieldsReady(Fields === TeacherRequestFields)
     setInput(next); setBaseline(JSON.stringify(next)); setAction(record ? "update" : "create"); setStage("form"); setError(""); setSaved(""); setUncertain(false); attempt.current = null
     setMonth(typeof next.cancel_date === "string" ? next.cancel_date.slice(0, 7) : currentMonth())
   }
@@ -126,7 +128,7 @@ export function TeacherOwnRequests({ domain, actorId, onChanged, includeCreate =
     <Button type="button" variant="outline" size="sm" disabled={permissionLost} onClick={() => begin(false)}>내 신청</Button>
     {includeCreate && <Button type="button" size="sm" disabled={permissionLost} onClick={() => begin(true)}><Plus className="size-4" aria-hidden="true" />추가</Button>}
     {!open && error && <span role="alert" className="text-sm text-destructive">{error}</span>}
-    <Dialog open={open} onOpenChange={value => { if (!value) close() }}><ScrollableDialogContent title={title} description={`${domainLabels[domain]} 본인 신청의 내용과 처리 이력을 확인합니다.`} restoreFocusToOpener
+    <Dialog open={open} onOpenChange={value => { if (!value) close() }}><ScrollableDialogContent className={stage === "form" ? domain === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : domain === "makeup" ? "sm:max-w-4xl" : domain === "withdrawal" ? "sm:max-w-3xl" : undefined : undefined} title={title} description={`${domainLabels[domain]} 본인 신청의 내용과 처리 이력을 확인합니다.`} restoreFocusToOpener
       onCloseAutoFocus={event => { if (opener.current?.isConnected) { event.preventDefault(); opener.current.focus({ preventScroll: true }) } }} onCloseButtonClick={close}
       footer={<div className="flex flex-wrap justify-end gap-2">{stage !== "list" && <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={locked} onClick={back}>목록·상세로 돌아가기</Button>}<Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={locked} onClick={close}>닫기</Button>
         {(stage === "form" || stage === "action") && <Button type="submit" form={formId} className="min-h-11 sm:min-h-9" disabled={pending || !uncertain && stage === "form" && referenceBlocked}>{pending ? "처리 중…" : uncertain ? "저장 결과 확인" : actionLabels[action]}</Button>}</div>}>
@@ -145,7 +147,7 @@ export function TeacherOwnRequests({ domain, actorId, onChanged, includeCreate =
           <details><summary className="cursor-pointer text-sm">신청 이력</summary><ol className="mt-3 grid gap-2 text-sm">{detail.history.map(event => <li key={event.id}>{dateLabel(event.createdAt)} · {actionLabels[event.action as RequestAction] || (event.action === "confirmed" ? (domain === "makeup" ? "원장 결정 기록" : "처리 기록 확인") : event.action === "rejected" ? "반려" : event.action === "noted" ? "관리팀 경과 기록" : "이력")} {event.note && <p className="whitespace-pre-wrap break-words text-muted-foreground">{event.note}</p>}</li>)}</ol></details></>}
         {(stage === "form" || stage === "action") && <form id={formId} onSubmit={event => { event.preventDefault(); void submit() }} className="grid gap-4">
           {stage === "form" ? <>{referenceLoading && <p role="status">선택 항목을 불러오는 중…</p>}{referenceError && <div role="alert" className="grid gap-2"><p>선택 항목을 불러오지 못했습니다. 입력은 유지됩니다.</p><Button type="button" variant="outline" onClick={() => setReferenceRetry(value => value + 1)}>선택 항목 다시 조회</Button></div>}
-            <TeacherRequestFields key={`${action}:${detail?.id || "new"}`} domain={domain} input={input} onChange={setInput} editing={action === "update"} labels={detail?.referenceLabels || {}} references={references} disabled={locked} month={month} onMonthChange={setMonth} onPermissionDenied={revoke} /></>
+            <Fields key={`${action}:${detail?.id || "new"}`} domain={domain} input={input} onChange={setInput} editing={action === "update"} labels={detail?.referenceLabels || {}} references={references} disabled={locked} month={month} onMonthChange={setMonth} onPermissionDenied={revoke} onReadyChange={setFieldsReady} /></>
             : <><p className="text-sm text-muted-foreground">{action === "withdraw" ? "신청은 철회되며 원문과 이력은 남습니다." : "요청은 담당자에게 접수됩니다. 원래 신청의 일정·명단·교재·정산은 즉시 변경되지 않습니다."}</p><Label htmlFor={`${formId}-note`}>요청 사유</Label><Textarea id={`${formId}-note`} aria-label="요청 사유" value={note} maxLength={4000} required disabled={locked} onChange={event => setNote(event.target.value)} /></>}
         </form>}
       </section>
