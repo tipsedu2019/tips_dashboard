@@ -2736,8 +2736,10 @@ for (const kind of ['transfer', 'withdrawal']) test(`teacher operational ${kind}
   await act(async () => create.click());
   const references = page.requests.filter(r => r.name === 'get_teacher_request_references_v1');
   assert.equal(references.length, 0, 'opening a blank application does not fetch global references');
-  assert.equal(document.querySelector(`[aria-label="${kind === 'transfer' ? '전 수업' : '퇴원 수업'}"]`).disabled, false, 'select the source class through the existing paged picker first');
-  assert.equal(document.querySelector('[aria-label="신청 학생"]').disabled, true, 'students are unavailable until the selected class references load');
+  const labelled = label => [...document.querySelectorAll('button[aria-labelledby]')].find(el => document.getElementById(el.getAttribute('aria-labelledby'))?.textContent.replace(/필수 입력|필수입력|\*/g, '').trim() === label);
+  assert.equal(labelled('과목').disabled, false, 'management subject-first sequence is available');
+  assert.equal(labelled(kind === 'transfer' ? '전 수업' : '수업').disabled, true, 'source class waits for subject and teacher selection');
+  assert.equal(labelled('학생').disabled, true, 'students are unavailable until the selected class references load');
   assert.equal(page.queries.includes('students'), false, 'own creation never uses the legacy raw editor');
   assert.equal(page.requests.some(r => r.name === 'mutate_teacher_own_request_v1'), false, 'opening a blank application never writes');
 });

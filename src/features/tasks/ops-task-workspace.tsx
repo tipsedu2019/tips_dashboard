@@ -11,6 +11,8 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { DataTableSelectionActions, DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
+import { useTeacherFormClass, TeacherFormClassPager } from "@/features/teacher-requests/teacher-form-context"
+import type { TeacherRequestFieldProps } from "@/features/teacher-requests/teacher-request-fields"
 import { TeacherRequestActions } from "@/features/teacher-requests/teacher-request-actions"
 import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
@@ -4566,7 +4568,7 @@ function getFallbackWithdrawalClassScheduleItems(classItem?: OpsClassOption): Wi
   return items
 }
 
-function getWithdrawalClassScheduleItems(classItem?: OpsClassOption): WithdrawalClassScheduleItem[] {
+function getWithdrawalClassScheduleItems(classItem?: OpsClassOption, authoritativeOnly = false): WithdrawalClassScheduleItem[] {
   const schedulePlan = classItem?.schedulePlan || {}
   const plannedItems = normalizeWithdrawalScheduleSessions({
     ...schedulePlan,
@@ -4585,7 +4587,7 @@ function getWithdrawalClassScheduleItems(classItem?: OpsClassOption): Withdrawal
     billingColor: session.billingColor,
   }))
 
-  return plannedItems.length > 0 ? plannedItems : getFallbackWithdrawalClassScheduleItems(classItem)
+  return plannedItems.length > 0 || authoritativeOnly ? plannedItems : getFallbackWithdrawalClassScheduleItems(classItem)
 }
 
 function getWithdrawalScheduleItemsByDate(items: WithdrawalClassScheduleItem[]) {
@@ -5051,16 +5053,25 @@ function WithdrawalScheduleCalendarField({
   classItem,
   withdrawal,
   onScheduleSelect,
+  ownerSchedule,
 }: {
+  ownerSchedule?: { month: string; onMonthChange: (month: string) => void; loading?: boolean }
   classItem?: OpsClassOption
   withdrawal: NonNullable<OpsTaskInput["withdrawal"]>
   onScheduleSelect: (metrics: ReturnType<typeof getWithdrawalScheduleMetrics>) => void
 }) {
   const fieldId = useId()
   const selectedDateKey = dateInputValue(withdrawal.withdrawalDate)
-  const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem), [classItem])
-  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
+  const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem, Boolean(ownerSchedule)), [classItem, ownerSchedule])
+  const [localCalendarMonth, setLocalCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
+  const calendarMonth = ownerSchedule ? getCalendarMonthDate(`${ownerSchedule.month}-01`) : localCalendarMonth
+  const setCalendarMonth = (next: Date | ((current: Date) => Date)) => {
+    const value = typeof next === "function" ? next(calendarMonth) : next
+    if (ownerSchedule) ownerSchedule.onMonthChange(`${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`)
+    else setLocalCalendarMonth(value)
+  }
   const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
+  const freeDateSelection = Boolean(ownerSchedule && !ownerSchedule.loading && classItem && classItem.scheduleStorageMode !== "normalized" && scheduleItems.length === 0)
   const itemsByDate = useMemo(() => getWithdrawalScheduleItemsByDate(scheduleItems), [scheduleItems])
   const metrics = getWithdrawalScheduleMetrics(scheduleItems, selectedDateKey, classItem)
   const progressLabel = metrics.fourWeekLessonHours
@@ -5069,7 +5080,7 @@ function WithdrawalScheduleCalendarField({
   const calendarDays = useMemo<ClassScheduleCalendarDay[]>(() => (
     calendarCells.map((cell) => {
       const scheduleItem = itemsByDate.get(cell.dateKey)
-      const selectable = Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
+      const selectable = freeDateSelection || Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
       const selected = cell.dateKey === selectedDateKey
       const dateLabel = getWithdrawalCalendarCellDateLabel(cell.dateKey)
       const sessionLabel = getWithdrawalCalendarDisplaySessionLabel(scheduleItem, { includeMonth: true })
@@ -5111,7 +5122,7 @@ function WithdrawalScheduleCalendarField({
         ariaLabel: getWithdrawalCalendarCellTitle(cell.dateKey, scheduleItem),
       }
     })
-  ), [calendarCells, calendarMonth, itemsByDate, selectedDateKey])
+  ), [calendarCells, calendarMonth, itemsByDate, selectedDateKey, freeDateSelection])
 
   if (!classItem) {
     return (
@@ -5124,9 +5135,9 @@ function WithdrawalScheduleCalendarField({
         <ScheduleSelectionDependencyState fieldId={fieldId} />
         <div className="grid gap-2 md:grid-cols-4">
           <ReadonlyInfoField label="퇴원회차" value={withdrawal.withdrawalSession || "자동 계산"} />
-          <ReadonlyInfoField label="진행 수업시수" value={withdrawal.completedLessonHours || "자동 계산"} />
-          <ReadonlyInfoField label="4주 기준 수업시수" value={withdrawal.fourWeekLessonHours || "자동 계산"} />
-          <ReadonlyInfoField label="수업진행률" value={progressLabel} />
+          {!ownerSchedule && <ReadonlyInfoField label="진행 수업시수" value={withdrawal.completedLessonHours || "자동 계산"} />}
+          {!ownerSchedule && <ReadonlyInfoField label="4주 기준 수업시수" value={withdrawal.fourWeekLessonHours || "자동 계산"} />}
+          {!ownerSchedule && <ReadonlyInfoField label="수업진행률" value={progressLabel} />}
         </div>
       </section>
     )
@@ -5156,19 +5167,20 @@ function WithdrawalScheduleCalendarField({
           onSelectDay={(dateKey) => {
             const scheduleItem = itemsByDate.get(dateKey)
             if (scheduleItem) handleScheduleSelect(scheduleItem)
+            else if (freeDateSelection) onScheduleSelect({ ...getWithdrawalScheduleMetrics([], dateKey, classItem), withdrawalDate: dateKey })
           }}
         />
         {scheduleItems.length === 0 && (
           <p className="-mt-px rounded-b-lg border border-t-0 px-3 py-2 text-sm text-muted-foreground">
-            수업을 선택하면 등록된 수업일정이 표시됩니다.
+            {freeDateSelection ? "등록된 회차가 없습니다. 날짜를 선택해 주세요." : "수업을 선택하면 등록된 수업일정이 표시됩니다."}
           </p>
         )}
       </div>
       <div className="grid gap-2 md:grid-cols-4">
         <ReadonlyInfoField label="퇴원회차" value={metrics.withdrawalSession || withdrawal.withdrawalSession || "자동 계산"} />
-        <ReadonlyInfoField label="진행 수업시수" value={metrics.completedLessonHours || withdrawal.completedLessonHours || "자동 계산"} />
-        <ReadonlyInfoField label="4주 기준 수업시수" value={metrics.fourWeekLessonHours || withdrawal.fourWeekLessonHours || "자동 계산"} />
-        <ReadonlyInfoField label="수업진행률" value={progressLabel} />
+        {!ownerSchedule && <ReadonlyInfoField label="진행 수업시수" value={metrics.completedLessonHours || withdrawal.completedLessonHours || "자동 계산"} />}
+        {!ownerSchedule && <ReadonlyInfoField label="4주 기준 수업시수" value={metrics.fourWeekLessonHours || withdrawal.fourWeekLessonHours || "자동 계산"} />}
+        {!ownerSchedule && <ReadonlyInfoField label="수업진행률" value={progressLabel} />}
       </div>
     </section>
   )
@@ -5180,9 +5192,11 @@ function TransferScheduleCalendarField({
   dateValue,
   sessionValue,
   onScheduleSelect,
+  ownerSchedule,
   required = false,
 }: {
   label: string
+  ownerSchedule?: { month: string; onMonthChange: (month: string) => void; loading?: boolean }
   classItem?: OpsClassOption
   dateValue: string
   sessionValue: string
@@ -5192,9 +5206,16 @@ function TransferScheduleCalendarField({
   const fieldId = useId()
   const requiredDescriptionId = useId()
   const selectedDateKey = dateInputValue(dateValue)
-  const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem), [classItem])
-  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
+  const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem, Boolean(ownerSchedule)), [classItem, ownerSchedule])
+  const [localCalendarMonth, setLocalCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
+  const calendarMonth = ownerSchedule ? getCalendarMonthDate(`${ownerSchedule.month}-01`) : localCalendarMonth
+  const setCalendarMonth = (next: Date | ((current: Date) => Date)) => {
+    const value = typeof next === "function" ? next(calendarMonth) : next
+    if (ownerSchedule) ownerSchedule.onMonthChange(`${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`)
+    else setLocalCalendarMonth(value)
+  }
   const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
+  const freeDateSelection = Boolean(ownerSchedule && !ownerSchedule.loading && classItem && classItem.scheduleStorageMode !== "normalized" && scheduleItems.length === 0)
   const itemsByDate = useMemo(() => getWithdrawalScheduleItemsByDate(scheduleItems), [scheduleItems])
 
   if (!classItem) {
@@ -5256,7 +5277,7 @@ function TransferScheduleCalendarField({
           ))}
           {calendarCells.map((cell) => {
             const scheduleItem = itemsByDate.get(cell.dateKey)
-            const selectable = Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
+            const selectable = freeDateSelection || Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
             const selected = cell.dateKey === selectedDateKey
             const dateLabel = getWithdrawalCalendarCellDateLabel(cell.dateKey)
             const sessionLabel = getWithdrawalCalendarDisplaySessionLabel(scheduleItem, { includeMonth: true })
@@ -5270,7 +5291,7 @@ function TransferScheduleCalendarField({
                 aria-selected={selected}
                 aria-label={calendarCellTitle}
                 title={calendarCellTitle}
-                onClick={() => scheduleItem && handleScheduleSelect(scheduleItem)}
+                onClick={() => { if (scheduleItem) handleScheduleSelect(scheduleItem); else if (freeDateSelection) onScheduleSelect({ ...getTransferClassScheduleMetrics([], cell.dateKey, classItem), transferDate: cell.dateKey }) }}
                 disabled={!selectable}
                 className={[
                   "grid min-h-16 min-w-0 place-items-center content-center gap-0.5 rounded-md px-1.5 py-1 text-center text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
@@ -5293,7 +5314,7 @@ function TransferScheduleCalendarField({
         </div>
         {scheduleItems.length === 0 && (
           <p className="border-t px-3 py-2 text-sm text-muted-foreground">
-            수업을 선택하면 등록된 수업일정이 표시됩니다.
+            {freeDateSelection ? "등록된 회차가 없습니다. 날짜를 선택해 주세요." : "수업을 선택하면 등록된 수업일정이 표시됩니다."}
           </p>
         )}
       </div>
@@ -12867,7 +12888,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               ))}
           </WorkspaceTabsList>
           <div className={isTodoWorkspace ? "flex shrink-0 flex-wrap items-center justify-end gap-2" : isWordRetestWorkspace ? "flex shrink-0 items-center justify-end gap-2" : "flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end"}>
-            {(isTransferWorkspace || isWithdrawalWorkspace) && <TeacherRequestActions domain={isTransferWorkspace ? "transfer" : "withdrawal"} onChanged={() => { void reload(true) }} />}
+            {(isTransferWorkspace || isWithdrawalWorkspace) && <TeacherRequestActions Fields={TeacherTransitionRequestFields} domain={isTransferWorkspace ? "transfer" : "withdrawal"} onChanged={() => { void reload(true) }} />}
 	            {!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && taskFocus !== "none" && (
               <Button type="button" variant="secondary" size="sm" onClick={() => syncView(view)}>
                 <X className="size-4" />
@@ -14375,6 +14396,319 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   )
 }
 
+// One form body for management and owner requests; data and write authority remain with each caller.
+export function TeacherTransitionRequestFields(props: TeacherRequestFieldProps) {
+  const { domain, input, onChange, editing, labels, references, disabled, month, onPermissionDenied } = props
+  const value = (key: string) => typeof input[key] === "string" ? input[key] as string : ""
+  const patch = (next: Record<string, unknown>) => { if (!disabled) onChange({ ...input, ...next }) }
+  const [subjectFilter, setSubject] = useState<string | null>(null)
+  const [fromTeacher, setFromTeacher] = useState<string | null>(null), [toTeacher, setToTeacher] = useState<string | null>(null)
+  const [sourceMonth, setSourceMonth] = useState(value(domain === "withdrawal" ? "withdrawal_date" : "from_class_end_date").slice(0, 7) || month)
+  const [targetMonth, setTargetMonth] = useState(value("to_class_start_date").slice(0, 7) || month)
+  const sourceId = value(domain === "withdrawal" ? "class_id" : "from_class_id")
+  const source = useTeacherFormClass({ id: sourceId, month: sourceMonth, subject: subjectFilter || "", teacher: fromTeacher || "", onPermissionDenied })
+  const subject = subjectFilter ?? source.selected?.subject ?? ""
+  const sourceTeacher = fromTeacher ?? source.selected?.teacher.split(/\s*[,/&·]\s*/)[0] ?? ""
+  const target = useTeacherFormClass({ id: domain === "transfer" ? value("to_class_id") : "", month: targetMonth, subject, teacher: toTeacher || "", onPermissionDenied, enabled: domain === "transfer" })
+  const targetTeacher = toTeacher ?? target.selected?.teacher.split(/\s*[,/&·]\s*/)[0] ?? ""
+  const teacherOptions = (names: string[], selected: string): LinkedSelectOption[] => [...new Set([...names, selected].filter(Boolean))].map(name => ({ id: name, label: name }))
+  const subjectOptions = [...new Set([...source.subjects, subject].filter(Boolean))].map(value => ({ value, label: value }))
+  const students: OpsStudentOption[] = (references?.students || []).map(student => ({ id: student.id, label: student.name, grade: "", school: "", contact: "", parentContact: "", status: student.status, classIds: [sourceId], waitlistClassIds: [] }))
+  if (editing && value("student_id") && !students.some(student => student.id === value("student_id"))) students.push({ id: value("student_id"), label: labels.student || "기존 학생", grade: "", school: "", contact: "", parentContact: "", status: "", classIds: [sourceId], waitlistClassIds: [] })
+  const withdrawal: NonNullable<OpsTaskInput["withdrawal"]> = { teacherName: sourceTeacher, withdrawalDate: value("withdrawal_date"), withdrawalSession: value("withdrawal_session"), customerReason: value("customer_reason"), teacherOpinion: value("teacher_opinion"), undistributedTextbooks: value("undistributed_textbooks") }
+  const transfer: NonNullable<OpsTaskInput["transfer"]> = { fromTeacherName: sourceTeacher, toTeacherName: targetTeacher, fromClassId: value("from_class_id"), toClassId: value("to_class_id"), transferReason: value("transfer_reason"), fromClassEndDate: value("from_class_end_date"), fromClassEndSession: value("from_class_end_session"), toClassStartDate: value("to_class_start_date"), toClassStartSession: value("to_class_start_session"), fromUndistributedTextbooks: value("from_undistributed_textbooks"), toUndistributedTextbooks: value("to_undistributed_textbooks") }
+  const form: OpsTaskInput = { type: domain === "transfer" ? "transfer" : "withdrawal", title: "", subject, classId: domain === "transfer" ? value("to_class_id") : sourceId, studentId: value("student_id"), withdrawal, transfer }
+  const ready = canSubmitOpsTaskForm(form, editing) && !source.detailLoading && !source.error && !target.detailLoading && !target.error
+  const onReadyChange = props.onReadyChange
+  useEffect(() => { onReadyChange?.(ready) }, [ready, onReadyChange])
+  const sourceReset = domain === "withdrawal" ? { class_id: "", student_id: "", withdrawal_date: null, withdrawal_session: "" } : { from_class_id: "", student_id: "", from_class_end_date: null, from_class_end_session: "" }
+  const withdrawalKeys: Partial<Record<keyof typeof withdrawal, string>> = { withdrawalDate: "withdrawal_date", withdrawalSession: "withdrawal_session", customerReason: "customer_reason", teacherOpinion: "teacher_opinion", undistributedTextbooks: "undistributed_textbooks" }
+  const transferKeys: Partial<Record<keyof typeof transfer, string>> = { transferReason: "transfer_reason", fromUndistributedTextbooks: "from_undistributed_textbooks", toUndistributedTextbooks: "to_undistributed_textbooks" }
+  return <fieldset disabled={disabled} className="grid min-w-0 gap-4">
+    {(source.detailLoading || target.detailLoading) && <p role="status">수업일정을 불러오는 중…</p>}
+    {(source.error || target.error) && <p role="alert" className="text-sm text-destructive">수업일정 조회에 실패했습니다. <Button type="button" variant="outline" onClick={() => { source.retry(); if (domain === "transfer") target.retry() }}>일정 다시 조회</Button></p>}
+    <TransitionRequestFormFields owner={{ editing, sourcePager: <TeacherFormClassPager context={source} label="수업" />, targetPager: <TeacherFormClassPager context={target} label="후 수업" />, sourceSchedule: { month: sourceMonth, onMonthChange: setSourceMonth, loading: source.detailLoading || source.error }, targetSchedule: { month: targetMonth, onMonthChange: setTargetMonth, loading: target.detailLoading || target.error } }} bindings={{
+      form, withdrawal, transfer, selectedWithdrawalTeacherId: sourceTeacher, selectedTransferFromTeacherId: sourceTeacher, selectedTransferToTeacherId: targetTeacher,
+      withdrawalSubjectOptions: subjectOptions, transferSubjectOptions: subjectOptions,
+      withdrawalTeacherOptions: teacherOptions(source.teachers, sourceTeacher), transferFromTeacherOptions: teacherOptions(source.teachers, sourceTeacher), transferToTeacherOptions: teacherOptions(target.teachers, targetTeacher),
+      withdrawalClassOptions: source.options, transferFromClassOptions: source.options, transferToClassOptions: target.options.filter(item => item.id !== sourceId),
+      withdrawalStudentOptions: students, transferStudentOptions: students, findStudent: id => students.find(item => item.id === id),
+      selectedWithdrawalClass: source.selected, selectedTransferFromClass: source.selected, selectedTransferToClass: target.selected,
+      shouldShowManualField: () => false, openManualField: () => {}, updateForm: () => {},
+      updateWithdrawal: (key, value) => { const inputKey = withdrawalKeys[key]; if (inputKey) patch({ [inputKey]: value }) },
+      updateTransfer: (key, value) => { const inputKey = transferKeys[key]; if (inputKey) patch({ [inputKey]: value }) },
+      selectClass: (id, options) => { if (options?.fillTransferTo) patch({ to_class_id: id, to_class_start_date: null, to_class_start_session: "" }); else if (!editing) patch({ ...sourceReset, [domain === "withdrawal" ? "class_id" : "from_class_id"]: id, ...(input.to_class_id === id ? { to_class_id: "" } : {}) }) },
+      selectStudent: id => { if (!editing) patch({ student_id: id }) },
+      selectWithdrawalSubject: value => { if (!editing) { setSubject(value); setFromTeacher(""); source.setPage(1); patch(sourceReset) } },
+      selectTransferSubject: value => { if (!editing) { setSubject(value); setFromTeacher(""); setToTeacher(""); source.setPage(1); target.setPage(1); patch({ ...sourceReset, to_class_id: "", to_class_start_date: null, to_class_start_session: "" }) } },
+      selectWithdrawalTeacher: value => { if (!editing) { setFromTeacher(value); source.setPage(1); patch(sourceReset) } },
+      selectTransferFromTeacher: value => { if (!editing) { setFromTeacher(value); source.setPage(1); patch(sourceReset) } },
+      selectTransferToTeacher: value => { setToTeacher(value); target.setPage(1); patch({ to_class_id: "", to_class_start_date: null, to_class_start_session: "" }) },
+      syncWithdrawalScheduleSelection: metrics => patch({ withdrawal_date: metrics.withdrawalDate || null, withdrawal_session: metrics.withdrawalSession }),
+      syncTransferFromScheduleSelection: metrics => patch({ from_class_end_date: metrics.transferDate || null, from_class_end_session: metrics.transferSession }),
+      syncTransferToScheduleSelection: metrics => patch({ to_class_start_date: metrics.transferDate || null, to_class_start_session: metrics.transferSession }),
+    }} />
+    <TextareaField label="신청 메모" value={value("memo")} onChange={memo => patch({ memo })} />
+  </fieldset>
+}
+
+type TransitionRequestFormBindings = {
+  form: OpsTaskInput
+  withdrawal: NonNullable<OpsTaskInput["withdrawal"]>
+  transfer: NonNullable<OpsTaskInput["transfer"]>
+  selectedWithdrawalTeacherId: string
+  selectedTransferFromTeacherId: string
+  selectedTransferToTeacherId: string
+  withdrawalSubjectOptions: TaskListboxOption[]
+  transferSubjectOptions: TaskListboxOption[]
+  withdrawalTeacherOptions: LinkedSelectOption[]
+  transferFromTeacherOptions: LinkedSelectOption[]
+  transferToTeacherOptions: LinkedSelectOption[]
+  withdrawalClassOptions: OpsClassOption[]
+  transferFromClassOptions: OpsClassOption[]
+  transferToClassOptions: OpsClassOption[]
+  withdrawalStudentOptions: OpsStudentOption[]
+  transferStudentOptions: OpsStudentOption[]
+  selectedWithdrawalClass: OpsClassOption | undefined
+  selectedTransferFromClass: OpsClassOption | undefined
+  selectedTransferToClass: OpsClassOption | undefined
+  findStudent: (id: string) => OpsStudentOption | undefined
+  updateWithdrawal: (key: keyof NonNullable<OpsTaskInput["withdrawal"]>, value: string | boolean) => void
+  updateTransfer: (key: keyof NonNullable<OpsTaskInput["transfer"]>, value: string | boolean) => void
+  updateForm: <Key extends keyof OpsTaskInput>(key: Key, value: OpsTaskInput[Key]) => void
+  selectClass: (id: string, options?: { fillWithdrawal?: boolean; fillTransferFrom?: boolean; fillTransferTo?: boolean }) => void
+  selectStudent: (id: string, options?: { fillWithdrawalClass?: boolean; fillTransferFromClass?: boolean }) => void
+  shouldShowManualField: (field: string, linkedId: string | undefined, textValue: string | undefined) => boolean
+  syncWithdrawalScheduleSelection: (metrics: ReturnType<typeof getWithdrawalScheduleMetrics>) => void
+  syncTransferFromScheduleSelection: (metrics: ReturnType<typeof getTransferClassScheduleMetrics>) => void
+  syncTransferToScheduleSelection: (metrics: ReturnType<typeof getTransferClassScheduleMetrics>) => void
+  selectWithdrawalSubject: (value: string) => void
+  selectWithdrawalTeacher: (value: string) => void
+  selectTransferSubject: (value: string) => void
+  selectTransferFromTeacher: (value: string) => void
+  selectTransferToTeacher: (value: string) => void
+  openManualField: (value: string) => void
+}
+function TransitionRequestFormFields({ bindings, owner }: { bindings: TransitionRequestFormBindings; owner?: { editing: boolean; sourcePager: ReactNode; targetPager: ReactNode; sourceSchedule: { month: string; onMonthChange: (month: string) => void; loading?: boolean }; targetSchedule: { month: string; onMonthChange: (month: string) => void; loading?: boolean } } }) {
+  const { form, withdrawal, transfer, selectedWithdrawalTeacherId, selectedTransferFromTeacherId, selectedTransferToTeacherId, withdrawalSubjectOptions, transferSubjectOptions, withdrawalTeacherOptions, transferFromTeacherOptions, transferToTeacherOptions, withdrawalClassOptions, transferFromClassOptions, transferToClassOptions, withdrawalStudentOptions, transferStudentOptions, selectedWithdrawalClass, selectedTransferFromClass, selectedTransferToClass, findStudent, updateWithdrawal, updateTransfer, updateForm, selectClass, selectStudent, shouldShowManualField, syncWithdrawalScheduleSelection, syncTransferFromScheduleSelection, syncTransferToScheduleSelection, selectWithdrawalSubject, selectWithdrawalTeacher, selectTransferSubject, selectTransferFromTeacher, selectTransferToTeacher, openManualField } = bindings
+	  if (form.type === "withdrawal") {
+      const canSelectWithdrawalTeacher = Boolean(form.subject)
+      const canSelectWithdrawalClass = Boolean(form.subject && selectedWithdrawalTeacherId)
+      const canSelectWithdrawalStudent = Boolean(form.subject && selectedWithdrawalTeacherId && form.classId)
+
+	    return (
+	      <section className="grid gap-4">
+	        <div className="grid gap-3">
+	          <div className="grid gap-3 md:grid-cols-2">
+	            <TaskListboxField
+	              label="과목"
+	              value={form.subject || ""}
+	              options={withdrawalSubjectOptions}
+	              onChange={selectWithdrawalSubject}
+                  disabled={owner?.editing}
+	            />
+	            <LinkedSelect
+	              label="선생님"
+	              value={selectedWithdrawalTeacherId}
+	              options={withdrawalTeacherOptions}
+	              onChange={selectWithdrawalTeacher}
+                disabled={Boolean(owner?.editing) || !canSelectWithdrawalTeacher}
+                disabledPlaceholder="과목 먼저"
+	              onManualSelect={owner ? undefined : () => openManualField("withdrawalTeacher")}
+	              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+	            />
+	            <LinkedSelect
+	              label="수업"
+	              value={form.classId || ""}
+	              options={withdrawalClassOptions}
+              listHeader={owner?.sourcePager}
+	              onChange={(value) => selectClass(value, { fillWithdrawal: true })}
+                disabled={Boolean(owner?.editing) || !canSelectWithdrawalClass}
+                disabledPlaceholder="선생님 먼저"
+	              onManualSelect={owner ? undefined : () => openManualField("withdrawalClass")}
+	              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+	            />
+	            <LinkedSelect
+	              label="학생"
+	              value={form.studentId || ""}
+	              options={withdrawalStudentOptions}
+	              onChange={(value) => selectStudent(value, { fillWithdrawalClass: true })}
+                disabled={Boolean(owner?.editing) || !canSelectWithdrawalStudent}
+                disabledPlaceholder="수업 먼저"
+	              onManualSelect={owner ? undefined : () => openManualField("withdrawalStudent")}
+	              renderOption={(option) => {
+	                const student = findStudent(option.id)
+	                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
+	              }}
+	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+	            />
+	            {shouldShowManualField("withdrawalTeacher", selectedWithdrawalTeacherId, withdrawal.teacherName) && <TextField label="선생님명" value={withdrawal.teacherName || ""} onChange={(value) => updateWithdrawal("teacherName", value)} />}
+	            {shouldShowManualField("withdrawalClass", form.classId, form.className) && <TextField label="수업명" value={form.className || ""} onChange={(value) => updateForm("className", value)} />}
+	            {shouldShowManualField("withdrawalStudent", form.studentId, form.studentName) && <TextField label="학생명" value={form.studentName || ""} autoFocus onChange={(value) => updateForm("studentName", value)} />}
+	          </div>
+	        </div>
+	        <div className="grid gap-3 md:grid-cols-2">
+	          <TextareaField label="고객 퇴원사유" value={withdrawal.customerReason || ""} onChange={(value) => updateWithdrawal("customerReason", value)} />
+	          <TextareaField label="선생님 의견" value={withdrawal.teacherOpinion || ""} onChange={(value) => updateWithdrawal("teacherOpinion", value)} />
+		          <UndistributedTextbookListField label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP} value={withdrawal.undistributedTextbooks || ""} onChange={(value) => updateWithdrawal("undistributedTextbooks", value)} />
+		          <WithdrawalScheduleCalendarField
+		            key={form.classId || "withdrawal-schedule-calendar"}
+		            classItem={selectedWithdrawalClass}
+                ownerSchedule={owner?.sourceSchedule}
+		            withdrawal={withdrawal}
+		            onScheduleSelect={syncWithdrawalScheduleSelection}
+		          />
+		        </div>
+		        {!owner && <div className="grid gap-2 md:grid-cols-3">
+		          <CheckField label="메이크에듀 퇴원처리" checked={Boolean(withdrawal.makeeduWithdrawalDone)} onChange={(value) => updateWithdrawal("makeeduWithdrawalDone", value)} />
+		          <CheckField label="수업료 처리 (퇴원 완료와 별도)" checked={Boolean(withdrawal.feeProcessed)} onChange={(value) => updateWithdrawal("feeProcessed", value)} />
+		          <CheckField label="교재비 처리 (퇴원 완료와 별도)" checked={Boolean(withdrawal.textbookFeeProcessed)} onChange={(value) => updateWithdrawal("textbookFeeProcessed", value)} />
+		        </div>}
+		      </section>
+		    )
+
+  }
+
+  if (form.type === "transfer") {
+    const canSelectTransferFromTeacher = Boolean(form.subject)
+    const canSelectTransferFromClass = Boolean(form.subject && selectedTransferFromTeacherId)
+    const canSelectTransferStudent = Boolean(form.subject && selectedTransferFromTeacherId && transfer.fromClassId)
+    const canSelectTransferToTeacher = Boolean(form.subject)
+    const canSelectTransferToClass = Boolean(form.subject && selectedTransferToTeacherId)
+    const transferTuitionAdjustment = getTransferTuitionAdjustment({
+      fromClass: selectedTransferFromClass,
+      toClass: selectedTransferToClass,
+      fromDate: transfer.fromClassEndDate || "",
+      toDate: transfer.toClassStartDate || "",
+    })
+
+    return (
+      <section className="grid gap-4">
+        <TransferWorkflowChart />
+        <section aria-label="전반 공통 정보" className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <TaskListboxField
+              label={<RequiredFieldLabel label="과목" />}
+              value={form.subject || ""}
+              options={transferSubjectOptions}
+              onChange={selectTransferSubject}
+              disabled={owner?.editing}
+              attention={!form.subject}
+              required
+            />
+            <LinkedSelect
+              label="학생"
+              value={form.studentId || ""}
+              options={transferStudentOptions}
+              onChange={(value) => selectStudent(value, { fillTransferFromClass: true })}
+              disabled={Boolean(owner?.editing) || !canSelectTransferStudent}
+              disabledPlaceholder="전 수업 먼저"
+              attention={canSelectTransferStudent && !form.studentId}
+              required
+              renderOption={(option) => {
+                const student = findStudent(option.id)
+                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
+              }}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+          </div>
+          <TextareaField label="전반사유" value={transfer.transferReason || ""} onChange={(value) => updateTransfer("transferReason", value)} />
+        </section>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section aria-label="전 수업 정보" className="grid content-start gap-3 rounded-md border bg-muted/20 p-3">
+            <h3 className="text-sm font-semibold">전 수업 정보</h3>
+            <LinkedSelect
+              label="전 선생님"
+              value={selectedTransferFromTeacherId}
+              options={transferFromTeacherOptions}
+              onChange={selectTransferFromTeacher}
+              disabled={Boolean(owner?.editing) || !canSelectTransferFromTeacher}
+              disabledPlaceholder="과목 먼저"
+              attention={canSelectTransferFromTeacher && !selectedTransferFromTeacherId}
+              required
+              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+            <LinkedSelect
+              label="전 수업"
+              value={transfer.fromClassId || ""}
+              options={transferFromClassOptions}
+              listHeader={owner?.sourcePager}
+              onChange={(value) => selectClass(value, { fillTransferFrom: true })}
+              disabled={Boolean(owner?.editing) || !canSelectTransferFromClass}
+              disabledPlaceholder="전 선생님 먼저"
+              attention={canSelectTransferFromClass && !transfer.fromClassId}
+              required
+              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+            <UndistributedTextbookListField label="전 미배부 교재" help={TRANSFER_FROM_UNDISTRIBUTED_TEXTBOOK_HELP} value={transfer.fromUndistributedTextbooks || ""} onChange={(value) => updateTransfer("fromUndistributedTextbooks", value)} />
+            <TransferScheduleCalendarField
+              key={transfer.fromClassId || "transfer-from-schedule-calendar"}
+              label="전 수업 종료일"
+              classItem={selectedTransferFromClass}
+              ownerSchedule={owner?.sourceSchedule}
+              dateValue={transfer.fromClassEndDate || ""}
+              sessionValue={transfer.fromClassEndSession || ""}
+              onScheduleSelect={syncTransferFromScheduleSelection}
+              required
+            />
+          </section>
+          <section aria-label="후 수업 정보" className="grid content-start gap-3 rounded-md border bg-muted/20 p-3">
+            <h3 className="text-sm font-semibold">후 수업 정보</h3>
+            <LinkedSelect
+              label="후 선생님"
+              value={selectedTransferToTeacherId}
+              options={transferToTeacherOptions}
+              onChange={selectTransferToTeacher}
+              disabled={!canSelectTransferToTeacher}
+              disabledPlaceholder="과목 먼저"
+              attention={canSelectTransferToTeacher && !selectedTransferToTeacherId}
+              required
+              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+            <LinkedSelect
+              label="후 수업"
+              value={transfer.toClassId || form.classId || ""}
+              options={transferToClassOptions}
+              listHeader={owner?.targetPager}
+              onChange={(value) => selectClass(value, { fillTransferTo: true })}
+              disabled={!canSelectTransferToClass}
+              disabledPlaceholder="후 선생님 먼저"
+              attention={canSelectTransferToClass && !(transfer.toClassId || form.classId)}
+              required
+              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+            <UndistributedTextbookListField label="후 미배부 교재" help={TRANSFER_TO_UNDISTRIBUTED_TEXTBOOK_HELP} value={transfer.toUndistributedTextbooks || ""} onChange={(value) => updateTransfer("toUndistributedTextbooks", value)} />
+            <TransferScheduleCalendarField
+              key={transfer.toClassId || form.classId || "transfer-to-schedule-calendar"}
+              label="후 수업 시작일"
+              classItem={selectedTransferToClass}
+              ownerSchedule={owner?.targetSchedule}
+              dateValue={transfer.toClassStartDate || ""}
+              sessionValue={transfer.toClassStartSession || ""}
+              onScheduleSelect={syncTransferToScheduleSelection}
+              required
+            />
+          </section>
+        </div>
+        {!owner && <TransferTuitionAdjustmentPanel adjustment={transferTuitionAdjustment} />}
+        {!owner && <div className="grid gap-2 md:grid-cols-3">
+          <CheckField label="메이크에듀 전반처리" checked={Boolean(transfer.makeeduTransferDone)} onChange={(value) => updateTransfer("makeeduTransferDone", value)} />
+          <CheckField label="수업료 처리" checked={Boolean(transfer.feeProcessed)} onChange={(value) => updateTransfer("feeProcessed", value)} />
+          <CheckField label="교재비 처리" checked={Boolean(transfer.textbookFeeProcessed)} onChange={(value) => updateTransfer("textbookFeeProcessed", value)} />
+        </div>}
+      </section>
+    )
+  }
+
+  return null
+}
+
 function TypeSpecificFields({
   step,
   form,
@@ -15090,213 +15424,43 @@ function TypeSpecificFields({
     )
   }
 
-	  if (form.type === "withdrawal") {
-      const canSelectWithdrawalTeacher = Boolean(form.subject)
-      const canSelectWithdrawalClass = Boolean(form.subject && selectedWithdrawalTeacherId)
-      const canSelectWithdrawalStudent = Boolean(form.subject && selectedWithdrawalTeacherId && form.classId)
-
-	    return (
-	      <section className="grid gap-4">
-	        <div className="grid gap-3">
-	          <div className="grid gap-3 md:grid-cols-2">
-	            <TaskListboxField
-	              label="과목"
-	              value={form.subject || ""}
-	              options={withdrawalSubjectOptions}
-	              onChange={selectWithdrawalSubject}
-	            />
-	            <LinkedSelect
-	              label="선생님"
-	              value={selectedWithdrawalTeacherId}
-	              options={withdrawalTeacherOptions}
-	              onChange={selectWithdrawalTeacher}
-                disabled={!canSelectWithdrawalTeacher}
-                disabledPlaceholder="과목 먼저"
-	              onManualSelect={() => openManualField("withdrawalTeacher")}
-	              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
-	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
-	            />
-	            <LinkedSelect
-	              label="수업"
-	              value={form.classId || ""}
-	              options={withdrawalClassOptions}
-	              onChange={(value) => selectClass(value, { fillWithdrawal: true })}
-                disabled={!canSelectWithdrawalClass}
-                disabledPlaceholder="선생님 먼저"
-	              onManualSelect={() => openManualField("withdrawalClass")}
-	              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
-	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
-	            />
-	            <LinkedSelect
-	              label="학생"
-	              value={form.studentId || ""}
-	              options={withdrawalStudentOptions}
-	              onChange={(value) => selectStudent(value, { fillWithdrawalClass: true })}
-                disabled={!canSelectWithdrawalStudent}
-                disabledPlaceholder="수업 먼저"
-	              onManualSelect={() => openManualField("withdrawalStudent")}
-	              renderOption={(option) => {
-	                const student = findStudent(option.id)
-	                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
-	              }}
-	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
-	            />
-	            {shouldShowManualField("withdrawalTeacher", selectedWithdrawalTeacherId, withdrawal.teacherName) && <TextField label="선생님명" value={withdrawal.teacherName || ""} onChange={(value) => updateWithdrawal("teacherName", value)} />}
-	            {shouldShowManualField("withdrawalClass", form.classId, form.className) && <TextField label="수업명" value={form.className || ""} onChange={(value) => updateForm("className", value)} />}
-	            {shouldShowManualField("withdrawalStudent", form.studentId, form.studentName) && <TextField label="학생명" value={form.studentName || ""} autoFocus onChange={(value) => updateForm("studentName", value)} />}
-	          </div>
-	        </div>
-	        <div className="grid gap-3 md:grid-cols-2">
-	          <TextareaField label="고객 퇴원사유" value={withdrawal.customerReason || ""} onChange={(value) => updateWithdrawal("customerReason", value)} />
-	          <TextareaField label="선생님 의견" value={withdrawal.teacherOpinion || ""} onChange={(value) => updateWithdrawal("teacherOpinion", value)} />
-		          <UndistributedTextbookListField label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP} value={withdrawal.undistributedTextbooks || ""} onChange={(value) => updateWithdrawal("undistributedTextbooks", value)} />
-		          <WithdrawalScheduleCalendarField
-		            key={form.classId || "withdrawal-schedule-calendar"}
-		            classItem={selectedWithdrawalClass}
-		            withdrawal={withdrawal}
-		            onScheduleSelect={syncWithdrawalScheduleSelection}
-		          />
-		        </div>
-		        <div className="grid gap-2 md:grid-cols-3">
-		          <CheckField label="메이크에듀 퇴원처리" checked={Boolean(withdrawal.makeeduWithdrawalDone)} onChange={(value) => updateWithdrawal("makeeduWithdrawalDone", value)} />
-		          <CheckField label="수업료 처리 (퇴원 완료와 별도)" checked={Boolean(withdrawal.feeProcessed)} onChange={(value) => updateWithdrawal("feeProcessed", value)} />
-		          <CheckField label="교재비 처리 (퇴원 완료와 별도)" checked={Boolean(withdrawal.textbookFeeProcessed)} onChange={(value) => updateWithdrawal("textbookFeeProcessed", value)} />
-		        </div>
-		      </section>
-		    )
-
-    return null
-  }
-
-  if (form.type === "transfer") {
-    const canSelectTransferFromTeacher = Boolean(form.subject)
-    const canSelectTransferFromClass = Boolean(form.subject && selectedTransferFromTeacherId)
-    const canSelectTransferStudent = Boolean(form.subject && selectedTransferFromTeacherId && transfer.fromClassId)
-    const canSelectTransferToTeacher = Boolean(form.subject)
-    const canSelectTransferToClass = Boolean(form.subject && selectedTransferToTeacherId)
-    const transferTuitionAdjustment = getTransferTuitionAdjustment({
-      fromClass: selectedTransferFromClass,
-      toClass: selectedTransferToClass,
-      fromDate: transfer.fromClassEndDate || "",
-      toDate: transfer.toClassStartDate || "",
-    })
-
-    return (
-      <section className="grid gap-4">
-        <TransferWorkflowChart />
-        <section aria-label="전반 공통 정보" className="grid gap-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            <TaskListboxField
-              label={<RequiredFieldLabel label="과목" />}
-              value={form.subject || ""}
-              options={transferSubjectOptions}
-              onChange={selectTransferSubject}
-              attention={!form.subject}
-              required
-            />
-            <LinkedSelect
-              label="학생"
-              value={form.studentId || ""}
-              options={transferStudentOptions}
-              onChange={(value) => selectStudent(value, { fillTransferFromClass: true })}
-              disabled={!canSelectTransferStudent}
-              disabledPlaceholder="전 수업 먼저"
-              attention={canSelectTransferStudent && !form.studentId}
-              required
-              renderOption={(option) => {
-                const student = findStudent(option.id)
-                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
-              }}
-              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
-            />
-          </div>
-          <TextareaField label="전반사유" value={transfer.transferReason || ""} onChange={(value) => updateTransfer("transferReason", value)} />
-        </section>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section aria-label="전 수업 정보" className="grid content-start gap-3 rounded-md border bg-muted/20 p-3">
-            <h3 className="text-sm font-semibold">전 수업 정보</h3>
-            <LinkedSelect
-              label="전 선생님"
-              value={selectedTransferFromTeacherId}
-              options={transferFromTeacherOptions}
-              onChange={selectTransferFromTeacher}
-              disabled={!canSelectTransferFromTeacher}
-              disabledPlaceholder="과목 먼저"
-              attention={canSelectTransferFromTeacher && !selectedTransferFromTeacherId}
-              required
-              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
-              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
-            />
-            <LinkedSelect
-              label="전 수업"
-              value={transfer.fromClassId || ""}
-              options={transferFromClassOptions}
-              onChange={(value) => selectClass(value, { fillTransferFrom: true })}
-              disabled={!canSelectTransferFromClass}
-              disabledPlaceholder="전 선생님 먼저"
-              attention={canSelectTransferFromClass && !transfer.fromClassId}
-              required
-              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
-              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
-            />
-            <UndistributedTextbookListField label="전 미배부 교재" help={TRANSFER_FROM_UNDISTRIBUTED_TEXTBOOK_HELP} value={transfer.fromUndistributedTextbooks || ""} onChange={(value) => updateTransfer("fromUndistributedTextbooks", value)} />
-            <TransferScheduleCalendarField
-              key={transfer.fromClassId || "transfer-from-schedule-calendar"}
-              label="전 수업 종료일"
-              classItem={selectedTransferFromClass}
-              dateValue={transfer.fromClassEndDate || ""}
-              sessionValue={transfer.fromClassEndSession || ""}
-              onScheduleSelect={syncTransferFromScheduleSelection}
-              required
-            />
-          </section>
-          <section aria-label="후 수업 정보" className="grid content-start gap-3 rounded-md border bg-muted/20 p-3">
-            <h3 className="text-sm font-semibold">후 수업 정보</h3>
-            <LinkedSelect
-              label="후 선생님"
-              value={selectedTransferToTeacherId}
-              options={transferToTeacherOptions}
-              onChange={selectTransferToTeacher}
-              disabled={!canSelectTransferToTeacher}
-              disabledPlaceholder="과목 먼저"
-              attention={canSelectTransferToTeacher && !selectedTransferToTeacherId}
-              required
-              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
-              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
-            />
-            <LinkedSelect
-              label="후 수업"
-              value={transfer.toClassId || form.classId || ""}
-              options={transferToClassOptions}
-              onChange={(value) => selectClass(value, { fillTransferTo: true })}
-              disabled={!canSelectTransferToClass}
-              disabledPlaceholder="후 선생님 먼저"
-              attention={canSelectTransferToClass && !(transfer.toClassId || form.classId)}
-              required
-              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
-              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
-            />
-            <UndistributedTextbookListField label="후 미배부 교재" help={TRANSFER_TO_UNDISTRIBUTED_TEXTBOOK_HELP} value={transfer.toUndistributedTextbooks || ""} onChange={(value) => updateTransfer("toUndistributedTextbooks", value)} />
-            <TransferScheduleCalendarField
-              key={transfer.toClassId || form.classId || "transfer-to-schedule-calendar"}
-              label="후 수업 시작일"
-              classItem={selectedTransferToClass}
-              dateValue={transfer.toClassStartDate || ""}
-              sessionValue={transfer.toClassStartSession || ""}
-              onScheduleSelect={syncTransferToScheduleSelection}
-              required
-            />
-          </section>
-        </div>
-        <TransferTuitionAdjustmentPanel adjustment={transferTuitionAdjustment} />
-        <div className="grid gap-2 md:grid-cols-3">
-          <CheckField label="메이크에듀 전반처리" checked={Boolean(transfer.makeeduTransferDone)} onChange={(value) => updateTransfer("makeeduTransferDone", value)} />
-          <CheckField label="수업료 처리" checked={Boolean(transfer.feeProcessed)} onChange={(value) => updateTransfer("feeProcessed", value)} />
-          <CheckField label="교재비 처리" checked={Boolean(transfer.textbookFeeProcessed)} onChange={(value) => updateTransfer("textbookFeeProcessed", value)} />
-        </div>
-      </section>
-    )
-  }
+  if (form.type === "withdrawal" || form.type === "transfer") return <TransitionRequestFormFields bindings={{
+    form,
+    withdrawal,
+    transfer,
+    selectedWithdrawalTeacherId,
+    selectedTransferFromTeacherId,
+    selectedTransferToTeacherId,
+    withdrawalSubjectOptions,
+    transferSubjectOptions,
+    withdrawalTeacherOptions,
+    transferFromTeacherOptions,
+    transferToTeacherOptions,
+    withdrawalClassOptions,
+    transferFromClassOptions,
+    transferToClassOptions,
+    withdrawalStudentOptions,
+    transferStudentOptions,
+    selectedWithdrawalClass,
+    selectedTransferFromClass,
+    selectedTransferToClass,
+    findStudent,
+    updateWithdrawal,
+    updateTransfer,
+    updateForm,
+    selectClass,
+    selectStudent,
+    shouldShowManualField,
+    syncWithdrawalScheduleSelection,
+    syncTransferFromScheduleSelection,
+    syncTransferToScheduleSelection,
+    selectWithdrawalSubject,
+    selectWithdrawalTeacher,
+    selectTransferSubject,
+    selectTransferFromTeacher,
+    selectTransferToTeacher,
+    openManualField
+  }} />
 
   if (form.type === "word_retest") {
     const isWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry"

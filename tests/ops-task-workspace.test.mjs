@@ -1178,7 +1178,7 @@ test("registration labels canonical result links by subject and keeps legacy det
   ]);
   const registrationFormSource = workspaceSource.slice(
     workspaceSource.indexOf('if (form.type === "registration") {', workspaceSource.indexOf("function TypeSpecificFields")),
-    workspaceSource.indexOf('if (form.type === "withdrawal")', workspaceSource.indexOf("function TypeSpecificFields")),
+    workspaceSource.indexOf('if (form.type === "withdrawal" || form.type === "transfer")', workspaceSource.indexOf("function TypeSpecificFields")),
   );
   const registrationDetailSource = workspaceSource.slice(
     workspaceSource.indexOf("function RegistrationDetailPanel"),
@@ -1824,7 +1824,7 @@ test("registration create persists one flat fact row without runtime, workflow, 
   );
   const registrationFormSource = source.slice(
     source.indexOf('if (form.type === "registration") {', source.indexOf("function TypeSpecificFields")),
-    source.indexOf('if (form.type === "withdrawal")', source.indexOf("function TypeSpecificFields")),
+    source.indexOf('if (form.type === "withdrawal" || form.type === "transfer")', source.indexOf("function TypeSpecificFields")),
   );
   const submitFormSource = source.slice(
     source.indexOf("const submitForm = async"),
@@ -2631,11 +2631,11 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "canSelectWithdrawalTeacher",
     "canSelectWithdrawalClass",
     "canSelectWithdrawalStudent",
-    'disabled={!canSelectWithdrawalTeacher}',
+    'disabled={Boolean(owner?.editing) || !canSelectWithdrawalTeacher}',
     'disabledPlaceholder="과목 먼저"',
-    'disabled={!canSelectWithdrawalClass}',
+    'disabled={Boolean(owner?.editing) || !canSelectWithdrawalClass}',
     'disabledPlaceholder="선생님 먼저"',
-    'disabled={!canSelectWithdrawalStudent}',
+    'disabled={Boolean(owner?.editing) || !canSelectWithdrawalStudent}',
     'disabledPlaceholder="수업 먼저"',
     "renderSelected={(option) => <LinkedSelectedValue label={option.label} />}",
   ]);
@@ -2920,7 +2920,7 @@ test("withdrawal schedule calendar defaults to current month and counts the bill
 
   assert.match(
     scheduleFieldSource,
-    /const \[calendarMonth, setCalendarMonth\] = useState\(\(\) => getCalendarMonthDate\(selectedDateKey\)\)/,
+    /const \[localCalendarMonth, setLocalCalendarMonth\] = useState\(\(\) => getCalendarMonthDate\(selectedDateKey\)\)/,
     "withdrawal calendar should show the current month by default when no withdrawal date is selected",
   );
   assert.match(
@@ -3243,11 +3243,11 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "attention={canSelectTransferStudent && !form.studentId}",
     "attention={canSelectTransferToTeacher && !selectedTransferToTeacherId}",
     "attention={canSelectTransferToClass && !(transfer.toClassId || form.classId)}",
-    'disabled={!canSelectTransferFromTeacher}',
+    'disabled={Boolean(owner?.editing) || !canSelectTransferFromTeacher}',
     'disabledPlaceholder="과목 먼저"',
-    'disabled={!canSelectTransferFromClass}',
+    'disabled={Boolean(owner?.editing) || !canSelectTransferFromClass}',
     'disabledPlaceholder="전 선생님 먼저"',
-    'disabled={!canSelectTransferStudent}',
+    'disabled={Boolean(owner?.editing) || !canSelectTransferStudent}',
     'disabledPlaceholder="전 수업 먼저"',
     'disabled={!canSelectTransferToTeacher}',
     'disabled={!canSelectTransferToClass}',
@@ -4799,7 +4799,7 @@ test("registration create omits placement while canonical track editors own enro
 test("registration canonical editors own class and textbook changes after create omits placement", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const registrationFormStart = source.indexOf('if (form.type === "registration")', source.indexOf("function TypeSpecificFields"));
-  const registrationFormSource = source.slice(registrationFormStart, source.indexOf('if (form.type === "withdrawal")', registrationFormStart));
+  const registrationFormSource = source.slice(registrationFormStart, source.indexOf('if (form.type === "withdrawal" || form.type === "transfer")', registrationFormStart));
 
   assertIncludesAll(source, [
     "loadOpsRegistrationClassDetail",

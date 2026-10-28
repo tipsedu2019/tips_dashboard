@@ -144,6 +144,9 @@ function getNextTimeOptionIndex(key: string, currentIndex: number, optionCount: 
 }
 
 type DatePickerControlProps = {
+  month?: Date
+  onMonthChange?: (month: Date) => void
+  strictLinkedDates?: boolean
   id?: string
   value: string
   onChange: (value: string) => void
@@ -160,7 +163,7 @@ type DatePickerControlProps = {
   triggerRef?: React.Ref<HTMLButtonElement>
 }
 
-export function DatePickerControl({
+export function DatePickerControl({ month, onMonthChange, strictLinkedDates = false,
   id,
   value,
   onChange,
@@ -217,9 +220,11 @@ export function DatePickerControl({
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={6} disablePortal={disablePortal} className="w-auto p-0">
         <Calendar
+          month={month}
+          onMonthChange={onMonthChange}
           mode="single"
           selected={selectedDate}
-          disabled={restrictToLinkedDates && linkedDateSet.size > 0 ? (date) => !linkedDateSet.has(toDateKey(date)) : undefined}
+          disabled={strictLinkedDates || restrictToLinkedDates && linkedDateSet.size > 0 ? (date) => !linkedDateSet.has(toDateKey(date)) : undefined}
           onSelect={(date) => {
             const nextDate = toDateKey(date)
             handleDateSelect(nextDate)
