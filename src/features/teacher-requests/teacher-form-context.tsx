@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { computeClassStatus, normalizeClassStatus } from "@/lib/class-status.js"
+import { requestClassOptions } from "@/lib/request-class-options"
 import { useAuth } from "@/providers/auth-provider"
 import { supabase } from "@/lib/supabase"
 import { teacherSubjectNames } from "./teacher-subject-options"
@@ -37,7 +39,7 @@ export function teacherFormClass(row: Row, schedule?: Row, month?: string): OpsC
     const ordinals = normalizedLessonDisplayOrdinals(sessions, teacherFormMonthRange(month))
     schedulePlan = { ...legacy, sessions: sessions.map(session => ({ ...session, sessionNumber: ordinals.get(session.id) ?? undefined })) }
   }
-  return { id: text(row.id), label: text(row.name), subject: text(row.subject), grade: text(row.grade),
+  return { id: text(row.id), startDate: text(row.startDate), endDate: text(row.endDate), status: text(row.status), label: text(row.name), subject: text(row.subject), grade: text(row.grade),
     teacher: text(row.teacher) || text(row.teacherName), room: text(row.room), schedule: text(row.schedule),
     scheduleStorageMode: text(row.scheduleStorageMode), schedulePlan, studentIds: [], waitlistIds: [], textbookIds: [] }
 }
@@ -80,7 +82,18 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
     if (!enabled) return
     const controller = new AbortController()
     void service.readClassScheduleNumberedPage({ filters: { termId: null, search, subject: subject || null, teacher: teacher || null, grade: null, syncGroupId: null }, page, pageSize: 15, signal: controller.signal })
-      .then(data => { if (!controller.signal.aborted) setPageState({ key: pageKey, data }) })
+      .then(async data => {
+        // The numbered DTO carries raw status but no dates. Resolve only unknown
+        // statuses through the existing authorized detail reader (at most 15).
+        const rows = await Promise.all(data.rows.map(async row => {
+          if (normalizeClassStatus(row.status)) return row
+          controller.signal.throwIfAborted()
+          const detail = await service.loadClassLessonDesignDetail(row.id)
+          controller.signal.throwIfAborted()
+          return { ...row, status: computeClassStatus(detail.classItem) }
+        }))
+        if (!controller.signal.aborted) setPageState({ key: pageKey, data: { ...data, rows } })
+      })
       .catch(error => { if (!controller.signal.aborted) { if (error?.code === "42501") onPermissionDenied(); else setPageState({ key: pageKey, error: true }) } })
     return () => controller.abort()
   }, [service, enabled, pageKey, subject, teacher, search, page, onPermissionDenied])
@@ -101,7 +114,7 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
   const selected = detail?.data || (detailState?.scope === detailScope && detailState.data ? { ...detailState.data, schedulePlan: { ...detailState.data.schedulePlan, sessions: [] } } : undefined)
   const teacherResult = teacherState?.key === teacherKey ? teacherState : undefined
   // A current page is never presented as the entire catalog.
-  const options = (result?.data?.rows || []).map(row => teacherFormClass(row))
+  const options = requestClassOptions((result?.data?.rows || []).map(row => teacherFormClass(row)), id)
   if (selected && !options.some(row => row.id === selected.id)) options.unshift(selected)
   return { options, selected, subjects: result?.data?.filterOptions.subjects || [], teachers: subject ? teacherResult?.names || [] : [],
     page, search: searchInput.value, searchInput, totalCount: result?.data?.totalCount ?? null, loading: enabled && (!result || Boolean(subject && !teacherResult)), detailLoading: Boolean(id && !detail), error: Boolean(result?.error || detail?.error || teacherResult?.error),

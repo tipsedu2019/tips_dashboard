@@ -16,11 +16,11 @@ async function mount(t,domain){
  props.Fields=domain==='makeup'?h.load('src/features/makeup-requests/makeup-request-workspace.tsx').TeacherMakeupRequestFields:h.load('src/features/tasks/ops-task-workspace.tsx').TeacherTransitionRequestFields;
  await h.render();return h;
 }
-async function edit(t,domain,patch={},currentApprover=makeupReferences.approver){
+async function edit(t,domain,patch={},currentApprover=makeupReferences.approver,classStatus='수강'){
  const h=await mount(t,domain),record=ownDetail(domain,patch);
  await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
  if(domain==='makeup')await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,approver:currentApprover,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});
- for(const request of calls(h,rpc.detail))await h.resolve(request,{classItem:classRow(request.args.p_class_id===id(21)?21:20)});
+ for(const request of calls(h,rpc.detail))await h.resolve(request,{classItem:{...classRow(request.args.p_class_id===id(21)?21:20),status:classStatus}});
  await subjectMetadata(h);
  return {h,record};
 }
@@ -59,8 +59,44 @@ test('management form owners actually call the same shared bodies',()=>{
 });
 import * as fs from 'node:fs';
 function awaitImportFs(){return fs;}
-function catalog(request, {total=2, rows=[20,21]}={}) { return {page:request.args.p_page,pageSize:15,totalCount:total,rows:rows.map(n=>({id:id(n),name:classRow(n).name,subject:'영어',grade:'중2',schedule:'월수',status:'active',teacherName:'가상 교사',termId:null,termName:null,syncGroupId:null,syncGroupName:null,updatedAt:null})),stats:{total,active:total,draft:0},filterOptions:{terms:[],subjects:['영어'],grades:['중2'],teachers:['가상 교사'],syncGroups:[]},syncGroupCounts:[]}; }
+function catalog(request, {total=2, rows=[20,21]}={}) { return {page:request.args.p_page,pageSize:15,totalCount:total,rows:rows.map(n=>({id:id(n),name:classRow(n).name,subject:'영어',grade:'중2',schedule:'월수',status:'수강',teacherName:'가상 교사',termId:null,termName:null,syncGroupId:null,syncGroupName:null,updatedAt:null})),stats:{total,active:total,draft:0},filterOptions:{terms:[],subjects:['영어'],grades:['중2'],teachers:['가상 교사'],syncGroups:[]},syncGroupCounts:[]}; }
 async function catalogs(h){ h.finished ||= new Set();for(const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))){h.finished.add(r);await h.resolve(r,catalog(r));}await subjectMetadata(h);}
+async function mixedStatusCatalogs(h) {
+ h.finished ||= new Set();
+ for (const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))) {
+  h.finished.add(r);const data=catalog(r);
+  data.rows=data.rows.map(row=>({...row,status:row.id===id(21)?'종강':'수강'}));
+  data.filterOptions.teachers=['가상 교사','가상 수학 교사','가상 과학 교사'];
+  await h.resolve(r,data);
+ }
+ await subjectMetadata(h);
+}
+for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: subject narrowing and ended-class exclusion coexist in new teacher request choices`,async t=>{
+ const h=await mount(t,domain);await click(h,'추가');await mixedStatusCatalogs(h);
+ await pick(h,domain==='makeup'?'subject':'과목','영어');await mixedStatusCatalogs(h);
+ const teacherLabel=domain==='makeup'?'teacher':domain==='transfer'?'전 선생님':'선생님';
+ const teacherControl=document.getElementById('makeup-'+teacherLabel)||labelled(teacherLabel);
+ await h.act(()=>teacherControl.id.startsWith('makeup-')?teacherControl.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})):teacherControl.click());
+ const teachers=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());
+ assert.ok(teachers.includes('가상 교사'));assert.equal(teachers.includes('가상 수학 교사'),false);assert.equal(teachers.includes('가상 과학 교사'),false);
+ await h.act(()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+ await pick(h,domain==='makeup'?'teacher':domain==='transfer'?'전 선생님':'선생님','가상 교사');await mixedStatusCatalogs(h);
+ const select=document.getElementById('makeup-class')||labelled('수업')||labelled('전 수업');assert.ok(select);
+ await h.act(()=>select.id==='makeup-class'?select.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})):select.click());
+ const options=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());
+ assert.ok(options.includes('가상 원래 반'));
+ assert.equal(options.includes('가상 새 반'),false,'ended class cannot be newly selected');
+ assert.equal(calls(h,rpc.write).length,0);
+});
+for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: an existing ended class remains visible and unchanged on edit`,async t=>{
+ const {h}=await edit(t,domain,{},makeupReferences.approver,'종강');
+ assert.ok(document.body.textContent.includes('가상 원래 반'));
+ if(domain==='makeup')await change(h,document.getElementById('makeup-reason'),'기존 종강 수업 보존');
+ else await change(h,[...document.querySelectorAll('textarea')].at(-1),'기존 종강 수업 보존');
+ await submit(h);const write=latest(h,rpc.write);assert.ok(write);
+ const key=domain==='transfer'?'from_class_id':'class_id';assert.equal(write.args.p_input[key],inputs[domain][key]);
+ if(domain==='transfer')assert.equal(write.args.p_input.to_class_id,inputs.transfer.to_class_id);
+});
 function labelled(label){return [...document.querySelectorAll('button[aria-labelledby]')].find(el=>document.getElementById(el.getAttribute('aria-labelledby'))?.textContent.replace(/필수 입력|필수입력|\*/g,'').trim()===label);}
 async function pick(h,label,option){const node=document.getElementById(`makeup-${label}`)||labelled(label);assert.ok(node,label);await h.act(()=>node.id.startsWith('makeup-')?node.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})):node.click());const opt=[...document.querySelectorAll('[role="option"]')].find(el=>el.textContent.trim()===option);assert.ok(opt,option);await h.act(()=>opt.click());}
 for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: existing subject/teacher/class sequence creates with the owner API only`,async t=>{
@@ -128,6 +164,53 @@ test('new makeup remains blocked when no current subject approver resolves',asyn
  await h.resolve(latest(h,rpc.detail),{classItem:classRow()});await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,approver:{label:null,status:'unresolved'},classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});
  await change(h,document.getElementById('makeup-reason'),'미배정 생성 차단');await h.act(()=>document.getElementById('cancel-date').click());const linked=[...document.querySelectorAll('button')].find(el=>el.textContent.includes('11-02')&&el.textContent.includes('회차'));assert.ok(linked);await h.act(()=>linked.click());
  await submit(h);assert.equal(calls(h,rpc.write).length,0);assert.equal(document.querySelector('button[type="submit"]').disabled,true);
+});
+
+test('teacher class choices resolve only unknown status dates and reject stale or failed status reads', async t => {
+ const h=await mount(t,'withdrawal');await click(h,'추가');
+ const first=latest(h,rpc.list), response=catalog(first);
+ response.rows[0].status='';response.rows[1].status='수강';
+ await h.resolve(first,response);const oldDetail=latest(h,rpc.detail);
+ assert.equal(calls(h,rpc.detail).length,1,'recognized status needs no detail read');
+ await click(h,'닫기');await click(h,'추가');
+ const current=latest(h,rpc.list);assert.notEqual(current,first);
+ await h.resolve(oldDetail,{classItem:{...classRow(),status:'',endDate:'2000-01-01'}});
+ await h.resolve(current,{...catalog(current),rows:[{...catalog(current).rows[0],status:''}]});
+ const detail=latest(h,rpc.detail);assert.notEqual(detail,oldDetail);
+ await h.reject(detail,new Error('synthetic unavailable'));
+ assert.match(document.body.textContent,/조회에 실패했습니다/);
+ assert.equal(calls(h,rpc.write).length,0);
+ await click(h,'일정 다시 조회');const retried=latest(h,rpc.list);
+ await h.resolve(retried,{...catalog(retried),rows:[{...catalog(retried).rows[0],status:''}]});
+ await h.resolve(latest(h,rpc.detail),{classItem:{...classRow(),status:'',endDate:'2000-01-01'}});
+ await pick(h,'과목','영어');const subjectRead=latest(h,rpc.list);await h.resolve(subjectRead,catalog(subjectRead));await subjectMetadata(h);
+ await pick(h,'선생님','가상 교사');const filtered=latest(h,rpc.list);
+ await h.resolve(filtered,{...catalog(filtered),rows:[{...catalog(filtered).rows[0],status:''},catalog(filtered).rows[1]]});
+ await h.resolve(latest(h,rpc.detail),{classItem:{...classRow(),status:'',endDate:'2000-01-01'}});
+ await h.act(()=>labelled('수업').click());
+ const options=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());
+ assert.equal(options.includes('가상 원래 반'),false);assert.ok(options.includes('가상 새 반'));
+ assert.equal(h.requests.some(r=>r.table),false);
+});
+
+test('transfer target class choices also exclude ended classes and retain another active target', async t => {
+ const h=await mount(t,'transfer');
+ async function choices() {
+  h.finished ||= new Set();
+  for(const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))) {
+   h.finished.add(r);const data=catalog(r,{total:3,rows:[20,21,22]});
+   data.rows=data.rows.map(item=>({...item,name:item.id===id(22)?'가상 진행 후 수업':item.name,status:item.id===id(21)?'종강':'수강'}));
+   await h.resolve(r,data);
+  }
+  await subjectMetadata(h);
+ }
+ await click(h,'추가');await choices();await pick(h,'과목','영어');await choices();
+ await pick(h,'전 선생님','가상 교사');await choices();await pick(h,'전 수업','가상 원래 반');
+ await h.resolve(latest(h,rpc.detail),{classItem:classRow()});await h.resolve(latest(h,'get_teacher_request_references_v1'),references);
+ await pick(h,'후 선생님','가상 교사');await choices();await h.act(()=>labelled('후 수업').click());
+ const options=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());
+ assert.ok(options.includes('가상 진행 후 수업'));assert.equal(options.includes('가상 새 반'),false);
+ assert.equal(options.includes('가상 원래 반'),false,'source cannot also be the target');assert.equal(calls(h,rpc.write).length,0);
 });
 
 async function subjectMetadata(h) {

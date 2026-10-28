@@ -1,5 +1,7 @@
 "use client"
 
+import { requestClassOptions } from "@/lib/request-class-options"
+
 import dynamic from "next/dynamic"
 
 import { DataTableCommandRow, DataTableWorkspaceToolbar, DataTableReadFeedback, DataTableFilters, DATA_TABLE_FILTER_FIELD_CLASS_NAME, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
@@ -1383,7 +1385,7 @@ function getWithdrawalClassOptions(
 ) {
   const normalizedTeacherName = normalizeLookupValue(selectedTeacherName)
   const selectedClass = classes.find((classItem) => classItem.id === selectedClassId)
-  const filteredClasses = classes.filter((classItem) => (
+  const filteredClasses = requestClassOptions(classes).filter((classItem) => (
     matchesWithdrawalSubject(classItem.subject, selectedSubject) &&
     (!normalizedTeacherName || normalizeLookupValue(classItem.teacher) === normalizedTeacherName)
   ))
