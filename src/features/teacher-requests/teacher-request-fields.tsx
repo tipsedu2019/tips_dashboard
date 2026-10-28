@@ -32,6 +32,7 @@ function Option({ label, value, fallback, options, disabled, onChange }: { label
 export type TeacherRequestFieldProps = {
   domain: RequestDomain; input: RequestInput; onChange: (input: RequestInput) => void; editing: boolean;
   labels: OwnRequestDetail["referenceLabels"]; references: RequestReferences | null; disabled: boolean;
+  approver?: OwnRequestDetail["approver"]
   onReadyChange?: (ready: boolean) => void
   month: string; onMonthChange: (value: string) => void; onPermissionDenied: () => void
 }

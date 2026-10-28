@@ -15,10 +15,10 @@ async function mount(t,domain){
  props.Fields=domain==='makeup'?h.load('src/features/makeup-requests/makeup-request-workspace.tsx').TeacherMakeupRequestFields:h.load('src/features/tasks/ops-task-workspace.tsx').TeacherTransitionRequestFields;
  await h.render();return h;
 }
-async function edit(t,domain,patch={}){
+async function edit(t,domain,patch={},currentApprover=makeupReferences.approver){
  const h=await mount(t,domain),record=ownDetail(domain,patch);
  await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
- if(domain==='makeup')await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});
+ if(domain==='makeup')await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,approver:currentApprover,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});
  for(const request of calls(h,rpc.detail))await h.resolve(request,{classItem:classRow(request.args.p_class_id===id(21)?21:20)});
  return {h,record};
 }
@@ -113,4 +113,17 @@ test('class context is paged and ignores a superseded selected-class response',a
  function Probe(){const [selected,setSelected]=useState(id(20));const result=useTeacherFormClass({id:selected,month:'2026-11',subject:'영어',teacher:'가상 교사',onPermissionDenied:denied});useLayoutEffect(()=>{current=result;select=setSelected;});return null;}
  await h.mountTestComponent(Probe,{});const old=latest(h,rpc.detail);await h.act(()=>select(id(21)));const fresh=latest(h,rpc.detail);await h.resolve(fresh,{classItem:classRow(21)});await h.resolve(old,{classItem:classRow(20)});assert.equal(current.selected.id,id(21));
  await h.resolve(latest(h,rpc.list),catalog(latest(h,rpc.list),{total:20}));await h.act(()=>current.setPage(2));const next=latest(h,rpc.list);assert.equal(next.args.p_page,2);assert.equal(next.args.p_page_size,15);assert.equal(current.options.some(row=>row.id===id(20)),false,'old page is not the current page');await h.resolve(next,catalog(next,{total:20,rows:[22]}));assert.equal(current.totalCount,20);assert.equal(current.page,2);assert.ok(current.options.some(row=>row.id===id(22)));assert.equal(h.requests.some(r=>r.table),false);
+});
+
+for (const currentApprover of [{label:null,status:'unresolved'},{label:'새 기본 승인자',status:'resolved'}]) test(`existing makeup keeps its visible assigned approver when current default is ${currentApprover.status}`,async t=>{
+ const {h}=await edit(t,'makeup',{},currentApprover);
+ const selector=document.getElementById('makeup-approver');assert.ok(selector);assert.match(selector.textContent,/가상 지정 승인자/);assert.equal(selector.disabled,true);
+ await change(h,document.getElementById('makeup-reason'),'기존 승인자 보존');await submit(h);const write=latest(h,rpc.write);assert.ok(write);assert.equal(write.args.p_action,'update');assert.equal(Object.keys(write.args.p_input).some(key=>/approver/.test(key)),false);
+});
+test('new makeup remains blocked when no current subject approver resolves',async t=>{
+ const h=await mount(t,'makeup');await click(h,'추가');await catalogs(h);
+ await pick(h,'subject','영어');await catalogs(h);await pick(h,'teacher','가상 교사');await catalogs(h);await pick(h,'class','가상 원래 반');
+ await h.resolve(latest(h,rpc.detail),{classItem:classRow()});await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,approver:{label:null,status:'unresolved'},classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});
+ await change(h,document.getElementById('makeup-reason'),'미배정 생성 차단');await h.act(()=>document.getElementById('cancel-date').click());const linked=[...document.querySelectorAll('button')].find(el=>el.textContent.includes('11-02')&&el.textContent.includes('회차'));assert.ok(linked);await h.act(()=>linked.click());
+ await submit(h);assert.equal(calls(h,rpc.write).length,0);assert.equal(document.querySelector('button[type="submit"]').disabled,true);
 });

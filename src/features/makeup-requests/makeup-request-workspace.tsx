@@ -1625,7 +1625,8 @@ export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
     }), textbooks: [], textbookIds: [],
   })
   const selectedClass = context.selected ? toClass(context.selected) : null
-  const input: MakeupRequestInput = { requestKind: ownerInput.request_kind as MakeupRequestKind, classId: value("class_id"), reason: value("reason"), cancelDate: value("cancel_date"), originalLessonSessionId: value("original_lesson_session_id"), makeupSlots: slots, makeupClassroom: "", approverTeacherCatalogId: references?.approver?.status === "resolved" ? "assigned" : "" }
+  const assignedApprover = editing ? props.approver?.profileId ? props.approver : null : references?.approver?.status === "resolved" ? references.approver : null
+  const input: MakeupRequestInput = { requestKind: ownerInput.request_kind as MakeupRequestKind, classId: value("class_id"), reason: value("reason"), cancelDate: value("cancel_date"), originalLessonSessionId: value("original_lesson_session_id"), makeupSlots: slots, makeupClassroom: "", approverTeacherCatalogId: assignedApprover ? "assigned" : "" }
   const ready = isMakeupFormInputReady(input, Boolean(selectedClass && !context.detailLoading && !context.error && references)) && !context.error && !context.detailLoading
   const onReadyChange = props.onReadyChange
   useEffect(() => { onReadyChange?.(ready) }, [ready, onReadyChange])
@@ -1669,7 +1670,7 @@ export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
       }
       return next
     }) }),
-    approverOptions: references?.approver?.label ? [{ id: "assigned", name: references.approver.label, profileId: "assigned" }] : [],
+    approverOptions: assignedApprover ? [{ id: "assigned", name: assignedApprover.label || "기존 지정 결재자", profileId: "assigned" }] : [],
     roomAvailability: () => (references?.rooms || []).map(room => ({ name: room.name, available: null, collisions: [] })),
   }} />
 }
