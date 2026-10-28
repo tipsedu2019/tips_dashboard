@@ -4,9 +4,18 @@ import { act } from 'react';
 import { setup, id, row } from './helpers/makeup-numbered-harness.mjs';
 globalThis.fetch=async()=>{throw Error('external network forbidden by independent audit')};
 const dialog=()=>document.querySelector('[role="dialog"]');
-function noRawOrWrites(p){assert.equal(p.requests.some(r=>r.table),false);assert.equal(p.requests.some(r=>!/^(list_makeup_numbered_page_v1|get_makeup_detail_v1)$/.test(r.name)),false);}
+function noRawOrWrites(p){
+ assert.equal(p.requests.some(r=>r.table),false);
+ // New policy reads only this authenticated caller's director subjects; no
+ // account ID, raw table, inbox write, or approval is permitted by this check.
+ assert.equal(p.requests.some(r=>!/^(list_makeup_numbered_page_v1|get_makeup_detail_v1|get_my_makeup_director_subjects_v1)$/.test(r.name)),false);
+ const subjects=p.requests.filter(r=>r.name==='get_my_makeup_director_subjects_v1');
+ assert.equal(subjects.length,1);assert.deepEqual(subjects[0].args,{});
+}
 async function pendingPageAndDetail(t){
  const p=await setup(t,{auth:{role:'teacher'},search:`?view=approvalPending&requestId=${id(999)}`});
+ const subjects=p.requests.find(r=>r.name==='get_my_makeup_director_subjects_v1');assert.ok(subjects);
+ await act(async()=>subjects.resolve({data:[],error:null}));
  const first=p.numbered()[0],detail=p.requests.find(r=>r.name==='get_makeup_detail_v1');
  assert.ok(first);assert.ok(detail);
  await act(async()=>p.finish(first,12));

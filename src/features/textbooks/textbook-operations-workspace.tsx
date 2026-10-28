@@ -1,4 +1,5 @@
 "use client";
+import { TeacherRequestActions } from "@/features/teacher-requests/teacher-request-actions";
 import { TeacherTextbookRequestWorkspace } from "./teacher-textbook-request-workspace";
 import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
 import { TEXTBOOK_FILTER_SUBJECT_OPTIONS, filterTextbookPickerGroups, getTextbookFilterGradeOptions, isRetiredTextbookGradeFilter, isRetiredTextbookSubjectFilter, normalizeTextbookCatalogFilters, normalizeTextbookPickerFilters } from "./textbook-filter-policy";
@@ -7580,6 +7581,7 @@ function PurchaseProcessTable({
         )}
         actions={<>
           <span role="status" className="sr-only">{purchaseBatchBusy ? "선택한 교재 처리 중…" : loading ? "목록 불러오는 중…" : filtersChanging ? "이전 조건의 결과 표시 중" : ""}</span>
+          {mode === "request" && <TeacherRequestActions domain="textbook" onChanged={() => {}} />}
           {mode === "order" && selectedProcessLineCount > 0 ? (<>
             <span className="mr-auto whitespace-nowrap text-sm font-medium tabular-nums">{formatQuantity(selectedProcessLineCount)}개 선택</span>
             {selectedOrderableRequestCount > 0 ? <Button type="button" size="sm" variant="outline" aria-label="선택 요청 일괄 주문" disabled={purchaseBatchBusy} onClick={onBulkOrder}>선택 주문</Button> : null}

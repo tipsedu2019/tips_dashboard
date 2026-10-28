@@ -384,7 +384,9 @@ test("mounted resubmit closes the committed revision and exposes notification wa
 
 test("mounted approval closes the committed approval and shows notification warning without resaving or resending", async (t) => {
   const p = await setup(t, { search: "?view=approvalPending" }), requests = []
-  const detail = row(900, { classId: id(600), requestKind: "cancel_only", cancelDate: "2026-09-01", makeupSlots: [], makeupStartAt: "", makeupEndAt: "", makeupClassroom: "" })
+  // Positive subject-director capability is supplied by the server DTO. The
+  // ordinary admin role alone no longer authorizes this approval regression.
+  const detail = row(900, { canDecideSubject: true, classId: id(600), requestKind: "cancel_only", cancelDate: "2026-09-01", makeupSlots: [], makeupStartAt: "", makeupEndAt: "", makeupClassroom: "" })
   t.mock.method(console, "warn", () => {})
   t.mock.method(p.supabase.auth, "getSession", async () => ({ data: { session: { access_token: "test-only-session" } }, error: null }))
   t.mock.method(globalThis, "fetch", async (url, init) => {

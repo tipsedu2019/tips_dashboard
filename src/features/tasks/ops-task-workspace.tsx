@@ -11,6 +11,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { DataTableSelectionActions, DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
+import { TeacherRequestActions } from "@/features/teacher-requests/teacher-request-actions"
 import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -12866,6 +12867,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               ))}
           </WorkspaceTabsList>
           <div className={isTodoWorkspace ? "flex shrink-0 flex-wrap items-center justify-end gap-2" : isWordRetestWorkspace ? "flex shrink-0 items-center justify-end gap-2" : "flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end"}>
+            {(isTransferWorkspace || isWithdrawalWorkspace) && <TeacherRequestActions domain={isTransferWorkspace ? "transfer" : "withdrawal"} onChanged={() => { void reload(true) }} />}
 	            {!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && taskFocus !== "none" && (
               <Button type="button" variant="secondary" size="sm" onClick={() => syncView(view)}>
                 <X className="size-4" />

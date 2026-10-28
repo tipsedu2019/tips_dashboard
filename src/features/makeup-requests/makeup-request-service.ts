@@ -110,6 +110,7 @@ export type MakeupSlotInput = {
 }
 
 export type MakeupRequest = {
+  canDecideSubject?: boolean
   notificationWarning?: string
   id: string
   status: MakeupRequestStatus

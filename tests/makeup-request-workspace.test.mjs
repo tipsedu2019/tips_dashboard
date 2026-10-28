@@ -698,37 +698,17 @@ test("makeup request route remains exposed to full roles but not the assistant s
   assert.doesNotMatch(assistantAllowedPathsSource, /"\/admin\/makeup-requests"/);
 });
 
-test("teacher and assistant makeup approval is rejected from the actor profile before body or service work", () => {
-  const postSource = makeupApprovalRouteSource.slice(
-    makeupApprovalRouteSource.indexOf("export async function POST"),
-  );
-  const authIndex = postSource.indexOf("actorClient.auth.getUser(token)");
-  const profileLookupIndex = postSource.indexOf('.from("profiles")');
-  const lookupFailureIndex = postSource.indexOf("if (actorProfileError || !isRecord(actorProfile))");
-  const restrictedRoleDenialIndex = postSource.indexOf('if (["teacher", "assistant"].includes(text(actorProfile.role)))');
-  const serviceClientIndex = postSource.indexOf("const serverClient = serviceClient()");
-  const bodyIndex = postSource.indexOf("request.json()");
-  const replayIndex = postSource.indexOf("attemptMakeupApprovalReplay");
-
-  assert.match(
-    postSource,
-    /actorClient\s*\.from\("profiles"\)\s*\.select\("role"\)\s*\.eq\("id", actor\.user\.id\)\s*\.single\(\)/,
-  );
-  assert.match(
-    postSource,
-    /if \(actorProfileError \|\| !isRecord\(actorProfile\)\) return response\(\{ ok: false, error: "휴보강 권한을 확인할 수 없습니다\." \}, 503\)/,
-  );
-  assert.match(
-    postSource,
-    /if \(\["teacher", "assistant"\]\.includes\(text\(actorProfile\.role\)\)\) return response\(\{ ok: false, error: "휴보강 접근 권한이 없습니다\." \}, 403\)/,
-  );
-  assert.doesNotMatch(postSource, /serverClient\s*\.from\("profiles"\)/);
-  assert.ok(authIndex >= 0 && authIndex < profileLookupIndex, "actor authentication must precede the profile role lookup");
-  assert.ok(profileLookupIndex < lookupFailureIndex, "profile lookup errors must fail closed");
-  assert.ok(lookupFailureIndex < restrictedRoleDenialIndex, "teacher/assistant role denial must follow the authoritative lookup");
-  assert.ok(restrictedRoleDenialIndex < serviceClientIndex, "teacher/assistant denial must precede service-role client creation");
-  assert.ok(restrictedRoleDenialIndex < bodyIndex, "teacher/assistant denial must precede request body parsing");
-  assert.ok(restrictedRoleDenialIndex < replayIndex, "teacher/assistant denial must precede approval replay");
+test("approval requires current subject capability before replay or service effects", () => {
+  const postSource=makeupApprovalRouteSource.slice(makeupApprovalRouteSource.indexOf("export async function POST"));
+  const authIndex=postSource.indexOf("actorClient.auth.getUser(token)");
+  const profileIndex=postSource.indexOf('.from("profiles")');
+  const assistantIndex=postSource.indexOf('text(actorProfile.role) === "assistant"');
+  const capabilityIndex=postSource.indexOf('actorClient.rpc("get_makeup_director_capability_v1"');
+  const replayIndex=postSource.indexOf('attemptMakeupApprovalReplay');
+  assert.ok(authIndex>=0 && profileIndex>authIndex && assistantIndex>profileIndex);
+  assert.ok(capabilityIndex>assistantIndex && replayIndex>capabilityIndex);
+  assert.match(postSource,/if \(canDecide !== true\)/);
+  assert.doesNotMatch(postSource,/\["teacher", "assistant"\]\.includes/);
 });
 
 test("makeup request migration creates request event and notification tables", () => {
@@ -842,7 +822,8 @@ test("makeup workspace includes approver queues form fields and room availabilit
     workspaceSource.indexOf("{message ?"),
   );
   assert.doesNotMatch(headerActionSource, /휴보강 알림 설정|<Bell/);
-  const createActionSource = workspaceSource.slice(workspaceSource.indexOf('createAction={canProcessRequest'), workspaceSource.indexOf('loading={loading}', workspaceSource.indexOf('createAction={canProcessRequest')));
+  const createActionSource = sourceBetween(workspaceSource, 'createAction={<><TeacherRequestActions', 'loading={loading}');
+  assert.match(createActionSource, /canProcessRequest/);
   assert.doesNotMatch(headerActionSource, />\s*휴보강 신청\s*</, 'create is in the list command row, not a separate tab header');
   assert.match(createActionSource, /<Plus className="size-4"/);
   assert.match(createActionSource, />\s*휴보강 신청\s*</);
@@ -1272,7 +1253,7 @@ test("makeup workspace keeps cancellation and fixed subject ordering without loc
   assert.doesNotMatch(workspaceSource, /관리팀 처리자/);
   assert.doesNotMatch(workspaceSource, /신청 ID/);
   assert.doesNotMatch(workspaceSource, /승인자/);
-  assert.match(workspaceSource, /승인취소일시/);
+  assert.match(workspaceSource, /취소·철회 일시/);
   assert.match(workspaceSource, /보완요청일시/);
   assert.match(serviceSource, /canceled: "승인 취소"/);
   assert.doesNotMatch(serviceSource, /completed: "처리 완료"/);
@@ -1367,7 +1348,7 @@ test("makeup workspace opens row details and uses cards on narrow viewports", ()
   assert.match(detailCardSource, /보완요청일시/);
   assert.match(detailCardSource, /승인일시/);
   assert.match(detailCardSource, /반려일시/);
-  assert.match(detailCardSource, /승인취소일시/);
+  assert.match(detailCardSource, /취소·철회 일시/);
   assert.match(detailCardSource, /결재자/);
   assert.match(workspaceSource, /const subtitle = \[request\.subject, request\.teacherLabel\]/);
   assert.doesNotMatch(workspaceSource, /\[request\.subject, request\.teacherLabel, request\.requesterLabel\]/);
@@ -1403,7 +1384,7 @@ test("makeup workspace opens row details and uses cards on narrow viewports", ()
   assert.ok(cardColumnsSource.indexOf('columnKey: "canceledNote"') > cardColumnsSource.indexOf('columnKey: "canceledAt"'));
   assert.ok(cardColumnsSource.indexOf('columnKey: "approver"') > cardColumnsSource.indexOf('columnKey: "canceledNote"'));
   assert.match(workspaceSource, /case "canceledNote":/);
-  assert.match(workspaceSource, /getRequestEvent\(request, \["approval_canceled", "completed_canceled"\]\)\?\.note/);
+  assert.match(workspaceSource, /getRequestEvent\(request, \["approval_canceled", "completed_canceled", "withdrawn"\]\)\?\.note/);
 });
 
 test("휴보강 서비스는 업무 저장과 서버 알림 브리지를 분리하고 초기 화면에서 알림 보관 테이블을 읽지 않는다", () => {
@@ -1592,4 +1573,16 @@ test("google chat route keeps webhook URLs server-side", () => {
   assert.match(apiRouteSource, /p_webhook_url_ciphertext: input\.webhookUrlCiphertext/);
   assert.doesNotMatch(apiRouteSource, /\.upsert\(/);
   assert.doesNotMatch(apiRouteSource, /NEXT_PUBLIC_GOOGLE_CHAT/);
+});
+
+
+test("withdrawn requests retain their reason in the existing closed view without implying approval", () => {
+  const load = modules({}, { '@/providers/auth-provider': { useAuth: () => ({}) } });
+  const { getMakeupRequestTableValue } = load("src/features/makeup-requests/makeup-request-workspace.tsx");
+  const withdrawn = row(1, {status:"canceled", canceledAt:stamp, events:[{id:id(901),requestId:id(1),eventType:"withdrawn",note:"가상 본인 철회 사유",createdAt:stamp,actorId:id(801)}]});
+  assert.equal(getMakeupRequestTableValue(withdrawn,"status"), "취소·철회");
+  assert.equal(getMakeupRequestTableValue(withdrawn,"canceledNote"), "가상 본인 철회 사유");
+  assert.notEqual(getMakeupRequestTableValue(withdrawn,"canceledAt"), "-");
+  const approvalCanceled = {...withdrawn, events:[{...withdrawn.events[0],eventType:"approval_canceled",note:"기존 승인 취소 사유"}]};
+  assert.equal(getMakeupRequestTableValue(approvalCanceled,"canceledNote"), "기존 승인 취소 사유");
 });

@@ -547,6 +547,8 @@ delete from public.teacher_catalogs where profile_id=pg_temp.ebr_approval_id(910
 insert into public.teacher_catalogs(id,name,subjects,profile_id) values
  (pg_temp.ebr_approval_id(910010),'EBR approver teacher',array['영어'],pg_temp.ebr_approval_id(910001)),
  (pg_temp.ebr_approval_id(910011),'EBR requested teacher',array['영어'],null);
+update public.profiles set teacher_catalog_id=pg_temp.ebr_approval_id(910010) where id=pg_temp.ebr_approval_id(910001);
+insert into dashboard_private.makeup_subject_directors_v1 values('영어',pg_temp.ebr_approval_id(910001),pg_temp.ebr_approval_id(910010));
 insert into public.classroom_catalogs(id,name,subjects) values
  (pg_temp.ebr_approval_id(910020),'EBR conflicting map room',array['영어']),
  (pg_temp.ebr_approval_id(910021),'EBR approved room',array['영어']);

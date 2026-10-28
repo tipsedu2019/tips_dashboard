@@ -5,6 +5,9 @@ insert into auth.users(id,instance_id,aud,role,email) values(pg_temp.t8(1),'0000
 insert into public.profiles(id,role,name) values(pg_temp.t8(1),'admin','Task8 errors') on conflict(id) do update set role='admin';
 delete from public.teacher_catalogs where profile_id=pg_temp.t8(1);
 insert into public.teacher_catalogs(id,name,subjects,profile_id) values(pg_temp.t8(2),'Task8 error teacher',array['영어'],pg_temp.t8(1));
+-- This synthetic schedule approver satisfies the current subject policy.
+update public.profiles set teacher_catalog_id=pg_temp.t8(2) where id=pg_temp.t8(1);
+insert into dashboard_private.makeup_subject_directors_v1 values('영어',pg_temp.t8(1),pg_temp.t8(2));
 insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.t8(3),'Task8 error room',array['영어']);
 insert into public.classes(id,name,subject,teacher,room,status,schedule_storage_mode,schedule_plan) values(pg_temp.t8(4),'Task8 errors','영어','Task8 error teacher','Task8 error room','개강 준비','normalized','{}');
 select set_config('app.class_schedule_mutation','release2-rpc',true);

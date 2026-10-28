@@ -148,8 +148,9 @@ export async function setup(t, initial = {}) {
     } },
     ...initial.overrides,
   });
-  const Workspace = load('src/features/textbooks/textbook-operations-workspace.tsx').TextbookOperationsWorkspace;
-  const render = () => act(async () => root.render(createElement(Workspace, { mode: initial.mode })));
+  const Workspace = initial.component ? load(initial.component.file)[initial.component.name]
+    : load('src/features/textbooks/textbook-operations-workspace.tsx').TextbookOperationsWorkspace;
+  const render = () => act(async () => root.render(createElement(Workspace, { mode: initial.mode, ...initial.props })));
   let rootMounted = true;
   const unmount = async () => {
     if (!rootMounted) return;
