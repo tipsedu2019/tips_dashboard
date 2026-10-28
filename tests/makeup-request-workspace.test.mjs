@@ -379,7 +379,7 @@ test("휴보강 초기 목록은 일정 원본과 요청 스냅샷을 제외한 
   const classSelect = calls.find((entry) => entry.table === "classes")?.calls.find((call) => call.method === "select");
   const requestSelect = calls.find((entry) => entry.table === "makeup_requests")?.calls.find((call) => call.method === "select");
   assert.deepEqual(classSelect?.args, [
-    "id,name,subject,grade,teacher,room,schedule,schedule_storage_mode,textbook_ids",
+    "id,name,subject,grade,teacher,room,schedule,schedule_storage_mode,textbook_ids,status,start_date,end_date",
   ]);
   assert.deepEqual(requestSelect?.args, [
     "id,status,subject,approval_group,requester_id,teacher_catalog_id,teacher_profile_id,class_id,class_name,request_kind,reason,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots,approver_teacher_catalog_id,approver_profile_id,returned_reason,rejected_reason,final_note,approved_by,approved_at,completed_by,completed_at,canceled_by,canceled_at,cancel_academic_event_id,makeup_academic_event_id,makeup_academic_event_ids,created_at,updated_at",
@@ -1585,4 +1585,28 @@ test("withdrawn requests retain their reason in the existing closed view without
   assert.notEqual(getMakeupRequestTableValue(withdrawn,"canceledAt"), "-");
   const approvalCanceled = {...withdrawn, events:[{...withdrawn.events[0],eventType:"approval_canceled",note:"기존 승인 취소 사유"}]};
   assert.equal(getMakeupRequestTableValue(approvalCanceled,"canceledNote"), "기존 승인 취소 사유");
+});
+
+test('management makeup new choices exclude ended classes but retain the catalog for existing requests', async t => {
+  const p = await setup(t);
+  await act(async () => p.finish(p.numbered()[0], 0));
+  await act(async () => button('휴보강 신청').click());
+  await act(async () => {
+    for (const r of p.requests.filter(r => r.table)) r.resolve({ error: null, data: r.table === 'classes' ? [
+      { id: id(901), name: '가상 진행 수업', status: '수강', subject: '영어', teacher: '가상 교사' },
+      { id: id(902), name: '가상 종강 수업', status: '종강', subject: '영어', teacher: '가상 교사' },
+    ] : [] });
+  });
+  async function pick(field, value) {
+    const trigger = document.getElementById('makeup-' + field); assert.ok(trigger, field);
+    await act(async () => trigger.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    const option = [...document.querySelectorAll('[role="option"]')].find(node => node.textContent.trim() === value); assert.ok(option, value);
+    await act(async () => option.click());
+  }
+  await pick('subject', '영어'); await pick('teacher', '가상 교사');
+  await act(async () => document.getElementById('makeup-class').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  const names = [...document.querySelectorAll('[role="option"]')].map(node => node.textContent.trim());
+  assert.ok(names.includes('가상 진행 수업')); assert.equal(names.includes('가상 종강 수업'), false);
+  assert.ok(p.observed.catalogs.classes.some(item => item.id === id(902)), 'history catalog is not pruned');
+  assert.equal(p.requests.some(r => /create_makeup|transition_makeup/.test(r.name || '')), false);
 });

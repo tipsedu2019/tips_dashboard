@@ -96,6 +96,9 @@ export type OpsStudentOption = OpsLinkedOption & {
 }
 
 export type OpsClassOption = OpsLinkedOption & {
+  startDate?: string
+  endDate?: string
+  status?: string
   subject: string
   grade: string
   teacher: string
@@ -501,16 +504,16 @@ const OPS_REGISTRATION_CLASS_DETAIL_COLUMN_CANDIDATES = [
   "id,name,subject,grade,teacher,room,schedule,schedule_plan",
 ] as const
 const OPS_CLASS_COLUMN_CANDIDATES = [
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,textbook_ids,status",
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,status",
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,textbook_ids,status",
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,status",
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,student_ids,waitlist_ids,textbook_ids,status",
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,student_ids,waitlist_ids,status",
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,status",
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,status",
-  "id,name,subject,grade,teacher,room,schedule,schedule_plan,status",
-  "id,name,subject,grade,teacher,room,schedule,status",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,textbook_ids,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,textbook_ids,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,student_ids,waitlist_ids,textbook_ids,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,student_ids,waitlist_ids,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,status,start_date,end_date",
+  "id,name,subject,grade,teacher,room,schedule,status,start_date,end_date",
 ] as const
 const OPS_REGISTRATION_OPTIONAL_DETAIL_COLUMNS = [
   "level_test_completed_at",
@@ -1597,6 +1600,9 @@ export function mapOpsTaskPageRow(row: Row): OpsTask {
 
 function mapOpsClassOption(row: Row): OpsClassOption {
   return {
+    status: text(row.status),
+    startDate: text(row.start_date),
+    endDate: text(row.end_date),
     id: text(row.id),
     label: text(row.name) || text(row.id),
     meta: optionMeta([row.subject, row.teacher, row.room]),

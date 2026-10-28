@@ -1104,7 +1104,7 @@ test("non-registration class reads retain the full class projection", async () =
 
   assert.equal(
     selections[0],
-    "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,textbook_ids,status",
+    "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,textbook_ids,status,start_date,end_date",
   );
 });
 
