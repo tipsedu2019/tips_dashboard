@@ -1,3 +1,5 @@
+export const REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_VERIFICATION_MESSAGE = "템플릿 상태 또는 내용을 확인하지 못했습니다. 관리팀에서 등록·승인 상태와 검증 결과를 확인해 주세요."
+
 const REGISTRATION_CUSTOMER_MESSAGE_ERROR_MESSAGES = Object.freeze([
   [
     "registration_customer_message_source_ineligible",
@@ -13,7 +15,7 @@ const REGISTRATION_CUSTOMER_MESSAGE_ERROR_MESSAGES = Object.freeze([
   ],
   [
     "registration_customer_message_template_drift",
-    "새 알림톡 템플릿 승인 후 발송할 수 있습니다.",
+    REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_VERIFICATION_MESSAGE,
   ],
   [
     "registration_customer_message_body_too_long",
@@ -52,7 +54,7 @@ const READINESS_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   pf_missing: "카카오 채널 연결을 확인해 주세요.",
   template_missing: "이 안내에 사용할 알림톡 템플릿을 등록해 주세요.",
   template_not_verified: "알림톡 템플릿 승인과 내용 확인이 필요합니다.",
-  template_drift: "승인된 템플릿과 현재 내용이 다릅니다. 템플릿을 확인해 주세요.",
+  template_drift: REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_VERIFICATION_MESSAGE,
   source_invalid: "예약과 과목별 진행상태를 확인한 뒤 새 미리보기를 열어 주세요.",
   source_dirty: "등록 정보가 변경되었습니다. 저장 후 새 미리보기를 열어 주세요.",
   duplicate_locked: "같은 내용의 발송 요청이 있습니다. 최근 발송 상태를 확인해 주세요.",

@@ -13,6 +13,7 @@ import {
 } from "../src/features/tasks/registration-customer-message-contract.ts"
 import { runRegistrationCustomerMessageRolloutAction } from "../src/features/tasks/registration-customer-message-rollout.ts"
 import { createRegistrationCustomerMessageAdminClient } from "../src/features/tasks/registration-customer-message-service.ts"
+import * as customerMessageErrors from "../src/features/tasks/registration-customer-message-errors.ts"
 
 const require = createRequire(import.meta.url)
 const panelUrl = new URL("../src/features/tasks/registration-customer-message-rollout-panel.tsx", import.meta.url)
@@ -64,6 +65,7 @@ async function loadRolloutPanel(inspectObservationReadiness = async () => READIN
     return createElement("input", { ...props, ref, onChange: () => onCheckedChange?.(true) })
   })
   const localModules = new Map([
+    ["./registration-customer-message-errors", customerMessageErrors],
     ["lucide-react", { Loader2: () => null, ShieldCheck: () => null }],
     ["@/components/ui/badge", { Badge: passthrough("span") }],
     ["@/components/ui/button", { Button }],
@@ -186,6 +188,7 @@ async function loadRealRolloutPanel(client) {
   })
   const runtimeModule = { exports: {} }
   const localModules = new Map([
+    ["./registration-customer-message-errors", customerMessageErrors],
     ["lucide-react", { Loader2: () => null, ShieldCheck: () => null }],
     ["@/components/ui/badge", { Badge: passthrough("span") }],
     ["@/components/ui/button", { Button: passthrough("button") }],
@@ -465,6 +468,7 @@ async function loadMountedRolloutPanel({ inspectObservationReadiness, runAction 
   const Checkbox = passthrough("input")
   const runtimeModule = { exports: {} }
   const localModules = new Map([
+    ["./registration-customer-message-errors", customerMessageErrors],
     ["lucide-react", { Loader2: () => null, ShieldCheck: () => null }],
     ["@/components/ui/badge", { Badge: passthrough("span") }],
     ["@/components/ui/button", { Button }],
