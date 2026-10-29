@@ -393,10 +393,13 @@ async function loadMountedRegistrationApplication({
     return createElement("button", { "data-mounted-management-notification": "" }, "관리팀 알림 미리보기")
   }
   const RegistrationCustomerMessageCaseHistory = function MountedCustomerMessageCaseHistory() {
-    return createElement("button", { "data-mounted-customer-message-history": "" }, "알림톡 이력")
+    return createElement("button", { "data-mounted-customer-message-history": "" }, "발송 이력")
+  }
+  const RegistrationCustomerMessageNavigation = function MountedCustomerMessageNavigation() {
+    return createElement("button", { "data-mounted-customer-message-navigation": "" }, "알림톡 위치")
   }
   const RegistrationApplicationHistoryAction = function MountedApplicationHistoryAction() {
-    return createElement("button", { "aria-label": "자동 이력 보기" })
+    return createElement("button", { "aria-label": "업무 처리 이력" }, "업무 처리 이력")
   }
   const RegistrationVisitCancellationActions = function MountedVisitCancellationActions() {
     return createElement("button", { "data-mounted-visit-cancellation": "" }, "방문 취소 안내")
@@ -434,6 +437,7 @@ async function loadMountedRegistrationApplication({
     ["./registration-alimtalk-preview-dialog", { RegistrationAlimtalkPreviewDialog }],
     ["./registration-management-notification-actions", { RegistrationManagementNotificationActions }],
     ["./registration-customer-message-case-history", { RegistrationCustomerMessageCaseHistory }],
+    ["./registration-customer-message-navigation", { RegistrationCustomerMessageNavigation }],
     ["./registration-visit-cancellation-actions", { RegistrationVisitCancellationActions }],
     ["./registration-application-consultation-section", { RegistrationApplicationConsultationSection: Passthrough }],
     ["./registration-application-inquiry-section", {
@@ -595,6 +599,7 @@ async function loadMountedRegistrationApplication({
     RegistrationAlimtalkPreviewDialog,
     RegistrationManagementNotificationActions,
     RegistrationCustomerMessageCaseHistory,
+    RegistrationCustomerMessageNavigation,
     RegistrationApplicationHistoryAction,
     RegistrationVisitCancellationActions,
     RegistrationAppointmentEditor,
@@ -856,7 +861,7 @@ test("saved detail exposes automatic history from a header clock popover only", 
   assert.match(shell, /\{props\.historyAction\}\s*\{props\.closeAction\}/)
   assert.doesNotMatch(shell, /history: ReactNode|history: "history"|history: "자동 이력"/)
   assert.match(action, /Clock3/)
-  assert.match(action, /aria-label="자동 이력 보기"/)
+  assert.match(action, /aria-label="업무 처리 이력"/)
   assert.match(action, /<Popover>/)
   assert.match(action, /<PopoverTrigger asChild>/)
   assert.match(action, /<PopoverContent/)
@@ -4581,9 +4586,9 @@ test("canonical registration editors keep messaging outside the admission checkl
   assert.match(application, /onSendSuccess=\{async \(\) => \{[\s\S]*reloadAfterCustomerMessageSend\(\)/)
 
   const appointmentSave = appointment.indexOf("<RegistrationSaveButton")
-  const bookingTrigger = appointment.indexOf("예약 안내 알림톡", appointmentSave)
-  const reminderTrigger = appointment.indexOf("리마인드 알림톡", appointmentSave)
-  assert.ok(appointmentSave >= 0 && bookingTrigger > appointmentSave)
+  const bookingTrigger = appointment.indexOf("예약 안내 알림톡")
+  const reminderTrigger = appointment.indexOf("리마인드 알림톡")
+  assert.ok(appointmentSave >= 0 && bookingTrigger >= 0 && bookingTrigger < appointmentSave, "The appointment header exposes messaging before form actions without changing its guard")
   assert.equal(reminderTrigger, -1)
   assert.doesNotMatch(appointment, /오전 10시 발송 예정|리마인드 대상 아님|리마인드 취소/)
   assert.doesNotMatch(appointment, /예약과 예정된 리마인드가 취소됩니다/)
@@ -4597,11 +4602,15 @@ test("canonical registration editors keep messaging outside the admission checkl
   assert.match(appointment, /예약을 저장한 뒤 알림톡을 보낼 수 있습니다\./)
   assert.match(appointment, /canOpenCustomerMessage\?: boolean/)
   assert.match(appointment, /\{canOpenCustomerMessage \? \([\s\S]*예약 안내 알림톡/)
-  const customerMessageControls = appointment.slice(
-    appointment.indexOf("{canOpenCustomerMessage ? ("),
-    appointment.indexOf("</>", appointment.indexOf("{canOpenCustomerMessage ? (")),
-  )
-  assert.equal((customerMessageControls.match(/size="form"/g) || []).length, 1)
+  const appointmentAst = ts.createSourceFile("registration-appointment-editor.tsx", appointment, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const customerMessageControls = []
+  function collectCustomerMessageControls(node) {
+    if (ts.isConditionalExpression(node) && node.condition.getText(appointmentAst) === "canOpenCustomerMessage") customerMessageControls.push(node.getText(appointmentAst))
+    ts.forEachChild(node, collectCustomerMessageControls)
+  }
+  collectCustomerMessageControls(appointmentAst)
+  assert.equal(customerMessageControls.length, 1)
+  assert.equal((customerMessageControls[0].match(/size="form"/g) || []).length, 1)
 
   assert.match(observation, /messageKind: "observation_booking", sourceId: current\.observationId/)
   assert.match(observation, /messageKind: "observation_booking",\s*sourceId: savedObservation\.observationId/)
@@ -4609,8 +4618,8 @@ test("canonical registration editors keep messaging outside the admission checkl
 
   const waiting = sourceBetween(actions, "export function RegistrationWaitingDetailsEditor", "function TerminalStageEditor")
   const waitingSave = waiting.indexOf("<RegistrationSaveButton")
-  const waitingTrigger = waiting.indexOf("대기 안내 알림톡", waitingSave)
-  assert.ok(waitingSave >= 0 && waitingTrigger > waitingSave)
+  const waitingTrigger = waiting.indexOf("대기 안내 알림톡")
+  assert.ok(waitingSave >= 0 && waitingTrigger >= 0 && waitingTrigger < waitingSave, "The owner header exposes messaging before form actions without changing its guard")
   assert.match(waiting, /messageKind: "waiting_notice", sourceId: track\.id/)
   assert.match(waiting, /permissions\.canManage/)
   assert.match(waiting, /waitingDirty \|\| saving \|\| refreshPending \|\| !savedWaitingComplete/)
@@ -5668,4 +5677,104 @@ test("failed observation reads retry on selection and permission revocation reje
     assert.match(collectMountedRegistrationText(view).join(" "), /최근 적합 청강/)
     hookHarness.flushEffects()
   } finally { hookHarness.cleanup() }
+})
+
+test("message entry placement keeps each preview in its owner header before editable controls", async () => {
+  const cases = [
+    ["registration-appointment-editor.tsx", "RegistrationAppointmentEditor", /level_test_booking|visit_consultation_booking/, "DateTimePickerControl"],
+    ["registration-application-track-actions.tsx", "RegistrationWaitingDetailsEditor", /waiting_notice/, "RegistrationSelect"],
+    ["registration-observation-editor.tsx", "RegistrationObservationEditor", /observation_booking/, "RegistrationSelect"],
+    ["registration-enrollment-editor.tsx", "RegistrationAdmissionPanel", /admission_application/, "RegistrationAdmissionChecklist"],
+  ]
+  for (const [fileName, ownerName, kind, firstControlTag] of cases) {
+    const source = await readFile(new URL(`../src/features/tasks/${fileName}`, import.meta.url), "utf8")
+    const ast = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const owner = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === ownerName)
+    assert.ok(owner, `actual owner ${ownerName}`)
+    const entries = findRegistrationJsxElements(owner, "Button").filter(element => registrationJsxAttribute(element, "data-registration-message-entry"))
+    assert.equal(entries.length, 1, `${ownerName} has one explicit message entry`)
+    assert.match(registrationJsxAttribute(entries[0], "data-registration-message-entry").getText(), kind)
+    assert.ok(registrationJsxAttribute(entries[0], "onClick"), "Preserve the local callback owner")
+    assert.equal(registrationJsxAttribute(entries[0], "type").initializer.text, "button")
+    const controls = findRegistrationJsxElements(owner, firstControlTag)
+    assert.ok(controls.length > 0, `${ownerName} editable controls`)
+    assert.ok(entries[0].pos < controls[0].pos, `${ownerName} entry precedes its form controls`)
+  }
+})
+
+test("mounted waiting header entry keeps saved target, dirty blocking, and manager ownership", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const previews = [], saves = [], dirty = []
+  const { RegistrationWaitingDetailsEditor } = loadNotificationComponent("src/features/tasks/registration-application-track-actions.tsx", new Map([
+    ["react", { ...require("react"), ...hookHarness.react }],
+    ["./registration-enrollment-editor", { RegistrationEnrollmentEditor: () => null }],
+    ["./registration-track-service", {
+      createRegistrationMutationRequestKey: () => "synthetic-key",
+      saveRegistrationWaitingDetails: async input => { saves.push(input) },
+    }],
+  ]))
+  const props = {
+    track: { id: MOUNTED_REGISTRATION_TRACK_ID, subject: "영어", workflowStatus: "waiting_current_class", waitingDetailKind: "current_class", waitingDetailClassId: MOUNTED_REGISTRATION_CLASS_ID, waitingDetailRetakeDecision: "" },
+    permissions: { canManage: true, readOnly: false }, classOptions: [],
+    onReload: async () => undefined, onWarning: message => assert.fail(message),
+    onDirtyChange: value => dirty.push(value), onOpenCustomerMessage: target => previews.push(target),
+  }
+  const render = (next = props) => { const tree = hookHarness.render(RegistrationWaitingDetailsEditor, next); hookHarness.flushEffects(); return tree }
+  const entry = tree => findMountedRegistrationElement(tree, node => node.props["data-registration-message-entry"] === "waiting_notice", "waiting header message entry")
+  try {
+    let tree = render()
+    const action = entry(tree)
+    assert.equal(action.props.disabled, false)
+    const children = require("react").Children.toArray(tree.props.children)
+    assert.ok(findMountedRegistrationElements(children[0], node => node === action).length === 1, "The message remains in the first local header row")
+    action.props.onClick()
+    assert.deepEqual(previews, [{ messageKind: "waiting_notice", sourceId: props.track.id }])
+    assert.deepEqual(saves, [])
+    const kind = findMountedRegistrationElement(tree, node => node.props["aria-label"] === "영어 대기 종류", "waiting kind control")
+    kind.props.onValueChange("next_term_opening")
+    tree = render()
+    assert.equal(entry(tree).props.disabled, true)
+    assert.equal(findMountedRegistrationElement(tree, node => node.props["aria-label"] === "영어 대기 종류", "retained waiting draft").props.value, "next_term_opening")
+    assert.equal(dirty.at(-1), true)
+    assert.equal(previews.length, 1, "Changing a draft must never prepare another preview")
+    assert.deepEqual(saves, [])
+    assert.equal(findMountedRegistrationElements(render({ ...props, permissions: { canManage: false, readOnly: true } }), node => node.props["data-registration-message-entry"] === "waiting_notice").length, 0)
+  } finally { hookHarness.cleanup() }
+})
+
+test("mounted detail header exposes location navigation only to management without opening a preview", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({ hookHarness, loadManagerDetail: async () => null, loadFeedback: async () => null })
+  const props = {
+    task: { id: MOUNTED_REGISTRATION_TASK_ID, type: "registration", title: "합성 등록", studentName: "합성 학생" },
+    detail: {
+      task: { id: MOUNTED_REGISTRATION_TASK_ID, title: "합성 등록", studentName: "합성 학생", registration: null }, commonRevision: 1,
+      tracks: [{ id: MOUNTED_REGISTRATION_TRACK_ID, taskId: MOUNTED_REGISTRATION_TASK_ID, subject: "영어", status: "inquiry", workflowStatus: "inquiry", workflowRevision: 1, observationAttemptCount: 0, observationSummaryVisible: false, migrationReviewRequired: false, legacy: false }],
+      appointments: [], levelTests: [], consultations: [], enrollments: [], admissionBatches: [],
+      admissionApplicationMessageStatus: "not_sent", admissionApplicationMessageClaimActive: false, admissionApplicationMessageId: null,
+    },
+    focusTrackId: MOUNTED_REGISTRATION_TRACK_ID, viewerId: "synthetic-manager", viewerRole: "staff",
+    onFocusTrack: () => assert.fail("Header discovery must not switch subjects"), onReload: async () => assert.fail("Header discovery must not write or reload"),
+    onWarning: () => undefined, subjectCapabilities: [], customerMessageClient: {}, observationRuntime: { available: false, runtimeVersion: 0 }, closeAction: null,
+  }
+  const globals = new Map(["window", "document", "HTMLElement"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  globalThis.HTMLElement = class HTMLElement {}
+  globalThis.window = { matchMedia: () => ({ matches: false }), requestAnimationFrame: callback => { callback(); return 1 }, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById: () => null }
+  const render = next => { const tree = hookHarness.render(mounted.RegistrationApplication, next); hookHarness.flushEffects(); return tree }
+  try {
+    for (const role of ["staff", "admin", "teacher", "assistant"]) {
+      const tree = render({ ...props, viewerRole: role })
+      const shell = findMountedRegistrationElement(tree, node => node.type === mounted.RegistrationApplicationShell, "detail shell")
+      const navigation = findMountedRegistrationElements(shell.props.historyAction, node => node.type === mounted.RegistrationCustomerMessageNavigation)
+      assert.equal(navigation.length, ["staff", "admin"].includes(role) ? 1 : 0, `${role} location navigation ownership`)
+      if (navigation.length) assert.equal(navigation[0].props.includeObservation, false)
+      const dialog = findMountedRegistrationElement(tree, node => node.type === mounted.RegistrationAlimtalkPreviewDialog, "existing preview dialog")
+      assert.equal(dialog.props.open, false)
+      assert.equal(dialog.props.target, null)
+    }
+  } finally {
+    hookHarness.cleanup()
+    for (const [key, descriptor] of globals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key] }
+  }
 })

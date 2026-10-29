@@ -1957,7 +1957,7 @@ test("canonical registration application opens one honest read-only timeline fro
   assert.equal(editorSource.split("detail={detail}").length - 1, 0);
   assert.equal(editorSource.split("eligibleTracks={genericTracks}").length - 1, 2);
   assert.doesNotMatch(editorSource, /history=\{<RegistrationHistoryTimeline/);
-  assert.match(actionSource, /aria-label="자동 이력 보기"/);
+  assert.match(actionSource, /aria-label="업무 처리 이력"/);
   assert.match(actionSource, /<Popover>/);
   assert.match(actionSource, /<RegistrationHistoryTimeline[\s\S]*?embedded/);
   assert.doesNotMatch(actionSource, /<Sheet|<Dialog/);

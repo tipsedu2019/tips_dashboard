@@ -98,7 +98,7 @@ jobs:
       - name: Verify dashboard conflict interactions and request recovery
         run: node --test --experimental-strip-types tests/dashboard-conflict-interaction.test.mjs tests/ops-task-service-loading.test.mjs
       - name: Verify registration subject snapshots and inquiry recovery
-        run: node --test --experimental-strip-types tests/registration-track-service.test.mjs tests/registration-track-workspace.test.mjs tests/registration-subject-navigation-safety.test.mjs tests/teacher-permission-retry.test.mjs
+        run: node --test --experimental-strip-types tests/registration-track-service.test.mjs tests/registration-track-workspace.test.mjs tests/registration-message-location-navigation.test.mjs tests/registration-subject-navigation-safety.test.mjs tests/teacher-permission-retry.test.mjs
       - name: Verify notification settings drafts and atomic saves
         run: |
           node --test --experimental-strip-types \
@@ -125,6 +125,7 @@ jobs:
             tests/registration-automatic-history-ui.test.mjs \
             tests/registration-case-customer-history.test.mjs \
             tests/registration-case-customer-history-ui.test.mjs \
+            tests/registration-message-history-entrypoints.test.mjs \
             tests/registration-observation-explicit-chat.test.mjs \
             tests/registration-visit-cancellation.test.mjs
       - name: Verify customer preview and observation safety contracts

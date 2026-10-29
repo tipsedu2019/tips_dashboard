@@ -25,8 +25,9 @@ export function RegistrationApplicationHistoryAction({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button ref={historyTriggerRef} type="button" variant="ghost" size="icon" aria-label="자동 이력 보기">
+        <Button ref={historyTriggerRef} type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-9" aria-label="업무 처리 이력">
           <Clock3 aria-hidden="true" className="size-4" />
+          <span>업무 처리 이력</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent
