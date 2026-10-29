@@ -118,12 +118,19 @@ export async function readRequestReferences(domain: RequestDomain, classId: stri
 }
 export type RequestAttempt = { domain: RequestDomain; id: string | null; action: RequestAction; input: RequestInput; revision: string | null; requestId: string }
 export async function mutateOwnRequest(actorId: string, attempt: RequestAttempt) {
+  // Hours are read/display metadata. Keep the established eight-key write
+  // contract on both database versions; the updated server owns calculation.
+  const input = { ...attempt.input }
+  if (attempt.domain === "withdrawal" && (attempt.action === "create" || attempt.action === "update")) {
+    delete input.completed_lesson_hours
+    delete input.four_week_lesson_hours
+  }
   try {
-    if (attempt.action === "create" || attempt.action === "update") parseRequestInput(attempt.domain, attempt.input)
-    else parse(z.object({ note: note.trim().min(1) }).strict(), attempt.input)
+    if (attempt.action === "create" || attempt.action === "update") parseRequestInput(attempt.domain, input)
+    else parse(z.object({ note: note.trim().min(1) }).strict(), input)
   } catch { throw Object.assign(new Error("신청 입력을 확인해 주세요."), { code: "22023" }) }
   const data = await rpc("mutate_teacher_own_request_v1", { p_domain: attempt.domain, p_id: attempt.id, p_action: attempt.action,
-    p_input: attempt.input, p_expected_revision: attempt.revision, p_request_id: attempt.requestId })
+    p_input: input, p_expected_revision: attempt.revision, p_request_id: attempt.requestId })
   return parseDetail(data, attempt.domain, actorId, attempt.id || undefined)
 }
 export async function readRequestChanges(domain: RequestDomain, page: number, signal: AbortSignal) {

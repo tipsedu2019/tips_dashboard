@@ -23,6 +23,7 @@ vm.runInContext(helperJs, helperContext);
 const actualMetrics = helperContext.actualMetrics;
 
 const names = { list: 'get_operations_class_schedule_numbered_page_v1', detail: 'get_operations_class_lesson_design_detail_v1', schedule: 'get_class_schedule_v1', write: 'mutate_teacher_own_request_v1' };
+const shownHours = label => [...document.querySelectorAll('span')].find(node => node.textContent === label)?.nextElementSibling?.textContent;
 const calls = (h, name) => h.requests.filter(request => request.name === name);
 const latest = (h, name) => calls(h, name).at(-1);
 const click = async (h, label) => { const node = button(label); assert.ok(node, label); await h.act(() => node.click()); };
@@ -74,13 +75,14 @@ test('teacher withdrawal uses the complete saved billing cycle while calendar la
   assert.ok(day, 'real normalized November calendar date');
   await h.act(() => day.click());
   assert.equal(calls(h, names.write).length, 0, 'selection never saves automatically');
+  assert.equal(shownHours('진행 수업시수'), management.completedLessonHours);
+  assert.equal(shownHours('4주 기준 수업시수'), management.fourWeekLessonHours);
   await submit(h); await submit(h);
   const write = latest(h, names.write);
   assert.ok(write); assert.equal(calls(h, names.write).length, 1, 'duplicate submit has one request');
   assert.equal(write.args.p_input.withdrawal_date, '2026-11-04');
   assert.equal(write.args.p_input.withdrawal_session, '11월 2회차', 'calendar display ordinal is unchanged');
-  assert.equal(write.args.p_input.completed_lesson_hours, management.completedLessonHours, 'October 28 is part of the same saved billing cycle, so November-only four hours is incomplete');
-  assert.equal(write.args.p_input.four_week_lesson_hours, management.fourWeekLessonHours);
+  assert.deepEqual(write.args.p_input, { ...inputs.withdrawal, withdrawal_date: '2026-11-04', withdrawal_session: '11월 2회차' }, 'only the selected date/session and original eight input fields cross the write boundary');
   assert.equal(calls(h, names.schedule).length, 1, 'calculation snapshot needs no extra schedule read');
   assert.equal(h.requests.some(request => request.table), false);
   await h.reject(write, { code: '23514', message: 'teacher_request_stale' });
@@ -99,7 +101,8 @@ test('teacher withdrawal reason-only edit preserves explicit string zero without
   await change(h, [...document.querySelectorAll('textarea')].at(-1), '시수 변경 없는 합성 메모');
   await submit(h);
   const write = latest(h, names.write); assert.ok(write);
-  assert.deepEqual(write.args.p_input, { ...input, memo: '시수 변경 없는 합성 메모' });
+  assert.equal(shownHours('진행 수업시수'), '0');
+  assert.deepEqual(write.args.p_input, { ...inputs.withdrawal, memo: '시수 변경 없는 합성 메모' });
   await h.reject(write, { code: '23514', message: 'teacher_request_stale' });
 });
 
@@ -150,26 +153,59 @@ function clientApi() {
   const api = loadNotificationComponent('src/features/teacher-requests/teacher-request-service.ts', new Map([['@/lib/supabase', { supabase: { rpc(name, args) { requests.push({ name, args }); return { abortSignal() { return this; }, retry() { return Promise.resolve({ data: response, error: null }); } }; } } }]]));
   return { api, requests, respond(value) { response = value; } };
 }
+for (const action of ['create', 'update']) test(`client-first withdrawal ${action} uses the legacy eight-key wire input and reads either server version`, async () => {
+  const { api, requests, respond } = clientApi();
+  const input = { ...inputs.withdrawal, completed_lesson_hours: '999999.99', four_week_lesson_hours: '0.01' };
+  const before = structuredClone(input);
+  const attempt = { domain: 'withdrawal', id: action === 'create' ? null : id(600), action, input, revision: action === 'create' ? null : 'revision-a', requestId: id(998) };
+  respond(ownDetail('withdrawal', { input: inputs.withdrawal }));
+  const legacy = await api.mutateOwnRequest(teacherActor, attempt);
+  assert.deepEqual(requests[0].args.p_input, inputs.withdrawal, 'old SQL accepts only these eight keys; preview hours cannot become caller-authoritative metrics');
+  assert.deepEqual(legacy.input, inputs.withdrawal);
+  const serverInput = { ...inputs.withdrawal, completed_lesson_hours: '6', four_week_lesson_hours: '16' };
+  respond(ownDetail('withdrawal', { input: serverInput }));
+  const current = await api.mutateOwnRequest(teacherActor, attempt);
+  assert.deepEqual(requests[1].args.p_input, inputs.withdrawal);
+  assert.deepEqual(current.input, serverInput, 'new server response owns the saved calculation');
+  assert.deepEqual(input, before, 'transport projection does not alter the pending retry/draft');
+  assert.equal(requests[1].args.p_request_id, requests[0].args.p_request_id);
+});
+test('derived withdrawal preview metadata cannot block a valid eight-key write', async () => {
+  const { api, requests, respond } = clientApi();
+  respond(ownDetail('withdrawal'));
+  for (const metadata of [
+    { completed_lesson_hours: '1000000', four_week_lesson_hours: '8' },
+    { completed_lesson_hours: 'NaN' },
+    { completed_lesson_hours: {}, four_week_lesson_hours: [] },
+  ]) {
+    const input = { ...inputs.withdrawal, ...metadata }, before = structuredClone(input);
+    await api.mutateOwnRequest(teacherActor, { domain: 'withdrawal', id: null, action: 'create', input, revision: null, requestId: id(998) });
+    assert.deepEqual(requests.at(-1).args.p_input, inputs.withdrawal);
+    assert.deepEqual(input, before);
+  }
+  assert.equal(requests.length, 3);
+});
 for (const action of ['create', 'update']) test(`teacher withdrawal ${action} and own read accept valid hours and preserve string zero`, async () => {
   const { api, requests, respond } = clientApi();
   const input = { ...inputs.withdrawal, completed_lesson_hours: '0', four_week_lesson_hours: '16' };
   respond(ownDetail('withdrawal', { input, revision: 'revision-b' }));
   const result = await api.mutateOwnRequest(teacherActor, { domain: 'withdrawal', id: action === 'create' ? null : id(600), action, input, revision: action === 'create' ? null : 'revision-a', requestId: id(998) });
-  assert.deepEqual(requests[0].args.p_input, input); assert.deepEqual(result.input, input);
+  assert.deepEqual(requests[0].args.p_input, inputs.withdrawal); assert.deepEqual(result.input, input);
   const read = await api.readOwnRequest('withdrawal', teacherActor, id(600), new AbortController().signal);
   assert.deepEqual(read.input, input);
   assert.deepEqual(requests.map(request => request.name), [names.write, 'get_teacher_own_request_v1']);
   assert.deepEqual(api.parseRequestInput('withdrawal', inputs.withdrawal), inputs.withdrawal, 'legacy snapshots without new fields still load');
 });
 
-test('teacher withdrawal rejects invalid hour values and unrelated extra keys before mutation', async () => {
-  const { api, requests } = clientApi();
+test('teacher withdrawal rejects invalid saved hour values on read and unrelated extra keys before mutation', async () => {
+  const { api, requests, respond } = clientApi();
   const valid = { ...inputs.withdrawal, completed_lesson_hours: '2.5', four_week_lesson_hours: '16' };
   for (const field of ['completed_lesson_hours', 'four_week_lesson_hours']) for (const value of ['-1', 'NaN', 'Infinity', 'not hours', '1e3', '1000000', '2.555', 4, {}, []]) {
-    await assert.rejects(api.mutateOwnRequest(teacherActor, { domain: 'withdrawal', id: null, action: 'create', input: { ...valid, [field]: value }, revision: null, requestId: id(998) }), error => error.code === '22023');
+    respond(ownDetail('withdrawal', { input: { ...valid, [field]: value } }));
+    await assert.rejects(api.readOwnRequest('withdrawal', teacherActor, id(600), new AbortController().signal), /신청 데이터 형식/);
   }
   await assert.rejects(api.mutateOwnRequest(teacherActor, { domain: 'withdrawal', id: null, action: 'create', input: { ...valid, fee_processed: true }, revision: null, requestId: id(998) }), error => error.code === '22023');
-  assert.equal(requests.length, 0);
+  assert.equal(requests.some(request => request.name === names.write), false);
 });
 
 test('teacher withdrawal hours accept the approved decimal boundary and missing pair without widening unrelated DTO keys', () => {
@@ -197,10 +233,12 @@ async function selectNovemberFourth(h) {
 test('teacher withdrawal never substitutes a partial monthly total for a missing full calculation snapshot', async t => {
   const row = classRow(); row.schedulePlan.sessions = [];
   const h = await editWithClass(t, row);
-  await selectNovemberFourth(h); await submit(h);
+  await selectNovemberFourth(h);
+  assert.equal(shownHours('진행 수업시수'), '계산된 값 없음', 'monthly four hours must not stand in for unknown full-cycle hours');
+  await submit(h);
   const write = latest(h, names.write); assert.ok(write);
   assert.equal(write.args.p_input.withdrawal_date, '2026-11-04');
-  assert.equal(write.args.p_input.completed_lesson_hours, '', 'monthly four hours must not stand in for unknown full-cycle hours');
+  assert.equal(Object.hasOwn(write.args.p_input, 'completed_lesson_hours'), false);
   await h.reject(write, { code: '23514', message: 'teacher_request_stale' });
 });
 
@@ -218,7 +256,8 @@ test('teacher withdrawal keeps saved hours when browsing another month fails and
   await change(h, [...document.querySelectorAll('textarea')].at(-1), '조회 실패 후에도 보존할 합성 메모');
   await submit(h);
   const write = latest(h, names.write); assert.ok(write);
-  assert.deepEqual(write.args.p_input, { ...input, memo: '조회 실패 후에도 보존할 합성 메모' });
+  assert.equal(shownHours('진행 수업시수'), '6');
+  assert.deepEqual(write.args.p_input, { ...inputs.withdrawal, memo: '조회 실패 후에도 보존할 합성 메모' });
   await h.reject(write, { code: '23514', message: 'teacher_request_stale' });
 });
 
@@ -238,15 +277,19 @@ test('uncertain teacher withdrawal save retries the identical hours snapshot and
   await h.reject(retry, { code: '23514', message: 'teacher_request_stale' });
 });
 
-test('teacher withdrawal rejects a partial hours-key contract before writes and when reading an own snapshot', async () => {
+test('teacher withdrawal omits partial preview metadata on writes but rejects partial saved snapshots on read', async () => {
   const { api, requests, respond } = clientApi();
   for (const field of ['completed_lesson_hours', 'four_week_lesson_hours']) {
     const input = { ...inputs.withdrawal, [field]: '2' };
-    for (const action of ['create', 'update']) await assert.rejects(api.mutateOwnRequest(teacherActor, { domain: 'withdrawal', id: action === 'create' ? null : id(600), action, input, revision: action === 'create' ? null : 'revision-a', requestId: id(998) }), error => error.code === '22023');
+    respond(ownDetail('withdrawal'));
+    for (const action of ['create', 'update']) {
+      await api.mutateOwnRequest(teacherActor, { domain: 'withdrawal', id: action === 'create' ? null : id(600), action, input, revision: action === 'create' ? null : 'revision-a', requestId: id(998) });
+      assert.deepEqual(requests.at(-1).args.p_input, inputs.withdrawal);
+    }
     respond(ownDetail('withdrawal', { input }));
     await assert.rejects(api.readOwnRequest('withdrawal', teacherActor, id(600), new AbortController().signal), /신청 데이터 형식/);
   }
-  assert.equal(requests.some(request => request.name === names.write), false);
+  assert.equal(requests.filter(request => request.name === names.write).length, 4);
 });
 
 for (const [description, hours, expected] of [
@@ -268,10 +311,13 @@ test('teacher withdrawal preserves management fractional hours and legacy numeri
   const management = actualMetrics.getWithdrawalScheduleMetrics(actualMetrics.getWithdrawalClassScheduleItems(row), '2026-11-04', row);
   assert.equal(management.completedLessonHours, '4.5'); assert.equal(management.fourWeekLessonHours, '16');
   const h = await editWithClass(t, row);
-  await selectNovemberFourth(h); await submit(h);
+  await selectNovemberFourth(h);
+  assert.equal(shownHours('진행 수업시수'), management.completedLessonHours);
+  assert.equal(shownHours('4주 기준 수업시수'), management.fourWeekLessonHours);
+  await submit(h);
   const write = latest(h, names.write); assert.ok(write);
-  assert.equal(write.args.p_input.completed_lesson_hours, management.completedLessonHours);
-  assert.equal(write.args.p_input.four_week_lesson_hours, management.fourWeekLessonHours);
+  assert.equal(Object.hasOwn(write.args.p_input, 'completed_lesson_hours'), false);
+  assert.equal(Object.hasOwn(write.args.p_input, 'four_week_lesson_hours'), false);
   assert.equal(calls(h, names.schedule).length, 1);
   await h.reject(write, { code: '23514', message: 'teacher_request_stale' });
 });
@@ -286,8 +332,10 @@ test('teacher withdrawal keeps its calendar usable but never fabricates hours wh
   const write = latest(h, names.write); assert.ok(write);
   assert.equal(write.args.p_input.withdrawal_date, '2026-11-04');
   assert.equal(write.args.p_input.withdrawal_session, '11월 2회차');
-  assert.equal(write.args.p_input.completed_lesson_hours, '', 'the untrusted full-plan duration cannot become a fallback total');
-  assert.equal(write.args.p_input.four_week_lesson_hours, '', 'even the class weekly schedule must not fabricate a trusted snapshot');
+  assert.equal(shownHours('진행 수업시수'), '계산된 값 없음', 'the untrusted full-plan duration cannot become a fallback total');
+  assert.equal(shownHours('4주 기준 수업시수'), '계산된 값 없음');
+  assert.equal(Object.hasOwn(write.args.p_input, 'completed_lesson_hours'), false);
+  assert.equal(Object.hasOwn(write.args.p_input, 'four_week_lesson_hours'), false);
   assert.equal(calls(h, names.detail).length, 1);
   assert.equal(calls(h, names.schedule).length, 1);
   assert.equal(calls(h, names.write).length, 1);

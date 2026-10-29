@@ -106,9 +106,8 @@ for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: existing
   // Navigate through the real picker to its linked date, independent of today's month.
   const linked=[...document.querySelectorAll('button')].find(el=>el.textContent.includes('11-02')&&el.textContent.includes('회차'));assert.ok(day||linked);await h.act(()=>(day||linked).click());}
  await submit(h);const write=latest(h,rpc.write);assert.ok(write);assert.equal(write.args.p_action,'create');assert.equal(write.args.p_expected_revision,null);
- const expectedKeys=[...Object.keys(inputs[domain]),...(domain==='withdrawal'?['completed_lesson_hours','four_week_lesson_hours']:[])].sort();
+ const expectedKeys=Object.keys(inputs[domain]).sort();
  assert.deepEqual(Object.keys(write.args.p_input).sort(),expectedKeys);
- if(domain==='withdrawal'){assert.equal(write.args.p_input.completed_lesson_hours,'');assert.equal(write.args.p_input.four_week_lesson_hours,'');}
  assert.equal(h.requests.some(r=>r.table),false);
 });
 test('reason-only makeup edit preserves overnight timestamps and precision exactly',async t=>{

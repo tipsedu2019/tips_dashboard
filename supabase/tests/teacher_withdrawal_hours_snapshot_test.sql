@@ -22,6 +22,13 @@ on conflict(id) do update set role=excluded.role,name=excluded.name,email=exclud
 insert into public.classes(id,name,subject,grade,teacher,status,schedule_storage_mode,schedule_plan,student_ids)
 values(pg_temp.hours_id(20),'가상 시수 수업','수학','중3','가상 시수 사용자 3','개강 준비','legacy','{}',jsonb_build_array(pg_temp.hours_id(30))),
  (pg_temp.hours_id(21),'가상 다른 수업','수학','중3','가상 시수 사용자 3','개강 준비','legacy','{}','[]');
+update public.classes set schedule='월수 19:30~21:30',schedule_plan='{"selectedDays":[1,3],"sessions":[
+ {"id":"first","date":"2026-11-02","sessionNumber":1,"state":"active","billingId":"cycle"},
+ {"id":"second","date":"2026-11-04","sessionNumber":2,"state":"active","billingId":"cycle"},
+ {"id":"canceled","date":"2026-11-06","sessionNumber":3,"state":"canceled","billingId":"cycle"},
+ {"id":"third","date":"2026-11-09","sessionNumber":4,"state":"active","billingId":"cycle","hours":2.5}]}'
+ where id=pg_temp.hours_id(20);
+create temp table hours_class_original as select schedule,schedule_plan from public.classes where id=pg_temp.hours_id(20);
 insert into public.students(id,name,grade,class_ids,contact,parent_contact)
 values(pg_temp.hours_id(30),'가상 시수 학생','중3',jsonb_build_array(pg_temp.hours_id(20)),'PRIVATE_CONTACT_CANARY','PRIVATE_PARENT_CANARY');
 
@@ -47,30 +54,72 @@ create temp table hours_effects_before as select
  (select count(*) from public.textbook_stock_moves) stock;
 
 select pg_temp.hours_actor(3);set local role authenticated;
-select lives_ok($q$select pg_temp.hours_create('normal',pg_temp.hours_input()||'{"completed_lesson_hours":"4","four_week_lesson_hours":"16"}',101)$q$,
- 'teacher own create accepts the calculated two-hour snapshot');
-select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,4::numeric,'owner readback returns completed snapshot');
+select lives_ok($q$select pg_temp.hours_create('normal',pg_temp.hours_input(),101)$q$,
+ 'eight-key teacher create derives hours from the locked class plan');
+select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,4::numeric,'owner readback returns server snapshot');
 select is((pg_temp.hours_current('normal')#>>'{input,four_week_lesson_hours}')::numeric,16::numeric,'owner readback returns four-week snapshot');
 select is(pg_temp.hours_current('normal')->>'requesterId',pg_temp.hours_id(3)::text,'hours do not alter the owner');
 select ok(pg_temp.hours_current('normal')->'allowedActions' ?& array['update','withdraw'],'hours do not grant processing actions');
 select ok(not((public.get_teacher_own_requests_v1('withdrawal',1,10)#>'{rows,0}') ? 'input'),'own list remains summary-only');
-select lives_ok($q$select pg_temp.hours_create('zero',pg_temp.hours_input()||'{"completed_lesson_hours":"0","four_week_lesson_hours":"0"}',102)$q$,
- 'explicit zero is accepted for both snapshot values');
+select lives_ok($q$select pg_temp.hours_create('zero',pg_temp.hours_input()||'{"withdrawal_date":"2026-11-06"}',102)$q$,
+ 'selected non-counted lesson has actual completed zero');
 select is((pg_temp.hours_current('zero')#>>'{input,completed_lesson_hours}')::numeric,0::numeric,'zero completed readback is not missing');
-select is((pg_temp.hours_current('zero')#>>'{input,four_week_lesson_hours}')::numeric,0::numeric,'zero denominator is stored without inventing a ratio');
-select lives_ok($q$select pg_temp.hours_create('missing',pg_temp.hours_input()||'{"completed_lesson_hours":"","four_week_lesson_hours":""}',103)$q$,
- 'explicit unknown pair remains distinct from zero');
-select is(pg_temp.hours_current('missing')#>>'{input,completed_lesson_hours}','','missing completed readback is empty');
-select is(pg_temp.hours_current('missing')#>>'{input,four_week_lesson_hours}','','missing denominator readback is empty');
-select lives_ok($q$select pg_temp.hours_create('partial-value',pg_temp.hours_input()||'{"completed_lesson_hours":"","four_week_lesson_hours":"16"}',104)$q$,
- 'both keys may represent one unknown operand without fabricating zero');
+select is((pg_temp.hours_current('zero')#>>'{input,four_week_lesson_hours}')::numeric,16::numeric,'zero completed does not erase the known denominator');
+select lives_ok($q$select pg_temp.hours_create('partial-value',pg_temp.hours_input()||'{"withdrawal_date":"2026-11-05"}',104)$q$,
+ 'missing selected lesson preserves the known weekly operand');
+select is(pg_temp.hours_current('partial-value')#>>'{input,completed_lesson_hours}','','unknown completed is not zero');
 select lives_ok($q$select pg_temp.hours_create('legacy',pg_temp.hours_input(),105)$q$,'legacy eight-key create stays compatible');
-select lives_ok($q$select pg_temp.hours_create('upper-bound',pg_temp.hours_input()||'{"completed_lesson_hours":"999999.99","four_week_lesson_hours":"0.01"}',106)$q$,
- 'storage bounds and hundredths are accepted without rounding');
+select lives_ok($q$select pg_temp.hours_create('processed',pg_temp.hours_input(),106)$q$,'another calculated request can later be processed');
+reset role;
+select pg_temp.hours_actor(1);
+update public.classes set schedule='',schedule_plan='{}' where id=pg_temp.hours_id(20);
+select pg_temp.hours_actor(3);set local role authenticated;
+select lives_ok($q$select pg_temp.hours_create('missing',pg_temp.hours_input(),103)$q$,'missing schedule does not invent fallback sessions');
+select is(pg_temp.hours_current('missing')#>>'{input,completed_lesson_hours}',null::text,'entirely unknown readback retains legacy optional shape');
+select ok(not(pg_temp.hours_current('missing')->'input' ?| array['completed_lesson_hours','four_week_lesson_hours']),'entirely unknown pair does not expand the old eight-key read contract');
+-- A retry after a class edit preserves the first effect and does not recalculate.
+select lives_ok($q$select public.mutate_teacher_own_request_v1('withdrawal',null,'create',input,null,request_key) from hours_results where name='normal'$q$,
+ 'receipt replay still succeeds after saved class schedule changes');
+select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,4::numeric,'replay preserves first calculated hours');
+reset role;
+select pg_temp.hours_actor(1);
+update public.classes set schedule='',schedule_plan='{"sessions":[{"id":"zero-base","date":"2026-11-04","state":"canceled"}]}' where id=pg_temp.hours_id(20);
+select pg_temp.hours_actor(3);set local role authenticated;
+select lives_ok($q$select pg_temp.hours_create('zero-base',pg_temp.hours_input(),108)$q$,'canceled-only schedule derives genuine zero completed and zero baseline');
+select is((pg_temp.hours_current('zero-base')#>>'{input,completed_lesson_hours}')::numeric,0::numeric,'public owner read retains genuine completed zero');
+select is((pg_temp.hours_current('zero-base')#>>'{input,four_week_lesson_hours}')::numeric,0::numeric,'public owner read retains genuine zero denominator');
+reset role;
+select is((select four_week_lesson_hours from public.ops_withdrawal_details where task_id=(select(payload->>'id')::uuid from hours_results where name='zero-base')),0::numeric,
+ 'existing writer stores actual zero denominator, not NULL');
+select pg_temp.hours_actor(1);
+update public.ops_withdrawal_details set fee_processed=true where task_id=(select(payload->>'id')::uuid from hours_results where name='zero-base');
+select pg_temp.hours_actor(3);set local role authenticated;
+select is((pg_temp.hours_current('zero-base')#>>'{input,completed_lesson_hours}')::numeric,0::numeric,'processed immutable history keeps completed zero');
+select is((pg_temp.hours_current('zero-base')#>>'{input,four_week_lesson_hours}')::numeric,0::numeric,'processed immutable history keeps zero denominator');
+reset role;
+select pg_temp.hours_actor(1);
+update public.classes set schedule=o.schedule,schedule_plan=o.schedule_plan from hours_class_original o where id=pg_temp.hours_id(20);
+-- Synthetic receipt from the intermediate contract; no past rows are edited.
+insert into dashboard_private.teacher_request_receipts_v1(request_key,actor_id,domain,request_id,action,fingerprint,response)
+select pg_temp.hours_id(107),pg_temp.hours_id(3),'withdrawal',(payload->>'id')::uuid,'create',
+ md5(jsonb_build_object('actor',pg_temp.hours_id(3),'domain','withdrawal','id',null,'action','create',
+ 'input',input||'{"completed_lesson_hours":"4","four_week_lesson_hours":"16"}'::jsonb,'revision',null)::text),payload
+ from hours_results where name='normal';
+select pg_temp.hours_actor(3);set local role authenticated;
+select lives_ok($q$select public.mutate_teacher_own_request_v1('withdrawal',null,'create',input||'{"completed_lesson_hours":"4","four_week_lesson_hours":"16"}',null,pg_temp.hours_id(107))
+ from hours_results where name='normal'$q$,'exact old ten-key receipt replay preserves its first effect');
+select is(jsonb_array_length(pg_temp.hours_current('normal')->'history'),1,'old ten-key receipt replay does not add history');
+select throws_ok($q$select public.mutate_teacher_own_request_v1('withdrawal',null,'create',input,null,pg_temp.hours_id(107))
+ from hours_results where name='normal'$q$,'22023','idempotency_key_reused','stripping old receipt quantities cannot change the original retry fingerprint');
+select throws_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"completed_lesson_hours":"4","four_week_lesson_hours":"16"}',109)$q$,
+ '22023','teacher_request_input_invalid','fresh update rejects even numerically matching ten-key input');
+
 
 select throws_ok(format($q$select public.mutate_teacher_own_request_v1('withdrawal',null,'create',pg_temp.hours_input()||%L::jsonb,null,pg_temp.hours_id(%s))$q$,
  patch::text,200+row_number() over ()),'22023','teacher_request_input_invalid',label)
 from (values
+ ('{"completed_lesson_hours":"999999.99","four_week_lesson_hours":"0.01"}'::jsonb,'fabricated bounded quantities are not accepted'),
+ ('{"completed_lesson_hours":"4","four_week_lesson_hours":"16"}'::jsonb,'even matching calculated values are not wire inputs'),
  ('{"completed_lesson_hours":"4"}'::jsonb,'one optional key cannot silently clear the other'),
  ('{"four_week_lesson_hours":"16"}'::jsonb,'inverse incomplete pair is rejected'),
  ('{"completed_lesson_hours":null,"four_week_lesson_hours":"16"}'::jsonb,'JSON null is not the explicit unknown string'),
@@ -92,28 +141,25 @@ select lives_ok($q$select public.mutate_teacher_own_request_v1('withdrawal',null
 select is(jsonb_array_length(pg_temp.hours_current('normal')->'history'),1,'duplicate create does not duplicate history');
 select throws_ok($q$select public.mutate_teacher_own_request_v1('withdrawal',null,'create',input||'{"completed_lesson_hours":"5"}',null,request_key) from hours_results where name='normal'$q$,
  '22023','idempotency_key_reused','changed calculated snapshot cannot reuse the create key');
-select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"completed_lesson_hours":"6.5","four_week_lesson_hours":"16"}',301)$q$,
- 'own update uses the same snapshot writer');
-select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,6.5::numeric,'updated snapshot survives readback');
-select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"memo":"legacy memo-only edit"}',302)$q$,
+select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"withdrawal_date":"2026-11-09"}',301)$q$,
+ 'own date update computes from the saved full plan');
+select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,6.5::numeric,'new selected date snapshot survives readback');
+select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"withdrawal_date":"2026-11-09","memo":"legacy memo-only edit"}',302)$q$,
  'eight-key memo edit preserves the existing snapshot');
-select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,6.5::numeric,'omitted optional keys never overwrite unchanged snapshot');
+select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,6.5::numeric,'unchanged selection retains its snapshot');
 select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"withdrawal_date":"2026-11-05"}',303)$q$,
- 'old client date change remains possible but clears stale snapshot');
-select ok(not(pg_temp.hours_current('normal')->'input' ?| array['completed_lesson_hours','four_week_lesson_hours']),
- 'date change without calculation clears hours and preserves the old eight-key read shape');
-select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"completed_lesson_hours":"4","four_week_lesson_hours":"16"}',304)$q$,
- 'new date selection restores an explicit snapshot');
-select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"withdrawal_session":"3"}',305)$q$,
- 'old client session change also clears stale snapshot');
-select ok(not(pg_temp.hours_current('normal')->'input' ?| array['completed_lesson_hours','four_week_lesson_hours']),
- 'session change without calculation clears hours and preserves the old read shape');
-select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"completed_lesson_hours":"4","four_week_lesson_hours":"16"}',306)$q$,
- 'snapshot can be selected again after a session change');
+ 'date without a saved lesson remains editable without inventing completed hours');
+select is(pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}','','unknown selected-date completed hours are missing');
+select is((pg_temp.hours_current('normal')#>>'{input,four_week_lesson_hours}')::numeric,16::numeric,'known weekly hours survive missing selected date');
+select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input(),304)$q$,'new known date restores a calculated snapshot');
+select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"withdrawal_session":"999"}',305)$q$,
+ 'monthly display label is not an authoritative full-plan ordinal');
+select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,4::numeric,'session-label edit calculates from selected date, never caller quantity');
+select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input(),306)$q$,'selection label can return without changing formula');
 
 select pg_temp.hours_actor(4);
 select throws_ok($q$select pg_temp.hours_current('normal')$q$,'42501','teacher_request_forbidden','other teacher cannot read the saved hour pair');
-select throws_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"completed_lesson_hours":"9","four_week_lesson_hours":"16"}',307)$q$,
+select throws_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input(),307)$q$,
  '42501','teacher_request_forbidden','other teacher cannot write the saved hour pair');
 select pg_temp.hours_actor(3);
 select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,4::numeric,'rejected other-owner write leaves snapshot intact');
@@ -127,6 +173,20 @@ select is((select completed_lesson_hours from public.ops_withdrawal_details wher
 select is((select completed_lesson_hours from public.ops_withdrawal_details where task_id=(select(payload->>'id')::uuid from hours_results where name='missing')),null::numeric,'writer stores NULL for missing');
 select is((select four_week_lesson_hours from public.ops_withdrawal_details where task_id=(select(payload->>'id')::uuid from hours_results where name='partial-value')),16::numeric,'writer preserves present operand beside missing operand');
 
+-- Memo-only edits of an entirely unknown snapshot preserve both NULLs and
+-- the historical eight-key shape even after subsequent management processing.
+select pg_temp.hours_actor(3);set local role authenticated;
+select lives_ok($q$select pg_temp.hours_update('missing',pg_temp.hours_input()||'{"memo":"retain entirely unknown"}',313)$q$,'unchanged-selection memo does not recalculate an unknown snapshot');
+reset role;
+select pg_temp.hours_actor(1);
+update public.ops_withdrawal_details set fee_processed=true where task_id=(select(payload->>'id')::uuid from hours_results where name='missing');
+select is((select completed_lesson_hours from public.ops_withdrawal_details where task_id=(select(payload->>'id')::uuid from hours_results where name='missing')),null::numeric,'unknown memo preserves stored completed NULL');
+select is((select four_week_lesson_hours from public.ops_withdrawal_details where task_id=(select(payload->>'id')::uuid from hours_results where name='missing')),null::numeric,'unknown memo preserves stored denominator NULL');
+select pg_temp.hours_actor(3);set local role authenticated;
+select is(pg_temp.hours_current('missing')->'input',pg_temp.hours_input()||'{"memo":"retain entirely unknown"}'::jsonb,
+ 'processed unknown request retains its complete eight-key immutable snapshot');
+reset role;
+
 -- A management correction uses the existing unchanged detail writer. The own
 -- editable reader must return the current values with the current revision.
 select pg_temp.hours_actor(1);
@@ -135,11 +195,30 @@ select lives_ok($q$select dashboard_private.upsert_ops_task_detail_v2(d.task_id,
  'management continues to use its existing detail writer and storage');
 select pg_temp.hours_actor(3);set local role authenticated;
 select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,7.25::numeric,'editable own read returns current management-corrected hours');
-select throws_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"completed_lesson_hours":"4","four_week_lesson_hours":"16"}',309)$q$,
+select throws_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input(),309)$q$,
  '23514','teacher_request_stale','stale teacher snapshot cannot overwrite management correction');
 update hours_results set payload=pg_temp.hours_current(name) where name='normal';
 select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'{"memo":"current memo"}',310)$q$,'fresh eight-key note edit preserves management snapshot');
 select is((pg_temp.hours_current('normal')#>>'{input,completed_lesson_hours}')::numeric,7.25::numeric,'fresh note edit did not recalculate or erase snapshot');
+reset role;
+
+-- The second finding: eight-key memo saves keep the effective pair in new
+-- immutable history, so processing cannot erase the owner's retained values.
+select pg_temp.hours_actor(1);
+select lives_ok($q$select dashboard_private.upsert_ops_task_detail_v2(d.task_id,'withdrawal',to_jsonb(d)||'{"completed_lesson_hours":"7.25","four_week_lesson_hours":"18"}')
+ from public.ops_withdrawal_details d where d.task_id=(select(payload->>'id')::uuid from hours_results where name='processed')$q$,'management snapshot can be retained by later teacher memo');
+select pg_temp.hours_actor(3);set local role authenticated;
+update hours_results set payload=pg_temp.hours_current(name) where name='processed';
+select lives_ok($q$select pg_temp.hours_update('processed',pg_temp.hours_input()||'{"memo":"retain effective hours"}',312)$q$,'eight-key memo creates a complete immutable snapshot');
+reset role;
+select is((select(input_snapshot->>'completed_lesson_hours')::numeric from dashboard_private.teacher_request_history_v1
+ where request_id=(select(payload->>'id')::uuid from hours_results where name='processed') and action='update' order by created_at desc,id desc limit 1),7.25::numeric,
+ 'new history stores the actual retained DB quantity');
+select pg_temp.hours_actor(1);
+update public.ops_withdrawal_details set fee_processed=true where task_id=(select(payload->>'id')::uuid from hours_results where name='processed');
+select pg_temp.hours_actor(3);set local role authenticated;
+select is((pg_temp.hours_current('processed')#>>'{input,completed_lesson_hours}')::numeric,7.25::numeric,'processing preserves memo-retained completed hours');
+select is((pg_temp.hours_current('processed')#>>'{input,four_week_lesson_hours}')::numeric,18::numeric,'processing preserves memo-retained denominator');
 reset role;
 
 -- Historical invalid values are preserved in storage, not emitted as an
@@ -156,6 +235,18 @@ select lives_ok($q$select pg_temp.hours_update('normal',pg_temp.hours_input()||'
 reset role;
 select is((select completed_lesson_hours::text from public.ops_withdrawal_details where task_id=(select(payload->>'id')::uuid from hours_results where name='normal')),'NaN',
  'read/update does not repair historical values without an explicit new snapshot');
+select ok(not((select input_snapshot from dashboard_private.teacher_request_history_v1
+ where request_id=(select(payload->>'id')::uuid from hours_results where name='normal') and action='update'
+ order by created_at desc,id desc limit 1) ?| array['completed_lesson_hours','four_week_lesson_hours']),
+ 'invalid retained legacy pair is omitted from new history without repairing DB');
+select pg_temp.hours_actor(1);
+update public.ops_withdrawal_details set fee_processed=true where task_id=(select(payload->>'id')::uuid from hours_results where name='normal');
+select pg_temp.hours_actor(3);set local role authenticated;
+select ok(not(pg_temp.hours_current('normal')->'input' ?| array['completed_lesson_hours','four_week_lesson_hours']),
+ 'after processing, invalid legacy snapshot stays omitted from immutable owner read');
+reset role;
+select is((select completed_lesson_hours::text from public.ops_withdrawal_details where task_id=(select(payload->>'id')::uuid from hours_results where name='normal')),'NaN',
+ 'processing and owner read do not repair the invalid original stored value');
 select pg_temp.hours_actor(1);
 update public.ops_withdrawal_details set completed_lesson_hours=4,four_week_lesson_hours=16
  where task_id=(select(payload->>'id')::uuid from hours_results where name='normal');
@@ -180,12 +271,12 @@ reset role;
 -- teacher input snapshot, exactly as the pre-existing owner contract does.
 select pg_temp.hours_actor(1);
 update public.ops_withdrawal_details set fee_processed=true
- where task_id=(select(payload->>'id')::uuid from hours_results where name='upper-bound');
+ where task_id=(select(payload->>'id')::uuid from hours_results where name='processed');
 select pg_temp.hours_actor(3);set local role authenticated;
-select is(pg_temp.hours_current('upper-bound')#>>'{input,completed_lesson_hours}','999999.99','processed request keeps the teacher snapshot');
-select ok(not(pg_temp.hours_current('upper-bound')->'allowedActions' ? 'update'),'observed processing never permits direct hour edits');
-update hours_results set payload=pg_temp.hours_current(name) where name='upper-bound';
-select throws_ok($q$select pg_temp.hours_update('upper-bound',pg_temp.hours_input()||'{"completed_lesson_hours":"1","four_week_lesson_hours":"16"}',402)$q$,
+select is((pg_temp.hours_current('processed')#>>'{input,completed_lesson_hours}')::numeric,7.25::numeric,'processed request keeps the actual stored teacher snapshot');
+select ok(not(pg_temp.hours_current('processed')->'allowedActions' ? 'update'),'observed processing never permits direct hour edits');
+update hours_results set payload=pg_temp.hours_current(name) where name='processed';
+select throws_ok($q$select pg_temp.hours_update('processed',pg_temp.hours_input(),402)$q$,
  '23514','teacher_request_state_conflict','processed request rejects a new direct hour snapshot');
 reset role;
 
@@ -221,6 +312,9 @@ select is((select count(*) from public.class_lesson_sessions),(select sessions f
 select is((select md5(jsonb_agg(to_jsonb(s) order by id)::text) from public.students s),(select students from hours_effects_before),'hour snapshots never change students or roster membership');
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from hours_effects_before),'hour snapshots never materialize provider delivery');
 select is((select count(*) from public.textbook_stock_moves),(select stock from hours_effects_before),'hour snapshots never change stock');
+select ok(not has_function_privilege('authenticated','dashboard_private.calculate_teacher_withdrawal_hours_v1(jsonb,date)','EXECUTE'),'server calculation helper remains private');
+select ok((select not prosecdef and provolatile='i' and proconfig @> array['search_path=""'] from pg_proc
+ where oid='dashboard_private.calculate_teacher_withdrawal_hours_v1(jsonb,date)'::regprocedure),'pure helper is immutable invoker with empty search path');
 select ok(not has_function_privilege('authenticated','dashboard_private.teacher_request_ops_input_v1(text,jsonb,uuid)','EXECUTE'),'input helper ACL remains private');
 select ok(not has_function_privilege('authenticated','dashboard_private.teacher_request_state_v1(text,uuid)','EXECUTE'),'state helper ACL remains private');
 select ok(not has_function_privilege('anon','public.mutate_teacher_own_request_v1(text,uuid,text,jsonb,text,uuid)','EXECUTE'),'anonymous mutation remains forbidden');
