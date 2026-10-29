@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type RefObject } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -23,6 +23,7 @@ import type {
 } from "./registration-customer-message-contract"
 import { getRegistrationCustomerMessageErrorMessage, getRegistrationCustomerMessageReadinessMessage } from "./registration-customer-message-errors"
 import { formatRegistrationMessageTimestamp } from "./registration-customer-message-labels"
+import { captureRegistrationPreviewSubjects, getRegistrationPreviewSubjectScope, type RegistrationPreviewCaseSubjects, type RegistrationPreviewSubjectRequest } from "./registration-preview-subject-scope"
 
 type RegistrationAlimtalkPreviewDialogProps = Readonly<{
   open: boolean
@@ -31,6 +32,7 @@ type RegistrationAlimtalkPreviewDialogProps = Readonly<{
   client: RegistrationCustomerMessageClient
   viewerRole: "admin" | "staff" | "teacher" | "assistant"
   triggerRef?: RefObject<HTMLElement | null>
+  caseSubjects?: RegistrationPreviewCaseSubjects
   canReleasePreSend?: boolean
   onSendSuccess?: (input: Readonly<{
     target: RegistrationCustomerMessageTarget
@@ -90,6 +92,7 @@ export function RegistrationAlimtalkPreviewDialog({
   client,
   viewerRole,
   triggerRef,
+  caseSubjects,
   canReleasePreSend,
   onSendSuccess,
 }: RegistrationAlimtalkPreviewDialogProps) {
@@ -97,6 +100,9 @@ export function RegistrationAlimtalkPreviewDialog({
   const requestKeyRef = useRef<string | null>(null)
   const confirmationLockedRef = useRef(false)
   const [preview, setPreview] = useState<RegistrationCustomerMessagePreviewResponse | null>(null)
+  const [subjectRequest, setSubjectRequest] = useState<RegistrationPreviewSubjectRequest | null>(null)
+  const caseSubjectsRef = useRef(caseSubjects)
+  useLayoutEffect(() => { caseSubjectsRef.current = caseSubjects }, [caseSubjects])
   const [latestMessage, setLatestMessage] = useState<RegistrationCustomerMessageHistoryItem | null>(null)
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
@@ -129,6 +135,7 @@ export function RegistrationAlimtalkPreviewDialog({
     deliveryAbortRef.current?.abort()
     deliveryAbortRef.current = null
     setPreview(null)
+    setSubjectRequest(null)
     setLatestMessage(null)
     setReason("")
     setRecoveryResolution("accepted")
@@ -142,10 +149,13 @@ export function RegistrationAlimtalkPreviewDialog({
     confirmationLockedRef.current = false
     if (!open || !targetMessageKind || !targetSourceId) return () => controller.abort()
 
-    void client.preview({ messageKind: targetMessageKind, sourceId: targetSourceId }, controller.signal)
+    const requestedTarget = { messageKind: targetMessageKind, sourceId: targetSourceId }
+    const requestedSubjects = captureRegistrationPreviewSubjects(caseSubjectsRef.current, requestedTarget)
+    void client.preview(requestedTarget, controller.signal)
       .then((next) => {
         if (generation !== generationRef.current) return
         setPreview(next)
+        setSubjectRequest(requestedSubjects)
         setLatestMessage(next.latestMessage)
       })
       .catch((cause: unknown) => {
@@ -172,6 +182,7 @@ export function RegistrationAlimtalkPreviewDialog({
   const canCheckPending = currentStatus === "pending" && canCheck
   const duplicateLocked = preview?.readiness.blockers.includes("duplicate_locked") || false
   const expired = !expiryTime || expiryTime <= now
+  const subjectScope = getRegistrationPreviewSubjectScope({ preview, target, request: subjectRequest, context: caseSubjects, expired })
   const confirmDisabled = loading || sending || confirmationLockedRef.current || !preview?.previewId || expired
     || !preview.readiness.sendAllowed || duplicateLocked || currentStatus === "pending" || currentStatus === "accepted" || currentStatus === "unknown" || currentStatus === "failed_hold"
   const canReconcile = viewerRole === "admin" && currentStatus === "unknown"
@@ -367,13 +378,18 @@ export function RegistrationAlimtalkPreviewDialog({
             <dl className="grid gap-1">
               <div><dt className="inline text-muted-foreground">학생 · </dt><dd className="inline">{preview.studentName}</dd></div>
               <div><dt className="inline text-muted-foreground">학부모 전화 · </dt><dd className="inline">끝 {preview.recipientLast4}</dd></div>
-              <div><dt className="inline text-muted-foreground">대상 · </dt><dd className="inline">{preview.facts.subjectLabel}</dd></div>
+              <div><dt className="inline text-muted-foreground">{subjectScope ? "이번 미리보기 대상 과목 · " : "대상 · "}</dt><dd className="inline">{subjectScope?.label ?? preview.facts.subjectLabel}</dd></div>
+              {subjectScope?.omitted?.length ? <div><dt className="inline text-muted-foreground">현재 불러온 등록 과목 중 미포함 · </dt><dd className="inline">{subjectScope.omitted.join(" · ")}</dd></div> : null}
               {observationFacts?.className ? <div><dt className="inline text-muted-foreground">수업 · </dt><dd className="inline">{observationFacts.className}</dd></div> : null}
               {preview.facts.scheduleLabel ? <div><dt className="inline text-muted-foreground">일정 · </dt><dd className="inline">{preview.facts.scheduleLabel}</dd></div> : null}
               {preview.facts.placeLabel ? <div><dt className="inline text-muted-foreground">장소 · </dt><dd className="inline">{preview.facts.placeLabel}</dd></div> : null}
               {observationFacts?.teacherLabel ? <div><dt className="inline text-muted-foreground">선생님 · </dt><dd className="inline">{observationFacts.teacherLabel}</dd></div> : null}
               {preview.facts.waitingKindLabel ? <div><dt className="inline text-muted-foreground">대기 · </dt><dd className="inline">{preview.facts.waitingKindLabel} {preview.facts.waitingDetailLabel || ""}</dd></div> : null}
             </dl>
+            {subjectScope ? <div className="grid gap-1 text-muted-foreground">
+              {subjectScope.omitted === null ? <p>현재 불러온 등록 과목과 비교할 수 없습니다. 안내 대상 과목을 확인해 주세요.</p> : null}
+              <p>표시된 과목만 이번 안내의 대상입니다. 이번 미리보기의 미포함 여부는 과거 발송 여부를 뜻하지 않습니다.</p>
+            </div> : null}
             {preview.facts.reservations?.length ? (
               <section aria-label="예약 목록" className="rounded-md border p-3">
                 <h3 className="mb-2 font-medium">예약 목록</h3>
