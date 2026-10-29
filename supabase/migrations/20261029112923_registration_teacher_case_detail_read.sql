@@ -55,16 +55,48 @@ begin
  return (result||jsonb_build_object('metadata',metadata))::text;
 end $$;
 
+-- Same display-text boundary as legacyEventTitle: structured snapshots and
+-- obvious truncated serialization are not prose. The original text is never
+-- rewritten; callers retain it or expose only an explicit title-only marker.
+create function dashboard_private.registration_teacher_legacy_title_only_v1(p text)
+returns boolean language plpgsql immutable set search_path='' as $$
+declare
+ ws constant text:=U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF';
+ v text;tail text;c text;i integer;open_quote boolean;
+begin
+ if p is null then return false;end if;
+ v:=btrim(p,ws);
+ begin perform v::json;return true;exception when invalid_text_representation then null;end;
+ if left(v,1)='{' or v='[object Object]' then return true;end if;
+ if left(v,1)='[' then
+  tail:=ltrim(substr(v,2),ws);
+  if tail='' or left(tail,1)=any(array['{','[','"','-']) or strpos('0123456789',left(tail,1))>0
+   or tail~'^(true|false|null)([^A-Za-z0-9_]|$)' then return true;end if;
+ end if;
+ if left(v,1)='"' then
+  i:=2;open_quote:=true;
+  while i<=length(v) loop
+   c:=substr(v,i,1);
+   if c='"' then open_quote:=false;exit;
+   elsif c=chr(92) then
+    i:=i+1;
+    if i>length(v) or substr(v,i,1)=any(array[chr(10),chr(13),chr(8232),chr(8233)]) then open_quote:=false;exit;end if;
+   end if;
+   i:=i+1;
+  end loop;
+  if open_quote then return true;end if;
+ end if;
+ return false;
+end $$;
+
 create function dashboard_private.registration_teacher_case_v1(p_task_id uuid)
 returns jsonb language plpgsql stable set search_path='' as $$
 declare parent jsonb;tracks jsonb;appointments jsonb;level_tests jsonb;consultations jsonb;batches jsonb;enrollments jsonb;events jsonb;
  reminders jsonb;active_message jsonb;profiles jsonb;classes jsonb;textbooks jsonb;track_ids uuid[];appointment_ids uuid[];
- scheduled_total integer;enrollment_total integer;current_rows jsonb;history_rows jsonb;
+ scheduled_total integer;enrollment_total integer;current_rows jsonb;history_rows jsonb;event_window jsonb;
 begin
- select dashboard_private.teacher_request_json_pick_v1(to_jsonb(t),array['id','title','type','status','priority','requested_by','requested_by_label','requested_team','assignee_id','assignee_label','assignee_team','secondary_assignee_id','secondary_assignee_label','student_id','student_name','class_id','class_name','textbook_id','textbook_title','campus','subject','start_at','due_at','completed_by','completed_by_label','completed_at','memo','created_at','updated_at'])||jsonb_build_object(
-  'ops_registration_details',case when d.task_id is null then '{}'::jsonb else dashboard_private.teacher_request_json_pick_v1(to_jsonb(d),array['task_id','pipeline_status','inquiry_at','school_grade','school_name','parent_phone','student_phone','request_note','admission_notice_sent','common_revision','admission_checklist','level_test_place','level_test_material_link','level_test_result','visit_consultation_place']) end,
-  'ops_task_comments',coalesce((select jsonb_agg(dashboard_private.teacher_request_json_pick_v1(to_jsonb(c),array['id','task_id','author_id','body','created_at']) order by c.created_at,c.id) from public.ops_task_comments c where c.task_id=t.id),'[]'),
-  'ops_task_attachments',coalesce((select jsonb_agg(dashboard_private.teacher_request_json_pick_v1(to_jsonb(a),array['id','task_id','file_name','file_kind','drive_file_id','drive_link','uploaded_by','uploaded_at']) order by a.uploaded_at,a.id) from public.ops_task_attachments a where a.task_id=t.id),'[]'))
+ select dashboard_private.teacher_request_json_pick_v1(to_jsonb(t),array['id','title','type','student_name','updated_at'])||jsonb_build_object(
+  'ops_registration_details',case when d.task_id is null then '{}'::jsonb else dashboard_private.teacher_request_json_pick_v1(to_jsonb(d),array['task_id','pipeline_status','inquiry_at','school_grade','school_name','parent_phone','student_phone','request_note','admission_notice_sent','common_revision','admission_checklist','level_test_place','level_test_material_link','level_test_result','visit_consultation_place']) end)
  into parent from public.ops_tasks t left join public.ops_registration_details d on d.task_id=t.id where t.id=p_task_id and t.type='registration';
  if parent is null then raise exception 'registration_teacher_detail_not_found' using errcode='P0002';end if;
 
@@ -121,17 +153,23 @@ begin
 
  -- Preserve the established shared-event filter. The case-created snapshot
  -- contains extra student data unused by the UI: retain only its audit fields.
- select coalesce(jsonb_agg(dashboard_private.teacher_request_json_pick_v1(to_jsonb(e),array['id','task_id','actor_id','event_type','field_name','before_value','after_value','created_at'])||
-  case when e.event_type='registration_case_created' then jsonb_build_object('before_value',null,'after_value',
-   dashboard_private.teacher_request_json_pick_v1(dashboard_private.registration_teacher_json_v1(e.after_value),array['version','actorId','occurredAt'])::text)
-  when e.event_type='legacy_registration_imported' then jsonb_build_object(
-   'before_value',dashboard_private.registration_teacher_object_v1(dashboard_private.registration_teacher_json_v1(e.before_value),array['studentId','classId','textbookId','pipelineStatus'])::text,
-   'after_value',(dashboard_private.registration_teacher_object_v1(dashboard_private.registration_teacher_json_v1(e.after_value),array['version'])||jsonb_build_object(
-    'timestamps',dashboard_private.registration_teacher_object_v1(dashboard_private.registration_teacher_json_v1(e.after_value)->'timestamps',array['levelTestAt','levelTestCompletedAt','phoneConsultationAt','visitConsultationAt','consultationAt','classStartDate','classStartSession']),
-    'legacyBooleans',dashboard_private.registration_teacher_object_v1(dashboard_private.registration_teacher_json_v1(e.after_value)->'legacyBooleans',array['admissionNoticeSent','makeeduRegistered','makeeduInvoiceSent','paymentChecked'])))::text)
-  when e.event_type='registration_track_event' then jsonb_build_object('before_value',null,'after_value',dashboard_private.registration_teacher_event_payload_v1(e.after_value))
-  else '{}'::jsonb end order by e.created_at,e.id),'[]') into events
- from public.ops_task_events e where e.task_id=p_task_id and public.registration_task_event_shared_visible(e)
+ -- Materialize only eligible identity/selection facts; payload JSON is
+ -- projected after the bounded ID union, never aggregated before LIMIT.
+ -- The migration snapshot consumes only the first standard-v1 import. Later
+ -- imports are not timeline rows, so exclude them before both count and LIMIT.
+ with legacy_import as materialized (
+  select e.id from public.ops_task_events e
+  where e.task_id=p_task_id and e.event_type='legacy_registration_imported'
+   and public.registration_task_event_shared_visible(e)
+   and dashboard_private.registration_teacher_json_v1(e.after_value)->'version' in('1'::jsonb,'"1"'::jsonb)
+   and exists(select 1 from jsonb_array_elements(tracks) t where t->'migration_review_required'='true'::jsonb)
+  order by e.created_at,e.id limit 1
+ ), eligible as materialized (
+  select e.id,e.created_at,e.event_type,
+   e.event_type='legacy_registration_imported' and dashboard_private.registration_teacher_json_v1(e.after_value)->'version' in('1'::jsonb,'"1"'::jsonb) as is_legacy_anchor
+  from public.ops_task_events e where e.task_id=p_task_id and public.registration_task_event_shared_visible(e)
+  and e.event_type not in('appointment_updated','appointment_replaced','appointment_subject_deselected','appointment_canceled')
+  and(e.event_type<>'legacy_registration_imported' or e.id in(select id from legacy_import))
   -- Match the actual history model's milestone/alias/fine-event inventory.
   -- Raw audit-only events (including registration_fact_saved) are not displayed.
   and (e.event_type='legacy_registration_imported' or(case when e.event_type='registration_track_event' then
@@ -145,7 +183,31 @@ begin
     'appointment_updated','appointment_replaced','appointment_subject_deselected','appointment_canceled']))
   -- The existing UI hides these internal notification/provider events entirely.
   and lower(e.event_type) !~ '(^|[._-])(notification|fanout|delivery|retry|provider)($|[._-])'
-  and (e.event_type<>'registration_track_event' or lower(coalesce(dashboard_private.registration_teacher_json_v1(e.after_value)->>'event_type',dashboard_private.registration_teacher_json_v1(e.after_value)->>'eventType','')) !~ '(^|[._-])(notification|fanout|delivery|retry|provider)($|[._-])');
+  and (e.event_type<>'registration_track_event' or lower(coalesce(dashboard_private.registration_teacher_json_v1(e.after_value)->>'event_type',dashboard_private.registration_teacher_json_v1(e.after_value)->>'eventType','')) !~ '(^|[._-])(notification|fanout|delivery|retry|provider)($|[._-])')
+ ), recent as (
+  select id from eligible order by created_at desc,id desc limit 30
+ ), anchors as (
+  (select id from eligible where is_legacy_anchor order by created_at,id limit 1)
+  union
+  (select id from eligible where event_type='registration_case_created' order by created_at,id limit 1)
+ ), selected as (
+  select id from recent union select id from anchors
+ )
+ select coalesce(jsonb_agg(dashboard_private.teacher_request_json_pick_v1(to_jsonb(e),array['id','task_id','actor_id','event_type','field_name','before_value','after_value','created_at'])||
+  case when e.event_type='registration_case_created' then jsonb_build_object('before_value',null,'after_value',
+   dashboard_private.teacher_request_json_pick_v1(dashboard_private.registration_teacher_json_v1(e.after_value),array['version','actorId','occurredAt'])::text)
+  when e.event_type='legacy_registration_imported' then jsonb_build_object(
+   'before_value',dashboard_private.registration_teacher_object_v1(dashboard_private.registration_teacher_json_v1(e.before_value),array['studentId','classId','textbookId','pipelineStatus'])::text,
+   'after_value',(dashboard_private.registration_teacher_object_v1(dashboard_private.registration_teacher_json_v1(e.after_value),array['version'])||jsonb_build_object(
+    'timestamps',dashboard_private.registration_teacher_object_v1(dashboard_private.registration_teacher_json_v1(e.after_value)->'timestamps',array['levelTestAt','levelTestCompletedAt','phoneConsultationAt','visitConsultationAt','consultationAt','classStartDate','classStartSession']),
+    'legacyBooleans',dashboard_private.registration_teacher_object_v1(dashboard_private.registration_teacher_json_v1(e.after_value)->'legacyBooleans',array['admissionNoticeSent','makeeduRegistered','makeeduInvoiceSent','paymentChecked'])))::text)
+  when e.event_type='registration_track_event' then jsonb_build_object('before_value',null,'after_value',dashboard_private.registration_teacher_event_payload_v1(e.after_value))
+  when dashboard_private.registration_teacher_legacy_title_only_v1(e.after_value) then jsonb_build_object('before_value',null,'after_value',null,'display_title_only',true)
+  else jsonb_build_object('before_value',null) end||jsonb_build_object('actor_id',null,'field_name',null) order by e.created_at,e.id),'[]'),jsonb_build_object(
+  'recentLimit',30,'totalCount',(select count(*)::integer from eligible),'returnedCount',count(*)::integer,
+  'anchorCount',(select count(*)::integer from anchors a where not exists(select 1 from recent r where r.id=a.id)),
+  'hasEarlierEvents',(select count(*) from eligible)>count(*)) into events,event_window
+ from public.ops_task_events e join selected on selected.id=e.id and e.task_id=p_task_id;
  select dashboard_private.teacher_request_json_pick_v1(to_jsonb(m),array['id','status','claim_active','template_key','updated_at']) into active_message
  from public.ops_registration_messages m where m.task_id=p_task_id and m.template_key='admission_application' and m.claim_active limit 1;
 
@@ -169,18 +231,17 @@ begin
  -- Only labels referenced by the selected display rows are returned. No
  -- profile/account directory or class/textbook selector catalog is exposed.
  with refs as(
-  select parent->>k id from unnest(array['requested_by','assignee_id','secondary_assignee_id','completed_by']) k
-  union select value->>'author_id' from jsonb_array_elements(parent->'ops_task_comments')
-  union select value->>'uploaded_by' from jsonb_array_elements(parent->'ops_task_attachments')
-  union select value->>'director_profile_id' from jsonb_array_elements(tracks)
+  select value->>'director_profile_id' id from jsonb_array_elements(tracks)
   union select value->>'director_profile_id' from jsonb_array_elements(consultations)
-  union select value->>'actor_id' from jsonb_array_elements(events)
-  union select coalesce(dashboard_private.registration_teacher_json_v1(value->>'after_value')->>'actor_profile_id',dashboard_private.registration_teacher_json_v1(value->>'after_value')->>'actorId') from jsonb_array_elements(events)
+  union select dashboard_private.registration_teacher_json_v1(value->>'after_value')->>'actor_profile_id' from jsonb_array_elements(events)
+   where value->>'event_type'='registration_track_event' and dashboard_private.registration_teacher_json_v1(value->>'after_value')->>'version'='2'
+    and dashboard_private.registration_teacher_json_v1(value->>'after_value')->>'actor_kind'='user'
+  union select dashboard_private.registration_teacher_json_v1(value->>'after_value')->>'actorId' from jsonb_array_elements(events)
+   where value->>'event_type'='registration_case_created' and dashboard_private.registration_teacher_json_v1(value->>'after_value')->'version' in('1'::jsonb,'"1"'::jsonb)
  ) select coalesce(jsonb_agg(jsonb_build_object('id',p.id,'name',coalesce(p.name,'')) order by p.id),'[]') into profiles
  from public.profiles p where p.id in(select dashboard_private.registration_teacher_uuid_v1(id) from refs);
  with refs as(
-  select parent->>'class_id' id
-  union select dashboard_private.registration_teacher_json_v1(value->>'before_value')->>'classId' from jsonb_array_elements(events) where value->>'event_type'='legacy_registration_imported'
+  select dashboard_private.registration_teacher_json_v1(value->>'before_value')->>'classId' id from jsonb_array_elements(events) where value->>'event_type'='legacy_registration_imported'
   union select value->>'class_id' from jsonb_array_elements(enrollments)
   union select value->>'waiting_detail_class_id' from jsonb_array_elements(tracks)
   union select coalesce(e->>'classId',e->>'class_id') from jsonb_array_elements(tracks) t
@@ -188,8 +249,7 @@ begin
  ) select coalesce(jsonb_agg(jsonb_build_object('id',c.id,'name',coalesce(c.name,'')) order by c.id),'[]') into classes
  from public.classes c where c.id in(select dashboard_private.registration_teacher_uuid_v1(id) from refs);
  with refs as(
-  select parent->>'textbook_id' id
-  union select dashboard_private.registration_teacher_json_v1(value->>'before_value')->>'textbookId' from jsonb_array_elements(events) where value->>'event_type'='legacy_registration_imported'
+  select dashboard_private.registration_teacher_json_v1(value->>'before_value')->>'textbookId' id from jsonb_array_elements(events) where value->>'event_type'='legacy_registration_imported'
   union select value->>'textbook_id' from jsonb_array_elements(enrollments)
   union select b#>>'{}' from jsonb_array_elements(enrollments) e cross join lateral jsonb_array_elements(case when jsonb_typeof(e->'textbook_ids')='array' then e->'textbook_ids' else '[]'::jsonb end) b
   union select coalesce(e->>'textbookId',e->>'textbook_id') from jsonb_array_elements(tracks) t
@@ -200,7 +260,7 @@ begin
  ) select coalesce(jsonb_agg(jsonb_build_object('id',b.id,'title',coalesce(b.title,'')) order by b.id),'[]') into textbooks
  from public.textbooks b where b.id in(select dashboard_private.registration_teacher_uuid_v1(id) from refs);
  return jsonb_build_object('parent',parent,'tracks',tracks,'appointments',appointments,'levelTests',level_tests,'consultations',consultations,
-  'admissionBatches',batches,'enrollments',enrollments,'events',events,'activeAdmissionMessage',active_message,'reminderSummaries',reminders,
+  'admissionBatches',batches,'enrollments',enrollments,'events',events,'eventWindow',event_window,'activeAdmissionMessage',active_message,'reminderSummaries',reminders,
   'scheduledAppointmentTotal',scheduled_total,'currentEnrollmentTotal',enrollment_total,'profiles',profiles,'classes',classes,'textbooks',textbooks);
 end $$;
 
@@ -306,6 +366,7 @@ returns jsonb language sql stable security invoker set search_path='' as $$
  select dashboard_private.get_registration_teacher_detail_v1_impl(p_task_id,p_section,p_track_id,p_observation_id,p_page,p_limit)
 $$;
 
+alter function dashboard_private.registration_teacher_legacy_title_only_v1(text) owner to postgres;
 alter function dashboard_private.registration_teacher_object_v1(jsonb,text[]) owner to postgres;
 alter function dashboard_private.registration_teacher_event_payload_v1(text) owner to postgres;
 alter function dashboard_private.registration_teacher_json_v1(text) owner to postgres;
@@ -314,6 +375,7 @@ alter function dashboard_private.registration_teacher_case_v1(uuid) owner to pos
 alter function dashboard_private.registration_teacher_attempt_v1(public.ops_registration_observations,public.ops_registration_appointments) owner to postgres;
 alter function dashboard_private.get_registration_teacher_detail_v1_impl(uuid,text,uuid,uuid,integer,integer) owner to postgres;
 alter function public.get_registration_teacher_detail_v1(uuid,text,uuid,uuid,integer,integer) owner to postgres;
+revoke all on function dashboard_private.registration_teacher_legacy_title_only_v1(text) from public,anon,authenticated,service_role;
 revoke all on function dashboard_private.registration_teacher_object_v1(jsonb,text[]) from public,anon,authenticated,service_role;
 revoke all on function dashboard_private.registration_teacher_event_payload_v1(text) from public,anon,authenticated,service_role;
 revoke all on function dashboard_private.registration_teacher_json_v1(text) from public,anon,authenticated,service_role;

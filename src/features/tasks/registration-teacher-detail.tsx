@@ -45,6 +45,9 @@ export function RegistrationTeacherDetail(props: RegistrationTeacherDetailProps)
 function TeacherCase({ data, viewerKey, focusTrackId, initialAppointmentId, initialObservationId, onFocusTrack, readers, customerHistoryClient, closeAction, onPermissionDenied }: RegistrationTeacherDetailProps) {
   const { detail } = data
   const { task } = detail
+  const historyNotice = data.eventWindow.hasEarlierEvents
+    ? `최근 저장된 기록 ${data.eventWindow.recentLimit}건${data.eventWindow.anchorCount ? `과 등록·이관 기준 기록 ${data.eventWindow.anchorCount}건` : ""}을 조회했습니다. 이전 기록 일부는 표시되지 않습니다.`
+    : undefined
   const tracks = [...detail.tracks].sort((a, b) => ["영어", "수학", "과학"].indexOf(a.subject) - ["영어", "수학", "과학"].indexOf(b.subject) || a.id.localeCompare(b.id))
   const routeTrackId = focusTrackId || tracks[0]?.id || ""
   const routeKey = `${routeTrackId}:${initialAppointmentId || ""}:${initialObservationId || ""}`
@@ -90,7 +93,7 @@ function TeacherCase({ data, viewerKey, focusTrackId, initialAppointmentId, init
   const selectedAppointment = initialAppointmentId && detail.appointments.some(item => item.id === initialAppointmentId) ? initialAppointmentId : null
   return <RegistrationApplicationShell
     mode="detail" studentName={task.studentName || task.title} closeAction={closeAction}
-    historyAction={<><RegistrationCustomerMessageCaseHistory taskId={task.id} client={historyClient} viewerKey={viewerKey} refreshKey={`${detail.commonRevision}:${task.updatedAt || ""}`} /><RegistrationApplicationHistoryAction detail={detail} profiles={data.profiles.map(item => ({ id: item.id, label: item.name }))} /></>}
+    historyAction={<><RegistrationCustomerMessageCaseHistory taskId={task.id} client={historyClient} viewerKey={viewerKey} refreshKey={`${detail.commonRevision}:${task.updatedAt || ""}`} /><RegistrationApplicationHistoryAction detail={detail} profiles={data.profiles.map(item => ({ id: item.id, label: item.name }))} partialHistory={data.eventWindow.hasEarlierEvents} historyNotice={historyNotice} /></>}
     subjectNavigation={track ? <div className="grid gap-3"><RegistrationApplicationSubjectTabs tracks={tracks.map(item => ({ id: item.id, subject: item.subject, statusLabel: REGISTRATION_WORKFLOW_STATUS_LABELS[item.workflowStatus], viewKey: getRegistrationWorkflowViewKey(item.workflowStatus) }))} value={track.id} panelIdsByTrackId={Object.fromEntries(tracks.map(item => [item.id, ["level_test", "consultation", "waiting", "registration", "observation"].map(key => `teacher-registration-${key}-${item.id}`)]))} onValueChange={id => { setSelection({ routeKey, trackId: id }); onFocusTrack?.(id) }} /><p className="text-sm"><span className="text-muted-foreground">진행상태</span> · {REGISTRATION_WORKFLOW_STATUS_LABELS[track.workflowStatus]}</p></div> : undefined}
     progress={track ? <RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress(track.status, track.waitingKind, track.workflowStatus)} /> : undefined}
     sectionStates={sectionStates}

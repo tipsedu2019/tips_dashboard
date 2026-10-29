@@ -27,6 +27,55 @@ function detailFixture() {
   };
 }
 
+test("partial history preserves an orphan appointment change without guessing an anchor", () => {
+  const event = { id: "orphan", eventType: "appointment_updated", subject: "수학", payloadVersion: 2,
+    actorId: "actor", actorKind: "user", occurredAt: "2026-10-29T01:00:00Z",
+    metadata: { appointmentId: "outside-appointment-window", notificationRevision: 3, place: "저장된 새 장소" } };
+  const [item] = buildRegistrationSubjectHistory({ events: [event] }, { partial: true });
+  assert.ok(item, "selected event survives even when no appointment or matching anchor was loaded");
+  assert.equal(item.id, "event:orphan"); assert.equal(item.title, "예약 변경");
+  assert.equal(item.occurredAt, event.occurredAt); assert.equal(item.actorId, "actor");
+  assert.equal(item.metadata.oldPlace, undefined); assert.equal(item.metadata.oldScheduledAt, undefined);
+  assert.equal(item.metadata.appointmentChanges[0].metadata.place, "저장된 새 장소");
+});
+
+test("partial history never merges a change into a later anchor or enriches it from current state", () => {
+  const detail = { ...detailFixture(), events: [
+    { id: "change", eventType: "appointment_updated", subject: "수학", payloadVersion: 2, occurredAt: "2026-10-28T01:00:00Z", metadata: { appointmentId: "shared", notificationRevision: 3, place: "당시 장소" } },
+    { id: "later", eventType: "level_test_scheduled", subject: "수학", payloadVersion: 2, occurredAt: "2026-10-29T01:00:00Z", metadata: { appointmentId: "shared", notificationRevision: 5, place: "나중 장소" } },
+  ] };
+  const items = buildRegistrationSubjectHistory(detail, { partial: true });
+  assert.deepEqual(items.map(item => item.id), ["event:later", "event:change"]);
+  const change = items[1]; assert.equal(change.metadata.oldPlace, undefined);
+  assert.equal(change.metadata.scheduledAt, undefined);
+  assert.doesNotMatch(change.description, /나중 장소|본관|2026-07-14/);
+  assert.ok(items.every(item => item.kind === "event" && item.origin === "canonical"));
+});
+
+test("partial history does not relabel current entity snapshots as migration activity", () => {
+  const detail = { ...detailFixture(), events: [
+    { id: "import", eventType: "legacy_registration_imported", metadata: {}, legacyText: null },
+    { id: "legacy", eventType: "track_closed", metadata: {}, legacyText: "과거 종료 메모", occurredAt: "2026-01-01T00:00:00Z" },
+  ] };
+  const items = buildRegistrationSubjectHistory(detail, { partial: true });
+  assert.equal(items.length, 1); assert.equal(items[0].title, "과거 종료 메모");
+  assert.equal(items[0].occurredAt, null); assert.equal(items[0].timeKind, "unavailable");
+  assert.equal(items[0].actorKind, "migration");
+  assert.deepEqual(buildRegistrationSubjectHistory({ ...detail, events: [] }, { partial: true }), []);
+  assert.ok(buildRegistrationSubjectHistory({ ...detail, events: [] }).length > 0, "existing full-history fallback remains available to management");
+});
+
+test("a projected title-only legacy milestone keeps its label without exposing its removed payload", () => {
+  const detail = { events: [{ id: "redacted", eventType: "waiting_transitioned", legacyText: null,
+    legacyTitleOnly: true, metadata: {}, payloadVersion: null, occurredAt: "2026-10-29T00:00:00Z" }] };
+  for (const partial of [false, true]) {
+    const [item] = buildRegistrationSubjectHistory(detail, { partial });
+    assert.ok(item); assert.equal(item.title, "대기 상태 변경");
+    assert.equal(item.occurredAt, null); assert.equal(item.timeKind, "unavailable");
+    assert.equal(item.actorId, null); assert.deepEqual(item.metadata, {});
+  }
+});
+
 test("legacy milestone titles retain prose but never render serialized or malformed snapshots", () => {
   for (const legacyText of [
     '{"campus":"PRIVATE_SNAPSHOT","actorId":"PRIVATE_ACTOR"}',

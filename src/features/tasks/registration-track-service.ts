@@ -370,6 +370,7 @@ export type OpsRegistrationTrackEvent = {
   payloadVersion: 1 | 2 | null
   occurredAt: string
   legacyText: string | null
+  legacyTitleOnly?: true
 }
 
 export type OpsRegistrationMigrationLegacySnapshot = {
@@ -1906,8 +1907,8 @@ export function mapRegistrationTeacherCaseBundle(input: Record<string, unknown>)
     if (result.some((row) => row.task_id !== taskId)) invalid()
     return result
   }
-  const commentRows = taskRows(parent.ops_task_comments)
-  const attachmentRows = taskRows(parent.ops_task_attachments)
+  if (Object.prototype.hasOwnProperty.call(parent, "ops_task_comments")
+    || Object.prototype.hasOwnProperty.call(parent, "ops_task_attachments")) invalid()
   const trackRows = taskRows(input.tracks)
   if (trackRows.length > 30) invalid()
   const trackIds = new Set(trackRows.map((row) => row.id))
@@ -1941,8 +1942,8 @@ export function mapRegistrationTeacherCaseBundle(input: Record<string, unknown>)
   const activeStatus = text(value(activeMessage, "status"))
   const messageStatus = activeStatus === "failed"
     ? "failed_hold" : (["pending", "accepted", "unknown"].includes(activeStatus) ? activeStatus : "")
-  const comments = commentRows.map(mapComment)
-  const attachments = attachmentRows.map(mapAttachment)
+  const comments: OpsTaskComment[] = []
+  const attachments: OpsTaskAttachment[] = []
   const tracks = trackRows.map((row) => {
     if (rowNeedsRegistrationObservationSummary(row)) invalid()
     return mapRegistrationObservationTrackSummary(row, true)
@@ -1973,7 +1974,19 @@ export function mapRegistrationTeacherCaseBundle(input: Record<string, unknown>)
       scheduledAppointments: window(input.scheduledAppointmentTotal, currentAppointmentCount),
       currentEnrollments: window(input.currentEnrollmentTotal, currentEnrollmentCount),
     },
-    events: eventRows.map(mapTrackEvent),
+    events: eventRows.map((row) => {
+      const event = mapTrackEvent(row)
+      if (row.display_title_only === true) return {
+        ...event, legacyTitleOnly: true as const, legacyText: null, metadata: {},
+        actorId: null, actorKind: null, systemSource: null, occurredAt: "",
+      }
+      if (row.event_type === "registration_track_event") {
+        const payload = parseJsonRecord(row.after_value)
+        const time = registrationTrackEventPayloadVersion(payload) === 2 ? payload?.occurred_at : payload?.occurredAt
+        return { ...event, occurredAt: recordedCaseCreationTime(time) }
+      }
+      return { ...event, metadata: {} }
+    }),
     migrationLegacy: tracks.some((track) => track.migrationReviewRequired)
       ? buildRegistrationMigrationLegacySnapshot(parent, detailRow, eventRows) : null,
   }

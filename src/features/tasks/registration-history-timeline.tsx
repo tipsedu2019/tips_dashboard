@@ -20,6 +20,8 @@ export type RegistrationHistoryTimelineProps = {
   detail: OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail
   profiles: Pick<OpsProfileOption, "id" | "label">[]
   embedded?: boolean
+  partialHistory?: boolean
+  historyNotice?: string
 }
 
 const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
@@ -140,8 +142,8 @@ function RegistrationHistoryDetails({ lines }: { lines: string[] }) {
   )
 }
 
-export function RegistrationHistoryTimeline({ detail, profiles, embedded = false }: RegistrationHistoryTimelineProps) {
-  const history = useMemo(() => buildRegistrationSubjectHistory(detail), [detail])
+export function RegistrationHistoryTimeline({ detail, profiles, embedded = false, partialHistory = false, historyNotice }: RegistrationHistoryTimelineProps) {
+  const history = useMemo(() => buildRegistrationSubjectHistory(detail, { partial: partialHistory }), [detail, partialHistory])
   const profileById = useMemo(
     () => new Map(profiles.map((profile) => [profile.id, profile.label])),
     [profiles],
@@ -156,10 +158,11 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
       <div>
         <h3 className="text-sm font-semibold">자동 이력</h3>
         <p className="text-xs text-muted-foreground">누가 · 언제 · 무엇을 · 어떻게 처리했는지 시간순으로 보여 줍니다.</p>
+        {historyNotice ? <p className="mt-1 text-xs text-muted-foreground">{historyNotice}</p> : null}
       </div>
       {history.length === 0 ? (
         <p className="rounded-md bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
-          아직 자동 이력이 없습니다.
+          {partialHistory ? "조회한 범위에 표시할 자동 이력이 없습니다." : "아직 자동 이력이 없습니다."}
         </p>
       ) : (
         <ol className="grid gap-2">

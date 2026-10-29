@@ -30,4 +30,5 @@ export type RegistrationSubjectHistoryItem = {
 
 export function buildRegistrationSubjectHistory(
   detail?: Partial<OpsRegistrationCaseDetail> | Partial<OpsRegistrationObservationCaseDetail>,
+  options?: { partial?: boolean },
 ): RegistrationSubjectHistoryItem[];

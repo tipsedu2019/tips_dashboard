@@ -27,6 +27,8 @@ insert into public.profiles(id,role,name,email)
 select pg_temp.t219(n),case n when 1 then 'admin' when 2 then 'staff' when 5 then 'viewer' when 6 then 'assistant' else 'teacher' end,
  '합성 담당자 '||n,'FORBIDDEN_ACCOUNT_'||n||'@synthetic.invalid' from generate_series(1,8)n
 on conflict(id) do update set role=excluded.role,name=excluded.name,email=excluded.email;
+update public.profiles set name='FORBIDDEN_COMMENT_ONLY_AUTHOR' where id=pg_temp.t219(7);
+update public.profiles set name='FORBIDDEN_ATTACHMENT_ONLY_AUTHOR' where id=pg_temp.t219(8);
 select pg_temp.actor219(1);
 delete from public.teacher_catalogs where profile_id=pg_temp.t219(4);
 insert into public.teacher_catalogs(id,name,subjects,profile_id,is_visible)
@@ -37,13 +39,15 @@ insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule
 select pg_temp.t219(1000+n),'합성 선택 반 '||n,'영어','수업 진행 중','legacy','{"sessions":[]}' from generate_series(1,31)n;
 insert into public.classes(id,name,subject) values(pg_temp.t219(1999),'FORBIDDEN_UNREFERENCED_CLASS','영어');
 insert into public.classes(id,name,subject) values(pg_temp.t219(1998),'합성 이전 수업','영어');
+insert into public.classes(id,name,subject) values(pg_temp.t219(1997),'FORBIDDEN_LATER_IMPORT_CLASS','영어');
 insert into public.textbooks(id,title,name,subject,school_levels,grade_levels,sub_subject,status)
 values(pg_temp.t219(40),'합성 선택 교재','합성 선택 교재','english',array['middle'],array['m3'],'독해','active'),
 (pg_temp.t219(42),'합성 이전 교재','합성 이전 교재','english',array['middle'],array['m3'],'독해','active'),
 (pg_temp.t219(43),'합성 별칭 교재','합성 별칭 교재','english',array['middle'],array['m3'],'독해','active'),
+(pg_temp.t219(44),'FORBIDDEN_LATER_IMPORT_BOOK','FORBIDDEN_LATER_IMPORT_BOOK','english',array['middle'],array['m3'],'독해','active'),
 (pg_temp.t219(41),'FORBIDDEN_UNREFERENCED_BOOK','FORBIDDEN_UNREFERENCED_BOOK','english',array['middle'],array['m3'],'독해','active');
 insert into public.ops_tasks(id,title,type,requested_by,student_name,class_id,textbook_id,memo)
-values(pg_temp.t219(101),'합성 등록 선택','registration',pg_temp.t219(2),'합성 선택 학생',pg_temp.t219(1001),pg_temp.t219(40),'DISPLAY_REQUEST_MEMO'),
+values(pg_temp.t219(101),'합성 등록 선택','registration',pg_temp.t219(7),'합성 선택 학생',pg_temp.t219(1001),pg_temp.t219(40),'FORBIDDEN_HIDDEN_PARENT_MEMO'),
  (pg_temp.t219(102),'FORBIDDEN_OTHER_CASE','registration',pg_temp.t219(2),'FORBIDDEN_OTHER_STUDENT',null,null,'FORBIDDEN_OTHER_NOTE'),
  (pg_temp.t219(103),'등록 외 합성','general',pg_temp.t219(2),null,null,null,null),
  (pg_temp.t219(104),'빈 등록 합성','registration',null,null,null,null,null),
@@ -58,9 +62,9 @@ values(pg_temp.t219(201),pg_temp.t219(101),'영어','consultation_waiting','obse
  (pg_temp.t219(202),pg_temp.t219(102),'영어','inquiry','inquiry',1,null,null,null,null,0,null,null),
  (pg_temp.t219(203),pg_temp.t219(101),'수학','inquiry','inquiry',1,null,null,null,null,0,now(),pg_temp.t219(1)),
  (pg_temp.t219(204),pg_temp.t219(104),'영어','inquiry','inquiry',1,null,null,null,null,0,null,null);
-insert into public.ops_task_comments(id,task_id,author_id,body) values(pg_temp.t219(301),pg_temp.t219(101),pg_temp.t219(2),'DISPLAY_COMMENT'),(pg_temp.t219(302),pg_temp.t219(102),pg_temp.t219(2),'FORBIDDEN_OTHER_COMMENT');
-insert into public.ops_task_attachments(id,task_id,file_name,drive_link,uploaded_by)
-values(pg_temp.t219(303),pg_temp.t219(101),'합성 안내.pdf','https://example.invalid/synthetic219.pdf',null);
+insert into public.ops_task_comments(id,task_id,author_id,body) values(pg_temp.t219(301),pg_temp.t219(101),pg_temp.t219(7),'FORBIDDEN_HIDDEN_COMMENT'),(pg_temp.t219(302),pg_temp.t219(102),pg_temp.t219(2),'FORBIDDEN_OTHER_COMMENT');
+insert into public.ops_task_attachments(id,task_id,file_name,drive_file_id,drive_link,uploaded_by)
+values(pg_temp.t219(303),pg_temp.t219(101),'FORBIDDEN_HIDDEN_FILENAME','FORBIDDEN_DRIVE_ID','https://example.invalid/FORBIDDEN_DRIVE_LINK',pg_temp.t219(8));
 insert into public.ops_task_events(id,task_id,actor_id,event_type,after_value)
 values(pg_temp.t219(304),pg_temp.t219(101),pg_temp.t219(2),'registration_case_created',jsonb_build_object('version',1,'actorId',pg_temp.t219(2),'occurredAt','2026-10-29T10:00:00Z','studentSnapshot','FORBIDDEN_UNUSED_SNAPSHOT')::text),
  (pg_temp.t219(305),pg_temp.t219(101),pg_temp.t219(2),'registration_observation_booked','FORBIDDEN_BOOKING_ONLY_EVENT'),
@@ -141,6 +145,55 @@ select pg_temp.t219(800+n),pg_temp.t219(101),pg_temp.t219(201),pg_temp.t219(900+
  case when n=0 then 0 else 1 end,case when n>0 then 'not_registered' end,case when n>0 then pg_temp.t219(2) end,case when n>0 then now() end,
  pg_temp.t219(2),pg_temp.t219(2),'2026-01-01T00:00:00Z'::timestamptz+n*interval '1 day' from generate_series(0,21)n;
 
+-- Read-window fixtures have only synthetic stored events. The first case has
+-- 40 process rows plus5 old anchors/candidates; invalid/future import is not a
+-- snapshot anchor. Stored times select the window but never fill occurredAt.
+insert into public.ops_tasks(id,title,type,requested_by) values
+(pg_temp.t219(106),'합성 이력 창 두 anchor','registration',pg_temp.t219(2)),
+(pg_temp.t219(107),'합성 이력 창 하나 anchor','registration',pg_temp.t219(2)),
+(pg_temp.t219(108),'합성 이력 창 anchor 없음','registration',pg_temp.t219(2));
+insert into public.ops_registration_details(task_id) values(pg_temp.t219(106)),(pg_temp.t219(107)),(pg_temp.t219(108));
+insert into public.ops_registration_subject_tracks(id,task_id,subject,pipeline_status,workflow_status,workflow_revision,migration_review_required)
+values(pg_temp.t219(205),pg_temp.t219(106),'영어','migration_review','inquiry',1,true);
+insert into public.ops_task_events(id,task_id,actor_id,event_type,before_value,after_value,created_at) values
+(pg_temp.t219(5000),pg_temp.t219(106),null,'legacy_registration_imported','{}','{"version":2,"timestamps":{"classStartDate":"1999-01-01"}}','2019-01-01'),
+(pg_temp.t219(5001),pg_temp.t219(106),null,'registration_case_created',null,'{"version":1,"actorId":null,"occurredAt":null}','2020-01-01'),
+(pg_temp.t219(5002),pg_temp.t219(106),null,'legacy_registration_imported',jsonb_build_object('classId',pg_temp.t219(1998),'textbookId',pg_temp.t219(42),'unused','FORBIDDEN_REVIEW_LEGACY_EXTRA')::text,'{"version":"1","unused":"FORBIDDEN_REVIEW_LEGACY_AFTER","timestamps":{"classStartDate":"2020-01-02","unused":"FORBIDDEN_REVIEW_LEGACY_TIME"},"legacyBooleans":{"paymentChecked":false,"unused":"FORBIDDEN_REVIEW_LEGACY_BOOL"}}','2020-01-02'),
+(pg_temp.t219(5003),pg_temp.t219(106),pg_temp.t219(2),'registration_case_created',null,'{"version":1,"occurredAt":"2020-01-03T00:00:00Z"}','2020-01-03'),
+(pg_temp.t219(5004),pg_temp.t219(106),null,'legacy_registration_imported','{}','{"version":1,"timestamps":{"classStartDate":"2020-01-04"}}','2020-01-04'),
+(pg_temp.t219(5005),pg_temp.t219(106),null,'legacy_registration_imported',jsonb_build_object('classId',pg_temp.t219(1997),'textbookId',pg_temp.t219(44),'pipelineStatus','FORBIDDEN_LATER_V1_IMPORT')::text,'{"version":"1","timestamps":{"classStartDate":"2027-01-01"}}','2027-01-01'),
+(pg_temp.t219(5006),pg_temp.t219(106),null,'legacy_registration_imported',jsonb_build_object('classId',pg_temp.t219(1997),'textbookId',pg_temp.t219(44),'pipelineStatus','FORBIDDEN_NEWER_V2_IMPORT')::text,'{"version":2,"timestamps":{"classStartDate":"2028-01-01"}}','2028-01-01'),
+(pg_temp.t219(6001),pg_temp.t219(107),null,'registration_case_created',null,'{"version":1,"actorId":null,"occurredAt":null}','2020-01-01');
+insert into public.ops_task_events(id,task_id,actor_id,event_type,after_value,created_at)
+select pg_temp.t219(5100+n),pg_temp.t219(106),pg_temp.t219(2),'registration_track_event',jsonb_build_object('version',2,'event_type','consultation_completed','actor_kind','user','actor_profile_id',pg_temp.t219(2),'track_id',pg_temp.t219(205),'subject','영어','reason_code','DISPLAY_BOUND_'||n,'metadata',jsonb_build_object('mode','phone'),'occurred_at','2026-01-01T00:00:00Z')::text,
+ '2026-01-01'::timestamptz+n*interval '1 minute' from generate_series(1,40)n;
+insert into public.ops_task_events(id,task_id,actor_id,event_type,after_value,created_at)
+select pg_temp.t219(6100+n),pg_temp.t219(107),null,'consultation_completed','DISPLAY_BOUND_ONE_'||n,'2026-01-01'::timestamptz+n*interval '1 minute' from generate_series(1,30)n;
+insert into public.ops_task_events(id,task_id,actor_id,event_type,after_value,created_at)
+select pg_temp.t219(7100+n),pg_temp.t219(108),null,'consultation_completed','DISPLAY_BOUND_NONE_'||n,'2026-01-01'::timestamptz+n*interval '1 minute' from generate_series(1,31)n;
+
+-- Title-only legacy rows preserve known stage activity without exporting a
+-- hidden serialized body. Bracketed/quoted natural prose is still display text.
+insert into public.ops_tasks(id,title,type) values(pg_temp.t219(109),'합성 이력 원문 투영','registration');
+insert into public.ops_task_events(id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at)
+select pg_temp.t219(8000+n),pg_temp.t219(109),pg_temp.t219(7),'consultation_completed','FORBIDDEN_HIDDEN_FIELD','FORBIDDEN_HIDDEN_BEFORE',body,'2026-02-01'::timestamptz+n*interval '1 minute'
+from(values
+ (1,'{"private":"FORBIDDEN_LITERAL_OBJECT"}'),
+ (2,'["FORBIDDEN_LITERAL_ARRAY"]'),
+ (3,'"FORBIDDEN_SERIALIZED_STRING"'),
+ (4,'null'),
+ (5,'42'),
+ (6,'{"private":"FORBIDDEN_TRUNCATED_OBJECT"'),
+ (7,'[ {"private":"FORBIDDEN_TRUNCATED_ARRAY"'),
+ (8,'"FORBIDDEN_UNTERMINATED_STRING'),
+ (9,'[object Object]'),
+ (10,'[전화상담] 원문 그대로'),
+ (11,'"전화상담" 안내 완료'),
+ (12,'일반 문장과 2026-11-01T10:00:00Z 식별자 유지')
+) fixture(n,body);
+insert into public.ops_task_events(id,task_id,event_type,after_value) values
+(pg_temp.t219(8013),pg_temp.t219(109),'appointment_updated','FORBIDDEN_OUTER_FINE_TEXT');
+
 -- Historical message fixture: normal verification-mode prerequisites inside
 -- this rollback transaction, following registration_customer_solapi_messages_test.
 -- Fake catalog values are fixture facts, never claimed provider verification.
@@ -191,6 +244,7 @@ create temp table baseline219 as select
  (select jsonb_agg(to_jsonb(t) order by id) from public.ops_registration_customer_messages t) messages,
  (select count(*) from public.ops_registration_customer_message_previews) previews,
  (select count(*) from public.ops_task_comments) comments,
+ (select jsonb_agg(to_jsonb(t) order by id) from public.ops_task_attachments t) attachments,
  (select count(*) from public.ops_task_events) events,
  (select count(*) from dashboard_private.ops_registration_mutations) mutations,
  (select count(*) from dashboard_private.notification_events) notifications,
@@ -206,9 +260,13 @@ select is((select payload#>'{data,parent,ops_registration_details}' from respons
 select is((select payload->>'contractVersion' from responses219 where kind='case'),'1','versioned read envelope');
 select is((select payload#>>'{data,parent,ops_registration_details,parent_phone}' from responses219 where kind='case'),'DISPLAY_PARENT_CONTACT','approved parent contact is readable');
 select is((select payload#>>'{data,parent,ops_registration_details,request_note}' from responses219 where kind='case'),'DISPLAY_REQUEST_NOTE','approved inquiry notes are readable');
-select is((select payload#>>'{data,parent,memo}' from responses219 where kind='case'),'DISPLAY_REQUEST_MEMO','same existing task memo is readable');
+select is((select jsonb_agg(k order by k) from responses219 cross join lateral jsonb_object_keys(payload#>'{data,parent}') k where kind='case'),'["id","ops_registration_details","student_name","title","type","updated_at"]'::jsonb,'teacher parent projection contains only displayed and association fields');
+select is((select payload#>'{data,parent,memo}' from responses219 where kind='case'),null::jsonb,'offscreen parent memo is absent from teacher DTO');
 select ok((select payload::text like '%DISPLAY_CURRENT_CONSULTATION%' from responses219 where kind='case'),'current consultation text is preserved');
-select ok((select payload::text like '%DISPLAY_COMMENT%' and payload::text like '%DISPLAY_MANAGER_COMMENT%' from responses219 where kind='case'),'existing collaboration display is preserved');
+select is((select payload#>'{data,parent,ops_task_comments}' from responses219 where kind='case'),null::jsonb,'hidden comments are not a teacher DTO key');
+select is((select payload#>'{data,parent,ops_task_attachments}' from responses219 where kind='case'),null::jsonb,'hidden attachments and Drive references are not a teacher DTO key');
+select ok((select payload::text not like '%DISPLAY_MANAGER_COMMENT%' from responses219 where kind='case'),'successful manager comment is not exported through teacher detail');
+select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,profiles}') p where p->>'id' in(pg_temp.t219(7)::text,pg_temp.t219(8)::text)) from responses219 where kind='case'),'comment-only and attachment-only authors are not profile references');
 select ok((select payload::text not like '%FORBIDDEN_%' from responses219 where kind='case'),'case output excludes other case/archive/account/provider/unused snapshot canaries');
 select is((select jsonb_array_length(payload#>'{data,tracks}') from responses219 where kind='case'),1,'archived and unrelated tracks are absent');
 select is((select payload#>>'{data,tracks,0,id}' from responses219 where kind='case'),pg_temp.t219(201)::text,'selected active track identity is exact');
@@ -230,18 +288,55 @@ select is((select payload#>>'{data,currentEnrollmentTotal}' from responses219 wh
 select is((select payload#>>'{data,enrollments,0,id}' from responses219 where kind='case'),pg_temp.t219(2231)::text,'enrollment ties preserve descending ID');
 select is((select payload#>'{data,appointments}' from responses219 where kind='empty'),'[]'::jsonb,'empty appointment list stays an array');
 select is((select payload#>'{data,activeAdmissionMessage}' from responses219 where kind='empty'),'null'::jsonb,'empty message status remains nullable');
-select is((select jsonb_array_length(payload#>'{data,textbooks}') from responses219 where kind='case'),3,'only current, legacy and alias-referenced textbook labels are exposed');
+select is((select jsonb_array_length(payload#>'{data,textbooks}') from responses219 where kind='case'),2,'only currently displayed and alias-referenced textbook labels are exposed');
 
 select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,events}') e where e->>'id' in(pg_temp.t219(308)::text,pg_temp.t219(309)::text)) from responses219 where kind='case'),'canonical v1/v2 internal notification events are absent');
 select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,events}') e where e->>'id' in(pg_temp.t219(312)::text,pg_temp.t219(313)::text)) from responses219 where kind='case'),'hidden audit note and unknown structured version are excluded');
 select is((select e->>'after_value' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='case' and e->>'id'=pg_temp.t219(314)::text),'DISPLAY_LEGACY_LITERAL: 원문 및 시간 미상','displayed literal legacy text remains exactly as recorded');
-select is((select (e->>'after_value')::jsonb#>>'{timestamps,classStartDate}' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='case' and e->>'id'=pg_temp.t219(311)::text),'2026-01-01','legacy displayed timestamp survives the explicit snapshot projection');
+select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,events}') e where e->>'event_type'='legacy_registration_imported') from responses219 where kind='case'),'legacy import payload is absent when no active track needs migration review');
 select ok((select exists(select 1 from jsonb_array_elements(payload#>'{data,events}') e where e->>'id'=pg_temp.t219(310)::text and e->>'after_value' like '%DISPLAY_FREE_TEXT%' and e->>'after_value' like '%NOT_A_DATE_DISPLAY%' and e->>'after_value' like '%DISPLAY_CHANGE_REASON%') from responses219 where kind='case'),'ordinary canonical history keeps free text, invalid date text and recursive displayed fields');
 select is((select (e->>'after_value')::jsonb#>'{metadata,rows,0,textbookIds}' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='case' and e->>'id'=pg_temp.t219(310)::text),'[]'::jsonb,'explicit empty plural textbook selection still overrides singular fallback');
 select is((select (e->>'after_value')::jsonb#>>'{metadata,appointmentChanges,0,metadata,oldPlace}' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='case' and e->>'id'=pg_temp.t219(310)::text),'DISPLAY_OLD_PLACE','nested appointment display fields are retained');
-select ok((select exists(select 1 from jsonb_array_elements(payload#>'{data,classes}') e where e->>'id'=pg_temp.t219(1998)::text and e->>'name'='합성 이전 수업') from responses219 where kind='case'),'legacy class name remains resolvable when no current row references it');
-select ok((select exists(select 1 from jsonb_array_elements(payload#>'{data,textbooks}') e where e->>'id'=pg_temp.t219(42)::text and e->>'title'='합성 이전 교재') from responses219 where kind='case'),'legacy textbook label remains resolvable independently of current placement');
+select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,classes}') e where e->>'id'=pg_temp.t219(1998)::text) from responses219 where kind='case'),'offscreen legacy-only class label is absent without migration review');
+select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,textbooks}') e where e->>'id'=pg_temp.t219(42)::text) from responses219 where kind='case'),'offscreen legacy-only textbook label is absent without migration review');
 select ok((select exists(select 1 from jsonb_array_elements(payload#>'{data,textbooks}') e where e->>'id'=pg_temp.t219(43)::text) from responses219 where kind='case'),'snake-case plural textbook alias keeps its referenced label');
+
+-- Bounded events are selected before projection/aggregation. Counts describe
+-- stored eligible rows, not a count of grouped UI timeline items.
+select lives_ok($q$insert into responses219 values('events-two-anchors',public.get_registration_teacher_detail_v1(pg_temp.t219(106)))$q$,'bounded recent events retain two required old anchors');
+select lives_ok($q$insert into responses219 values('events-one-anchor',public.get_registration_teacher_detail_v1(pg_temp.t219(107)))$q$,'one outside anchor can complete a31-row event set');
+select lives_ok($q$insert into responses219 values('events-no-anchor',public.get_registration_teacher_detail_v1(pg_temp.t219(108)))$q$,'recent stored events are bounded even without anchors');
+select is((select payload#>'{data,eventWindow}' from responses219 where kind='events-two-anchors'),'{"recentLimit":30,"totalCount":43,"returnedCount":32,"anchorCount":2,"hasEarlierEvents":true}'::jsonb,'event window counts only the first displayed legacy import, visible rows and extra anchors');
+select is((select jsonb_agg(e->>'id' order by ord) from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') with ordinality x(e,ord) where kind='events-two-anchors'),
+ jsonb_build_array(pg_temp.t219(5001)::text,pg_temp.t219(5002)::text)||(select jsonb_agg(pg_temp.t219(n)::text order by n) from generate_series(5111,5140)n),'recent30 plus earliest eligible anchors preserve original ascending stored order');
+select ok((select payload::text not like '%FORBIDDEN_%' from responses219 where kind='events-two-anchors'),'needed migration snapshot keeps only displayed legacy fields');
+select is((select count(distinct e->>'id') from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-two-anchors'),32::bigint,'bounded event IDs are unique');
+select is((select (e->>'after_value')::jsonb->'occurredAt' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-two-anchors' and e->>'id'=pg_temp.t219(5001)::text),'null'::jsonb,'missing creation time is not filled from stored created_at');
+select is((select (e->>'after_value')::jsonb#>>'{timestamps,classStartDate}' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-two-anchors' and e->>'id'=pg_temp.t219(5002)::text),'2020-01-02','earliest supported string-v1 legacy snapshot is retained');
+select ok((select exists(select 1 from jsonb_array_elements(payload#>'{data,classes}') c where c->>'id'=pg_temp.t219(1998)::text) and exists(select 1 from jsonb_array_elements(payload#>'{data,textbooks}') b where b->>'id'=pg_temp.t219(42)::text) from responses219 where kind='events-two-anchors'),'retained legacy anchor still supplies referenced labels');
+select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,events}') e where e->>'id' in(pg_temp.t219(5000)::text,pg_temp.t219(5003)::text,pg_temp.t219(5004)::text,pg_temp.t219(5110)::text)) from responses219 where kind='events-two-anchors'),'invalid import and additional old duplicates do not consume unbounded anchors');
+select is((select jsonb_agg(e->>'id' order by e->>'id') from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-two-anchors' and e->>'event_type'='legacy_registration_imported'),jsonb_build_array(pg_temp.t219(5002)::text),'only the earliest standard-v1 import is eligible even when later valid imports are recent');
+select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,events}') e where e->>'id' in(pg_temp.t219(5005)::text,pg_temp.t219(5006)::text)) from responses219 where kind='events-two-anchors'),'newer standard-v1 and v2 imports cannot displace visible recent events');
+select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,classes}') c where c->>'id'=pg_temp.t219(1997)::text) from responses219 where kind='events-two-anchors'),'later import-only class labels are not disclosed');
+select ok((select not exists(select 1 from jsonb_array_elements(payload#>'{data,textbooks}') b where b->>'id'=pg_temp.t219(44)::text) from responses219 where kind='events-two-anchors'),'later import-only textbook labels are not disclosed');
+select is((select payload#>'{data,eventWindow}' from responses219 where kind='events-one-anchor'),'{"recentLimit":30,"totalCount":31,"returnedCount":31,"anchorCount":1,"hasEarlierEvents":false}'::jsonb,'one anchor reports no missing rows when it completes the total');
+select is((select jsonb_array_length(payload#>'{data,events}') from responses219 where kind='events-one-anchor'),31,'one-anchor count matches actual returned rows');
+select is((select payload#>'{data,eventWindow}' from responses219 where kind='events-no-anchor'),'{"recentLimit":30,"totalCount":31,"returnedCount":30,"anchorCount":0,"hasEarlierEvents":true}'::jsonb,'no-anchor window reports one omitted stored row');
+select is((select payload#>>'{data,events,0,id}' from responses219 where kind='events-no-anchor'),pg_temp.t219(7102)::text,'recent limit is applied before aggregation, omitting oldest row');
+select is((select payload#>'{data,eventWindow}' from responses219 where kind='case'),'{"recentLimit":30,"totalCount":3,"returnedCount":3,"anchorCount":0,"hasEarlierEvents":false}'::jsonb,'creation anchor in the recent set is not duplicated and offscreen imports are excluded');
+select is((select payload#>'{data,eventWindow}' from responses219 where kind='empty'),'{"recentLimit":30,"totalCount":0,"returnedCount":0,"anchorCount":0,"hasEarlierEvents":false}'::jsonb,'empty history has a complete zero window');
+select is(public.get_registration_teacher_detail_v1(pg_temp.t219(106)),(select payload from responses219 where kind='events-two-anchors'),'bounded repeated read is stable and creates no events');
+
+select lives_ok($q$insert into responses219 values('events-title-only',public.get_registration_teacher_detail_v1(pg_temp.t219(109)))$q$,'known legacy milestones survive with a title-only marker');
+select is((select payload#>'{data,eventWindow}' from responses219 where kind='events-title-only'),'{"recentLimit":30,"totalCount":12,"returnedCount":12,"anchorCount":0,"hasEarlierEvents":false}'::jsonb,'noncanonical fine event is excluded before window counts');
+select is((select count(*) from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-title-only' and e->'display_title_only'='true'::jsonb),9::bigint,'serialized and obviously malformed legacy text is title-only');
+select ok((select bool_and(e->'before_value'='null'::jsonb and e->'after_value'='null'::jsonb and e->'actor_id'='null'::jsonb and e->'field_name'='null'::jsonb) from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-title-only' and e->'display_title_only'='true'::jsonb),'title-only projection exports no hidden payload or actor fields');
+select ok((select payload::text not like '%FORBIDDEN_%' from responses219 where kind='events-title-only'),'hidden literal payload and actor references never reach the response');
+select is((select e->>'after_value' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-title-only' and e->>'id'=pg_temp.t219(8010)::text),'[전화상담] 원문 그대로','bracketed natural prose is unchanged');
+select is((select e->>'after_value' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-title-only' and e->>'id'=pg_temp.t219(8011)::text),'"전화상담" 안내 완료','quoted natural prose is unchanged');
+select is((select e->>'after_value' from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-title-only' and e->>'id'=pg_temp.t219(8012)::text),'일반 문장과 2026-11-01T10:00:00Z 식별자 유지','ordinary literal dates and identifiers are not rewritten');
+select ok((select bool_and(not(e?'display_title_only')) from responses219 cross join lateral jsonb_array_elements(payload#>'{data,events}') e where kind='events-title-only' and e->>'id' in(pg_temp.t219(8010)::text,pg_temp.t219(8011)::text,pg_temp.t219(8012)::text)),'displayable prose does not receive a fake redaction marker');
+select is((select payload#>'{data,profiles}' from responses219 where kind='events-title-only'),'[]'::jsonb,'literal-only actors do not widen profile label reads');
 
 select lives_ok($q$insert into responses219 values('observations',public.get_registration_teacher_detail_v1(pg_temp.t219(101),'observation_detail',pg_temp.t219(201)))$q$,'saved observation detail is readable without booking capability');
 select lives_ok($q$insert into responses219 values('attempt',public.get_registration_teacher_detail_v1(pg_temp.t219(101),'observation_attempt',pg_temp.t219(201),pg_temp.t219(821)))$q$,'selected historical observation remains readable');
@@ -402,6 +497,27 @@ update auth.users set deleted_at=null where id=pg_temp.t219(3);
 set local role authenticated;
 select lives_ok($q$select public.get_registration_teacher_detail_v1(pg_temp.t219(101))$q$,'restored active teacher uses the current account state');reset role;
 
+-- Expected classification comes from the real JS legacyEventTitle. These
+-- SQL assertions still require the isolated PostgreSQL runtime.
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('﻿{"private":"hidden"}'),true,'legacy title display boundary golden 1');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1(' [ true한국'),true,'legacy title display boundary golden 2');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('[전화상담] 원문'),false,'legacy title display boundary golden 3');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('"전화상담" 안내'),false,'legacy title display boundary golden 4');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('"unfinished'),true,'legacy title display boundary golden 5');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('"unfinished\'),false,'legacy title display boundary golden 6');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('"unfinished\
+'),false,'legacy title display boundary golden 7');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('"escaped\"inside'),true,'legacy title display boundary golden 8');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('[ trueblue'),false,'legacy title display boundary golden 9');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('[ true한국'),true,'legacy title display boundary golden 10');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('[ null ]'),true,'legacy title display boundary golden 11');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('1e1000000'),true,'legacy title display boundary golden 12');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('false'),true,'legacy title display boundary golden 13');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('"plain serialized"'),true,'legacy title display boundary golden 14');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('2026-11-01'),false,'legacy title display boundary golden 15');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('[상담] 010 식별자'),false,'legacy title display boundary golden 16');
+select is(dashboard_private.registration_teacher_legacy_title_only_v1('[object Object]'),true,'legacy title display boundary golden 17');
+
 select ok((select not prosecdef and provolatile='s' and proowner='postgres'::regrole and proconfig @> array['search_path=""'] from pg_proc where oid='public.get_registration_teacher_detail_v1(uuid,text,uuid,uuid,integer,integer)'::regprocedure),'public wrapper is stable, invoker and has an empty search path');
 select ok((select prosecdef and provolatile='s' and proowner='postgres'::regrole and proconfig @> array['search_path=""','TimeZone=UTC'] from pg_proc where oid='dashboard_private.get_registration_teacher_detail_v1_impl(uuid,text,uuid,uuid,integer,integer)'::regprocedure),'private reader is stable, definer, postgres-owned and pins search path/timezone');
 select ok(has_function_privilege('authenticated','public.get_registration_teacher_detail_v1(uuid,text,uuid,uuid,integer,integer)','execute'),'authenticated may enter the guarded wrapper');
@@ -414,6 +530,7 @@ select is((select jsonb_agg(to_jsonb(t) order by id) from public.ops_registratio
 select is((select jsonb_agg(to_jsonb(t) order by id) from public.ops_registration_customer_messages t),(select messages from baseline219),'reads never dispatch or update message attempts');
 select is((select count(*) from public.ops_registration_customer_message_previews),(select previews from baseline219),'reads create no preview/consent tokens');
 select is((select count(*) from public.ops_task_comments),(select comments from baseline219),'denied comment writes have no effects');
+select is((select jsonb_agg(to_jsonb(t) order by id) from public.ops_task_attachments t),(select attachments from baseline219),'hiding attachments does not mutate stored attachment metadata');
 select is((select count(*) from public.ops_task_events),(select events from baseline219),'reads create no activity events');
 select is((select count(*) from dashboard_private.ops_registration_mutations),(select mutations from baseline219),'reads create no mutation receipts');
 select is((select count(*) from dashboard_private.notification_events),(select notifications from baseline219),'reads enqueue no notifications');

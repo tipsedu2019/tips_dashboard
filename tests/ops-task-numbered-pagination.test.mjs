@@ -2942,6 +2942,27 @@ async function acceptedWithPendingNextPage(t){
   const detail=teacherCaseReads(h).at(-1);assert.ok(detail);
   return {h,pending,detail};
 }
+for (const section of ['observation_detail', 'customer_history']) for (const status of [401, 403]) test(`teacher ${section} clears accepted data on SDK HTTP ${status} outside the error body`, async t => {
+  const h = await workspace(t, { workspace: 'registration', viewerRole: 'teacher' });
+  await finishOneRegistration(h, 'ACCEPTED LIST HTTP');
+  await act(async () => document.querySelector('[data-registration-case-row]').click());
+  await settle(h, teacherCaseReads(h).at(-1), teacherCase(1, 'ACCEPTED DETAIL HTTP'));
+  assert.match(document.body.textContent, /ACCEPTED DETAIL HTTP/);
+  assert.match(document.body.textContent, /01000000001/);
+  if (section === 'customer_history') await act(async () => {
+    const button = [...document.querySelectorAll('button')].find(item => item.textContent.includes('알림톡 이력'));
+    assert.ok(button); button.click();
+  });
+  const request = rpc(h, 'get_registration_teacher_detail_v1').find(item => item.args.p_section === section);
+  assert.ok(request, 'actual child reader starts');
+  const response = { data: null, error: { code: 'PGRST301', message: 'JWT expired', details: null, hint: null }, status, statusText: status === 401 ? 'Unauthorized' : 'Forbidden' };
+  assert.equal(Object.hasOwn(response.error, 'status'), false, 'SDK HTTP status is outside its error body');
+  await act(async () => request.resolve(response));
+  assert.equal(document.querySelectorAll('[data-registration-case-row]').length, 0, 'HTTP authorization failure clears accepted list rows');
+  assert.doesNotMatch(document.body.textContent, /ACCEPTED DETAIL HTTP|ACCEPTED LIST HTTP|01000000001|JWT expired/);
+  assert.equal(document.querySelector('[data-registration-teacher-detail]'), null, 'authorized detail is removed without waiting for another auth event');
+  noRawOrWrites(h);
+});
 for(const denial of [{code:'42501',message:'SYNTHETIC_DENIED'},{status:401,message:'SYNTHETIC_UNAUTHORIZED'},{status:403,message:'SYNTHETIC_FORBIDDEN'}]) test(`final teacher accepted detail and page are cleared after permission error ${JSON.stringify(denial)}`,async t=>{
   const {h,pending,detail}=await acceptedWithPendingNextPage(t);
   await settle(h,detail,teacherCase(1,'ACCEPTED DETAIL TO REVOKE'));

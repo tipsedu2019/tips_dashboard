@@ -29,6 +29,7 @@ function fixture(taskId = id(1), name = '합성 학생') {
     consultations: [{ id: id(7), trackId: id(2), appointmentId: id(5), mode: 'visit', status: 'completed', directorProfileId: id(20), readyAt: at, readySource: 'inquiry', completedAt: at, outcome: 'waiting', note: '합성 영어 상담 내용', createdAt: at, updatedAt: at }, { id: id(8), trackId: id(3), appointmentId: null, mode: 'phone', status: 'completed', directorProfileId: id(20), readyAt: at, completedAt: at, outcome: 'enrollment', note: '합성 수학 상담 내용', createdAt: at, updatedAt: at }],
     enrollments: [{ id: id(9), trackId: id(2), classId: id(30), textbookId: id(40), textbookIds: [id(40), id(41)], classStartDate: '2026-11-02', classStartSession: '11월 1회차', classStartSessionKey: 'saved-1', status: 'enrolled', rosterActive: true, sortOrder: 0, createdAt: at, updatedAt: at }], admissionBatches: [], admissionChecklist: { applicationSent: true, makeeduRegistered: true, invoiceSent: false, paymentConfirmed: false, registrationCompleted: false }, admissionApplicationMessageId: null, admissionApplicationMessageStatus: '', admissionApplicationMessageClaimActive: false, admissionApplicationMessageUpdatedAt: null, admissionApplicationAccepted: false, comments: [], attachments: [], events: [{ id: id(70), taskId, trackId: id(2), subject: '영어', eventType: 'case_created', actorId: id(20), actorKind: 'user', occurredAt: at, payloadVersion: 2, metadata: {} }], migrationLegacy: null,
     collectionWindows: { scheduledAppointments: { loadedCount: 0, totalCount: 0, overflow: false }, currentEnrollments: { loadedCount: 1, totalCount: 1, overflow: false } } },
+    eventWindow: { recentLimit: 30, totalCount: 1, returnedCount: 1, anchorCount: 0, hasEarlierEvents: false },
     profiles: [{ id: id(20), name: '합성 책임자' }], classes: [{ id: id(30), name: '합성 영어반' }], textbooks: [{ id: id(40), title: '합성 교재 1' }, { id: id(41), title: '합성 교재 2' }] };
 }
 const attempt = (taskId = id(1), trackId = id(2), label = '합성 청강반') => ({ observationId: id(50), taskId, trackId, appointmentId: id(51), appointmentStatus: 'completed', classId: id(30), className: label, subject: '영어', sessionDate: '2026-10-29', startsAt: at, endsAt: '2026-10-29T05:00:00Z', teacherName: '합성 청강 교사', classroomName: '합성 강의실', campus: '본관', textbooks: [{ id: id(40), title: '합성 청강 교재' }], progress: '합성 진도', status: 'completed', attendance: 'attended', suitabilityResult: 'fit', decisionKind: 'enrollment', revision: 1, feedbackRevision: 1 });
@@ -51,6 +52,20 @@ async function mount(t, patch = {}) {
 const findButton = label => [...document.querySelectorAll('button')].find(node => node.textContent.includes(label) || node.getAttribute('aria-label') === label);
 const section = key => document.querySelector(`[data-registration-application-section="${key}"]`);
 async function click(h, label) { const node = findButton(label); assert.ok(node, label); await h.act(() => node.click()); }
+
+test('bounded teacher history discloses its stored-record window and retains a change without its anchor', async t => {
+  const data = fixture();
+  const own = { ...data.detail.events[0], id: id(100), eventType: 'appointment_updated', metadata: { appointmentId: id(900), notificationRevision: 8, place: '기록 당시 장소' } };
+  data.detail.events = Array.from({ length: 30 }, (_, index) => ({ ...own, id: id(100 + index) }));
+  data.detail.events.push({ id: id(200), eventType: 'registration_case_created', payloadVersion: null, metadata: {}, legacyText: null });
+  data.eventWindow = { recentLimit: 30, totalCount: 70, returnedCount: 31, anchorCount: 1, hasEarlierEvents: true };
+  const h = await mount(t, { data }); await click(h, '자동 이력 보기');
+  const timeline = document.querySelector('[aria-label="등록 자동 이력"]'); assert.ok(timeline);
+  assert.match(timeline.textContent, /최근 저장된 기록 30건.*등록·이관 기준 기록 1건/);
+  assert.match(timeline.textContent, /이전 기록 일부는 표시되지 않습니다/);
+  assert.match(timeline.textContent, /예약 변경/);
+  assert.doesNotMatch(timeline.textContent, /레벨테스트 1회차|수강 등록|마이그레이션/);
+});
 
 test('teacher case uses shared sections and preserves the saved management-visible values without edit controls', async t => {
   const h = await mount(t);
@@ -142,9 +157,17 @@ test('legacy producer values survive the scoped service mapper and remain explic
   raw.events.push({ id: id(95), task_id: producerIds.task, event_type: 'legacy_registration_imported', actor_id: null, created_at: at,
     before_value: { classId: producerIds.class, textbookId: producerIds.textbook },
     after_value: { version: 1, timestamps: { levelTestAt: at, levelTestCompletedAt: at, phoneConsultationAt: at, visitConsultationAt: at, consultationAt: at, classStartDate: '2026-11-02', classStartSession: '기존 1회차' }, legacyBooleans: { admissionNoticeSent: true, makeeduRegistered: true, makeeduInvoiceSent: false, paymentChecked: false } } });
+  raw.eventWindow = { recentLimit: 30, totalCount: raw.events.length, returnedCount: raw.events.length, anchorCount: 0, hasEarlierEvents: false };
   const { createRegistrationTeacherDetailService } = loadNotificationComponent('src/features/tasks/registration-teacher-detail-service.ts');
   const requests = [];
-  const client = { rpc(name, args) { requests.push({ name, args }); return Promise.resolve({ data: envelope('case', raw), error: null }); } };
+  const client = { rpc(name, args) {
+    const request = { name, args, signal: null, retry: null }; requests.push(request);
+    return {
+      abortSignal(signal) { request.signal = signal; return this; },
+      retry(value) { request.retry = value; return this; },
+      then(resolve, reject) { return Promise.resolve({ data: envelope('case', raw), error: null, status: 200 }).then(resolve, reject); },
+    };
+  } };
   const data = await createRegistrationTeacherDetailService(client).loadCase({ taskId: producerIds.task });
   assert.equal(data.detail.task.registration.levelTestResult, undefined, 'the actual mapper does not put legacy fields in common inquiry');
   await mount(t, { data });
@@ -153,6 +176,8 @@ test('legacy producer values survive the scoped service mapper and remain explic
   assert.match(section('inquiry').textContent, /입학 안내.*완료.*수납 확인.*미완료/s);
   assert.doesNotMatch(section('level_test').textContent, /기존 합성 시험 결과/);
   assert.equal(requests.length, 1, 'one scoped mock read; no global catalogs');
+  assert.ok(requests[0].signal instanceof AbortSignal);
+  assert.equal(requests[0].retry, false);
 });
 
 test('a direct older observation uses the exact scoped attempt reader and rejects an unrelated result', async t => {

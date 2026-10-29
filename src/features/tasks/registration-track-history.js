@@ -526,7 +526,49 @@ function enrichCanonicalMetadata(group, { levelTestById, consultationById, batch
   return metadata;
 }
 
-export function buildRegistrationSubjectHistory(detail = {}) {
+function buildPartialRegistrationHistory(detail) {
+  const subjects = new Map(list(detail.tracks).map(track => [text(track.id), text(track.subject)]));
+  const items = [];
+  for (const event of list(detail.events)) {
+    if (isNotificationInternal(event)) continue;
+    const stage = eventStage(event);
+    const fine = isFineAppointmentEvent(event);
+    if (!stage && !fine) continue;
+    const canonical = isCanonicalProcessEvent(event);
+    if (!canonical && !(stage && (text(event.legacyText) || event.legacyTitleOnly === true || event.eventType === "registration_case_created"))) continue;
+    // A bounded window cannot establish missing revisions or operation groups.
+    // Keep each recorded event's own facts; current entity snapshots remain in
+    // their detail sections and are never recast as historical migration rows.
+    const metadata = { ...record(event.metadata) };
+    if (canonical && fine) metadata.appointmentChanges = [appointmentChangeSnapshot(event)];
+    items.push(historyItem({
+      id: `event:${text(event.id)}`,
+      kind: "event",
+      stage: stage || "registration",
+      occurredAt: canonical ? event.occurredAt : null,
+      subjects: [text(event.subject) || subjects.get(text(event.trackId))],
+      title: eventTitle(event),
+      description: snapshotDescription(event),
+      metadata,
+      actorId: canonical ? event.actorId : null,
+      actorKind: canonical ? event.actorKind : event.eventType === "registration_case_created" ? null : "migration",
+      systemSource: canonical ? event.systemSource : null,
+      timeKind: canonical ? "exact" : "unavailable",
+      origin: canonical ? "canonical" : "migration",
+    }));
+  }
+  return items.sort((left, right) => {
+    if (left.timeKind !== right.timeKind) return left.timeKind === "exact" ? -1 : 1;
+    if (left.occurredAt && right.occurredAt) {
+      const order = right.occurredAt.localeCompare(left.occurredAt);
+      if (order !== 0) return order;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
+export function buildRegistrationSubjectHistory(detail = {}, { partial = false } = {}) {
+  if (partial) return buildPartialRegistrationHistory(detail);
   const tracks = list(detail.tracks);
   const appointments = list(detail.appointments);
   const levelTests = list(detail.levelTests);
@@ -572,7 +614,7 @@ export function buildRegistrationSubjectHistory(detail = {}) {
     if (!stage && !fineAppointment) continue;
 
     if (!isCanonicalProcessEvent(event)) {
-      if (stage && (text(event.legacyText) || event.eventType === "registration_case_created")) {
+      if (stage && (text(event.legacyText) || event.legacyTitleOnly === true || event.eventType === "registration_case_created")) {
         migrationEvents.push({ event, stage });
       }
       continue;

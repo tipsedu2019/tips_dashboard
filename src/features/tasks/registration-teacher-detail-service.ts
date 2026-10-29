@@ -9,8 +9,11 @@ import {
 } from "./registration-customer-message-case-history-contract"
 import type { RegistrationCustomerMessageClient } from "./registration-customer-message-contract"
 
+export type RegistrationTeacherEventWindow = Readonly<{ recentLimit: 30; totalCount: number; returnedCount: number; anchorCount: number; hasEarlierEvents: boolean }>
+
 export type RegistrationTeacherCaseData = Readonly<{
   detail: OpsRegistrationObservationCaseDetail
+  eventWindow: RegistrationTeacherEventWindow
   profiles: ReadonlyArray<{ id: string; name: string }>
   classes: ReadonlyArray<{ id: string; name: string }>
   textbooks: ReadonlyArray<{ id: string; title: string }>
@@ -58,7 +61,7 @@ export type RegistrationTeacherFeedback = Readonly<Pick<RegistrationTeacherObser
 }>
 
 type Row = Record<string, unknown>
-type RpcResult = { data: unknown; error: unknown }
+type RpcResult = { data: unknown; error: unknown; status?: number }
 type RpcRequest = PromiseLike<RpcResult> & {
   abortSignal: (signal: AbortSignal) => RpcRequest
   retry: (enabled: boolean) => RpcRequest
@@ -71,7 +74,7 @@ export type RegistrationTeacherTrackInput = RegistrationTeacherCaseInput & Reado
 export type RegistrationTeacherObservationInput = RegistrationTeacherTrackInput & Readonly<{ observationId: string }>
 type Section = "case" | "observation_detail" | "observation_attempt" | "feedback" | "customer_history"
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const CASE_KEYS = ["parent", "tracks", "appointments", "levelTests", "consultations", "admissionBatches", "enrollments", "events", "activeAdmissionMessage", "reminderSummaries", "scheduledAppointmentTotal", "currentEnrollmentTotal", "profiles", "classes", "textbooks"]
+const CASE_KEYS = ["parent", "tracks", "appointments", "levelTests", "consultations", "admissionBatches", "enrollments", "events", "eventWindow", "activeAdmissionMessage", "reminderSummaries", "scheduledAppointmentTotal", "currentEnrollmentTotal", "profiles", "classes", "textbooks"]
 const invalid = (): never => { throw new Error("registration_teacher_detail_invalid") }
 function exact(input: unknown, keys: readonly string[]): Row {
   if (!input || typeof input !== "object" || Array.isArray(input)) return invalid()
@@ -101,12 +104,152 @@ function labels(input: unknown, label: "name" | "title") {
   })
 }
 
+const PARENT_KEYS = ["id", "title", "type", "student_name", "updated_at", "ops_registration_details"]
+const DETAIL_KEYS = "task_id pipeline_status inquiry_at school_grade school_name parent_phone student_phone request_note admission_notice_sent common_revision admission_checklist level_test_place level_test_material_link level_test_result visit_consultation_place".split(" ")
+const TRACK_KEYS = "id task_id subject pipeline_status director_profile_id director_assignment_source director_assignment_rule_key waiting_kind level_test_retake_decision migration_review_required stage_entered_at updated_at workflow_status workflow_revision workflow_status_entered_at waiting_detail_kind waiting_detail_class_id waiting_detail_retake_decision enrollment_detail_rows phone_ready_at phone_ready_source level_test_scheduled_at level_test_place visit_scheduled_at visit_place director observation_return_workflow_status observation_attempt_count observation_current_id observation_current_status observation_current_appointment_id observation_nearest_scheduled_at observation_nearest_place observation_notification_revision observation_revision observation_feedback_revision".split(" ")
+const ENROLLMENT_DETAIL_KEYS = "id classId class_id textbookId textbook_id textbookIds textbook_ids classStartDate class_start_date classStartSessionKey class_start_session_key classStartLessonSessionId class_start_lesson_session_id classStartSession class_start_session classStartSourceObservationId class_start_source_observation_id sortOrder sort_order".split(" ")
+const RAW_ROW_KEYS = {
+  appointments: "id task_id kind scheduled_at place status notification_revision created_at updated_at",
+  levelTests: "id track_id appointment_id attempt_number status started_at completed_at material_link",
+  consultations: "id track_id appointment_id mode status director_profile_id ready_at ready_source completed_at outcome note created_at updated_at",
+  admissionBatches: "id task_id revision_number status invoice_sent_at payment_confirmed_at created_at updated_at",
+  enrollments: "id track_id student_id admission_batch_id class_id textbook_id textbook_ids class_start_date class_start_session_key class_start_lesson_session_id class_start_session class_start_source_observation_id status makeedu_registered roster_active roster_released_at roster_release_reason roster_release_source_task_id roster_release_kind sort_order created_at updated_at",
+} as const
+const EVENT_KEYS = "id task_id actor_id event_type field_name before_value after_value created_at display_title_only".split(" ")
+const VISIBLE_EVENT_TYPES = new Set("case_created inquiry_routed director_default_resolved director_manual_override level_test_scheduled level_test_started level_test_completed consultation_waiting visit_consultation_scheduled consultation_completed waiting_started enrollment_decided admission_completed registration_completed track_closed track_reopened registration_case_created initial_inquiry_selected director_default_cleared director_assignment_required director_phone_queue_repaired level_test_retake_scheduled level_test_absent level_test_canceled level_test_track_closed visit_scheduled waiting_transitioned enrollment_decision_routed admission_batch_started admission_batch_completed enrollment_rows_saved registration_enrollment_makeedu_updated registration_enrollment_canceled registration_enrollment_roster_released admission_batch_canceled migration_review_resolved appointment_updated appointment_replaced appointment_subject_deselected appointment_canceled".split(" "))
+const LITERAL_EVENT_TYPES = new Set([...VISIBLE_EVENT_TYPES].filter((type) => !["appointment_updated", "appointment_replaced", "appointment_subject_deselected", "appointment_canceled"].includes(type)))
+const EVENT_PAYLOAD_KEYS = "version eventType event_type trackId track_id subject source destination reason reason_code actorId actor_profile_id actor_kind system_source occurredAt occurred_at metadata".split(" ")
+const EVENT_METADATA_KEYS = "action activeTrackIds activityId appointmentId attemptId attemptNumber batchId canceledTrackIds changeKind classId completedAt consultationId consultationStatus directorProfileId enrollmentId enrollmentIds invoiceSentAt kind makeeduRegistered materialLink mode newAppointmentId notificationRevision oldAppointmentId oldNotificationRevision oldPlace oldScheduledAt outcome paymentConfirmedAt place restoredHistoricalEnrollment resultStatus retakeDecision revisionNumber rowIds scheduledAt startedAt status waitingKind rows subjectTransitions enrollmentSnapshot appointmentChanges".split(" ")
+const EVENT_ENROLLMENT_KEYS = "classId textbookId textbookIds textbook_id textbook_ids classStartDate classStartSession status".split(" ")
+const PRIMITIVE_ARRAY_KEYS = new Set(["textbookIds", "textbook_ids", "activeTrackIds", "canceledTrackIds", "rowIds", "enrollmentIds"])
+function closed(input: unknown, keys: readonly string[]): Row {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return invalid()
+  const row = input as Row
+  if (Object.keys(row).some((key) => !keys.includes(key))) return invalid()
+  return row
+}
+function primitive(value: unknown): boolean {
+  return value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))
+}
+function projectedObject(input: unknown, keys: readonly string[], nested: readonly string[] = []): Row {
+  const row = closed(input, keys)
+  for (const [key, value] of Object.entries(row)) {
+    if (nested.includes(key)) continue
+    if (!primitive(value) && !(PRIMITIVE_ARRAY_KEYS.has(key) && Array.isArray(value) && value.every(primitive))) return invalid()
+  }
+  return row
+}
+function projectedRows(input: unknown, keys: readonly string[]): Row[] {
+  if (!Array.isArray(input)) return invalid()
+  return input.map((item) => projectedObject(item, keys))
+}
+function jsonObject(input: unknown): Row {
+  let value = input
+  if (typeof value === "string") {
+    try { value = JSON.parse(value) } catch { return invalid() }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid()
+  return value as Row
+}
+function plainHistoryValue(input: unknown) {
+  if (input === null) return
+  if (typeof input !== "string") return invalid()
+  const title = input.trim()
+  let hidden: boolean
+  try { JSON.parse(title); hidden = true } catch {
+    // Match the existing history title consumer, including truncated JSON.
+    // Bracketed Korean notes and ordinary quoted prose remain human text.
+    hidden = /^\{/.test(title)
+      || /^\[\s*(?:[{["\d-]|true\b|false\b|null\b|$)/.test(title)
+      || /^"(?:[^"\\]|\\.)*$/.test(title)
+      || title === "[object Object]"
+  }
+  if (hidden) return invalid()
+}
+function validateTeacherEvent(input: unknown) {
+  const row = projectedObject(input, EVENT_KEYS, ["before_value", "after_value"])
+  if ((Object.prototype.hasOwnProperty.call(row, "actor_id") && row.actor_id !== null)
+    || (Object.prototype.hasOwnProperty.call(row, "field_name") && row.field_name !== null)) return invalid()
+  if (Object.prototype.hasOwnProperty.call(row, "display_title_only")) {
+    if (row.display_title_only !== true || typeof row.event_type !== "string"
+      || !LITERAL_EVENT_TYPES.has(row.event_type) || row.event_type === "registration_case_created"
+      || row.before_value !== null || row.after_value !== null) return invalid()
+    return
+  }
+  if (row.event_type === "registration_track_event") {
+    if (row.before_value !== null) return invalid()
+    const payload = projectedObject(jsonObject(row.after_value), EVENT_PAYLOAD_KEYS, ["metadata"])
+    const version = payload.version
+    if (version !== 1 && version !== "1" && version !== 2 && version !== "2") return invalid()
+    const type = version === 1 || version === "1" ? payload.eventType : payload.event_type
+    if (typeof type !== "string" || !VISIBLE_EVENT_TYPES.has(type)) return invalid()
+    const metadata = projectedObject(payload.metadata, EVENT_METADATA_KEYS, ["rows", "subjectTransitions", "enrollmentSnapshot", "appointmentChanges"])
+    if (Object.prototype.hasOwnProperty.call(metadata, "rows")) projectedRows(metadata.rows, EVENT_ENROLLMENT_KEYS)
+    if (Object.prototype.hasOwnProperty.call(metadata, "subjectTransitions")) projectedRows(metadata.subjectTransitions, ["subject", "source", "destination", "reason"])
+    if (Object.prototype.hasOwnProperty.call(metadata, "enrollmentSnapshot")) projectedObject(metadata.enrollmentSnapshot, [...EVENT_ENROLLMENT_KEYS, "admissionBatchId"])
+    if (Object.prototype.hasOwnProperty.call(metadata, "appointmentChanges")) {
+      if (!Array.isArray(metadata.appointmentChanges)) return invalid()
+      for (const item of metadata.appointmentChanges) {
+        const change = projectedObject(item, ["eventType", "reasonLabel", "reason", "metadata"], ["metadata"])
+        projectedObject(change.metadata, ["oldScheduledAt", "scheduledAt", "oldPlace", "place"])
+      }
+    }
+  } else if (row.event_type === "legacy_registration_imported") {
+    projectedObject(jsonObject(row.before_value), ["studentId", "classId", "textbookId", "pipelineStatus"])
+    const payload = projectedObject(jsonObject(row.after_value), ["version", "timestamps", "legacyBooleans"], ["timestamps", "legacyBooleans"])
+    if (payload.version !== 1 && payload.version !== "1") return invalid()
+    projectedObject(payload.timestamps, ["levelTestAt", "levelTestCompletedAt", "phoneConsultationAt", "visitConsultationAt", "consultationAt", "classStartDate", "classStartSession"])
+    projectedObject(payload.legacyBooleans, ["admissionNoticeSent", "makeeduRegistered", "makeeduInvoiceSent", "paymentChecked"])
+  } else if (row.event_type === "registration_case_created") {
+    if (row.before_value !== null) return invalid()
+    if (row.after_value !== null) projectedObject(jsonObject(row.after_value), ["version", "actorId", "occurredAt"])
+  } else {
+    if (typeof row.event_type !== "string" || !LITERAL_EVENT_TYPES.has(row.event_type) || row.before_value !== null) return invalid()
+    plainHistoryValue(row.after_value)
+  }
+}
+function validateTeacherCaseRows(row: Row) {
+  const parent = projectedObject(row.parent, PARENT_KEYS, ["ops_registration_details"])
+  const detail = projectedObject(parent.ops_registration_details, DETAIL_KEYS, ["admission_checklist"])
+  if (Object.prototype.hasOwnProperty.call(detail, "admission_checklist")) {
+    const checklist = exact(detail.admission_checklist, ["applicationSent", "makeeduRegistered", "invoiceSent", "paymentConfirmed", "registrationCompleted"])
+    if (Object.values(checklist).some((value) => typeof value !== "boolean")) return invalid()
+  }
+  if (!Array.isArray(row.tracks)) return invalid()
+  for (const item of row.tracks) {
+    const track = projectedObject(item, TRACK_KEYS, ["director", "enrollment_detail_rows"])
+    if (track.director !== null) projectedObject(track.director, ["id", "name"])
+    if (Object.prototype.hasOwnProperty.call(track, "enrollment_detail_rows")) projectedRows(track.enrollment_detail_rows, ENROLLMENT_DETAIL_KEYS)
+  }
+  for (const [key, keys] of Object.entries(RAW_ROW_KEYS)) projectedRows(row[key], keys.split(" "))
+  if (row.activeAdmissionMessage !== null) projectedObject(row.activeAdmissionMessage, ["id", "status", "claim_active", "template_key", "updated_at"])
+  if (!Array.isArray(row.events) || row.events.length > 32) return invalid()
+  row.events.forEach(validateTeacherEvent)
+  const imports = row.events.filter((event: Row) => event.event_type === "legacy_registration_imported")
+  if (imports.length > 1 || (imports.length > 0
+    && !row.tracks.some((track: Row) => track.migration_review_required === true))) return invalid()
+}
+function parseEventWindow(input: unknown, events: unknown): RegistrationTeacherEventWindow {
+  const row = exact(input, ["recentLimit", "totalCount", "returnedCount", "anchorCount", "hasEarlierEvents"])
+  if (row.recentLimit !== 30 || !Array.isArray(events)
+    || !Number.isSafeInteger(row.totalCount) || Number(row.totalCount) < 0
+    || !Number.isSafeInteger(row.returnedCount) || row.returnedCount !== events.length
+    || !Number.isSafeInteger(row.anchorCount) || Number(row.anchorCount) < 0 || Number(row.anchorCount) > 2
+    || Number(row.returnedCount) > Number(row.totalCount)
+    || row.returnedCount !== Math.min(Number(row.totalCount), 30) + Number(row.anchorCount)
+    || row.hasEarlierEvents !== (Number(row.totalCount) > Number(row.returnedCount))) return invalid()
+  return { recentLimit: 30, totalCount: Number(row.totalCount), returnedCount: Number(row.returnedCount), anchorCount: Number(row.anchorCount), hasEarlierEvents: row.hasEarlierEvents as boolean }
+}
+
 export function parseRegistrationTeacherCaseData(input: unknown, taskId: string): RegistrationTeacherCaseData {
   const row = exact(input, CASE_KEYS)
+  validateTeacherCaseRows(row)
+  const eventWindow = parseEventWindow(row.eventWindow, row.events)
   const detail = mapRegistrationTeacherCaseBundle(row)
   if (detail.task.id !== taskId) return invalid()
   return {
     detail,
+    eventWindow,
     profiles: labels(row.profiles, "name").map(({ id, value }) => ({ id, name: value })),
     classes: labels(row.classes, "name").map(({ id, value }) => ({ id, name: value })),
     textbooks: labels(row.textbooks, "title").map(({ id, value }) => ({ id, title: value })),
@@ -245,9 +388,17 @@ export function createRegistrationTeacherDetailService(client: RegistrationTeach
       if (abort.aborted) onAbort()
     })
     try {
-      const { data, error } = await Promise.race([Promise.resolve(request), aborted])
+      const { data, error, status } = await Promise.race([Promise.resolve(request), aborted])
       abort.throwIfAborted()
-      if (error) throw error
+      if (error) {
+        // PostgREST keeps HTTP status beside its error object. Retain it so
+        // expired sessions and forbidden reads invalidate the displayed case.
+        if (status === 401 || status === 403) {
+          const details = typeof error === "object" ? error as Row : {}
+          throw Object.assign(new Error(typeof details.message === "string" ? details.message : "registration_teacher_detail_forbidden"), details, { status, cause: error })
+        }
+        throw error
+      }
       const envelope = exact(data, ["contractVersion", "taskId", "section", "data"])
       if (envelope.contractVersion !== 1 || envelope.taskId !== taskId || envelope.section !== section) return invalid()
       return envelope.data
