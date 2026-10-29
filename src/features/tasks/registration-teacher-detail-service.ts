@@ -208,14 +208,36 @@ export function createRegistrationTeacherDetailService(client: RegistrationTeach
     const deadline = AbortSignal.timeout(8_000)
     const abort = signal ? AbortSignal.any([signal, deadline]) : deadline
     const taskId = uuid(input.taskId)
-    const request = client.rpc("get_registration_teacher_detail_v1", {
-      p_task_id: taskId,
-      p_section: section,
-      p_track_id: input.trackId === undefined ? null : uuid(input.trackId),
-      p_observation_id: input.observationId === undefined ? null : uuid(input.observationId),
-      p_page: input.page ?? 1,
-      p_page_size: input.pageSize ?? 10,
-    }).abortSignal(abort).retry(false)
+    const pageSize = input.pageSize ?? 10
+    if (pageSize !== 10 && pageSize !== 15 && pageSize !== 20) return invalid()
+    // These are the actual server limits, kept explicit at each RPC call so
+    // the existing query budget verifier can prove every branch is bounded.
+    const request = pageSize === 20
+      ? client.rpc("get_registration_teacher_detail_v1", {
+        p_task_id: taskId,
+        p_section: section,
+        p_track_id: input.trackId === undefined ? null : uuid(input.trackId),
+        p_observation_id: input.observationId === undefined ? null : uuid(input.observationId),
+        p_page: input.page ?? 1,
+        p_limit: 20,
+      }).abortSignal(abort).retry(false)
+      : pageSize === 15
+        ? client.rpc("get_registration_teacher_detail_v1", {
+          p_task_id: taskId,
+          p_section: section,
+          p_track_id: input.trackId === undefined ? null : uuid(input.trackId),
+          p_observation_id: input.observationId === undefined ? null : uuid(input.observationId),
+          p_page: input.page ?? 1,
+          p_limit: 15,
+        }).abortSignal(abort).retry(false)
+        : client.rpc("get_registration_teacher_detail_v1", {
+          p_task_id: taskId,
+          p_section: section,
+          p_track_id: input.trackId === undefined ? null : uuid(input.trackId),
+          p_observation_id: input.observationId === undefined ? null : uuid(input.observationId),
+          p_page: input.page ?? 1,
+          p_limit: 10,
+        }).abortSignal(abort).retry(false)
     let onAbort: (() => void) | undefined
     const aborted = new Promise<never>((_, reject) => {
       onAbort = () => reject(abort.reason)

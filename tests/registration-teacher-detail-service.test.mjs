@@ -27,7 +27,7 @@ test('teacher case read maps non-empty producer fields through the existing mana
   assert.equal(detail.collectionWindows.scheduledAppointments.overflow, true); assert.equal(detail.collectionWindows.currentEnrollments.totalCount, 31);
   assert.deepEqual(result.classes, raw.classes); assert.deepEqual(result.textbooks, raw.textbooks); assert.deepEqual(result.profiles, raw.profiles);
   assert.deepEqual(raw, before); assert.equal(h.calls.length, 1);
-  assert.deepEqual(h.calls[0].args, { p_task_id: ids.task, p_section: 'case', p_track_id: null, p_observation_id: null, p_page: 1, p_page_size: 10 });
+  assert.deepEqual(h.calls[0].args, { p_task_id: ids.task, p_section: 'case', p_track_id: null, p_observation_id: null, p_page: 1, p_limit: 10 });
   assert.equal(h.calls[0].name, 'get_registration_teacher_detail_v1'); assert.equal(h.calls[0].retry, false);
 });
 
@@ -262,3 +262,41 @@ test('transport failures and missing targets remain visible without cached data 
   await assert.rejects(h.service.loadCase({ taskId: ids.task }), error => error === missing);
   assert.equal(h.calls.length, 3); assert.ok(h.calls.every(call => call.retry === false));
 });
+
+
+for (const pageSize of [10, 15, 20]) {
+  for (const [label, page, count] of [['second full page', 2, pageSize], ['last partial page', 3, 3], ['empty later page', 4, 0]]) {
+    test(`history size ${pageSize} sends the actual server limit on ${label}`, async () => {
+      const h = harness();
+      const data = { ...history(), page, pageSize, totalCount: pageSize * 2 + 3,
+        history: Array.from({ length: count }, (_, index) => ({ ...history().history[0], messageId: id(300 + pageSize * page + index) })),
+      };
+      h.respond(envelope('customer_history', data));
+      assert.deepEqual(await h.service.listCaseHistory({ taskId: ids.task, page, pageSize }), data);
+      assert.deepEqual(h.calls[0].args, { p_task_id: ids.task, p_section: 'customer_history', p_track_id: null, p_observation_id: null, p_page: page, p_limit: pageSize });
+      assert.equal(Object.hasOwn(h.calls[0].args, 'p_page_size'), false);
+      assert.equal(h.calls[0].retry, false); assert.ok(h.calls[0].signal instanceof AbortSignal);
+      assert.equal(h.calls.length, 1);
+    });
+  }
+  test(`history size ${pageSize} aborts its branch and discards a late response`, async () => {
+    const h = harness(), controller = new AbortController(); let resolve;
+    const data = { ...history(), page: 2, pageSize, totalCount: pageSize + 1 };
+    h.deferred(new Promise(done => { resolve = done; }));
+    const pending = h.service.listCaseHistory({ taskId: ids.task, page: 2, pageSize }, controller.signal);
+    controller.abort(); resolve({ data: envelope('customer_history', data), error: null });
+    await assert.rejects(pending, error => error.name === 'AbortError');
+    assert.equal(h.calls[0].signal.aborted, true); assert.equal(h.calls[0].args.p_limit, pageSize);
+    assert.equal(Object.hasOwn(h.calls[0].args, 'p_page_size'), false); assert.equal(h.calls[0].retry, false);
+    const before = h.calls.length;
+    await assert.rejects(h.service.listCaseHistory({ taskId: ids.task, page: 2, pageSize }, controller.signal), error => error.name === 'AbortError');
+    assert.equal(h.calls.length, before, 'already-aborted branch never creates a second request');
+  });
+}
+for (const pageSize of [0, 11, 21, 31, 10.5, '10', null]) {
+  test(`history rejects invalid limit ${JSON.stringify(pageSize)} before RPC`, async () => {
+    const h = harness();
+    await assert.rejects(h.service.listCaseHistory({ taskId: ids.task, page: 1, pageSize }), /registration_teacher_detail_invalid/);
+    assert.equal(h.calls.length, 0);
+  });
+}

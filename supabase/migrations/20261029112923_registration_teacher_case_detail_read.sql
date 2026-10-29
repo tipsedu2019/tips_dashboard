@@ -218,7 +218,7 @@ $$;
 
 create function dashboard_private.get_registration_teacher_detail_v1_impl(
  p_task_id uuid,p_section text default 'case',p_track_id uuid default null,p_observation_id uuid default null,
- p_page integer default 1,p_page_size integer default 10)
+ p_page integer default 1,p_limit integer default 10)
 returns jsonb language plpgsql stable security definer set search_path='' set timezone='UTC' as $$
 declare data jsonb;track public.ops_registration_subject_tracks%rowtype;current_observation jsonb;attempts jsonb;latest_decision jsonb;history jsonb;total integer;
 begin
@@ -228,9 +228,9 @@ begin
   and u.deleted_at is null and(u.banned_until is null or u.banned_until<=now())) then
   raise exception 'registration_teacher_detail_forbidden' using errcode='42501';end if;
  if p_task_id is null or p_section is null or p_section not in('case','observation_detail','observation_attempt','feedback','customer_history')
-  or p_page is null or p_page_size is null
-  or(p_section='customer_history' and(p_page not between 1 and 100000 or p_page_size not in(10,15,20) or p_track_id is not null or p_observation_id is not null))
-  or(p_section<>'customer_history' and(p_page<>1 or p_page_size<>10))
+  or p_page is null or p_limit is null
+  or(p_section='customer_history' and(p_page not between 1 and 100000 or p_limit not in(10,15,20) or p_track_id is not null or p_observation_id is not null))
+  or(p_section<>'customer_history' and(p_page<>1 or p_limit<>10))
   or(p_section='case' and(p_track_id is not null or p_observation_id is not null))
   or(p_section='observation_detail' and(p_track_id is null or p_observation_id is not null))
   or(p_section in('observation_attempt','feedback') and(p_track_id is null or p_observation_id is null)) then
@@ -291,9 +291,9 @@ begin
    'confirmedAt',m.confirmed_at,'updatedAt',m.updated_at,'recipientLast4',case when m.recipient_last4~'^[0-9]{4}$' then m.recipient_last4 else null end,
    'canCheck',false,'canCheckDelivery',false)) order by m.created_at desc,m.id desc),'[]') into history
   from(select id,message_kind,status,delivery_origin,confirmed_by,confirmed_at,updated_at,recipient_last4,created_at
-   from public.ops_registration_customer_messages where task_id=p_task_id order by created_at desc,id desc limit p_page_size offset((p_page-1)*p_page_size)) m
+   from public.ops_registration_customer_messages where task_id=p_task_id order by created_at desc,id desc limit p_limit offset((p_page-1)*p_limit)) m
   left join public.profiles p on p.id=m.confirmed_by;
-  data:=jsonb_build_object('ok',true,'page',p_page,'pageSize',p_page_size,'totalCount',total,'history',history);
+  data:=jsonb_build_object('ok',true,'page',p_page,'pageSize',p_limit,'totalCount',total,'history',history);
  end if;
  if data is null then raise exception 'registration_teacher_detail_not_found' using errcode='P0002';end if;
  return jsonb_build_object('contractVersion',1,'taskId',p_task_id,'section',p_section,'data',data);
@@ -301,9 +301,9 @@ end $$;
 
 create function public.get_registration_teacher_detail_v1(
  p_task_id uuid,p_section text default 'case',p_track_id uuid default null,p_observation_id uuid default null,
- p_page integer default 1,p_page_size integer default 10)
+ p_page integer default 1,p_limit integer default 10)
 returns jsonb language sql stable security invoker set search_path='' as $$
- select dashboard_private.get_registration_teacher_detail_v1_impl(p_task_id,p_section,p_track_id,p_observation_id,p_page,p_page_size)
+ select dashboard_private.get_registration_teacher_detail_v1_impl(p_task_id,p_section,p_track_id,p_observation_id,p_page,p_limit)
 $$;
 
 alter function dashboard_private.registration_teacher_object_v1(jsonb,text[]) owner to postgres;
