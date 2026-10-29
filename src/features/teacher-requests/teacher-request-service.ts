@@ -11,13 +11,16 @@ const uuid = z.string().uuid()
 const text = z.string()
 const date = text.regex(/^\d{4}-\d{2}-\d{2}$/).nullable()
 const note = text.max(4000)
+const lessonHours = text.regex(/^(?:|(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?)$/)
 const makeupSlotInputSchema = z.object({ startAt: text, endAt: text, classroom: text }).strict()
 const inputSchemas = {
   transfer: z.object({ student_id: uuid, memo: note, from_class_id: uuid, to_class_id: uuid, transfer_reason: note,
     from_class_end_date: date, from_class_end_session: note, to_class_start_date: date, to_class_start_session: note,
     from_undistributed_textbooks: note, to_undistributed_textbooks: note }).strict(),
   withdrawal: z.object({ student_id: uuid, memo: note, class_id: uuid, withdrawal_date: date, withdrawal_session: note,
-    customer_reason: note, teacher_opinion: note, undistributed_textbooks: note }).strict(),
+    customer_reason: note, teacher_opinion: note, undistributed_textbooks: note,
+    completed_lesson_hours: lessonHours.optional(), four_week_lesson_hours: lessonHours.optional(),
+  }).strict().refine(value => (value.completed_lesson_hours === undefined) === (value.four_week_lesson_hours === undefined)),
   makeup: z.object({ request_kind: z.enum(["cancel_makeup", "cancel_only", "makeup_only"]), class_id: uuid, reason: note,
     cancel_date: date, original_lesson_session_id: uuid.nullable(), makeup_slots: z.array(makeupSlotInputSchema).max(30) }).strict(),
   textbook: z.object({ title: text, textbookId: uuid.nullable(), classId: uuid.nullable(), locationId: uuid.nullable(),
@@ -29,6 +32,15 @@ const makeupDetailInputSchema = inputSchemas.makeup.extend({
     .transform(({ startAt, endAt, classroom }) => ({ startAt, endAt, classroom }))).max(30),
 })
 export type RequestInput = Record<string, unknown>
+export function teacherWithdrawalHoursDisplay(input: RequestInput) {
+  const hours = (value: unknown) => lessonHours.safeParse(value).success && value !== "" ? Number(value) : null
+  const completed = hours(input.completed_lesson_hours), total = hours(input.four_week_lesson_hours)
+  return {
+    completed: completed === null ? "계산된 값 없음" : String(completed),
+    total: total === null ? "계산된 값 없음" : String(total),
+    progress: completed === null || total === null || total === 0 ? "계산된 값 없음" : `${Math.min(100, Math.round(100 * completed / total))}%`,
+  }
+}
 export type MakeupSlot = { startAt: string; endAt: string; classroom: string }
 const labelsSchema = z.object({ student: text.optional(), class: text.optional(), fromClass: text.optional(), toClass: text.optional(), textbook: text.optional(), location: text.optional() }).strict()
 const approverSchema = z.object({ profileId: uuid.nullable(), label: text.nullable() }).strict().nullable()
