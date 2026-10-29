@@ -73,7 +73,8 @@ function loadTextbookService() {
         if (specifier === "@/lib/public-classes-cache-invalidation.js") {
           return { url: cacheInvalidationStubUrl, shortCircuit: true };
         }
-        if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL) {
+        // Only app modules need extension resolution; leave dependency CommonJS paths intact.
+        if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL?.startsWith(new URL("src/", root).href)) {
           return nextResolve(withKnownExtension(new URL(specifier, context.parentURL).href), context);
         }
         return nextResolve(specifier, context);
