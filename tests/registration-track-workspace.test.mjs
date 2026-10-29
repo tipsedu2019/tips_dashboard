@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import { REGISTRATION_SYNTHETIC_PHONES } from "../src/features/tasks/registration-track-fixtures.ts";
 import { registrationDefaultTextbookIds } from "../src/features/tasks/registration-class-options.ts"
 import assert from "node:assert/strict";
@@ -5777,4 +5779,32 @@ test("mounted detail header exposes location navigation only to management witho
     hookHarness.cleanup()
     for (const [key, descriptor] of globals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key] }
   }
+})
+
+
+// The workflow selects this existing suite explicitly. Keep the real Radix
+// regressions in a separate process so their DOM globals cannot affect it.
+test("message location navigation regressions run in an isolated CI subprocess", { timeout: 35_000 }, () => {
+  const result = spawnSync(process.execPath, [
+    "--test", "--experimental-strip-types", "--test-reporter=tap",
+    fileURLToPath(new URL("./registration-message-location-navigation.test.mjs", import.meta.url)),
+  ], {
+    cwd: fileURLToPath(new URL("../", import.meta.url)),
+    encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024,
+    // Do not inherit test-runner context, filters, preload options or credentials.
+    env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C", TZ: "UTC" },
+  })
+  const diagnostic = [result.error?.message, result.stderr, result.stdout].filter(Boolean).join("\n")
+  assert.equal(result.error, undefined, diagnostic)
+  assert.equal(result.signal, null, diagnostic)
+  assert.equal(result.status, 0, diagnostic)
+  assert.match(result.stdout, /^TAP version 13$/m)
+  const summary = Object.fromEntries(["tests", "pass", "fail", "cancelled", "skipped", "todo"].map(key => {
+    const matches = [...result.stdout.matchAll(new RegExp(`^# ${key} (\\d+)$`, "gm"))]
+    assert.equal(matches.length, 1, `Missing or repeated ${key} summary\n${diagnostic}`)
+    return [key, Number(matches[0][1])]
+  }))
+  assert.ok(summary.tests >= 7, diagnostic)
+  assert.equal(summary.pass, summary.tests, diagnostic)
+  for (const key of ["fail", "cancelled", "skipped", "todo"]) assert.equal(summary[key], 0, diagnostic)
 })
