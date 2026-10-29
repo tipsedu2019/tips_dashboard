@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type RefObject } from "react"
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -96,11 +96,17 @@ export function RegistrationAlimtalkPreviewDialog({
   const generationRef = useRef(0)
   const requestKeyRef = useRef<string | null>(null)
   const confirmationLockedRef = useRef(false)
+  const sendOutcomeUncertainRef = useRef(false)
+  const previewAbortRef = useRef<AbortController | null>(null)
+  const previewTitleRef = useRef<HTMLHeadingElement | null>(null)
+  const retryButtonRef = useRef<HTMLButtonElement | null>(null)
   const [preview, setPreview] = useState<RegistrationCustomerMessagePreviewResponse | null>(null)
   const [latestMessage, setLatestMessage] = useState<RegistrationCustomerMessageHistoryItem | null>(null)
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
+  const [previewNotice, setPreviewNotice] = useState("")
+  const [retrying, setRetrying] = useState(false)
   const [result, setResult] = useState<RegistrationCustomerMessageSendResult | null>(null)
   const [refreshWarning, setRefreshWarning] = useState("")
   const [deliveryResult, setDeliveryResult] = useState<RegistrationCustomerMessageDeliveryResult | null>(null)
@@ -117,12 +123,17 @@ export function RegistrationAlimtalkPreviewDialog({
   const targetMessageKind = target?.messageKind
   const targetSourceId = target?.sourceId
 
-  useEffect(() => {
+  const loadPreview = useCallback((source: "initial" | "manual" | "conflict" = "initial") => {
     const generation = ++generationRef.current
+    previewAbortRef.current?.abort()
     const controller = new AbortController()
+    previewAbortRef.current = controller
+    const restorePreviewFocus = source === "manual" && document.activeElement === retryButtonRef.current
     setLoading(Boolean(open && targetMessageKind && targetSourceId))
+    setRetrying(source === "manual")
     setSending(false)
     setError("")
+    setPreviewNotice(source === "conflict" ? "등록 수업 정보가 변경되었습니다. 새 미리보기를 확인해 주세요." : "")
     setResult(null)
     setRefreshWarning("")
     setDeliveryResult(null)
@@ -140,30 +151,54 @@ export function RegistrationAlimtalkPreviewDialog({
     setRecoveryProviderGroupId("")
     requestKeyRef.current = null
     confirmationLockedRef.current = false
-    if (!open || !targetMessageKind || !targetSourceId) return () => controller.abort()
+    sendOutcomeUncertainRef.current = false
+    if (!open || !targetMessageKind || !targetSourceId) {
+      previewAbortRef.current = null
+      return
+    }
 
     void client.preview({ messageKind: targetMessageKind, sourceId: targetSourceId }, controller.signal)
       .then((next) => {
-        if (generation !== generationRef.current) return
+        if (generation !== generationRef.current || controller.signal.aborted) return
         setPreview(next)
         setLatestMessage(next.latestMessage)
+        if (restorePreviewFocus && (document.activeElement === retryButtonRef.current || document.activeElement === document.body)) {
+          previewTitleRef.current?.focus()
+        }
       })
       .catch((cause: unknown) => {
-        if (generation !== generationRef.current) return
+        if (generation !== generationRef.current || controller.signal.aborted) return
         setError(getRegistrationCustomerMessageErrorMessage(cause, "미리보기를 불러오지 못했습니다."))
       })
       .finally(() => {
-        if (generation === generationRef.current) setLoading(false)
+        if (generation === generationRef.current && !controller.signal.aborted) {
+          previewAbortRef.current = null
+          setLoading(false)
+          setRetrying(false)
+        }
       })
-    return () => { controller.abort(); deliveryAbortRef.current?.abort() }
   }, [client, open, targetMessageKind, targetSourceId])
+
+  const cancelPendingResponses = useCallback(() => {
+    ++generationRef.current
+    previewAbortRef.current?.abort()
+    previewAbortRef.current = null
+    deliveryAbortRef.current?.abort()
+  }, [])
+
+  useEffect(() => {
+    loadPreview()
+    return cancelPendingResponses
+  }, [loadPreview, cancelPendingResponses])
 
   const expiryTime = previewExpiryTime(preview)
   useEffect(() => {
-    if (!expiryTime) return
-    const timer = window.setTimeout(() => setClockTick((value) => value + 1), Math.max(0, expiryTime - Date.now() + 1))
+    if (!open || expiryTime === null) return
+    const remaining = expiryTime - Date.now()
+    if (remaining <= 0) return
+    const timer = window.setTimeout(() => setClockTick((value) => value + 1), Math.min(2_147_483_647, remaining + 1))
     return () => window.clearTimeout(timer)
-  }, [expiryTime])
+  }, [expiryTime, open, clockTick])
 
   const now = Date.now() + clockTick * 0
   const currentStatus = result?.currentStatus || latestMessage?.currentStatus || null
@@ -172,6 +207,9 @@ export function RegistrationAlimtalkPreviewDialog({
   const canCheckPending = currentStatus === "pending" && canCheck
   const duplicateLocked = preview?.readiness.blockers.includes("duplicate_locked") || false
   const expired = !expiryTime || expiryTime <= now
+  const previewNeedsRenewal = Boolean(preview?.previewId) && expired && !currentStatus && !duplicateLocked
+  const canReloadPreview = !currentStatus && !requestKeyRef.current && !duplicateLocked
+    && ((!preview && Boolean(error)) || previewNeedsRenewal)
   const confirmDisabled = loading || sending || confirmationLockedRef.current || !preview?.previewId || expired
     || !preview.readiness.sendAllowed || duplicateLocked || currentStatus === "pending" || currentStatus === "accepted" || currentStatus === "unknown" || currentStatus === "failed_hold"
   const canReconcile = viewerRole === "admin" && currentStatus === "unknown"
@@ -190,6 +228,10 @@ export function RegistrationAlimtalkPreviewDialog({
   }
 
   function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      cancelPendingResponses()
+      confirmationLockedRef.current = true
+    }
     onOpenChange(nextOpen)
     if (!nextOpen) returnFocus()
   }
@@ -200,7 +242,12 @@ export function RegistrationAlimtalkPreviewDialog({
   }
 
   async function confirm() {
-    if (confirmationLockedRef.current || confirmDisabled || !preview?.previewId || !target) return
+    if (confirmationLockedRef.current || previewAbortRef.current || confirmDisabled || !preview?.previewId || !target) return
+    // Recheck at the gesture: background tabs can delay the expiry timer.
+    if (expiryTime === null || expiryTime <= Date.now()) {
+      setClockTick((value) => value + 1)
+      return
+    }
     const generation = generationRef.current
     const confirmedTarget = target
     requestKeyRef.current ??= createRequestKey()
@@ -222,11 +269,22 @@ export function RegistrationAlimtalkPreviewDialog({
       }
     } catch (cause) {
       if (generation !== generationRef.current) return
+      if (cause instanceof Error && cause.message === "registration_customer_message_confirmation_conflict" && !sendOutcomeUncertainRef.current) {
+        loadPreview("conflict")
+        return
+      }
+      // An ambiguous send failure must retain its request key, including after expiry.
+      sendOutcomeUncertainRef.current = true
       confirmationLockedRef.current = false
       setError(getRegistrationCustomerMessageErrorMessage(cause, "발송 요청을 처리하지 못했습니다."))
     } finally {
       if (generation === generationRef.current) setSending(false)
     }
+  }
+
+  function retryPreview() {
+    if (!open || !canReloadPreview || previewAbortRef.current || sending || confirmationLockedRef.current) return
+    loadPreview("manual")
   }
 
   async function check() {
@@ -337,7 +395,7 @@ export function RegistrationAlimtalkPreviewDialog({
         <DialogHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <DialogTitle>알림톡 미리보기</DialogTitle>
+              <DialogTitle ref={previewTitleRef} tabIndex={-1}>알림톡 미리보기</DialogTitle>
             <DialogDescription>{currentStatus === "accepted"
               ? "접수한 알림톡의 전달 결과를 확인할 수 있습니다."
               : "내용과 수신자 끝자리를 확인한 뒤 발송합니다."}</DialogDescription>
@@ -349,6 +407,12 @@ export function RegistrationAlimtalkPreviewDialog({
         </DialogHeader>
 
         {error ? <p role="alert" className="rounded-md border border-destructive/40 px-3 py-2 text-sm">{error}</p> : null}
+        {previewNotice ? <p role="status" className="text-sm">{previewNotice}</p> : null}
+        {previewNeedsRenewal ? <p role="status" className="text-sm">
+          {expiryTime === null ? "미리보기 유효 시간을 확인할 수 없습니다." : "미리보기가 만료되었습니다."}
+          {expiryTime !== null && preview?.expiresAt ? <span className="block text-muted-foreground">만료 시각 · <time dateTime={preview.expiresAt}>{formatAuditTimestamp(preview.expiresAt)}</time></span> : null}
+          <span className="block">{requestKeyRef.current ? "발송 이력을 확인해 주세요." : "새 미리보기를 확인해 주세요."}</span>
+        </p> : null}
         {refreshWarning ? <p role="status" className="rounded-md border border-amber-300 px-3 py-2 text-sm">{refreshWarning}</p> : null}
         {currentStatus === "accepted" ? <p role="status" className="text-sm">
           {deliveryResult?.deliveryStatus === "delivered" ? "알림톡 전달 완료"
@@ -429,6 +493,7 @@ export function RegistrationAlimtalkPreviewDialog({
 
         <DialogFooter>
           <Button type="button" className="min-h-11" variant="outline" onClick={() => handleOpenChange(false)}>돌아가기</Button>
+          {canReloadPreview || retrying ? <Button ref={retryButtonRef} type="button" className="min-h-11" variant="outline" disabled={loading || sending} onClick={retryPreview}>미리보기 다시 확인</Button> : null}
           {currentStatus === "accepted" && client.checkDelivery && (viewerRole === "admin" || viewerRole === "staff") ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void checkDelivery()}>{sending ? "확인 중" : "전달 결과 확인"}</Button> : (currentStatus === "unknown" && canCheck) || canCheckPending ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void check()}>상태 확인</Button> : (
             <Button type="button" className="min-h-11" disabled={confirmDisabled} onClick={() => void confirm()}>{confirmLabel}</Button>
           )}
