@@ -21,7 +21,7 @@ function modules(supabase, overrides = {}) {
     const runtime = { exports: {} }; cache.set(file, runtime);
     // Observe private production consumers without adding production exports or replacing them.
     const testExports = file.endsWith('/ops-task-workspace.tsx')
-      ? '\nexport { WithdrawalDetailPanel, WithdrawalDataTable, TransferDataTable, mergeOpsTaskWorkspaceOptionData };' : '';
+      ? '\nexport { WithdrawalDetailPanel, WithdrawalDataTable, TransferDataTable, mergeOpsTaskWorkspaceOptionData, getWithdrawalClassOptions };' : '';
     const source = ts.transpileModule(readFileSync(file, 'utf8') + testExports, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
@@ -2951,4 +2951,17 @@ for (const type of ['todo', 'word_retest', 'transfer', 'withdrawal']) test(`long
   }
   assert.ok(page.requests.every(request => /^(list_|get_|read_)|_runtime_version$/.test(request.name)), 'no write request leaves this synthetic test');
   assert.equal(page.tableRequests.some(request => request.filters.some(([method]) => ['insert', 'update', 'delete', 'upsert'].includes(method))), false);
+});
+
+for (const selectedId of ['', 'ended']) test(`management transfer/withdrawal choices filter ended classes while retaining selection (${selectedId || 'new'})`, () => {
+  const { getWithdrawalClassOptions } = modules(null, { '@/providers/auth-provider': { useAuth: () => ({ role: 'admin', user: null }) } })('src/features/tasks/ops-task-workspace.tsx');
+  const classes = [
+    { id: 'active', label: '가상 진행 수업', status: '수강', subject: '영어', teacher: '가상 교사' },
+    { id: 'ended', label: '가상 종강 수업', status: '종강', subject: '영어', teacher: '가상 교사' },
+    { id: 'other', label: '가상 다른 수업', status: '수강', subject: '수학', teacher: '다른 교사' },
+  ];
+  const before = structuredClone(classes);
+  assert.deepEqual(getWithdrawalClassOptions(classes, '영어', '가상 교사', selectedId).map(item => item.id), selectedId ? ['ended', 'active'] : ['active']);
+  assert.deepEqual(getWithdrawalClassOptions(classes, '수학', '다른 교사', selectedId).map(item => item.id), selectedId ? ['ended', 'other'] : ['other']);
+  assert.deepEqual(classes, before);
 });
