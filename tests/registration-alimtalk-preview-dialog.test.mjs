@@ -48,23 +48,29 @@ async function loadMountedDialog() {
     return createElement("button", { ...props, ref }, children)
   })
   const Dialog = ({ open, children }) => open ? createElement("div", null, children) : null
-  const Wrapper = ({ children, ...props }) => {
+  const Wrapper = forwardRef(function MountedWrapper({ children, ...props }, ref) {
     delete props.overlayClassName
     delete props.showCloseButton
     delete props.onEscapeKeyDown
-    return createElement("div", props, children)
-  }
+    return createElement("div", { ...props, ref }, children)
+  })
+  const Content = forwardRef(function MountedContent(props, ref) {
+    return createElement(Wrapper, { ...props, ref, role: "dialog", tabIndex: -1, "data-slot": "dialog-content" })
+  })
+  const Title = forwardRef(function MountedTitle({ children, ...props }, ref) {
+    return createElement("h2", { ...props, ref, "data-slot": "dialog-title" }, children)
+  })
   const runtimeModule = { exports: {} }
   const localModules = new Map([
     ["@/components/ui/button", { Button }],
     ["@/components/ui/dialog", {
       Dialog,
       DialogClose: ({ children }) => children,
-      DialogContent: Wrapper,
+      DialogContent: Content,
       DialogDescription: Wrapper,
       DialogFooter: Wrapper,
       DialogHeader: Wrapper,
-      DialogTitle: Wrapper,
+      DialogTitle: Title,
     }],
     ["./registration-customer-message-errors", customerMessageErrors],
     ["./registration-customer-message-labels", { formatRegistrationMessageTimestamp }],
@@ -826,6 +832,48 @@ for (const status of ["pending", "accepted", "unknown", "failed_hold", "duplicat
     assert.equal(view.button("미리보기 다시 확인"), undefined)
     assert.doesNotMatch(view.text(), /미리보기가 만료되었습니다/)
     assert.equal(view.calls.preview.length, 1)
+    assert.equal(view.calls.send.length, 0)
+  })
+}
+
+test("manual retry restores title focus after Radix moves the disabled action focus to dialog content", async t => {
+  const pending = controlledPromise()
+  const view = await mountRecoveryDialog(t, { previews: [new Error("load failed"), pending.promise] })
+  view.button("미리보기 다시 확인").focus()
+  await view.click("미리보기 다시 확인")
+  assert.equal(view.button("미리보기 다시 확인").disabled, true)
+  const content = view.dom.window.document.querySelector('[data-slot="dialog-content"]')
+  // Real Radix browser evidence shows this focus fallback when the retry button
+  // becomes disabled. The mounted harness reproduces that observed DOM state.
+  content.focus()
+  assert.equal(view.dom.window.document.activeElement === content, true)
+  await view.resolve(pending, recoveryPreview(2))
+  const title = view.dom.window.document.querySelector('[data-slot="dialog-title"]')
+  assert.equal(title.tagName, "H2")
+  assert.equal(view.dom.window.document.activeElement === title, true, "The completed retry must focus the preview title after dialog-content fallback")
+  assert.notEqual(view.dom.window.document.activeElement, view.button("확인 후 발송"))
+  assert.equal(view.calls.preview.length, 2)
+  assert.equal(view.calls.send.length, 0)
+})
+
+for (const destination of ["another dialog button", "an outside input"]) {
+  test(`manual retry preserves focus explicitly moved to ${destination}`, async t => {
+    const pending = controlledPromise()
+    const view = await mountRecoveryDialog(t, { previews: [new Error("load failed"), pending.promise] })
+    view.button("미리보기 다시 확인").focus()
+    await view.click("미리보기 다시 확인")
+    view.dom.window.document.querySelector('[data-slot="dialog-content"]').focus()
+    const nextFocus = destination === "another dialog button"
+      ? view.button("돌아가기") : view.dom.window.document.createElement("input")
+    if (destination === "an outside input") {
+      nextFocus.setAttribute("aria-label", "합성 외부 입력")
+      view.dom.window.document.body.append(nextFocus)
+    }
+    nextFocus.focus()
+    assert.equal(view.dom.window.document.activeElement === nextFocus, true)
+    await view.resolve(pending, recoveryPreview(2))
+    assert.equal(view.dom.window.document.activeElement === nextFocus, true, "A completed preview must not steal an explicitly moved focus")
+    assert.equal(view.calls.preview.length, 2)
     assert.equal(view.calls.send.length, 0)
   })
 }

@@ -98,6 +98,7 @@ export function RegistrationAlimtalkPreviewDialog({
   const confirmationLockedRef = useRef(false)
   const sendOutcomeUncertainRef = useRef(false)
   const previewAbortRef = useRef<AbortController | null>(null)
+  const previewContentRef = useRef<HTMLDivElement | null>(null)
   const previewTitleRef = useRef<HTMLHeadingElement | null>(null)
   const retryButtonRef = useRef<HTMLButtonElement | null>(null)
   const [preview, setPreview] = useState<RegistrationCustomerMessagePreviewResponse | null>(null)
@@ -162,7 +163,8 @@ export function RegistrationAlimtalkPreviewDialog({
         if (generation !== generationRef.current || controller.signal.aborted) return
         setPreview(next)
         setLatestMessage(next.latestMessage)
-        if (restorePreviewFocus && (document.activeElement === retryButtonRef.current || document.activeElement === document.body)) {
+        if (restorePreviewFocus && (document.activeElement === retryButtonRef.current
+          || document.activeElement === previewContentRef.current || document.activeElement === document.body)) {
           previewTitleRef.current?.focus()
         }
       })
@@ -387,6 +389,7 @@ export function RegistrationAlimtalkPreviewDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
+        ref={previewContentRef}
         overlayClassName="z-[90]"
         className="z-[90] max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
         showCloseButton={false}
