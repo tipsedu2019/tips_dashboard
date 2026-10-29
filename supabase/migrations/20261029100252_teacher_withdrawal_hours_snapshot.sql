@@ -2,7 +2,9 @@ begin;
 set local lock_timeout='5s';
 set local statement_timeout='30s';
 
--- Extend only the owner-request input/readback boundary. The existing writer,
+-- Preserve the existing strict eight-key owner-request input contract. No
+-- caller-provided hour quantity is accepted, including at this intermediate
+-- migration state before server calculation is added. The existing writer,
 -- owner/effect/revision checks, transaction marker and request receipt remain
 -- authoritative. Existing rows and management calculations are not rewritten.
 -- Deploy the compatible optional-field client before applying this migration;
@@ -24,31 +26,13 @@ begin
  anchors:=array[
  $a$declare keys text[];ids text[];dates text[];k text;s public.students%rowtype;c public.classes%rowtype;dest public.classes%rowtype;
  old_task public.ops_tasks%rowtype;old_detail public.ops_transfer_details%rowtype;task_input jsonb;detail jsonb;$a$,
- $a$ if jsonb_typeof(p) is distinct from 'object' or not(p ?& keys) or p-keys<>'{}' then raise exception 'teacher_request_input_invalid' using errcode='22023';end if;$a$,
- $a$  detail:=(dashboard_private.teacher_request_json_pick_v1(p,keys)-array['student_id','memo','class_id'])||jsonb_build_object('school_grade',s.grade,'teacher_name',c.teacher);$a$
- ];
+ $a$  detail:=(dashboard_private.teacher_request_json_pick_v1(p,keys)-array['student_id','memo','class_id'])||jsonb_build_object('school_grade',s.grade,'teacher_name',c.teacher);$a$];
  replacements:=array[
  $r$declare keys text[];ids text[];dates text[];k text;s public.students%rowtype;c public.classes%rowtype;dest public.classes%rowtype;
  old_task public.ops_tasks%rowtype;old_detail public.ops_transfer_details%rowtype;task_input jsonb;detail jsonb;
- allowed_keys text[];hour_keys text[]:=array['completed_lesson_hours','four_week_lesson_hours'];
  old_withdrawal public.ops_withdrawal_details%rowtype;$r$,
- $r$ allowed_keys:=keys||case when d='withdrawal' then hour_keys else array[]::text[] end;
- if jsonb_typeof(p) is distinct from 'object' or not(p ?& keys) or p-allowed_keys<>'{}' then
-  raise exception 'teacher_request_input_invalid' using errcode='22023';end if;
- if d='withdrawal' and p ?| hour_keys then
-  if not(p ?& hour_keys) then raise exception 'teacher_request_input_invalid' using errcode='22023';end if;
-  foreach k in array hour_keys loop
-   -- Empty means not calculated. Zero is an actual snapshot, never NULL.
-   -- The plain-decimal bound matches the existing numeric(8,2) storage.
-   if jsonb_typeof(p->k) is distinct from 'string'
-     or (p->>k<>'' and (p->>k)!~'^(0|[1-9][0-9]{0,5})(\.[0-9]{1,2})?$') then
-    raise exception 'teacher_request_input_invalid' using errcode='22023';end if;
-  end loop;
- end if;$r$,
  $r$  detail:=(dashboard_private.teacher_request_json_pick_v1(p,keys)-array['student_id','memo','class_id'])||jsonb_build_object('school_grade',s.grade,'teacher_name',c.teacher);
-  if p ?& hour_keys then
-   detail:=detail||dashboard_private.teacher_request_json_pick_v1(p,hour_keys);
-  elsif p_existing_id is not null then
+  if p_existing_id is not null then
    -- The outer owner mutation already locks this detail. An old eight-key
    -- client may keep an unchanged snapshot on a note edit, but cannot carry it
    -- onto a different selected date/session without a new calculation.
@@ -57,8 +41,7 @@ begin
      or nullif(p->>'withdrawal_session','') is distinct from nullif(old_withdrawal.withdrawal_session,'') then
     detail:=detail||jsonb_build_object('completed_lesson_hours',null,'four_week_lesson_hours',null);
    end if;
-  end if;$r$
- ];
+  end if;$r$];
  for n in 1..array_length(anchors,1) loop
   if length(definition)-length(replace(definition,anchors[n],''))<>length(anchors[n]) then
    raise exception 'teacher_withdrawal_hours_input_version_mismatch' using errcode='55000';end if;

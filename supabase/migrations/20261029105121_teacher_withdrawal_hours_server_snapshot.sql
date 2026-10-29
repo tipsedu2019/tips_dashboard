@@ -268,27 +268,9 @@ begin
  select jsonb_build_array(proowner,proacl,provolatile,prosecdef,proconfig) into before_contract from pg_catalog.pg_proc where oid=target;
  definition:=pg_catalog.pg_get_functiondef(target);
  anchors:=array[
- $a$declare keys text[];ids text[];dates text[];k text;s public.students%rowtype;c public.classes%rowtype;dest public.classes%rowtype;
- old_task public.ops_tasks%rowtype;old_detail public.ops_transfer_details%rowtype;task_input jsonb;detail jsonb;
- allowed_keys text[];hour_keys text[]:=array['completed_lesson_hours','four_week_lesson_hours'];
- old_withdrawal public.ops_withdrawal_details%rowtype;$a$,
- $a$ allowed_keys:=keys||case when d='withdrawal' then hour_keys else array[]::text[] end;
- if jsonb_typeof(p) is distinct from 'object' or not(p ?& keys) or p-allowed_keys<>'{}' then
-  raise exception 'teacher_request_input_invalid' using errcode='22023';end if;
- if d='withdrawal' and p ?| hour_keys then
-  if not(p ?& hour_keys) then raise exception 'teacher_request_input_invalid' using errcode='22023';end if;
-  foreach k in array hour_keys loop
-   -- Empty means not calculated. Zero is an actual snapshot, never NULL.
-   -- The plain-decimal bound matches the existing numeric(8,2) storage.
-   if jsonb_typeof(p->k) is distinct from 'string'
-     or (p->>k<>'' and (p->>k)!~'^(0|[1-9][0-9]{0,5})(\.[0-9]{1,2})?$') then
-    raise exception 'teacher_request_input_invalid' using errcode='22023';end if;
-  end loop;
- end if;$a$,
+ $a$ if jsonb_typeof(p) is distinct from 'object' or not(p ?& keys) or p-keys<>'{}' then raise exception 'teacher_request_input_invalid' using errcode='22023';end if;$a$,
  $a$  detail:=(dashboard_private.teacher_request_json_pick_v1(p,keys)-array['student_id','memo','class_id'])||jsonb_build_object('school_grade',s.grade,'teacher_name',c.teacher);
-  if p ?& hour_keys then
-   detail:=detail||dashboard_private.teacher_request_json_pick_v1(p,hour_keys);
-  elsif p_existing_id is not null then
+  if p_existing_id is not null then
    -- The outer owner mutation already locks this detail. An old eight-key
    -- client may keep an unchanged snapshot on a note edit, but cannot carry it
    -- onto a different selected date/session without a new calculation.
@@ -299,9 +281,6 @@ begin
    end if;
   end if;$a$];
  replacements:=array[
- $r$declare keys text[];ids text[];dates text[];k text;s public.students%rowtype;c public.classes%rowtype;dest public.classes%rowtype;
- old_task public.ops_tasks%rowtype;old_detail public.ops_transfer_details%rowtype;task_input jsonb;detail jsonb;
- old_withdrawal public.ops_withdrawal_details%rowtype;$r$,
  $r$ if jsonb_typeof(p) is distinct from 'object' or not(p ?& keys) or p-keys<>'{}' then
   raise exception 'teacher_request_input_invalid' using errcode='22023';end if;$r$,
  $r$  detail:=(dashboard_private.teacher_request_json_pick_v1(p,keys)-array['student_id','memo','class_id'])||jsonb_build_object('school_grade',s.grade,'teacher_name',c.teacher);

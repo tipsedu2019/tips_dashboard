@@ -943,12 +943,12 @@
     {
       "fileName": "20261029100252_teacher_withdrawal_hours_snapshot.sql",
       "status": "final",
-      "sha256": "1a3c3b2656cb485b38a754c5f4030d8c039b8e3a05b53a57ec2eba8dd46db795"
+      "sha256": "4ea10823dd0165c4692f22530faa6bff1a0fb8c9260e6c4fa3ceeaac7e243530"
     },
     {
       "fileName": "20261029105121_teacher_withdrawal_hours_server_snapshot.sql",
       "status": "final",
-      "sha256": "c94978f14f6653c7861aecb8f1e1b312b099069868d0af03b53702a3c430125e"
+      "sha256": "26c131ad0473031fc3fa7c8ddfa640512ff872b3fedced5bbbf0317f35cc5f71"
     }
   ]
 }
