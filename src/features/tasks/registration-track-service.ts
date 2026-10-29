@@ -1880,6 +1880,105 @@ function mapTask(row: Row, detail: Row, comments: OpsTaskComment[], attachments:
   }
 }
 
+// The teacher-only gateway supplies explicit case-bound rows. Reuse the same
+// management decoders without changing the management loader or its queries.
+export function mapRegistrationTeacherCaseBundle(input: Record<string, unknown>): OpsRegistrationObservationCaseDetail {
+  const invalid = (): never => { throw new Error("registration_teacher_detail_invalid") }
+  const record = (candidate: unknown): Row => candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? candidate as Row : invalid()
+  const array = (candidate: unknown): Row[] => Array.isArray(candidate) ? candidate.map(record) : invalid()
+  const parent = record(input.parent)
+  const taskId = typeof parent.id === "string" ? parent.id : invalid()
+  if (parent.type !== "registration") invalid()
+  const detailRow = record(parent.ops_registration_details)
+  const uniqueRows = (candidate: unknown): Row[] => {
+    const result = array(candidate)
+    const ids = new Set<string>()
+    for (const row of result) {
+      const id = typeof row.id === "string" && row.id ? row.id : invalid()
+      if (ids.has(id)) invalid()
+      ids.add(id)
+    }
+    return result
+  }
+  const taskRows = (candidate: unknown): Row[] => {
+    const result = uniqueRows(candidate)
+    if (result.some((row) => row.task_id !== taskId)) invalid()
+    return result
+  }
+  const commentRows = taskRows(parent.ops_task_comments)
+  const attachmentRows = taskRows(parent.ops_task_attachments)
+  const trackRows = taskRows(input.tracks)
+  if (trackRows.length > 30) invalid()
+  const trackIds = new Set(trackRows.map((row) => row.id))
+  const trackChildren = (candidate: unknown): Row[] => {
+    const result = uniqueRows(candidate)
+    if (result.some((row) => !trackIds.has(row.track_id))) invalid()
+    return result
+  }
+  const appointmentRows = taskRows(input.appointments)
+  if (appointmentRows.some(isBookingOnlyRegistrationAppointmentRow)) invalid()
+  const eventRows = taskRows(input.events)
+  if (eventRows.some(isBookingOnlyRegistrationEventRow)) invalid()
+  const levelTestRows = trackChildren(input.levelTests)
+  const consultationRows = trackChildren(input.consultations)
+  const enrollmentRows = trackChildren(input.enrollments)
+  const batchRows = taskRows(input.admissionBatches)
+  const reminderById = new Map<string, RegistrationCustomerReminderSummary>()
+  for (const row of array(input.reminderSummaries)) {
+    const { appointmentId, summary } = mapRegistrationCustomerReminderSummary(row)
+    if (reminderById.has(appointmentId) || !appointmentRows.some((item) => item.id === appointmentId)) invalid()
+    reminderById.set(appointmentId, summary)
+  }
+  const currentAppointmentCount = appointmentRows.filter((row) => row.status === "scheduled").length
+  const currentEnrollmentCount = enrollmentRows.filter((row) => row.status === "planned" || row.status === "waitlisted"
+    || (row.status === "enrolled" && row.roster_active === true)).length
+  const window = (total: unknown, loadedCount: number): OpsRegistrationCollectionWindow => {
+    if (!Number.isSafeInteger(total) || Number(total) < loadedCount || loadedCount > 30) invalid()
+    return { loadedCount, totalCount: Number(total), overflow: Number(total) > loadedCount }
+  }
+  const activeMessage = input.activeAdmissionMessage === null ? null : record(input.activeAdmissionMessage)
+  const activeStatus = text(value(activeMessage, "status"))
+  const messageStatus = activeStatus === "failed"
+    ? "failed_hold" : (["pending", "accepted", "unknown"].includes(activeStatus) ? activeStatus : "")
+  const comments = commentRows.map(mapComment)
+  const attachments = attachmentRows.map(mapAttachment)
+  const tracks = trackRows.map((row) => {
+    if (rowNeedsRegistrationObservationSummary(row)) invalid()
+    return mapRegistrationObservationTrackSummary(row, true)
+  })
+  return {
+    task: mapTask(parent, detailRow, comments, attachments),
+    commonRevision: numberValue(value(detailRow, "common_revision", "commonRevision")),
+    admissionApplicationMessageId: nullableText(value(activeMessage, "id")),
+    admissionApplicationMessageStatus: messageStatus as OpsRegistrationCaseDetail["admissionApplicationMessageStatus"],
+    admissionApplicationMessageClaimActive: bool(value(activeMessage, "claim_active", "claimActive")),
+    admissionApplicationMessageUpdatedAt: nullableText(value(activeMessage, "updated_at", "updatedAt")),
+    admissionApplicationAccepted: activeStatus === "accepted",
+    admissionChecklist: normalizeRegistrationAdmissionChecklist(value(detailRow, "admission_checklist", "admissionChecklist")),
+    comments,
+    attachments,
+    tracks,
+    appointments: appointmentRows.map((row) => {
+      const appointment = mapAppointment(row)
+      const customerReminder = reminderById.get(appointment.id)
+      if (!customerReminder) invalid()
+      return { ...appointment, customerReminder }
+    }),
+    levelTests: levelTestRows.map(mapLevelTest),
+    consultations: consultationRows.map(mapConsultation),
+    admissionBatches: batchRows.map(mapBatch),
+    enrollments: enrollmentRows.map(mapEnrollment),
+    collectionWindows: {
+      scheduledAppointments: window(input.scheduledAppointmentTotal, currentAppointmentCount),
+      currentEnrollments: window(input.currentEnrollmentTotal, currentEnrollmentCount),
+    },
+    events: eventRows.map(mapTrackEvent),
+    migrationLegacy: tracks.some((track) => track.migrationReviewRequired)
+      ? buildRegistrationMigrationLegacySnapshot(parent, detailRow, eventRows) : null,
+  }
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function normalizeUuid(input: unknown) {

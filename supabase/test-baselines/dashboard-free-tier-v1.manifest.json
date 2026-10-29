@@ -939,6 +939,11 @@
       "fileName": "20261027152314_class_schedule_month_summary.sql",
       "status": "final",
       "sha256": "ef8167164cbe81c2a577e045e632bcdc5474cd1e5033e5973c6fa0140787fb01"
+    },
+    {
+      "fileName": "20261029112923_registration_teacher_case_detail_read.sql",
+      "status": "final",
+      "sha256": "5862591e30d1a96abd210a2e18bdf46078f7343fef1b6a99c076919f1ede9030"
     }
   ]
 }

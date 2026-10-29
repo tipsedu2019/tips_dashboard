@@ -14,11 +14,11 @@ import {
   buildRegistrationSubjectHistory,
   type RegistrationSubjectHistoryItem,
 } from "./registration-track-history.js"
-import type { OpsRegistrationCaseDetail } from "./registration-track-service"
+import type { OpsRegistrationCaseDetail, OpsRegistrationObservationCaseDetail } from "./registration-track-service"
 
 export type RegistrationHistoryTimelineProps = {
-  detail: OpsRegistrationCaseDetail
-  profiles: OpsProfileOption[]
+  detail: OpsRegistrationCaseDetail | OpsRegistrationObservationCaseDetail
+  profiles: Pick<OpsProfileOption, "id" | "label">[]
   embedded?: boolean
 }
 

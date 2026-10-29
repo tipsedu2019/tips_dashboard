@@ -86,7 +86,9 @@ const DECISION_LABELS: Record<RegistrationObservationDecisionKind, string> = {
 }
 
 export function RegistrationObservationFeedbackPanel({ detail }: Readonly<{
-  detail: RegistrationObservationFeedbackDetail
+  detail: Pick<RegistrationObservationFeedbackDetail,
+    "observationId" | "status" | "className" | "teacherName" | "attendance" | "decisionKind"
+    | "suitabilityResult" | "feedbackReason" | "proxySubmitted" | "feedbackSubmittedByName" | "feedbackSubmittedAt">
 }>) {
   const proxyLabel = getRegistrationObservationProxyLabel(detail)
   const hasLegacyFeedback = Boolean(
