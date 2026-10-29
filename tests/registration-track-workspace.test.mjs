@@ -743,7 +743,8 @@ test("registration progress supports consultation to waiting to registration and
   assert.match(model, /waitingKind[\s\S]*?"skipped"/)
   assert.match(model, /waiting: "대기"/)
   assert.match(model, /observation: "청강 신청"/)
-  assert.match(model, /workflowStatus\?\.startsWith\("observation_"\)[\s\S]*?"observation"/)
+  assert.equal(getRegistrationApplicationProgress("inquiry", "", "observation_requested")
+    .find(step => step.state === "current").key, "observation")
   assert.match(model, /registration: "등록 신청"/)
 })
 
@@ -5587,6 +5588,92 @@ test("subject deactivation rejects the pending observation default and preserves
     assert.equal(calendarIn(view).props.valueDate, regular.sessionDate)
     assert.ok(calendarIn(view).props.sessions.some((option) => option.source === "observation"), "the cached observation option survives")
   } finally { hookHarness.cleanup() }
+})
+
+test("saved subject progress follows confirmed manual status without changing sibling or appointment facts", async () => {
+  const hooks = createRegistrationEditorHookHarness()
+  const statuses = ["level_test_requested", "consultation_requested", "waiting_current_class"]
+  const calls = []
+  const warnings = []
+  let pendingSave
+  let confirmedStatus
+  const mounted = await loadMountedRegistrationApplication({
+    hookHarness: hooks,
+    loadManagerDetail: async () => null,
+    loadFeedback: async () => null,
+    workflowStatusOptions: () => statuses.map(value => ({ value, label: value })),
+    setWorkflowStatus: input => {
+      calls.push(input)
+      confirmedStatus = input.workflowStatus
+      pendingSave = createControlledPromise()
+      return pendingSave.promise
+    },
+  })
+  const tracks = [
+    { id: "synthetic-english", subject: "영어", status: "migration_review", workflowStatus: "level_test_requested", migrationReviewRequired: true },
+    { id: "synthetic-math", subject: "수학", status: "level_test_scheduled", workflowStatus: "inquiry", migrationReviewRequired: false },
+  ].map(track => ({ ...track, taskId: "synthetic-case", workflowRevision: 1, directorProfileId: null, observationAttemptCount: 0, observationSummaryVisible: false, waitingKind: "", legacy: false }))
+  const task = { id: "synthetic-case", type: "registration", title: "합성 등록", studentName: "합성 학생", registration: null }
+  const appointment = { id: "synthetic-appointment", taskId: task.id, kind: "level_test", status: "scheduled", scheduledAt: "2026-10-30T01:00:00Z", place: "본관" }
+  const props = {
+    task,
+    detail: { task, commonRevision: 1, tracks, appointments: [appointment], levelTests: [{ id: "synthetic-test", trackId: tracks[1].id, appointmentId: appointment.id, status: "scheduled" }], consultations: [], enrollments: [], admissionBatches: [] },
+    focusTrackId: tracks[0].id, viewerId: "synthetic-viewer", viewerRole: "staff", subjectCapabilities: [],
+    onFocusTrack: () => {}, onWarning: message => warnings.push(message),
+    onReload: async trackId => {
+      props.detail = { ...props.detail, tracks: props.detail.tracks.map(track => track.id === trackId ? { ...track, workflowStatus: confirmedStatus, workflowRevision: track.workflowRevision + 1 } : track) }
+    },
+    observationRuntime: { available: false, runtimeVersion: 0 }, closeAction: null,
+  }
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  globalThis.window = { matchMedia: () => ({ matches: true }), requestAnimationFrame: () => 1, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById: () => null }
+  const render = () => {
+    const view = hooks.render(mounted.RegistrationApplication, props)
+    hooks.flushEffects()
+    return findMountedRegistrationElement(view, node => node.type === mounted.RegistrationApplicationShell, "application shell").props
+  }
+  const current = shell => shell.progress.props.steps.filter(step => step.state === "current").map(step => step.key)
+  const selector = shell => findMountedRegistrationElement(shell.subjectNavigation, node => node.props["aria-label"] === "영어 진행상태", "English status selector")
+  try {
+    let shell = render()
+    assert.equal(selector(shell).props.value, "level_test_requested")
+    assert.deepEqual(current(shell), ["level_test"], "migrated legacy pipeline must not override the saved manual status")
+    for (const [workflow, expected] of [["consultation_requested", "consultation"], ["waiting_current_class", "waiting"]]) {
+      const before = current(shell)
+      selector(shell).props.onValueChange(workflow)
+      shell = render()
+      assert.equal(selector(shell).props.disabled, true)
+      assert.deepEqual(current(shell), before, "pending save must not advertise an unconfirmed stage")
+      pendingSave.resolve({ sourceEventIds: [] })
+      await flushMountedRegistrationWork()
+      shell = render()
+      assert.equal(selector(shell).props.value, workflow)
+      assert.deepEqual(current(shell), [expected])
+      assert.equal(calls.at(-1).trackId, tracks[0].id)
+    }
+    selector(shell).props.onValueChange("level_test_requested")
+    render()
+    pendingSave.reject(new Error("synthetic save failure"))
+    await flushMountedRegistrationWork()
+    shell = render()
+    assert.equal(selector(shell).props.value, "waiting_current_class")
+    assert.deepEqual(current(shell), ["waiting"])
+    assert.ok(warnings.some(message => message.includes("synthetic save failure")))
+    props.focusTrackId = tracks[1].id
+    assert.deepEqual(current(render()), ["inquiry"], "another subject's booking must not change its manual status")
+    props.focusTrackId = tracks[0].id
+    assert.deepEqual(current(render()), ["waiting"])
+    assert.deepEqual(props.detail.tracks.map(track => track.status), tracks.map(track => track.status))
+    assert.equal(props.detail.tracks[1], tracks[1])
+    assert.equal(props.detail.appointments[0], appointment)
+    assert.equal(calls.length, 3)
+  } finally {
+    hooks.cleanup()
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+  }
 })
 
 test("registration application keeps both enrollment forms mounted but activates only the selected subject", async () => {
