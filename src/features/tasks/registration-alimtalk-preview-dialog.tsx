@@ -83,6 +83,12 @@ function auditActorLabel(confirmedByName: string) {
     : `발송 요청 · ${confirmedByName}`
 }
 
+function recipientSuffixLabel(last4?: string) {
+  return typeof last4 === "string" && /^\d{4}$/u.test(last4)
+    ? `끝 ${last4}`
+    : "끝자리 확인 불가"
+}
+
 export function RegistrationAlimtalkPreviewDialog({
   open,
   onOpenChange,
@@ -290,7 +296,6 @@ export function RegistrationAlimtalkPreviewDialog({
     }
   }
 
-  const last4 = result?.recipientLast4 || preview?.recipientLast4 || latestMessage?.recipientLast4 || ""
   const auditMessage = result || latestMessage
   const observationFacts = preview?.messageKind === "observation_booking"
     || preview?.messageKind === "observation_reminder"
@@ -355,7 +360,7 @@ export function RegistrationAlimtalkPreviewDialog({
             : deliveryResult?.deliveryStatus === "failed" ? "알림톡 전달 실패 · 재발송 전 수신 정보를 확인해 주세요"
             : deliveryResult?.deliveryStatus === "pending" ? "SOLAPI 접수 완료 · 전달 처리 중"
             : deliveryResult?.deliveryStatus === "unavailable" ? "SOLAPI 접수 완료 · 전달 결과 확인 불가"
-            : "SOLAPI 접수 완료"} · 학부모 전화 끝 {last4}
+            : "SOLAPI 접수 완료"} · 최근 요청 수신자 {recipientSuffixLabel(auditMessage?.recipientLast4)}
           {deliveryResult ? <span className="block text-xs text-muted-foreground">조회 시각 · {formatAuditTimestamp(deliveryResult.checkedAt)}</span> : null}
         </p> : null}
         {currentStatus === "unknown" ? <p role="alert" className="text-sm">발송 결과 확인 필요</p> : null}
@@ -366,7 +371,7 @@ export function RegistrationAlimtalkPreviewDialog({
           <div className="grid gap-4 text-sm">
             <dl className="grid gap-1">
               <div><dt className="inline text-muted-foreground">학생 · </dt><dd className="inline">{preview.studentName}</dd></div>
-              <div><dt className="inline text-muted-foreground">학부모 전화 · </dt><dd className="inline">끝 {preview.recipientLast4}</dd></div>
+              <div><dt className="inline text-muted-foreground">이번 미리보기 수신자 · </dt><dd className="inline">{recipientSuffixLabel(preview.recipientLast4)}</dd></div>
               <div><dt className="inline text-muted-foreground">대상 · </dt><dd className="inline">{preview.facts.subjectLabel}</dd></div>
               {observationFacts?.className ? <div><dt className="inline text-muted-foreground">수업 · </dt><dd className="inline">{observationFacts.className}</dd></div> : null}
               {preview.facts.scheduleLabel ? <div><dt className="inline text-muted-foreground">일정 · </dt><dd className="inline">{preview.facts.scheduleLabel}</dd></div> : null}
@@ -374,6 +379,7 @@ export function RegistrationAlimtalkPreviewDialog({
               {observationFacts?.teacherLabel ? <div><dt className="inline text-muted-foreground">선생님 · </dt><dd className="inline">{observationFacts.teacherLabel}</dd></div> : null}
               {preview.facts.waitingKindLabel ? <div><dt className="inline text-muted-foreground">대기 · </dt><dd className="inline">{preview.facts.waitingKindLabel} {preview.facts.waitingDetailLabel || ""}</dd></div> : null}
             </dl>
+            <p className="text-muted-foreground">끝 4자리만 표시됩니다. 전체 연락처는 등록 정보에서 확인해 주세요.</p>
             {preview.facts.reservations?.length ? (
               <section aria-label="예약 목록" className="rounded-md border p-3">
                 <h3 className="mb-2 font-medium">예약 목록</h3>
@@ -402,8 +408,17 @@ export function RegistrationAlimtalkPreviewDialog({
             <p className="whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3">{preview.body}</p>
             {preview.buttons.map((button) => <p key={`${button.name}:${button.host}`} className="break-words text-muted-foreground">카카오 버튼 · {button.name} ({button.host})</p>)}
             <p className="text-muted-foreground">준비 상태 · {preview.readiness.sendAllowed ? "발송 가능" : getRegistrationCustomerMessageReadinessMessage(preview.readiness.blockers)}</p>
-            {latestMessage ? <p className="text-muted-foreground">최근 상태 · {statusLabel(latestMessage.currentStatus)}</p> : null}
-            {auditMessage ? <p className="text-muted-foreground">{auditActorLabel(auditMessage.confirmedByName)} · {formatAuditTimestamp(auditMessage.confirmedAt)}</p> : null}
+            {auditMessage ? (
+              <section aria-label="최근 발송 요청" className="grid gap-1 border-t pt-3">
+                <h3 className="font-medium">최근 발송 요청</h3>
+                <dl className="grid gap-1">
+                  <div><dt className="inline text-muted-foreground">최근 요청 수신자 · </dt><dd className="inline">{recipientSuffixLabel(auditMessage.recipientLast4)}</dd></div>
+                  <div><dt className="inline text-muted-foreground">상태 · </dt><dd className="inline">{statusLabel(auditMessage.currentStatus)}</dd></div>
+                  <div><dt className="inline text-muted-foreground">요청 시각 · </dt><dd className="inline">{formatAuditTimestamp(auditMessage.confirmedAt)}</dd></div>
+                </dl>
+                <p className="text-muted-foreground">{auditActorLabel(auditMessage.confirmedByName)}</p>
+              </section>
+            ) : duplicateLocked ? <p className="text-muted-foreground">이전 요청의 상세 정보는 현재 미리보기에서 확인할 수 없습니다.</p> : null}
           </div>
         ) : null}
 
