@@ -939,6 +939,11 @@
       "fileName": "20261027152314_class_schedule_month_summary.sql",
       "status": "final",
       "sha256": "ef8167164cbe81c2a577e045e632bcdc5474cd1e5033e5973c6fa0140787fb01"
+    },
+    {
+      "fileName": "20261029100252_teacher_withdrawal_hours_snapshot.sql",
+      "status": "final",
+      "sha256": "1a3c3b2656cb485b38a754c5f4030d8c039b8e3a05b53a57ec2eba8dd46db795"
     }
   ]
 }
