@@ -6380,17 +6380,17 @@ function InventoryCountWorkspace({
   const allDisplayRowsSelected = displayRowIds.length > 0 && displayRowIds.every((id) => selectedIdSet.has(id));
   const someDisplayRowsSelected = displayRowIds.some((id) => selectedIdSet.has(id)) && !allDisplayRowsSelected;
   const groupedRows = useMemo(() => {
-    const groups: Array<{ label: string; rows: InventoryCountRow[] }> = [];
+    const groups = new Map<string, { label: string; rows: InventoryCountRow[] }>();
     for (const row of displayRows) {
       const label = getTextbookGroupLabel(row.source);
-      const current = groups[groups.length - 1];
-      if (current?.label === label) {
+      const current = groups.get(label);
+      if (current) {
         current.rows.push(row);
       } else {
-        groups.push({ label, rows: [row] });
+        groups.set(label, { label, rows: [row] });
       }
     }
-    return groups;
+    return [...groups.values()];
   }, [displayRows]);
   const noRowsLabel = loading ? "재고 목록을 불러오는 중…" : readError ? "재고 목록을 불러오지 못했습니다" : emptyLabel;
 
