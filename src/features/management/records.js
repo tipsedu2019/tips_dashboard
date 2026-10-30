@@ -215,9 +215,15 @@ export function normalizeClassManagementRecord(row = {}) {
     : studentIds.length || Number(row.student_count || row.studentCount || 0);
   const hasWaitlistTotal = Object.hasOwn(row, "waitlisted_students_relation_page");
   const waitlistTotal = row.waitlist_count ?? row.waitlistCount;
+  const hasWaitlistIds = [row.waitlist_student_ids, row.waitlistStudentIds, row.waitlist_ids, row.waitlistIds].some(Array.isArray);
+  const hasWaitlistCount = Object.hasOwn(row, "waitlist_count") || Object.hasOwn(row, "waitlistCount");
+  const parsedWaitlistTotal = typeof waitlistTotal === "number" || (typeof waitlistTotal === "string" && waitlistTotal.trim())
+    ? Number(waitlistTotal) : undefined;
   const waitlistCount = hasWaitlistTotal
     ? (Number.isSafeInteger(waitlistTotal) && waitlistTotal >= 0 ? waitlistTotal : undefined)
-    : waitlistStudentIds.length || Number(row.waitlist_count || row.waitlistCount || 0);
+    : waitlistStudentIds.length || (hasWaitlistCount
+      ? (Number.isSafeInteger(parsedWaitlistTotal) && parsedWaitlistTotal >= 0 ? parsedWaitlistTotal : undefined)
+      : hasWaitlistIds ? 0 : undefined);
   const registeredCountLabel = registeredCount === undefined ? "확인 중" : String(registeredCount);
   const weeklyMinutes = computeWeeklyClassMinutes(schedule);
   const weeklyHoursLabel = formatDurationLabel(weeklyMinutes);
