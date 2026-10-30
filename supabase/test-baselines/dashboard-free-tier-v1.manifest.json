@@ -939,6 +939,11 @@
       "fileName": "20261027152314_class_schedule_month_summary.sql",
       "status": "final",
       "sha256": "ef8167164cbe81c2a577e045e632bcdc5474cd1e5033e5973c6fa0140787fb01"
+    },
+    {
+      "fileName": "20261030102228_management_class_waitlist_counts.sql",
+      "status": "final",
+      "sha256": "130afcf9ac5c30a2c52c6f42dd93245df2790b7eae74ff9ce6ce85f1febe4b5c"
     }
   ]
 }
