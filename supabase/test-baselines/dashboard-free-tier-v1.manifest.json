@@ -944,6 +944,11 @@
       "fileName": "20261030102228_management_class_waitlist_counts.sql",
       "status": "final",
       "sha256": "130afcf9ac5c30a2c52c6f42dd93245df2790b7eae74ff9ce6ce85f1febe4b5c"
+    },
+    {
+      "fileName": "20261031120000_class_close_occupancy_release.sql",
+      "status": "final",
+      "sha256": "1872ae421e86e383e1c06ee9cc9df7a86c4c462ea6f9f2433cc254735f55fe63"
     }
   ]
 }
