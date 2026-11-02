@@ -60,17 +60,23 @@ select ok((select teacher_catalog_id is null and classroom_catalog_id is null fr
 -- independently inherited resources still scope the conservative blocker.
 select set_config('app.class_close_mutation','v1',true);
 insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule,teacher,room,schedule_plan) values
-(pg_temp.sid(305),'closed off-weekday legacy','영어','종강','legacy','수 18:00-19:30','other scoped teacher','other scoped room',jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','old-regular','date',pg_temp.next_day(5),'scheduleState','active','isForced',false,'startTime',null,'endTime',null))));
+(pg_temp.sid(305),'closed off-weekday legacy','영어','종강','legacy','수 18:00-19:30','other scoped teacher','other scoped room',jsonb_build_object('sessions',jsonb_build_array(
+ jsonb_build_object('id','old-regular','date',pg_temp.next_day(5),'scheduleState','active','isForced',false,'startTime',null,'endTime',null),
+ jsonb_build_object('id','old-past-regular','date',pg_temp.next_day(5)-21,'scheduleState','active','isForced',false,'startTime',null,'endTime',null)))),
+(pg_temp.sid(306),'active off-weekday legacy','영어','수강','legacy','수 18:00-19:30','other scoped teacher','other scoped room',jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','active-regular','date',pg_temp.next_day(5),'scheduleState','active','isForced',false,'startTime',null,'endTime',null))));
 create temp table off_weekday_original as select to_jsonb(c) row from public.classes c where id=pg_temp.sid(305);
 update dashboard_private.timetable_operating_write_baselines set reference=dashboard_private.read_timetable_operating_reference_v1() where transaction_id=txid_current();
 set constraints all immediate;set constraints all deferred;
-select is((select b->>'teacherId' from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text),pg_temp.sid(102)::text,'off-weekday regular uncertainty retains its uniquely resolved teacher');
-select ok((select b->>'startMinute' is null and b->>'endMinute' is null and b->>'classroomId'=pg_temp.sid(202)::text from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text),'time stays unknown while the known room is retained');
+select is((select b->>'teacherId' from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(306)::text),pg_temp.sid(102)::text,'active off-weekday regular uncertainty retains its uniquely resolved teacher');
+select ok((select b->>'startMinute' is null and b->>'endMinute' is null and b->>'classroomId'=pg_temp.sid(202)::text from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(306)::text),'active time stays unknown while the known room is retained');
+select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text and b->>'date'=pg_temp.next_day(5)::text),0,'closed future unknown-time occupancy is released');
+select ok((select b->>'teacherId'=pg_temp.sid(102)::text and b->>'classroomId'=pg_temp.sid(202)::text and b->>'startMinute' is null and b->>'endMinute' is null
+ from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text and b->>'date'=(pg_temp.next_day(5)-21)::text),'closed past unknown-time occupancy remains conservative');
 create function pg_temp.makeup_with(t int,r int,k int) returns jsonb language sql as $$
  select public.update_class_operational_v1(pg_temp.sid(303),jsonb_build_object('schedule_plan',jsonb_set(schedule_plan,'{sessions}',jsonb_build_array(jsonb_build_object('id','scoped-makeup','date',pg_temp.next_day(5),'scheduleState','makeup','startTime','19:20','endTime','21:20','teacherCatalogId',pg_temp.sid(t),'classroomCatalogId',pg_temp.sid(r))))),pg_temp.sid(k),schedule_plan) from public.classes where id=pg_temp.sid(303)
 $$;
 set local role authenticated;
-select lives_ok($q$select pg_temp.makeup_with(101,201,601);set constraints all immediate;set constraints all deferred$q$,'unrelated teacher AND room can save against closed-class unknown time');
+select lives_ok($q$select pg_temp.makeup_with(101,201,601);set constraints all immediate;set constraints all deferred$q$,'unrelated teacher AND room can save against active-class unknown time');
 select lives_ok($q$select pg_temp.makeup_with(102,201,602)$q$,'manual dated input accepts the selected teacher despite another class with unknown time');
 select lives_ok($q$select pg_temp.makeup_with(101,202,603)$q$,'manual dated input accepts the selected room despite another class with unknown time');
 select is((select schedule_plan#>>'{sessions,0,classroomCatalogId}' from public.classes where id=pg_temp.sid(303)),
@@ -78,8 +84,10 @@ select is((select schedule_plan#>>'{sessions,0,classroomCatalogId}' from public.
 reset role;
 select is((select to_jsonb(c) from public.classes c where id=pg_temp.sid(305)),(select row from off_weekday_original),'uncertainty refinement never rewrites the closed class');
 -- Mixed-resource schedules must not choose one of the resource pairs.
-update public.classes set schedule='수 18:00-19:30; 목 18:00-19:30 (scoped teacher, scoped room)' where id=pg_temp.sid(305);
-select ok((select b->>'teacherId' is null and b->>'classroomId' is null from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text),'mixed resources remain conservative for an unmatched weekday');
+update public.classes set schedule='수 18:00-19:30; 목 18:00-19:30 (scoped teacher, scoped room)' where id in(pg_temp.sid(305),pg_temp.sid(306));
+select ok((select b->>'teacherId' is null and b->>'classroomId' is null from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(306)::text),'mixed active resources remain conservative for an unmatched weekday');
+select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text and b->>'date'=pg_temp.next_day(5)::text),0,'mixed closed future resources stay released');
+select ok((select b->>'teacherId' is null and b->>'classroomId' is null from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text and b->>'date'=(pg_temp.next_day(5)-21)::text),'mixed closed past resources remain conservative');
 -- Forced, makeup, explicit overrides, missing producer marker and duplicate
 -- identities cannot acquire regular-default authority from date similarity.
 update public.classes set schedule_plan=jsonb_build_object('sessions',jsonb_build_array(
