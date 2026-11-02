@@ -111,12 +111,19 @@ insert into public.ops_registration_appointments(id,task_id,kind,scheduled_at,pl
 values(pg_temp.t219(632),pg_temp.t219(102),'level_test','2026-09-01','다른 합성 예약실','completed');
 insert into public.ops_registration_level_tests(id,track_id,appointment_id,attempt_number,status,completed_at,material_link)
 values(pg_temp.t219(733),pg_temp.t219(202),pg_temp.t219(632),1,'completed','2026-09-01','https://example.invalid/foreign-material');
-insert into public.ops_registration_consultations(id,track_id,mode,status,director_profile_id,completed_at,outcome,note)
-select pg_temp.t219(2000+n),pg_temp.t219(201),'phone','completed',pg_temp.t219(2),now(),'not_registered','DISPLAY_CONSULTATION_'||n from generate_series(1,31)n;
-insert into public.ops_registration_consultations(id,track_id,mode,status,director_profile_id,note)
-values(pg_temp.t219(2032),pg_temp.t219(201),'phone','waiting',pg_temp.t219(2),'DISPLAY_CURRENT_CONSULTATION'),
- (pg_temp.t219(2033),pg_temp.t219(203),'phone','waiting',pg_temp.t219(2),'FORBIDDEN_ARCHIVED_NOTE'),
- (pg_temp.t219(2034),pg_temp.t219(202),'phone','waiting',pg_temp.t219(2),'FORBIDDEN_OTHER_CONSULTATION');
+-- Phone consultations require both readiness facts under the existing intake
+-- contract. Keep that guard active; only seed valid synthetic input for reads.
+select throws_ok($q$
+ insert into public.ops_registration_consultations(id,track_id,mode,status,director_profile_id)
+ values(pg_temp.t219(2099),pg_temp.t219(201),'phone','waiting',pg_temp.t219(2))
+$q$,'23514','new row for relation "ops_registration_consultations" violates check constraint "ops_registration_consultations_mode_readiness_check"',
+ 'phone consultation without readiness remains rejected before valid fixture seeding');
+insert into public.ops_registration_consultations(id,track_id,mode,status,director_profile_id,completed_at,outcome,note,ready_at,ready_source)
+select pg_temp.t219(2000+n),pg_temp.t219(201),'phone','completed',pg_temp.t219(2),now(),'not_registered','DISPLAY_CONSULTATION_'||n,now(),'inquiry' from generate_series(1,31)n;
+insert into public.ops_registration_consultations(id,track_id,mode,status,director_profile_id,note,ready_at,ready_source)
+values(pg_temp.t219(2032),pg_temp.t219(201),'phone','waiting',pg_temp.t219(2),'DISPLAY_CURRENT_CONSULTATION',now(),'inquiry'),
+ (pg_temp.t219(2033),pg_temp.t219(203),'phone','waiting',pg_temp.t219(2),'FORBIDDEN_ARCHIVED_NOTE',now(),'inquiry'),
+ (pg_temp.t219(2034),pg_temp.t219(202),'phone','waiting',pg_temp.t219(2),'FORBIDDEN_OTHER_CONSULTATION',now(),'inquiry');
 insert into public.ops_registration_admission_batches(id,task_id,revision_number,status)
 select pg_temp.t219(2100+n),pg_temp.t219(101),n,'canceled' from generate_series(1,31)n;
 insert into public.ops_registration_admission_batches(id,task_id,revision_number,status)
