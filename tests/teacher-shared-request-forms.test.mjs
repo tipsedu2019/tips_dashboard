@@ -1,3 +1,4 @@
+import { subjectCatalog, subjectScopeResponse } from './helpers/teacher-subject-fixtures.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, button, id } from './helpers/textbook-numbered-harness.mjs';
@@ -20,6 +21,7 @@ async function edit(t,domain,patch={},currentApprover=makeupReferences.approver,
  await click(h,'내 신청');await h.resolve(latest(h,'get_teacher_own_requests_v1'),page([ownSummary(record)]));await click(h,record.title);await h.resolve(latest(h,'get_teacher_own_request_v1'),record);await click(h,'신청 수정');
  if(domain==='makeup')await h.resolve(latest(h,'get_teacher_request_references_v1'),{...makeupReferences,approver:currentApprover,classes:[{...makeupReferences.classes[0],scheduleStorageMode:'legacy'}],sessions:[]});
  for(const request of calls(h,rpc.detail))await h.resolve(request,{classItem:{...classRow(request.args.p_class_id===id(21)?21:20),status:classStatus}});
+ await subjectMetadata(h);
  return {h,record};
 }
 for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: production shared form preserves safe update, duplicate guard and failed draft`,async t=>{
@@ -58,18 +60,26 @@ test('management form owners actually call the same shared bodies',()=>{
 import * as fs from 'node:fs';
 function awaitImportFs(){return fs;}
 function catalog(request, {total=2, rows=[20,21]}={}) { return {page:request.args.p_page,pageSize:15,totalCount:total,rows:rows.map(n=>({id:id(n),name:classRow(n).name,subject:'영어',grade:'중2',schedule:'월수',status:'수강',teacherName:'가상 교사',termId:null,termName:null,syncGroupId:null,syncGroupName:null,updatedAt:null})),stats:{total,active:total,draft:0},filterOptions:{terms:[],subjects:['영어'],grades:['중2'],teachers:['가상 교사'],syncGroups:[]},syncGroupCounts:[]}; }
-async function catalogs(h){ h.finished ||= new Set();for(const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))){h.finished.add(r);await h.resolve(r,catalog(r));}}
+async function catalogs(h){ h.finished ||= new Set();for(const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))){h.finished.add(r);await h.resolve(r,catalog(r));}await subjectMetadata(h);}
 async function mixedStatusCatalogs(h) {
  h.finished ||= new Set();
  for (const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))) {
   h.finished.add(r);const data=catalog(r);
   data.rows=data.rows.map(row=>({...row,status:row.id===id(21)?'종강':'수강'}));
+  data.filterOptions.teachers=['가상 교사','가상 수학 교사','가상 과학 교사'];
   await h.resolve(r,data);
  }
+ await subjectMetadata(h);
 }
-for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: ended classes are absent from new teacher request choices`,async t=>{
+for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: subject narrowing and ended-class exclusion coexist in new teacher request choices`,async t=>{
  const h=await mount(t,domain);await click(h,'추가');await mixedStatusCatalogs(h);
  await pick(h,domain==='makeup'?'subject':'과목','영어');await mixedStatusCatalogs(h);
+ const teacherLabel=domain==='makeup'?'teacher':domain==='transfer'?'전 선생님':'선생님';
+ const teacherControl=document.getElementById('makeup-'+teacherLabel)||labelled(teacherLabel);
+ await h.act(()=>teacherControl.id.startsWith('makeup-')?teacherControl.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})):teacherControl.click());
+ const teachers=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());
+ assert.ok(teachers.includes('가상 교사'));assert.equal(teachers.includes('가상 수학 교사'),false);assert.equal(teachers.includes('가상 과학 교사'),false);
+ await h.act(()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
  await pick(h,domain==='makeup'?'teacher':domain==='transfer'?'전 선생님':'선생님','가상 교사');await mixedStatusCatalogs(h);
  const select=document.getElementById('makeup-class')||labelled('수업')||labelled('전 수업');assert.ok(select);
  await h.act(()=>select.id==='makeup-class'?select.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})):select.click());
@@ -173,7 +183,7 @@ test('teacher class choices resolve only unknown status dates and reject stale o
  await click(h,'일정 다시 조회');const retried=latest(h,rpc.list);
  await h.resolve(retried,{...catalog(retried),rows:[{...catalog(retried).rows[0],status:''}]});
  await h.resolve(latest(h,rpc.detail),{classItem:{...classRow(),status:'',endDate:'2000-01-01'}});
- await pick(h,'과목','영어');const subjectRead=latest(h,rpc.list);await h.resolve(subjectRead,catalog(subjectRead));
+ await pick(h,'과목','영어');const subjectRead=latest(h,rpc.list);await h.resolve(subjectRead,catalog(subjectRead));await subjectMetadata(h);
  await pick(h,'선생님','가상 교사');const filtered=latest(h,rpc.list);
  await h.resolve(filtered,{...catalog(filtered),rows:[{...catalog(filtered).rows[0],status:''},catalog(filtered).rows[1]]});
  await h.resolve(latest(h,rpc.detail),{classItem:{...classRow(),status:'',endDate:'2000-01-01'}});
@@ -192,6 +202,7 @@ test('transfer target class choices also exclude ended classes and retain anothe
    data.rows=data.rows.map(item=>({...item,name:item.id===id(22)?'가상 진행 후 수업':item.name,status:item.id===id(21)?'종강':'수강'}));
    await h.resolve(r,data);
   }
+  await subjectMetadata(h);
  }
  await click(h,'추가');await choices();await pick(h,'과목','영어');await choices();
  await pick(h,'전 선생님','가상 교사');await choices();await pick(h,'전 수업','가상 원래 반');
@@ -200,4 +211,52 @@ test('transfer target class choices also exclude ended classes and retain anothe
  const options=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());
  assert.ok(options.includes('가상 진행 후 수업'));assert.equal(options.includes('가상 새 반'),false);
  assert.equal(options.includes('가상 원래 반'),false,'source cannot also be the target');assert.equal(calls(h,rpc.write).length,0);
+});
+
+async function subjectMetadata(h) {
+ h.metadataFinished ||= new Set();
+ for(const r of h.requests.filter(r=>['list_operations_catalogs_v1','get_academic_curriculum_numbered_page_v2'].includes(r.name)&&!h.metadataFinished.has(r))) {
+  h.metadataFinished.add(r);await h.resolve(r,r.name==='list_operations_catalogs_v1'?subjectCatalog:subjectScopeResponse(r));
+ }
+}
+async function globalTeacherCatalogs(h) {
+ h.finished ||= new Set();
+ for(const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))) {
+  h.finished.add(r);const data=catalog(r);data.filterOptions.subjects=['영어','수학','과학'];data.filterOptions.teachers=['가상 교사','가상 수학 교사','가상 과학 교사','가상 복수 교사'];
+  await h.resolve(r,data);
+ }
+ await subjectMetadata(h);
+}
+for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: subject selection narrows teacher choices independently of the current class page`,async t=>{
+ const h=await mount(t,domain);await click(h,'추가');await globalTeacherCatalogs(h);
+ for(const [subject,expected,absent] of [['수학',['가상 수학 교사','가상 복수 교사'],['가상 교사','가상 과학 교사']],['영어',['가상 교사','가상 복수 교사','가상 카탈로그 외 교사'],['가상 수학 교사','가상 과학 교사']],['과학',['가상 과학 교사'],['가상 교사','가상 수학 교사','가상 복수 교사']]]) {
+  await pick(h,domain==='makeup'?'subject':'과목',subject);await globalTeacherCatalogs(h);
+  for(const label of domain==='transfer'?['전 선생님','후 선생님']:[domain==='makeup'?'teacher':'선생님']) {
+   const trigger=document.getElementById('makeup-'+label)||labelled(label);assert.ok(trigger);
+   await h.act(()=>trigger.id.startsWith('makeup-')?trigger.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})):trigger.click());
+   const names=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());
+   for(const name of absent)assert.equal(names.includes(name),false,`${subject} excludes ${name}`);
+   for(const name of expected)assert.ok(names.includes(name),`${subject} includes ${name}`);
+   await h.act(()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  }
+ }
+ assert.equal(h.requests.some(r=>r.table),false);assert.equal(calls(h,rpc.write).length,0);
+});
+
+test('teacher subject changes discard stale facets and failure retries without a global-list fallback',async t=>{
+ const h=await mount(t,'withdrawal');await click(h,'추가');await globalTeacherCatalogs(h);
+ await pick(h,'과목','수학');const stale=latest(h,'get_academic_curriculum_numbered_page_v2');assert.ok(stale);
+ // Resolve only the class page so the next subject control remains usable.
+ for(const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))){h.finished.add(r);const d=catalog(r);d.filterOptions.subjects=['영어','수학','과학'];await h.resolve(r,d);}
+ await pick(h,'과목','영어');const current=latest(h,'get_academic_curriculum_numbered_page_v2');assert.notEqual(current,stale);assert.equal(stale.signal.aborted,true);
+ for(const r of calls(h,'list_operations_catalogs_v1'))await h.resolve(r,subjectCatalog);
+ await h.resolve(stale,subjectScopeResponse(stale));await h.reject(current,new Error('synthetic unavailable'));
+ assert.match(document.body.textContent,/조회에 실패했습니다/);assert.equal(calls(h,rpc.write).length,0);
+ await h.act(()=>labelled('선생님').click());const failedNames=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());
+ assert.equal(failedNames.includes('가상 수학 교사'),false);assert.equal(failedNames.includes('가상 교사'),false);
+ await h.act(()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+ await click(h,'일정 다시 조회');await globalTeacherCatalogs(h);await h.act(()=>labelled('선생님').click());
+ const names=[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent.trim());assert.ok(names.includes('가상 교사'));assert.equal(names.includes('가상 수학 교사'),false);
+ const scopeReads=calls(h,'get_academic_curriculum_numbered_page_v2');assert.ok(scopeReads.every(r=>r.args.p_page===1&&r.args.p_page_size===15&&r.args.p_filters.search===''&&r.args.p_filters.teacher===null&&r.args.p_include_scope_metadata===true));
+ assert.equal(h.requests.some(r=>r.table),false);
 });
