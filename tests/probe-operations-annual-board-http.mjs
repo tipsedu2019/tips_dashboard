@@ -34,6 +34,7 @@ function requireCondition(condition, code) {
 }
 const sqlLiteral = value => `'${String(value).replaceAll("'", "''")}'`;
 const ownershipHash = nonce => createHash("sha256").update(nonce).digest("hex");
+const isPlainObject = value => Boolean(value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype);
 
 export function ownedSidecarId(container, target, sidecarName, imageId) {
   requireCondition(/^[a-f0-9]{64}$/u.test(container.Id || "") && container.Name === `/${sidecarName}`
@@ -80,22 +81,25 @@ export function validateDockerBoundary(target, db, network, routes) {
     && [network.Id, target.networkName].includes(db.HostConfig?.NetworkMode), "db_network_mismatch");
   const requested = db.HostConfig.PortBindings;
   const published = db.NetworkSettings.Ports;
-  requireCondition(requested && typeof requested === "object" && published && typeof published === "object", "db_ports_invalid");
+  requireCondition(isPlainObject(requested) && isPlainObject(published), "db_ports_invalid");
+  const nullDbPublication = Object.keys(published).join("|") === "5432/tcp" && published["5432/tcp"] === null;
   for (const [key, bindings] of Object.entries(requested)) {
     requireCondition(key === "5432/tcp" && Array.isArray(bindings) && bindings.length > 0
-      && bindings.every(binding => ["", "127.0.0.1", "::1"].includes(binding.HostIp)
+      && bindings.every(binding => isPlainObject(binding) && ["", "127.0.0.1", "::1"].includes(binding.HostIp)
         && Number(binding.HostPort) === Number(target.url.port)), "db_ports_invalid");
   }
   for (const [key, bindings] of Object.entries(published)) {
+    if (nullDbPublication && key === "5432/tcp") continue;
     requireCondition(key === "5432/tcp" && Array.isArray(bindings)
-      && bindings.every(binding => ["127.0.0.1", "::1"].includes(binding.HostIp)
+      && bindings.every(binding => isPlainObject(binding) && ["127.0.0.1", "::1"].includes(binding.HostIp)
         && Number(binding.HostPort) === Number(target.url.port)), "db_ports_invalid");
   }
   // The official runner supports an owned loopback relay when internal
-  // bridges publish nothing: either {} or {"5432/tcp": []}. An empty entry
-  // is accepted only with the exact requested test port; all real bindings
-  // remain loopback-only. HTTP uses the independently verified internal sidecar.
-  if (Object.hasOwn(published, "5432/tcp") && published["5432/tcp"].length === 0) {
+  // bridges publish nothing: {}, {"5432/tcp": []}, or sole5432:null.
+  // Empty/null entries require the exact requested test port; real bindings
+  // remain loopback-only. This probe does not use or attest the host relay:
+  // SQL and HTTP use the independently verified DB/internal sidecar below.
+  if (nullDbPublication || (Object.hasOwn(published, "5432/tcp") && published["5432/tcp"].length === 0)) {
     requireCondition(Object.keys(requested).length === 1 && Array.isArray(requested["5432/tcp"])
       && requested["5432/tcp"].length > 0, "db_ports_invalid");
   }
