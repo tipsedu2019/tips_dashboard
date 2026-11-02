@@ -206,6 +206,12 @@ insert into public.ops_task_events(id,task_id,event_type,after_value) values
 -- Fake catalog values are fixture facts, never claimed provider verification.
 -- No guard is disabled, real key supplied, preview RPC called or worker run.
 create temp table activation219_original as select * from dashboard_private.registration_customer_solapi_activation where message_kind='level_test_booking';
+-- The reduced schema baseline does not replay historical seed data. Create
+-- only this synthetic off row when absent, and restore original absence below.
+insert into dashboard_private.registration_customer_solapi_activation(message_kind,mode)
+values('level_test_booking','off') on conflict(message_kind) do nothing;
+select is((select count(*) from dashboard_private.registration_customer_solapi_activation where message_kind='level_test_booking'),
+ 1::bigint,'historical message fixture has one scoped activation row before verification');
 insert into dashboard_private.registration_customer_solapi_template_receipts(message_kind,template_id,pf_id,catalog_checksum,provider_checksum,provider_status,verified_by)
 values('level_test_booking','synthetic219-template-only','synthetic219-pf-only',repeat('c',64),repeat('c',64),'sendable',pg_temp.t219(1));
 do $$declare n integer;task_id uuid;begin
@@ -230,9 +236,13 @@ end $$;
 update dashboard_private.registration_customer_solapi_activation a set mode=o.mode,verification_task_id=o.verification_task_id,
  verification_recipient_hash=o.verification_recipient_hash,updated_by=o.updated_by,updated_at=o.updated_at
 from activation219_original o where a.message_kind=o.message_kind;
+delete from dashboard_private.registration_customer_solapi_activation a
+where a.message_kind='level_test_booking' and not exists(select 1 from activation219_original);
 delete from dashboard_private.registration_customer_solapi_template_receipts where message_kind='level_test_booking';
-select ok((select (to_jsonb(a)-'updated_at')=(to_jsonb(o)-'updated_at') from dashboard_private.registration_customer_solapi_activation a join activation219_original o using(message_kind)),
- 'synthetic activation mode and scope are restored before reads; update timestamp follows its unchanged trigger');
+select is(
+ (select coalesce(jsonb_agg(to_jsonb(a)-'updated_at' order by a.message_kind),'[]'::jsonb) from dashboard_private.registration_customer_solapi_activation a where a.message_kind='level_test_booking'),
+ (select coalesce(jsonb_agg(to_jsonb(o)-'updated_at' order by o.message_kind),'[]'::jsonb) from activation219_original o),
+ 'synthetic activation state or original absence is restored before reads; update timestamp follows its unchanged trigger');
 select ok((select tgenabled='O' from pg_trigger where tgrelid='public.ops_registration_customer_messages'::regclass and tgname='enforce_registration_customer_solapi_delivery_gate_v1'),
  'delivery gate stayed enabled during historical fixture creation');
 
