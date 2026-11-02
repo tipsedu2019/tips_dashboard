@@ -69,6 +69,9 @@ export type MakeupTeacherOption = {
 }
 
 export type MakeupClassOption = {
+  startDate?: string
+  endDate?: string
+  status?: string
   id: string
   name: string
   subject: string
@@ -202,7 +205,7 @@ const EMPTY_WORKSPACE_DATA: MakeupRequestWorkspaceData = {
   academicEvents: [],
 }
 
-const MAKEUP_CLASS_LIST_SELECT = "id,name,subject,grade,teacher,room,schedule,schedule_storage_mode,textbook_ids"
+const MAKEUP_CLASS_LIST_SELECT = "id,name,subject,grade,teacher,room,schedule,schedule_storage_mode,textbook_ids,status,start_date,end_date"
 const MAKEUP_REQUEST_LIST_SELECT = "id,status,subject,approval_group,requester_id,teacher_catalog_id,teacher_profile_id,class_id,class_name,request_kind,reason,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots,approver_teacher_catalog_id,approver_profile_id,returned_reason,rejected_reason,final_note,approved_by,approved_at,completed_by,completed_at,canceled_by,canceled_at,cancel_academic_event_id,makeup_academic_event_id,makeup_academic_event_ids,created_at,updated_at"
 
 export const MAKEUP_NOTIFICATION_TRIGGER_LABELS: Record<ActiveMakeupNotificationTrigger, string> = {
@@ -361,6 +364,9 @@ function mapClass(row: Row): MakeupClassOption {
   return {
     id: text(row.id),
     name: text(row.name || row.class_name),
+    status: text(row.status),
+    startDate: text(row.start_date),
+    endDate: text(row.end_date),
     subject: text(row.subject),
     grade: text(row.grade),
     teacher: text(row.teacher),

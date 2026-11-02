@@ -313,7 +313,7 @@ insert into expected_counts values
  (38,0,1),
  (39,1,0),
  (40,1,0),
- (41,1,0),
+ (41,0,0),
  (42,1,0),
  (43,0,1),
  (44,0,0);
@@ -375,11 +375,11 @@ select is(jsonb_array_length(pg_temp.dated_for(36)),2,'matched weekday keeps bot
 select is(pg_temp.blockers_for(37)->0->>'teacherId',pg_temp.fid(101)::text,'multiple intervals with one pair retain unmatched teacher');
 select is(pg_temp.blockers_for(43)->0->>'classroomId',pg_temp.fid(201)::text,'one pair across weekdays retains unmatched room');
 select ok(exists(select 1 from reader_result,jsonb_array_elements(after_reference->'shadowClasses') c where c->>'id'=pg_temp.fid(340)::text),'academic active alias stays admitted weekly');
-select is(jsonb_array_length(pg_temp.dated_for(41)),1,'closed future history keeps existing dated semantics');
+select is(jsonb_array_length(pg_temp.dated_for(41)),0,'approved close policy releases undated legacy closure future occupancy');
 select is(jsonb_array_length(pg_temp.dated_for(42)),1,'shadow storage keeps legacy inheritance');
 select is(jsonb_array_length(pg_temp.dated_for(44)||pg_temp.blockers_for(44)),0,'empty complete history stays empty');
-select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(501)::text),5::bigint,'normalized closed history keeps all five source rows');
-select is((select v->>'teacherId' from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'id'='session:'||pg_temp.fid(602)::text),pg_temp.fid(101)::text,'normalized trimmed-label fallback stays unchanged');
+select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(501)::text),3::bigint,'normalized closed projection retains three historical source rows');
+select ok(not exists(select 1 from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'id'='session:'||pg_temp.fid(602)::text),'closed future normalized row is absent from occupancy; original row preservation is checked below');
 select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId'=pg_temp.fid(501)::text),2::bigint,'normalized partial and fractional rows stay unresolved');
 
 -- Keep final-schema constraints rather than inventing unreachable reader errors.
@@ -421,10 +421,10 @@ select is((select count(*) from dashboard_private.notification_deliveries),(sele
 select is((select count(*) from public.student_class_enrollment_history),(select enrollments from no_send),'reader changes no enrollment history');
 select is((select count(*) from public.dashboard_audit_logs),(select audits from no_send),'reader and probes leave no audit record');
 select is((select provolatile::text from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'s','reader remains STABLE');
--- The final reader includes optional rooms from 20261020134458;
+-- The final reader adds the approved close projection after optional rooms;
 -- the inheritance/freshness/security assertions above still exercise that body.
 select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'sha256'),'hex'),
- '003657222bc8694f95e2a9eca9e38915c62617d1df1bf9e959eecaa5784a164f',
+ 'd577eaaa428d6793d0e01963c7f03cfeb2af64798464e7aca46b31b1db9a9909',
  'assertions execute the exact final inheritance reader body');
 select ok((select prosecdef from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'reader remains SECURITY DEFINER');
 select ok((select proconfig @> array['search_path=""'] from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),

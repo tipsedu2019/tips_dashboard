@@ -1,5 +1,7 @@
 "use client"
 
+import { requestClassOptions } from "@/lib/request-class-options"
+
 import { makeupDomainErrorMessage } from "./makeup-domain-errors.js"
 
 import { useDraftNavigation } from "@/hooks/use-draft-navigation"
@@ -1620,7 +1622,7 @@ export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
     return result.length ? result : [{ id: "owner-slot-0", date: "", startTime: "", endTime: "", classroom: "" }]
   })
   const toClass = (row: NonNullable<typeof context.selected>): MakeupClassOption => ({
-    id: row.id, name: row.label, subject: row.subject, grade: row.grade, teacher: row.teacher, teacherCatalogId: "", room: row.room, classroom: row.room,
+    id: row.id, startDate: row.startDate, endDate: row.endDate, status: row.status, name: row.label, subject: row.subject, grade: row.grade, teacher: row.teacher, teacherCatalogId: "", room: row.room, classroom: row.room,
     schedule: row.schedule, schedulePlan: row.schedulePlan || {}, schedulePlanLoaded: !context.detailLoading && !context.error,
     scheduleStorageMode: row.scheduleStorageMode === "normalized" ? "normalized" : row.scheduleStorageMode === "shadow" ? "shadow" : "legacy",
     lessonSessions: (references?.sessions || []).map(session => {
@@ -2393,11 +2395,11 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [data.classes, data.teachers, selectedSubject])
 
   const availableClasses = useMemo(() => (
-    data.classes.filter((classItem) => (
+    requestClassOptions(data.classes, input.classId).filter((classItem) => (
       (!selectedSubject || classItem.subject === selectedSubject) &&
       matchesClassTeacherSelection(classItem, selectedTeacherKey, data.teachers)
     ))
-  ), [data.classes, data.teachers, selectedSubject, selectedTeacherKey])
+  ), [data.classes, data.teachers, input.classId, selectedSubject, selectedTeacherKey])
 
   const selectedRoomHasCollision = useMemo(() => (
     hasSlotRoomCollision(input.makeupSlots, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role))

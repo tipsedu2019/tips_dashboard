@@ -1,9 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { computeClassStatus, normalizeClassStatus } from "@/lib/class-status.js"
+import { requestClassOptions } from "@/lib/request-class-options"
 import { useAuth } from "@/providers/auth-provider"
 import { supabase } from "@/lib/supabase"
-import { createOperationsReadService } from "@/features/operations/operations-read-service"
+import { teacherSubjectNames } from "./teacher-subject-options"
+import { createAcademicReadService } from "@/features/academic/academic-read-service"
+import { createOperationsReadService, invalidateOperationsCatalogCache } from "@/features/operations/operations-read-service"
 import { normalizedLessonDisplayOrdinals } from "@/features/operations/normalized-lesson-display"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
 import { DataTableSearchField } from "@/components/data-table/data-table-search-field"
@@ -35,7 +39,7 @@ export function teacherFormClass(row: Row, schedule?: Row, month?: string): OpsC
     const ordinals = normalizedLessonDisplayOrdinals(sessions, teacherFormMonthRange(month))
     schedulePlan = { ...legacy, sessions: sessions.map(session => ({ ...session, sessionNumber: ordinals.get(session.id) ?? undefined })) }
   }
-  return { id: text(row.id), label: text(row.name), subject: text(row.subject), grade: text(row.grade),
+  return { id: text(row.id), startDate: text(row.startDate), endDate: text(row.endDate), status: text(row.status), label: text(row.name), subject: text(row.subject), grade: text(row.grade),
     teacher: text(row.teacher) || text(row.teacherName), room: text(row.room), schedule: text(row.schedule),
     scheduleStorageMode: text(row.scheduleStorageMode), schedulePlan, studentIds: [], waitlistIds: [], textbookIds: [] }
 }
@@ -46,19 +50,50 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
   const { user, role } = useAuth()
   const actor = `${user?.id || ""}:${role}`
   const service = useMemo(() => createOperationsReadService({ supabase, actorScope: actor }), [actor])
+  const academic = useMemo(() => createAcademicReadService({ supabase, actorScope: actor }), [actor])
+  const [teacherState, setTeacherState] = useState<{ key: string; names?: string[]; error?: boolean }>()
   const [page, setPage] = useState(1), [retry, setRetry] = useState(0)
   const searchInput = useCommittedSearch("")
   const search = searchInput.committed
   const [pageState, setPageState] = useState<{ key: string; data?: Awaited<ReturnType<typeof service.readClassScheduleNumberedPage>>; error?: boolean }>()
   const [detailState, setDetailState] = useState<{ key: string; scope: string; data?: OpsClassOption; error?: boolean }>()
   const pageKey = JSON.stringify([actor, subject, teacher, search, page, retry])
+  const teacherKey = JSON.stringify([actor, subject, retry])
+  useEffect(() => {
+    if (!enabled || !subject) return
+    const controller = new AbortController()
+    void Promise.all([
+      service.loadCatalogs(),
+      academic.readCurriculumNumberedPage({ filters: { periodId: null, search: "", status: null, subject, grade: null, teacher: null, classroom: null, viewMode: "all" }, page: 1, pageSize: 15, signal: controller.signal }),
+    ]).then(([catalog, scope]) => {
+      const names = teacherSubjectNames(catalog, subject, scope.filterOptions?.teachers || [])
+      if (!controller.signal.aborted) setTeacherState({ key: teacherKey, names })
+    }).catch(error => {
+      if (!controller.signal.aborted) {
+        if (error?.code === "42501") onPermissionDenied()
+        else setTeacherState({ key: teacherKey, error: true })
+      }
+    })
+    return () => controller.abort()
+  }, [service, academic, enabled, teacherKey, subject, onPermissionDenied])
   const detailScope = JSON.stringify([actor, id])
   const detailKey = JSON.stringify([actor, id, month, retry])
   useEffect(() => {
     if (!enabled) return
     const controller = new AbortController()
     void service.readClassScheduleNumberedPage({ filters: { termId: null, search, subject: subject || null, teacher: teacher || null, grade: null, syncGroupId: null }, page, pageSize: 15, signal: controller.signal })
-      .then(data => { if (!controller.signal.aborted) setPageState({ key: pageKey, data }) })
+      .then(async data => {
+        // The numbered DTO carries raw status but no dates. Resolve only unknown
+        // statuses through the existing authorized detail reader (at most 15).
+        const rows = await Promise.all(data.rows.map(async row => {
+          if (normalizeClassStatus(row.status)) return row
+          controller.signal.throwIfAborted()
+          const detail = await service.loadClassLessonDesignDetail(row.id)
+          controller.signal.throwIfAborted()
+          return { ...row, status: computeClassStatus(detail.classItem) }
+        }))
+        if (!controller.signal.aborted) setPageState({ key: pageKey, data: { ...data, rows } })
+      })
       .catch(error => { if (!controller.signal.aborted) { if (error?.code === "42501") onPermissionDenied(); else setPageState({ key: pageKey, error: true }) } })
     return () => controller.abort()
   }, [service, enabled, pageKey, subject, teacher, search, page, onPermissionDenied])
@@ -77,12 +112,13 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
   const result = pageState?.key === pageKey ? pageState : undefined
   const detail = detailState?.key === detailKey ? detailState : undefined
   const selected = detail?.data || (detailState?.scope === detailScope && detailState.data ? { ...detailState.data, schedulePlan: { ...detailState.data.schedulePlan, sessions: [] } } : undefined)
+  const teacherResult = teacherState?.key === teacherKey ? teacherState : undefined
   // A current page is never presented as the entire catalog.
-  const options = (result?.data?.rows || []).map(row => teacherFormClass(row))
+  const options = requestClassOptions((result?.data?.rows || []).map(row => teacherFormClass(row)), id)
   if (selected && !options.some(row => row.id === selected.id)) options.unshift(selected)
-  return { options, selected, subjects: result?.data?.filterOptions.subjects || [], teachers: result?.data?.filterOptions.teachers || [],
-    page, search: searchInput.value, searchInput, totalCount: result?.data?.totalCount ?? null, loading: enabled && !result, detailLoading: Boolean(id && !detail), error: Boolean(result?.error || detail?.error),
-    setPage, setSearch: (value: string) => { searchInput.onChange(value); setPage(1) }, retry: () => setRetry(value => value + 1) }
+  return { options, selected, subjects: result?.data?.filterOptions.subjects || [], teachers: subject ? teacherResult?.names || [] : [],
+    page, search: searchInput.value, searchInput, totalCount: result?.data?.totalCount ?? null, loading: enabled && (!result || Boolean(subject && !teacherResult)), detailLoading: Boolean(id && !detail), error: Boolean(result?.error || detail?.error || teacherResult?.error),
+    setPage, setSearch: (value: string) => { searchInput.onChange(value); setPage(1) }, retry: () => { invalidateOperationsCatalogCache(actor); setRetry(value => value + 1) } }
 }
 
 export function TeacherFormClassPager({ context, label }: { context: ReturnType<typeof useTeacherFormClass>; label: string }) {
