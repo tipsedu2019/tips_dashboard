@@ -18,6 +18,8 @@ import {
 export function RegistrationApplicationHistoryAction({
   detail,
   profiles,
+  partialHistory,
+  historyNotice,
 }: RegistrationHistoryTimelineProps) {
   const historyTriggerRef = useRef<HTMLButtonElement>(null)
   const restoreHistoryTriggerFocusRef = useRef(false)
@@ -45,7 +47,7 @@ export function RegistrationApplicationHistoryAction({
           historyTriggerRef.current?.focus({ preventScroll: true })
         }}
       >
-        <RegistrationHistoryTimeline detail={detail} profiles={profiles} embedded />
+        <RegistrationHistoryTimeline detail={detail} profiles={profiles} partialHistory={partialHistory} historyNotice={historyNotice} embedded />
       </PopoverContent>
     </Popover>
   )

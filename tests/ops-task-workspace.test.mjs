@@ -1963,7 +1963,9 @@ test("canonical registration application opens one honest read-only timeline fro
   assert.doesNotMatch(actionSource, /<Sheet|<Dialog/);
   assert.doesNotMatch(editorSource, /현재 업무/);
   assert.doesNotMatch(editorSource, /담당자 및 일시 이력/);
-  assert.match(timelineSource, /buildRegistrationSubjectHistory\(detail\)/);
+  assert.match(timelineSource, /partialHistory = false/);
+  assert.match(timelineSource, /buildRegistrationSubjectHistory\(detail, \{ partial: partialHistory \}\)/);
+  assert.doesNotMatch(editorSource, /partialHistory=/, "management keeps the default complete history");
   assert.doesNotMatch(timelineSource, /과목 전체|단계 전체|subjectFilter|stageFilter/);
   assert.match(timelineSource, /알 수 없음/);
   assert.match(timelineSource, /마이그레이션/);

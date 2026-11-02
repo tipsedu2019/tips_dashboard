@@ -1,3 +1,4 @@
+import { bundle as teacherDetailBundle, envelope as teacherDetailEnvelope, ids as teacherDetailIds } from "./helpers/registration-teacher-detail-fixtures.mjs";
 import { createObservationDraftFixtureState } from "./helpers/registration-observation-draft-fixture.mjs";
 import { clickTab, pressTabKey } from "./helpers/tab-interactions.mjs";
 import assert from 'node:assert/strict';
@@ -2746,7 +2747,12 @@ for (const kind of ['transfer', 'withdrawal']) test(`teacher operational ${kind}
 
 // Role-specific common-reader regressions use the same real workspace harness.
 const rpc = (h, name) => h.requests.filter(r => r.name === name);
-const commonReads = h => rpc(h, 'get_operational_common_detail_v1');
+const teacherCaseReads = h => rpc(h, 'get_registration_teacher_detail_v1').filter(r=>r.args.p_section==='case');
+function teacherCase(n, name, trackId=id(1000+n*2), appointmentId=id(2000+n*2)) {
+  const raw = teacherDetailBundle(); raw.parent.student_name=name;
+  const mapped=JSON.parse(JSON.stringify(raw).replaceAll(teacherDetailIds.task,id(n)).replaceAll(teacherDetailIds.track,trackId).replaceAll(teacherDetailIds.appointment,appointmentId));
+  return teacherDetailEnvelope('case',mapped,id(n));
+}
 const pages = h => rpc(h, 'list_ops_task_numbered_page_v1');
 async function settle(h, request, data) { await act(async()=> { request.resolve({data,error:null}); await Promise.resolve(); }); }
 async function finishOneRegistration(h, name='LIST COMMON') {
@@ -2756,65 +2762,144 @@ async function finishOneRegistration(h, name='LIST COMMON') {
 function noRawOrWrites(h) {
   assert.equal(h.tableRequests.length,0,`raw relation reads: ${h.tableRequests.map(r=>r.table).join(',')}`);
   assert.deepEqual(h.requests.filter(r=>/^(create|save|update|delete|transition|approve|request_|correct|complete|add_)/.test(r.name)).map(r=>r.name),[]);
+  assert.equal(rpc(h,'get_operational_common_detail_v1').length,0,'registration scoped detail must not merge the old common DTO into shared lists');
 }
 async function stabilize(h) { for(let i=0;i<3;i++) { await h.render(); await act(async()=>Promise.resolve()); } }
 
-test('teacher list click uses one safe detail and stays stable without canonical/options/raw reads',async t=>{
+test('teacher list click uses one scoped read detail and stays stable without canonical/options/raw reads',async t=>{
   const h=await workspace(t,{workspace:'registration',viewerRole:'teacher'});
   await finishOneRegistration(h);
   const target=document.querySelector('[data-registration-case-row]'); assert.ok(target,'real registration row renders');
   await act(async()=>target.click());
-  assert.equal(commonReads(h).length,1);
-  await settle(h,commonReads(h)[0],row(1,registrationPatch(1,'SAFE DETAIL ONE')));
+  assert.equal(teacherCaseReads(h).length,1);
+  await settle(h,teacherCaseReads(h)[0],teacherCase(1,'SAFE DETAIL ONE'));
   assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/SAFE DETAIL ONE/);
   assert.equal(new URLSearchParams(window.location.search).get('taskId'),id(1));
   const stableUrl=window.location.href, before=h.requests.length;
   await stabilize(h);
   assert.equal(h.requests.length,before,'rerender/route acknowledgement starts no reads');
-  assert.equal(commonReads(h).length,1); assert.equal(window.location.href,stableUrl);
+  assert.equal(teacherCaseReads(h).length,1); assert.equal(window.location.href,stableUrl);
   noRawOrWrites(h);
 });
 
-for(const variant of ['case','track','appointment']) test(`teacher ${variant} direct URL resolves once to common dialog`,async t=>{
+test('registration teacher student click includes the management inquiry read fields',async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher'});
+  await finishOneRegistration(h,'SYNTHETIC PARITY STUDENT');
+  await act(async()=>document.querySelector('[data-registration-case-row]').click());
+  await settle(h,teacherCaseReads(h)[0],teacherCase(1,'SYNTHETIC PARITY STUDENT'));
+  assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/학부모 전화/,'the student detail must include management inquiry fields');
+  noRawOrWrites(h);
+});
+
+test('teacher malformed task URL remains a recoverable detail error without any scoped RPC',async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:'?taskId=not-a-uuid'});await finishOneRegistration(h);
+  assert.match(document.querySelector('[role="dialog"] [role="alert"]')?.textContent||'',/불러오지 못했습니다/);
+  assert.equal(teacherCaseReads(h).length,0);assert.ok(document.querySelector('[data-registration-case-row]'));noRawOrWrites(h);
+});
+
+test('teacher valid uppercase route IDs bind to canonical case and appointment identities',async t=>{
+  const task='abcdefab-0000-4000-8000-000000000001',track='bcdefabc-0000-4000-8000-000000000002',appointment='cdefabcd-0000-4000-8000-000000000003';
+  const query=new URLSearchParams({taskId:task.toUpperCase(),trackId:track.toUpperCase(),appointmentId:appointment.toUpperCase()});
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:`?${query}`});await finishOneRegistration(h);
+  const request=teacherCaseReads(h)[0];assert.equal(request.args.p_task_id,task);
+  const response=JSON.parse(JSON.stringify(teacherCase(1,'CANONICAL UUID DETAIL',track,appointment)).replaceAll(id(1),task));
+  await settle(h,request,response);
+  assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/CANONICAL UUID DETAIL/);noRawOrWrites(h);
+});
+for(const change of ['role','user']) test(`teacher accepted full detail is removed immediately on ${change} replacement`,async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher'});await finishOneRegistration(h);
+  await act(async()=>document.querySelector('[data-registration-case-row]').click());await settle(h,teacherCaseReads(h)[0],teacherCase(1,'SENSITIVE SYNTHETIC DETAIL'));
+  assert.match(document.body.textContent,/SENSITIVE SYNTHETIC DETAIL/);
+  await h.render(change==='role'?{viewerRole:'assistant'}:{viewerId:'actor-b'});
+  assert.doesNotMatch(document.body.textContent,/SENSITIVE SYNTHETIC DETAIL/);
+  assert.equal(h.requests.some(r=>/^(create|save|update|delete|transition|approve)/.test(r.name)),false);
+});
+
+test('teacher detail subject arrow navigation preserves focus through workspace URL updates',async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher'});await finishOneRegistration(h);
+  await act(async()=>document.querySelector('[data-registration-case-row]').click());
+  const response=teacherCase(1,'KEYBOARD SYNTHETIC');response.data.tracks.push({...response.data.tracks[0],id:id(1003),subject:'영어'});
+  await settle(h,teacherCaseReads(h)[0],response);
+  const list=document.querySelector('[role="dialog"] [role="tablist"]');assert.ok(list);
+  const selected=list.querySelector('[role="tab"][aria-selected="true"]');selected.focus();
+  await act(async()=>selected.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true})));
+  const current=document.querySelector('[role="dialog"] [role="tab"][aria-selected="true"]');assert.ok(current);
+  assert.ok(document.activeElement===current,'subject selection must retain keyboard focus after the URL state acknowledges it');
+  assert.equal(teacherCaseReads(h).length,1,'subject navigation reuses only the current case read');noRawOrWrites(h);
+});
+
+test('teacher detail retries a read failure, closes without retaining data, and refetches on reopen',async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher'});await finishOneRegistration(h);
+  const rowElement=document.querySelector('[data-registration-case-row]');await act(async()=>rowElement.click());
+  const failed=teacherCaseReads(h)[0];await act(async()=>failed.resolve({data:null,error:{code:'57014',message:'SYNTHETIC READ FAILURE'}}));
+  assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/불러오지 못했습니다/);
+  const retry=[...document.querySelectorAll('button')].find(el=>el.textContent.trim()==='다시 불러오기');assert.ok(retry);
+  await act(async()=>retry.click());assert.equal(teacherCaseReads(h).length,2);
+  await settle(h,teacherCaseReads(h)[1],teacherCase(1,'RETRY DETAIL'));
+  assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/RETRY DETAIL/);
+  await act(async()=>[...document.querySelectorAll('[role="dialog"] button')].find(el=>el.textContent.trim()==='닫기').click());
+  assert.equal(document.querySelector('[role="dialog"]'),null);assert.equal(new URLSearchParams(window.location.search).has('taskId'),false);
+  await act(async()=>rowElement.click());assert.equal(teacherCaseReads(h).length,3);
+  assert.doesNotMatch(document.querySelector('[role="dialog"]')?.textContent||'',/RETRY DETAIL/);
+  const pending=teacherCaseReads(h)[2];await act(async()=>[...document.querySelectorAll('[role="dialog"] button')].find(el=>el.textContent.trim()==='닫기').click());
+  assert.equal(pending.signal.aborted,true);await settle(h,pending,teacherCase(1,'CLOSED LATE DATA'));
+  assert.doesNotMatch(document.body.textContent,/CLOSED LATE DATA/);noRawOrWrites(h);
+});
+for(const denial of [{code:'42501'},{status:401},{status:403}]) test(`teacher scoped detail denial clears the accepted list ${JSON.stringify(denial)}`,async t=>{
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher'});await finishOneRegistration(h,'VISIBLE BEFORE DENIAL');
+  await act(async()=>document.querySelector('[data-registration-case-row]').click());
+  await act(async()=>teacherCaseReads(h)[0].resolve({data:null,error:denial}));await stabilize(h);
+  assert.equal(document.querySelector('[role="dialog"]'),null);assert.doesNotMatch(document.body.textContent,/VISIBLE BEFORE DENIAL/);
+  assert.equal(document.querySelectorAll('[data-registration-case-row]').length,0);noRawOrWrites(h);
+});
+for(const kind of ['track','appointment']) test(`teacher route rejects a ${kind} outside the selected case instead of displaying another child`,async t=>{
+  const query=new URLSearchParams({taskId:id(1),[kind==='track'?'trackId':'appointmentId']:id(7777)});
+  const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:`?${query}`});await finishOneRegistration(h);
+  await settle(h,teacherCaseReads(h)[0],teacherCase(1,'WRONG CHILD MUST NOT DISPLAY'));
+  assert.match(document.querySelector('[role="alert"]')?.textContent||'',/선택한 과목 또는 예약 정보를 확인할 수 없습니다/);
+  assert.doesNotMatch(document.querySelector('[role="dialog"]')?.textContent||'',/WRONG CHILD MUST NOT DISPLAY/);noRawOrWrites(h);
+});
+
+for(const variant of ['case','track','appointment']) test(`teacher ${variant} direct URL resolves once to scoped read dialog`,async t=>{
   const query=new URLSearchParams({taskId:id(999)});
   if(variant!=='case')query.set('trackId',id(2999));
   if(variant==='appointment')query.set('appointmentId',id(3999));
   const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:`?${query}`});
   await finishOneRegistration(h);
-  assert.equal(commonReads(h).length,1);
-  await settle(h,commonReads(h)[0],row(999,registrationPatch(999,'OFFPAGE COMMON')));
+  assert.equal(teacherCaseReads(h).length,1);
+  await settle(h,teacherCaseReads(h)[0],teacherCase(999,'OFFPAGE COMMON', variant==='case'?id(2998):id(2999),id(3999)));
   await stabilize(h);
   assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/OFFPAGE COMMON/);
-  assert.equal(commonReads(h).length,1);
+  assert.equal(teacherCaseReads(h).length,1);
   const current=new URLSearchParams(window.location.search); assert.equal(current.get('taskId'),id(999));
-  assert.equal(current.has('trackId'),false); assert.equal(current.has('appointmentId'),false);
+  assert.equal(current.get('trackId'),variant==='case'?null:id(2999)); assert.equal(current.get('appointmentId'),variant==='appointment'?id(3999):null);
   noRawOrWrites(h);
 });
 
-test('late offpage A cannot replace selected common B or its URL',async t=>{
+test('late offpage A cannot replace selected scoped B or its URL',async t=>{
   const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:`?taskId=${id(999)}`});
   await finishOneRegistration(h,'B LIST');
-  const a=commonReads(h)[0];assert.ok(a);
+  const a=teacherCaseReads(h)[0];assert.ok(a);
   await act(async()=>document.querySelector('[data-registration-case-row]').click());
-  const b=commonReads(h).find(r=>r.args.p_id===id(1));assert.ok(b);
+  const b=teacherCaseReads(h).find(r=>r.args.p_task_id===id(1));assert.ok(b);
   const nextUrl=window.location.href;
-  await settle(h,a,row(999,registrationPatch(999,'STALE A NEVER DISPLAY')));
+  await settle(h,a,teacherCase(999,'STALE A NEVER DISPLAY'));
   assert.equal(window.location.href,nextUrl);
   assert.doesNotMatch(document.body.textContent,/STALE A NEVER DISPLAY/);
-  await settle(h,b,row(1,registrationPatch(1,'CURRENT B')));
+  await settle(h,b,teacherCase(1,'CURRENT B'));
   await stabilize(h);
   assert.match(document.querySelector('[role="dialog"]')?.textContent||'',/CURRENT B/);
   assert.equal(new URLSearchParams(window.location.search).get('taskId'),id(1));
-  assert.equal(commonReads(h).length,2);noRawOrWrites(h);
+  assert.equal(teacherCaseReads(h).length,2);noRawOrWrites(h);
 });
 
-for(const change of ['role','user']) test(`common offpage response is detached after ${change} replacement`,async t=>{
+for(const change of ['role','user']) test(`scoped offpage response is detached after ${change} replacement`,async t=>{
   const h=await workspace(t,{workspace:'registration',viewerRole:'teacher',search:`?taskId=${id(999)}`});
   await finishOneRegistration(h);
-  const stale=commonReads(h)[0];assert.ok(stale);
+  const stale=teacherCaseReads(h)[0];assert.ok(stale);
   await h.render(change==='role'?{viewerRole:'staff'}:{viewerId:'actor-b'});
   const currentUrl=window.location.href;
-  await settle(h,stale,row(999,registrationPatch(999,'DETACHED OLD ACTOR')));
+  await settle(h,stale,teacherCase(999,'DETACHED OLD ACTOR'));
   assert.equal(window.location.href,currentUrl);assert.doesNotMatch(document.body.textContent,/DETACHED OLD ACTOR/);
   assert.deepEqual(h.requests.filter(r=>/^(create|save|update|delete|transition|approve)/.test(r.name)).map(r=>r.name),[]);
 });
@@ -2854,12 +2939,33 @@ async function acceptedWithPendingNextPage(t){
   const pending=pages(h).at(-1);assert.notEqual(pending,first);
   const rowElement=document.querySelector('[data-registration-case-row]');assert.ok(rowElement,'old accepted rows remain interactive during pending page');
   await act(async()=>rowElement.click());
-  const detail=commonReads(h).at(-1);assert.ok(detail);
+  const detail=teacherCaseReads(h).at(-1);assert.ok(detail);
   return {h,pending,detail};
 }
+for (const section of ['observation_detail', 'customer_history']) for (const status of [401, 403]) test(`teacher ${section} clears accepted data on SDK HTTP ${status} outside the error body`, async t => {
+  const h = await workspace(t, { workspace: 'registration', viewerRole: 'teacher' });
+  await finishOneRegistration(h, 'ACCEPTED LIST HTTP');
+  await act(async () => document.querySelector('[data-registration-case-row]').click());
+  await settle(h, teacherCaseReads(h).at(-1), teacherCase(1, 'ACCEPTED DETAIL HTTP'));
+  assert.match(document.body.textContent, /ACCEPTED DETAIL HTTP/);
+  assert.match(document.body.textContent, /01000000001/);
+  if (section === 'customer_history') await act(async () => {
+    const button = [...document.querySelectorAll('button')].find(item => item.textContent.includes('알림톡 이력'));
+    assert.ok(button); button.click();
+  });
+  const request = rpc(h, 'get_registration_teacher_detail_v1').find(item => item.args.p_section === section);
+  assert.ok(request, 'actual child reader starts');
+  const response = { data: null, error: { code: 'PGRST301', message: 'JWT expired', details: null, hint: null }, status, statusText: status === 401 ? 'Unauthorized' : 'Forbidden' };
+  assert.equal(Object.hasOwn(response.error, 'status'), false, 'SDK HTTP status is outside its error body');
+  await act(async () => request.resolve(response));
+  assert.equal(document.querySelectorAll('[data-registration-case-row]').length, 0, 'HTTP authorization failure clears accepted list rows');
+  assert.doesNotMatch(document.body.textContent, /ACCEPTED DETAIL HTTP|ACCEPTED LIST HTTP|01000000001|JWT expired/);
+  assert.equal(document.querySelector('[data-registration-teacher-detail]'), null, 'authorized detail is removed without waiting for another auth event');
+  noRawOrWrites(h);
+});
 for(const denial of [{code:'42501',message:'SYNTHETIC_DENIED'},{status:401,message:'SYNTHETIC_UNAUTHORIZED'},{status:403,message:'SYNTHETIC_FORBIDDEN'}]) test(`final teacher accepted detail and page are cleared after permission error ${JSON.stringify(denial)}`,async t=>{
   const {h,pending,detail}=await acceptedWithPendingNextPage(t);
-  await settle(h,detail,row(1,registrationPatch(1,'ACCEPTED DETAIL TO REVOKE')));
+  await settle(h,detail,teacherCase(1,'ACCEPTED DETAIL TO REVOKE'));
   assert.equal(document.body.textContent.includes('ACCEPTED DETAIL TO REVOKE'),true);
   await act(async()=>pending.resolve({data:null,error:denial}));
   const seen={rowCount:document.querySelectorAll('[data-registration-case-row]').length,hasOldDetail:document.body.textContent.includes('ACCEPTED DETAIL TO REVOKE'),hasOldCount:document.body.textContent.includes('12건'),alertText:document.querySelector('[role="alert"]')?.textContent||''};
@@ -2872,9 +2978,9 @@ for(const denial of [{code:'42501',message:'SYNTHETIC_DENIED'},{status:401,messa
 test('final teacher page permission denial invalidates an already pending common detail completion',async t=>{
   const {h,pending,detail}=await acceptedWithPendingNextPage(t);
   await act(async()=>pending.resolve({data:null,error:{code:'42501',message:'SYNTHETIC_DENIED'}}));
-  await settle(h,detail,row(1,registrationPatch(1,'LATE DETAIL AFTER DENIAL')));
+  await settle(h,detail,teacherCase(1,'LATE DETAIL AFTER DENIAL'));
   await stabilize(h);
-  console.log('AUTH_LATE_DETAIL',JSON.stringify({rowCount:document.querySelectorAll('[data-registration-case-row]').length,hasLate:document.body.textContent.includes('LATE DETAIL AFTER DENIAL'),commonReads:commonReads(h).length}));
+  console.log('AUTH_LATE_DETAIL',JSON.stringify({rowCount:document.querySelectorAll('[data-registration-case-row]').length,hasLate:document.body.textContent.includes('LATE DETAIL AFTER DENIAL'),commonReads:teacherCaseReads(h).length}));
   assert.equal(document.body.textContent.includes('LATE DETAIL AFTER DENIAL'),false,'an old detail completion cannot resurrect data after permission denial');
   noRawOrWrites(h);
 });

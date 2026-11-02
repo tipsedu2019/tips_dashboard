@@ -250,6 +250,7 @@ import {
   preloadRegistrationApplication,
   RegistrationApplication,
 } from "./registration-application-lazy"
+import { RegistrationTeacherDetailDialog, type RegistrationTeacherDetailTarget } from "./registration-teacher-detail-dialog"
 import { createRegistrationCustomerMessageClient } from "./registration-customer-message-service"
 import type { RegistrationCustomerMessageClient } from "./registration-customer-message-contract"
 import {
@@ -8037,6 +8038,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [registrationApplicationDirty, setRegistrationApplicationDirty] = useState(false)
   const selectedRegistrationTrackIdRef = useRef<string | null>(selectedRegistrationTrackId)
   selectedRegistrationTrackIdRef.current = selectedRegistrationTrackId
+  const [registrationTeacherTarget, setRegistrationTeacherTarget] = useState<RegistrationTeacherDetailTarget | null>(null)
   const [registrationCaseDetail, setRegistrationCaseDetail] = useState<OpsRegistrationObservationCaseDetail | null>(null)
   const [registrationDetailLoadError, setRegistrationDetailLoadError] = useState("")
   const [form, setForm] = useState<OpsTaskInput>(() => cloneForm())
@@ -8371,6 +8373,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     workspaceLoadAbortControllerRef.current?.abort()
     setSelectedTask(null)
     setDetailOpen(false)
+    setRegistrationTeacherTarget(null)
     setRegistrationApplicationHost({ kind: "closed" })
     setData(null)
   }, [commonReadDenied])
@@ -8786,6 +8789,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const clearRegistrationWorkspaceSelection = () => {
+    setRegistrationTeacherTarget(null)
     registrationObservationLoadOwnershipRef.current.invalidate()
     setDetailOpen(false)
     setRegistrationApplicationHost({ kind: "closed" })
@@ -10068,29 +10072,32 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [readGeneralTaskDetail, resolvedViewerRole, syncTaskDeepLink])
 
   const invalidateCommonPagePermission = numberedPage.invalidatePermission
-  const openCommonRegistrationDetail = useCallback(async (taskId: string) => {
-    if (commonReadDenied) return null
-    const requestId = ++selectedDetailLoadRef.current
-    const viewerId = currentUserId
-    registrationTrackSelectionRef.current = `case:${taskId}`
-    syncTaskDeepLink(taskId, null, null, "push")
-    setRegistrationApplicationHost({ kind: "loading_detail", taskId, focusTrackId: null, appointmentId: null })
-    const ownsRead = () => workspaceMountedRef.current && selectedDetailLoadRef.current === requestId
-      && latestWorkspaceViewerIdRef.current === viewerId
-      && new URLSearchParams(window.location.search).get("taskId") === taskId
-    try {
-      const task = await loadOperationalCommonTaskById(taskId)
-      if (!ownsRead() || !task) return null
-      openDetail(task, null, { skipCommonRefresh: true })
-      return { task, track: task.registrationTracks?.[0] || null, detail: null }
-    } catch (error) {
-      if (ownsRead()) {
-        if (isNumberedPagePermissionError(error)) invalidateCommonPagePermission(error)
-        else setRegistrationApplicationHost({ kind: "refresh_failed", taskId, focusTrackId: null, appointmentId: null, message: "운영 공통정보를 불러오지 못했습니다." })
-      }
-      return null
-    }
-  }, [commonReadDenied, currentUserId, invalidateCommonPagePermission, openDetail, syncTaskDeepLink])
+  const openCommonRegistrationDetail = useCallback(async (
+    taskId: string, trackId: string | null = null, appointmentId: string | null = null, observationId: string | null = null,
+  ) => {
+    if (commonReadDenied || !isRegistrationWorkspace || !operationalReadOnly || !currentUserId) return null
+    selectedDetailLoadRef.current += 1
+    setSelectedTask(null)
+    setDetailOpen(false)
+    setRegistrationApplicationHost({ kind: "closed" })
+    setRegistrationTeacherTarget({ taskId, trackId, appointmentId, observationId, viewerId: currentUserId })
+    // Observation calendar URLs already contain their full child identity.
+    if (!observationId) syncTaskDeepLink(taskId, trackId, appointmentId, "push")
+    return null
+  }, [commonReadDenied, currentUserId, isRegistrationWorkspace, operationalReadOnly, syncTaskDeepLink])
+  const closeRegistrationTeacherDetail = useCallback(() => {
+    setRegistrationTeacherTarget(null)
+    syncTaskDeepLink(null)
+  }, [syncTaskDeepLink])
+  const denyRegistrationTeacherDetail = useCallback((error: unknown) => {
+    setRegistrationTeacherTarget(null)
+    invalidateCommonPagePermission(error)
+  }, [invalidateCommonPagePermission])
+  const focusRegistrationTeacherTrack = useCallback((trackId: string) => {
+    if (!registrationTeacherTarget) return
+    setRegistrationTeacherTarget({ ...registrationTeacherTarget, trackId, appointmentId: null, observationId: null })
+    syncTaskDeepLink(registrationTeacherTarget.taskId, trackId)
+  }, [registrationTeacherTarget, syncTaskDeepLink])
 
   const openWordRetestEditor = useCallback((
     task: OpsTask,
@@ -10150,6 +10157,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       return null
     }
 
+    if (operationalReadOnly) return openCommonRegistrationDetail(taskId, isLegacyRegistrationTrackId(trackId) ? null : trackId)
+
     if (isLegacyRegistrationTrackId(trackId)) {
       if (!task) {
         setMessage("선택한 등록 업무를 찾을 수 없습니다. 목록을 다시 불러오세요.")
@@ -10159,8 +10168,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       syncTaskDeepLink(taskId, null)
       return { task, track: task.registrationTracks?.find((item) => item.id === trackId) || null, detail: null }
     }
-
-    if (operationalReadOnly) return openCommonRegistrationDetail(taskId)
 
     const selectionKey = `${taskId}:${trackId}`
     registrationTrackSelectionRef.current = selectionKey
@@ -10340,7 +10347,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       return null
     }
 
-    if (operationalReadOnly) return openCommonRegistrationDetail(taskId)
+    if (operationalReadOnly) return openCommonRegistrationDetail(taskId, preferredTrackId, appointmentId)
 
     const selectionKey = `appointment:${taskId}:${appointmentId}`
     registrationTrackSelectionRef.current = selectionKey
@@ -10422,7 +10429,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const openRegistrationObservation = useCallback(async (
     target: RegistrationObservationDirectTarget,
   ) => {
-    if (operationalReadOnly) { await openCommonRegistrationDetail(target.taskId); return null }
+    if (operationalReadOnly) { await openCommonRegistrationDetail(target.taskId, target.trackId, target.appointmentId, target.observationId); return null }
     if (registrationObservationRuntime.runtimeVersion !== 1) return null
     const task = taskById.get(target.taskId)
     if (task && task.type !== "registration") return null
@@ -10599,7 +10606,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ])
 
   useRegistrationObservationRouteAdjudication({
-    enabled: isRegistrationWorkspace,
+    enabled: isRegistrationWorkspace && !operationalReadOnly,
     viewerId: registrationViewerId,
     searchParams: new URLSearchParams(searchParams.toString()),
     observationRuntimeVersion: registrationObservationRuntime.runtimeVersion,
@@ -10934,6 +10941,17 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const acceptedRouteNavigation = acceptedRouteNavigationRef.current
     acceptedRouteNavigationRef.current = false
     const currentSearchParams = new URLSearchParams(window.location.search)
+    if (isRegistrationWorkspace && operationalReadOnly) {
+      const taskId = currentSearchParams.get("taskId")?.toLowerCase()
+      if (!taskId || commonReadDenied || !currentUserId || !data || !workspaceDataBelongsToCurrentViewer) {
+        setRegistrationTeacherTarget(null)
+        return
+      }
+      const next = { taskId, trackId: currentSearchParams.get("trackId")?.toLowerCase() || null, appointmentId: currentSearchParams.get("appointmentId")?.toLowerCase() || null, observationId: currentSearchParams.get("observationId")?.toLowerCase() || null, viewerId: currentUserId }
+      setRegistrationTeacherTarget(current => current && Object.keys(next).every(key => current[key as keyof typeof next] === next[key as keyof typeof next]) ? current : next)
+      return
+    }
+    setRegistrationTeacherTarget(null)
     if (currentSearchParams.has("observationId")) return
     const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
     const deepLinkedTrackId = currentSearchParams.get("trackId") || ""
@@ -11100,7 +11118,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
     if (deepLinkedTask.type === "general") void readGeneralTaskDetail(deepLinkedTask.id)
-  }, [data, deleteTarget, isRegistrationWorkspace, operationalReadOnly, detailOpen, closeRegistrationApplicationHost, invalidateGeneralTaskDetailRead, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, readGeneralTaskDetail, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+  }, [commonReadDenied, currentUserId, data, deleteTarget, isRegistrationWorkspace, operationalReadOnly, detailOpen, closeRegistrationApplicationHost, invalidateGeneralTaskDetailRead, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, readGeneralTaskDetail, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -14150,6 +14168,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           )}
         </DialogContent>
       </Dialog>
+      ) : null}
+
+      {isRegistrationWorkspace && operationalReadOnly && !authLoading && !commonReadDenied && workspaceDataBelongsToCurrentViewer && registrationTeacherTarget?.viewerId === currentUserId ? (
+        <RegistrationTeacherDetailDialog
+          key={`${currentUserId}:${registrationTeacherTarget.taskId}`}
+          target={registrationTeacherTarget}
+          viewerKey={`${currentUserId}:${resolvedViewerRole}`}
+          onClose={closeRegistrationTeacherDetail}
+          onFocusTrack={focusRegistrationTeacherTrack}
+          onPermissionDenied={denyRegistrationTeacherDetail}
+          fallbackFocusRef={taskSearchInputRef}
+        />
       ) : null}
 
       <Dialog

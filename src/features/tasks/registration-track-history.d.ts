@@ -1,4 +1,4 @@
-import type { OpsRegistrationCaseDetail, RegistrationSubject } from "./registration-track-service";
+import type { OpsRegistrationCaseDetail, OpsRegistrationObservationCaseDetail, RegistrationSubject } from "./registration-track-service";
 
 export type RegistrationHistoryStage =
   | "inquiry"
@@ -29,5 +29,6 @@ export type RegistrationSubjectHistoryItem = {
 };
 
 export function buildRegistrationSubjectHistory(
-  detail?: Partial<OpsRegistrationCaseDetail>,
+  detail?: Partial<OpsRegistrationCaseDetail> | Partial<OpsRegistrationObservationCaseDetail>,
+  options?: { partial?: boolean },
 ): RegistrationSubjectHistoryItem[];

@@ -941,6 +941,11 @@
       "sha256": "ef8167164cbe81c2a577e045e632bcdc5474cd1e5033e5973c6fa0140787fb01"
     },
     {
+      "fileName": "20261029112923_registration_teacher_case_detail_read.sql",
+      "status": "final",
+      "sha256": "98fc0b2c1849ac6fcca397b0ff8326e1d41f1a5f04b3fc6b82e943ab056c07bd"
+    },
+    {
       "fileName": "20261031120000_class_close_occupancy_release.sql",
       "status": "final",
       "sha256": "1872ae421e86e383e1c06ee9cc9df7a86c4c462ea6f9f2433cc254735f55fe63"
