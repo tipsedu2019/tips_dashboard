@@ -103,7 +103,7 @@ test("HTTP probe rejects external, unlabeled or dual-network DB containers and h
     value => { value.HostConfig.PortBindings["5432/tcp"] = []; },
     value => { value.HostConfig.PortBindings["5432/tcp"][0].HostIp = "0.0.0.0"; },
     value => { value.HostConfig.PortBindings["5432/tcp"][0].HostPort = "5432"; },
-    value => { value.NetworkSettings.Ports = { "5432/tcp": null }; },
+    value => { value.NetworkSettings.Ports = { "5432/tcp": undefined }; },
     value => { value.NetworkSettings.Ports = { "5432/tcp": [], "3000/tcp": [] }; },
   ]) {
     const changed = structuredClone(unpublished);
@@ -112,6 +112,76 @@ test("HTTP probe rejects external, unlabeled or dual-network DB containers and h
   }
   assert.throws(() => validateDockerBoundary(target, unpublished, { ...network, Internal: false }, route), /annual_http_internal_network_required/u);
   assert.throws(() => validateDockerBoundary(target, unpublished, network, `${route}eth0 00000000 010011AC 0003 0 0 0 00000000 0 0 0\n`), /annual_http_default_route_forbidden/u);
+});
+
+test("HTTP probe accepts only the exact owned DB null publication without changing transport identity", () => {
+  const { target, db, network } = boundary();
+  db.NetworkSettings.Ports = { "5432/tcp": null };
+  const before = structuredClone({ db, network });
+  assert.deepEqual(validateDockerBoundary(target, db, network, route), { networkId: network.Id, dbIp: "172.18.0.2" });
+  assert.deepEqual({ db, network }, before, "validation must not normalize null or alter inspect evidence");
+});
+
+test("null DB publication rejects missing, malformed, extra, public or mismatched bindings", () => {
+  const { target, db, network } = boundary();
+  db.NetworkSettings.Ports = { "5432/tcp": null };
+  assert.doesNotThrow(() => validateDockerBoundary(target, db, network, route));
+  for (const [name, mutate] of [
+    ["missing requested map", value => { delete value.HostConfig.PortBindings; }],
+    ["null requested map", value => { value.HostConfig.PortBindings = null; }],
+    ["array requested map", value => { value.HostConfig.PortBindings = []; }],
+    ["missing requested port", value => { value.HostConfig.PortBindings = {}; }],
+    ["null requested bindings", value => { value.HostConfig.PortBindings["5432/tcp"] = null; }],
+    ["empty requested bindings", value => { value.HostConfig.PortBindings["5432/tcp"] = []; }],
+    ["malformed binding", value => { value.HostConfig.PortBindings["5432/tcp"] = [null]; }],
+    ["public requested IP", value => { value.HostConfig.PortBindings["5432/tcp"][0].HostIp = "0.0.0.0"; }],
+    ["public IPv6", value => { value.HostConfig.PortBindings["5432/tcp"][0].HostIp = "::"; }],
+    ["wrong requested port", value => { value.HostConfig.PortBindings["5432/tcp"][0].HostPort = "55556"; }],
+    ["extra requested port", value => { value.HostConfig.PortBindings["3000/tcp"] = []; }],
+    ["missing publication map", value => { delete value.NetworkSettings.Ports; }],
+    ["null publication map", value => { value.NetworkSettings.Ports = null; }],
+    ["array publication map", value => { value.NetworkSettings.Ports = []; }],
+    ["scalar publication map", value => { value.NetworkSettings.Ports = "5432/tcp"; }],
+    ["malformed publication", value => { value.NetworkSettings.Ports["5432/tcp"] = {}; }],
+    ["missing publication entry", value => { value.NetworkSettings.Ports["5432/tcp"] = undefined; }],
+    ["extra unpublished port", value => { value.NetworkSettings.Ports["3000/tcp"] = null; }],
+    ["unexpected unpublished port", value => { value.NetworkSettings.Ports = { "3000/tcp": null }; }],
+    ["public publication", value => { value.NetworkSettings.Ports["5432/tcp"] = [{ HostIp: "0.0.0.0", HostPort: "55555" }]; }],
+    ["wrong publication port", value => { value.NetworkSettings.Ports["5432/tcp"] = [{ HostIp: "127.0.0.1", HostPort: "55556" }]; }],
+    ["malformed published binding", value => { value.NetworkSettings.Ports["5432/tcp"] = [null]; }],
+  ]) {
+    const changed = structuredClone(db);
+    mutate(changed);
+    assert.throws(() => validateDockerBoundary(target, changed, network, route), /annual_http_db_ports_invalid/u, name);
+  }
+  const wrongTarget = { ...target, url: new URL(target.url) };
+  wrongTarget.url.port = "55556";
+  assert.throws(() => validateDockerBoundary(wrongTarget, db, network, route), /annual_http_db_ports_invalid/u);
+});
+
+test("null publication never reuses a prior valid ownership or network snapshot", () => {
+  const { target, db, network } = boundary();
+  db.NetworkSettings.Ports = { "5432/tcp": null };
+  assert.doesNotThrow(() => validateDockerBoundary(target, db, network, route));
+  for (const mutate of [
+    value => { value.db.Id = "c".repeat(64); },
+    value => { value.db.Name = "/supabase_db_other"; },
+    value => { value.db.State.Running = false; },
+    value => { value.db.HostConfig.NetworkMode = "host"; },
+    value => { value.db.NetworkSettings.Networks.bridge = { NetworkID: "c".repeat(64), IPAddress: "172.19.0.2" }; },
+    value => { value.network.Internal = false; },
+    value => { value.network.EnableIPv6 = true; },
+    value => { value.network.Labels = {}; },
+    value => { value.network.Containers.extra = { Name: "foreign" }; },
+    value => { value.network.Id = "c".repeat(64); },
+    value => { value.db.NetworkSettings.Networks[network.Name].IPAddress = "invalid"; },
+  ]) {
+    const changed = structuredClone({ db, network });
+    mutate(changed);
+    assert.throws(() => validateDockerBoundary(target, changed.db, changed.network, route), /^Error: annual_http_/u);
+  }
+  assert.throws(() => validateDockerBoundary(target, db, network, `${route}eth0 00000000 010011AC 0003 0 0 0 00000000 0 0 0\n`), /annual_http_default_route_forbidden/u);
+  assert.throws(() => validateDockerBoundary(target, db, network, "missing"), /annual_http_route_invalid/u);
 });
 
 test("PostgREST sidecar rejects missing publication metadata, foreign members and mounts", () => {
