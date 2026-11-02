@@ -828,5 +828,185 @@ select ok((select bool_and(p.prosecdef and pg_get_userbyid(p.proowner)='postgres
  'dashboard_private.timetable_operating_finalize_v1()'::regprocedure]) private_function
  where has_function_privilege(api_role,private_function,'EXECUTE')),
  'reader, assertion wrapper and finalizer retain postgres-owned definer/empty-path/private ACL contracts');
+
+-- #234 owner-approved policy: all actual session types release occupancy from
+-- the KST close day. This projection does not delete lesson/history records.
+select set_config('app.class_close_mutation','v1',true);
+insert into public.classes(id,name,subject,status,schedule_storage_mode,closed_at,student_ids,waitlist_ids,schedule_plan)
+values
+ (pg_temp.gid(450),'Synthetic stamped close','영어','종강','legacy',
+  ((now() at time zone 'Asia/Seoul')::date::text||' 00:30:00+09')::timestamptz,'[]','[]','{}'),
+ (pg_temp.gid(451),'Synthetic undated close','영어','종강','legacy',null,'[]','[]','{}'),
+ (pg_temp.gid(452),'Synthetic active peer','영어','수강','legacy',null,'[]','[]','{}'),
+ (pg_temp.gid(453),'Synthetic prior stamped close','영어','종강','legacy',
+  (((now() at time zone 'Asia/Seoul')::date-7)::text||' 00:30:00+09')::timestamptz,'[]','[]','{}');
+select set_config('app.class_close_mutation','',true);
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1() where transaction_id=txid_current();
+set constraints all immediate;set constraints all deferred;
+create temp table release_wire as
+select jsonb_build_object('asOfDate',(now() at time zone 'Asia/Seoul')::date,
+ 'datedSessions',(select jsonb_agg(jsonb_build_object('id',kind||':'||delta,'classId',pg_temp.gid(450),
+   'date',(now() at time zone 'Asia/Seoul')::date+delta,'state',kind) order by kind,delta)
+   from unnest(array['active','exception','makeup','skipped','tbd']) kind cross join generate_series(-1,1) delta),
+ 'datedUnresolvedOccupancies',jsonb_build_array(
+   jsonb_build_object('classId',pg_temp.gid(450),'date',(now() at time zone 'Asia/Seoul')::date,'reason','unresolved_resource'),
+   jsonb_build_object('classId',pg_temp.gid(450),'date',null,'reason','incomplete_read'),
+   jsonb_build_object('classId',pg_temp.gid(452),'date',(now() at time zone 'Asia/Seoul')::date,'reason','unresolved_resource')),
+ 'datedFingerprint','all-raw-history','shadowFingerprint','weekly-and-raw','datedComplete',false,
+ 'shadowSlots','[]'::jsonb,'unresolvedOccupancies','[]'::jsonb) value;
+create temp table release_result as select dashboard_private.project_class_close_occupancy_v1(value) value from release_wire;
+select is(jsonb_array_length((select value->'datedSessions' from release_result)),5,'all five source states retain yesterday only');
+select ok(not exists(select 1 from release_result,jsonb_array_elements(value->'datedSessions') e
+ where (e->>'date')::date>=(now() at time zone 'Asia/Seoul')::date),'close day and all future session states are nonoccupying');
+select is(jsonb_array_length((select value->'datedUnresolvedOccupancies' from release_result)),2,
+ 'known closed-day uncertainty releases while date-unknown and active-peer blockers remain');
+select is(jsonb_array_length((select value->'datedSessions' from release_wire)),15,'projection leaves raw source input unchanged');
+select is((select value->'datedSessions' from release_result),
+ (select jsonb_agg(e order by ord) from release_wire,jsonb_array_elements(value->'datedSessions') with ordinality a(e,ord)
+ where (e->>'date')::date<(now() at time zone 'Asia/Seoul')::date),'past source JSON and multiplicity are preserved exactly');
+select isnt((select value->>'datedFingerprint' from release_result),'all-raw-history','release updates dated fingerprint');
+select isnt((select value->>'shadowFingerprint' from release_result),'weekly-and-raw','release updates operating fingerprint');
+select is((select value->>'datedComplete' from release_result),'false','retained unknown remains incomplete');
+-- Date-less legacy closed rows use current KST day, not end_date/updated_at or an invented historical close.
+select is(jsonb_array_length(dashboard_private.project_class_close_occupancy_v1(
+ (select jsonb_set(value,'{datedSessions}',replace((value->'datedSessions')::text,pg_temp.gid(450)::text,pg_temp.gid(451)::text)::jsonb) from release_wire))
+ ->'datedSessions'),5,'undated legacy close releases current/future and conservatively retains the past');
+-- An already-closed stamped row must use its stored day, not today's fallback.
+select is(dashboard_private.project_class_close_occupancy_v1(jsonb_build_object(
+ 'datedSessions',(select jsonb_agg(jsonb_build_object('id','older-'||delta,'classId',pg_temp.gid(453),
+ 'date',(now() at time zone 'Asia/Seoul')::date+delta) order by delta) from unnest(array[-8,-7,-1,0]) delta),
+ 'datedUnresolvedOccupancies','[]'::jsonb,'datedFingerprint','prior-raw','shadowFingerprint','prior-shadow'))
+ ->'datedSessions',jsonb_build_array(jsonb_build_object('id','older--8','classId',pg_temp.gid(453),
+ 'date',(now() at time zone 'Asia/Seoul')::date-8)),
+ 'already closed stamped class retains only dates before its original Korean close day');
+set local timezone='UTC';
+select is(dashboard_private.project_class_close_occupancy_v1((select value from release_wire)),
+ (select value from release_result),'close day is KST independent of session timezone');
+set local timezone='Asia/Seoul';
+select ok(not exists(select 1 from unnest(array['anon','authenticated','service_role']) api_role
+ where has_function_privilege(api_role,'dashboard_private.project_class_close_occupancy_v1(jsonb)','EXECUTE')),
+ 'release helper has no API execute grant');
+-- No new reopen permission: the existing close guard still owns lifecycle writes.
+set local role authenticated;
+select throws_ok($q$select public.update_class_operational_v1(pg_temp.gid(450),'{"status":"수강"}',pg_temp.gid(9450))$q$,
+ '42501','class_close_requires_rpc','ordinary metadata writer cannot reopen a closed class');
+set local role postgres;
+-- Owner-only fixture restoration models a legitimately active reference; it is
+-- not a new public reopen RPC or an operational data change.
+savepoint release_reactivation;
+select set_config('app.class_close_mutation','v1',true);
+update public.classes set status='수강',closed_at=null,closed_by=null where id=pg_temp.gid(450);
+select set_config('app.class_close_mutation','',true);
+select is(jsonb_array_length(dashboard_private.project_class_close_occupancy_v1((select value from release_wire))->'datedSessions'),
+ 15,'reactivated lifecycle restores current/future operating rows');
+rollback to release_reactivation;release release_reactivation;
+select is((select status from public.classes where id=pg_temp.gid(450)),'종강','synthetic reactivation rollback preserves source status');
+select ok((select closed_at is null from public.classes where id=pg_temp.gid(451)),'legacy fallback does not backfill a close date');
+
+-- Actual producers, not only helper fixtures: stamped legacy/normalized classes
+-- retain yesterday and release every current/future type in both query windows.
+select set_config('app.class_close_mutation','v1',true);
+select set_config('app.class_schedule_mutation','release2-rpc',true);
+insert into public.teacher_catalogs(id,name,subjects) values(pg_temp.gid(1460),'Release fixture teacher',array['영어']);
+insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.gid(2460),'Release fixture room',array['영어']);
+insert into public.classes(id,name,subject,status,schedule_storage_mode,closed_at,student_ids,waitlist_ids,schedule_plan)
+values(pg_temp.gid(460),'Release legacy source','영어','종강','legacy',now(),'[]','[]',
+ jsonb_build_object('sessions',(select jsonb_agg(jsonb_build_object('id','legacy-'||delta||'-'||kind,
+ 'date',(now() at time zone 'Asia/Seoul')::date+delta,'scheduleState',kind,'isForced',true,
+ 'startTime','17:00','endTime','18:00','teacherCatalogId',pg_temp.gid(1460),'classroomCatalogId',pg_temp.gid(2460)) order by delta,kind)
+ from generate_series(-1,1) delta cross join unnest(array['active','makeup']) kind))),
+ (pg_temp.gid(461),'Release normalized source','영어','종강','normalized',now(),'[]','[]','{}'),
+ (pg_temp.gid(462),'Release active peer','영어','수강','normalized',null,'[]','[]','{}'),
+ (pg_temp.gid(464),'Release single reactivation target','영어','종강','normalized',now(),'[]','[]','{}'),
+ (pg_temp.gid(463),'Release mixed target','영어','수강','legacy',null,'[]','[]',
+ jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','mixed-future',
+ 'date',(now() at time zone 'Asia/Seoul')::date+1,'scheduleState','active','startTime','17:00','endTime','18:00',
+ 'teacherCatalogId',pg_temp.gid(1460),'classroomCatalogId',pg_temp.gid(2460)))));
+insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,
+ teacher_catalog_id,classroom_catalog_id,origin)
+select pg_temp.gid(10000+row_number() over(order by delta,kind)::int),pg_temp.gid(461),'release-'||delta||'-'||kind,
+ (now() at time zone 'Asia/Seoul')::date+delta,kind,'17:00','18:00',pg_temp.gid(1460),pg_temp.gid(2460),'manual'
+from generate_series(-1,1) delta cross join unnest(array['active','exception','makeup','skipped','tbd']) kind;
+insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,
+ teacher_catalog_id,classroom_catalog_id,origin)
+values(pg_temp.gid(10020),pg_temp.gid(462),'active-peer',(now() at time zone 'Asia/Seoul')::date+1,
+ 'active','17:00','18:00',pg_temp.gid(1460),pg_temp.gid(2460),'manual'),
+ (pg_temp.gid(10021),pg_temp.gid(464),'reactivation-single',(now() at time zone 'Asia/Seoul')::date+1,
+ 'active','17:00','18:00',pg_temp.gid(1460),pg_temp.gid(2460),'manual');
+select set_config('app.class_close_mutation','',true);
+select set_config('app.class_schedule_mutation','',true);
+-- Only synthetic fixture arrangement admits the initial overlapping rows.
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1() where transaction_id=txid_current();
+set constraints all immediate;set constraints all deferred;
+create temp table release_sources as select
+ (select jsonb_agg(to_jsonb(c) order by id) from public.classes c where id in(pg_temp.gid(460),pg_temp.gid(461))) classes,
+ (select jsonb_agg(to_jsonb(s) order by id) from public.class_lesson_sessions s where class_id=pg_temp.gid(461)) lessons,
+ (select to_jsonb(s) from public.class_lesson_sessions s where id=pg_temp.gid(10021)) reactivation_lesson;
+create temp table release_producers as select dashboard_private.read_timetable_operating_reference_v1() full_ref,
+ dashboard_private.read_makeup_operating_reference_v1((now() at time zone 'Asia/Seoul')::date-1,(now() at time zone 'Asia/Seoul')::date+1) window_ref;
+select ok(not exists(select 1 from release_producers,jsonb_array_elements((full_ref->'datedSessions')||(full_ref->'datedUnresolvedOccupancies')) x
+ where x->>'classId' in(pg_temp.gid(460)::text,pg_temp.gid(461)::text)
+ and (x->>'date')::date>=(now() at time zone 'Asia/Seoul')::date),
+ 'actual full reader releases legacy manual/makeup and all normalized future states');
+select is((select count(*) from release_producers,jsonb_array_elements(full_ref->'datedSessions') x
+ where x->>'classId'=pg_temp.gid(461)::text),5::bigint,'actual reader retains all five yesterday normalized states');
+select is((select jsonb_agg(x order by x::text) from release_producers,jsonb_array_elements(full_ref->'datedSessions') x
+ where x->>'classId' in(pg_temp.gid(460)::text,pg_temp.gid(461)::text)),
+ (select jsonb_agg(x order by x::text) from release_producers,jsonb_array_elements(window_ref->'datedSessions') x
+ where x->>'classId' in(pg_temp.gid(460)::text,pg_temp.gid(461)::text)),
+ 'global and bounded readers agree on retained synthetic sessions');
+select is((select jsonb_agg(x order by x::text) from release_producers,jsonb_array_elements(full_ref->'datedUnresolvedOccupancies') x
+ where x->>'classId' in(pg_temp.gid(460)::text,pg_temp.gid(461)::text)),
+ (select jsonb_agg(x order by x::text) from release_producers,jsonb_array_elements(window_ref->'datedUnresolvedOccupancies') x
+ where x->>'classId' in(pg_temp.gid(460)::text,pg_temp.gid(461)::text)),
+ 'global and bounded readers agree on retained synthetic blockers');
+select is((select jsonb_agg(to_jsonb(c) order by id) from public.classes c where id in(pg_temp.gid(460),pg_temp.gid(461))),
+ (select classes from release_sources),'both readers preserve original closed class source');
+select is((select jsonb_agg(to_jsonb(s) order by id) from public.class_lesson_sessions s where class_id=pg_temp.gid(461)),
+ (select lessons from release_sources),'both readers preserve all fifteen normalized source lessons');
+-- A future source change in the same close is also nonoccupying under the
+-- approved policy. No blanket assert/finalizer bypass or new mixed-input ban.
+savepoint release_mixed_close;
+set local role authenticated;
+select lives_ok($q$select public.update_class_operational_v1(pg_temp.gid(463),
+ '{"status":"종강","teacher":"Release fixture teacher","room":"Release fixture room","schedule":"월 17:00-18:00"}',pg_temp.gid(9463))$q$,
+ 'valid mixed close retains source edits but releases its future resource occupancy');
+set local role postgres;
+set constraints all immediate;set constraints all deferred;
+select is((select schedule from public.classes where id=pg_temp.gid(463)),'월 17:00-18:00','mixed source schedule remains recorded');
+select is((select count(*) from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedSessions') x
+ where x->>'classId'=pg_temp.gid(463)::text),0::bigint,'mixed closed future source is nonoccupying');
+rollback to release_mixed_close;release release_mixed_close;
+-- Past source changes remain operating and cannot hide behind the close flag.
+set local role authenticated;
+select throws_ok($q$select public.update_class_operational_v1(pg_temp.gid(463),
+ jsonb_build_object('status','종강','schedule_plan',
+ jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','mixed-new-past',
+ 'date',(now() at time zone 'Asia/Seoul')::date-1,'scheduleState','active','startTime','17:00','endTime','18:00',
+ 'teacherCatalogId',pg_temp.gid(1460),'classroomCatalogId',pg_temp.gid(2460))))),pg_temp.gid(9464),
+ (select schedule_plan from public.classes where id=pg_temp.gid(463)))$q$,
+ '23P01','timetable_resource_conflict','mixed close cannot introduce a new pre-close dated collision');
+set local role postgres;
+select is((select status from public.classes where id=pg_temp.gid(463)),'수강','past conflict rolls back nested close');
+select is((select schedule_plan#>>'{sessions,0,id}' from public.classes where id=pg_temp.gid(463)),
+ 'mixed-future','past conflict rolls back source patch');
+select is((select count(*) from dashboard_private.class_schedule_mutation_receipts where request_key=pg_temp.gid(9464)),
+ 0::bigint,'past conflict rolls back inner and outer receipts');
+-- Owner-only reactivation fixture must re-enter the original conflict validator.
+-- No API capability or production reopen workflow is introduced.
+create function pg_temp.release_reactivate_conflict() returns void language plpgsql as $$begin
+ perform set_config('app.class_close_mutation','v1',true);
+ update public.classes set status='수강',closed_at=null,closed_by=null where id=pg_temp.gid(464);
+ perform set_config('app.class_close_mutation','',true);
+ perform dashboard_private.assert_timetable_operational_conflicts_v1();
+end$$;
+select throws_ok($q$select pg_temp.release_reactivate_conflict()$q$,'23P01','timetable_resource_conflict',
+ 'single-session reactivation restores occupancy and rejects a newly live peer collision');
+select is((select status from public.classes where id=pg_temp.gid(464)),'종강','failed synthetic reactivation rolls back state');
+select is((select to_jsonb(s) from public.class_lesson_sessions s where id=pg_temp.gid(10021)),
+ (select reactivation_lesson from release_sources),'failed reactivation preserves its exact source lesson');
+
 select * from finish();
 rollback;

@@ -678,7 +678,12 @@ function isConcreteEmptyPublicationMap(value) {
   return Boolean(value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype && Object.keys(value).length === 0);
 }
 
-export function validateInternalContainer(value, runtime, networkId, { relay = null, allowUnpublished = false, allowPendingPublication = false, allowEmptyPublicationMap = false } = {}) {
+function isConcreteNullDbPublicationMap(value) {
+  return Boolean(value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype
+    && Object.keys(value).join("|") === "5432/tcp" && value["5432/tcp"] === null);
+}
+
+export function validateInternalContainer(value, runtime, networkId, { relay = null, allowUnpublished = false, allowPendingPublication = false, allowEmptyPublicationMap = false, allowNullPublication = false } = {}) {
   let rows;
   try { rows = JSON.parse(value); } catch { fail("isolated_supabase_db_container_network_invalid"); }
   const container = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
@@ -694,10 +699,18 @@ export function validateInternalContainer(value, runtime, networkId, { relay = n
   if (!Array.isArray(requestedBindings) || !requestedBindings.length
     || requestedBindings.some((binding) => !["", "127.0.0.1", "::1"].includes(binding.HostIp)
       || Number(binding.HostPort) !== runtime.ports.db)) fail("isolated_supabase_db_port_binding_invalid");
-  // Linux internal bridges can report a concrete empty publication object.
-  // Treat only this exact shape as unpublished; final acceptance needs the
-  // owned relay. Missing/null/partial/malformed maps are never normalized.
-  if (bindings === undefined && allowEmptyPublicationMap && isConcreteEmptyPublicationMap(container.NetworkSettings.Ports)) {
+  // Internal bridges can report {} or the sole exposed-but-unmapped DB port
+  // as { "5432/tcp": null }. Neither is a published binding. Each shape needs
+  // explicit opt-in and the owned relay at ready; unknown maps stay rejected.
+  const nullDbPublication = allowNullPublication && isConcreteNullDbPublicationMap(container.NetworkSettings.Ports);
+  // The opt-in path also stays single-port if a later inspect reports native
+  // publication instead. Unexpected requested/published ports cannot piggyback.
+  if (allowNullPublication && bindings !== undefined
+    && (Object.keys(container.NetworkSettings.Ports).join("|") !== "5432/tcp"
+      || Object.keys(container.HostConfig.PortBindings).join("|") !== "5432/tcp")) {
+    fail("isolated_supabase_db_port_binding_invalid");
+  }
+  if (nullDbPublication || (bindings === undefined && allowEmptyPublicationMap && isConcreteEmptyPublicationMap(container.NetworkSettings.Ports))) {
     if (!allowUnpublished) {
       if (!relay) fail("isolated_supabase_db_port_binding_invalid");
       relay.assertBoundary();
@@ -973,9 +986,10 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
           let container;
           try { container = JSON.parse(inspected.stdout)?.[0]; } catch { fail("isolated_supabase_db_container_network_invalid"); }
           if (container?.State?.Running) {
-            const publicationReady = validateContainerBoundary(inspected.stdout, "startup", { allowUnpublished: true, allowPendingPublication: true, allowEmptyPublicationMap: true });
+            const publicationReady = validateContainerBoundary(inspected.stdout, "startup", { allowUnpublished: true, allowPendingPublication: true, allowEmptyPublicationMap: true, allowNullPublication: true });
             if (publicationReady) {
               const unpublished = isConcreteEmptyPublicationMap(container.NetworkSettings.Ports)
+                || isConcreteNullDbPublicationMap(container.NetworkSettings.Ports)
                 || container.NetworkSettings.Ports["5432/tcp"].length === 0;
               if (!unpublished) break;
               if (startFinished && startError) break;
@@ -1016,7 +1030,10 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       throw error;
     } finally { clearTimeout(startTimeout); }
     validateInternalNetwork((await invokeNetwork(["network", "inspect", runtime.networkName])).stdout, runtime, networkId);
-    validateContainerBoundary((await invokeNetwork(["inspect", `supabase_db_${runtime.projectId}`])).stdout, "ready", { relay, allowEmptyPublicationMap: true });
+    validateContainerBoundary((await invokeNetwork(["inspect", `supabase_db_${runtime.projectId}`])).stdout, "ready", { relay, allowEmptyPublicationMap: true, allowNullPublication: true });
+    // A relay opened during startup remains our connection even if Docker now
+    // reports a native binding. Recheck it before any repository SQL either way.
+    if (relay) relay.assertBoundary();
     validateInternalRoutes((await invokeNetwork(["exec", `supabase_db_${runtime.projectId}`, "cat", "/proc/net/route"])).stdout);
     log(JSON.stringify({ event: "isolated_supabase_db_network_verified", internal: true, exclusive: true,
       connection: relay ? "owned_docker_exec_loopback" : "native_loopback", loopbackPublication: true,

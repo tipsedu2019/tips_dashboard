@@ -2944,6 +2944,44 @@ test("isolated CI rejects external networks, wrong ownership, IPv6 and broad por
   assert.throws(() => validateInternalRoutes("missing route table"), /route_invalid/u);
 });
 
+test("isolated CI accepts only the exact owned null port with explicit relay proof", async () => {
+  const { validateInternalContainer } = await import(runnerUrl.href);
+  const runtime = { projectId: "tips_supabase_db_qa_fixture", networkName: "tips_supabase_db_qa_fixture_internal", ports: { db: 55500 } };
+  const networkId = "a".repeat(64);
+  const container = { Name: `/supabase_db_${runtime.projectId}`, State: { Running: true },
+    HostConfig: { NetworkMode: networkId, PortBindings: { "5432/tcp": [{ HostIp: "", HostPort: "55500" }] } },
+    NetworkSettings: { Networks: { [runtime.networkName]: { NetworkID: networkId } }, Ports: { "5432/tcp": null } } };
+  const validate = (value, options = {}) => validateInternalContainer(JSON.stringify([value]), runtime, networkId, options);
+  let assertions = 0;
+  const relay = { assertBoundary: () => { assertions += 1; return true; } };
+  assert.throws(() => validate(container, { relay }), /port_binding_invalid/u, "default remains strict");
+  assert.throws(() => validate(container, { allowNullPublication: true }), /port_binding_invalid/u, "ready needs an owned relay");
+  assert.equal(validate(container, { allowNullPublication: true, allowUnpublished: true }), true, "startup eligibility only");
+  assert.equal(assertions, 0);
+  assert.equal(validate(container, { allowNullPublication: true, relay }), true);
+  assert.equal(assertions, 1);
+  assert.throws(() => validate(container, { allowNullPublication: true, relay: { assertBoundary: () => { throw Error("relay_invalid"); } } }), /relay_invalid/u);
+  const invalidMaps = [undefined, null, [], "malformed", {}, { "other/tcp": null }, { "5432/udp": null },
+    { "5432/tcp": null, "other/tcp": [] }, { "5432/tcp": {} }, { "5432/tcp": "null" },
+    { "5432/tcp": [{ HostIp: "0.0.0.0", HostPort: "55500" }] }, { "5432/tcp": [{ HostIp: "::", HostPort: "55500" }] },
+    { "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55501" }] }];
+  for (const ports of invalidMaps) {
+    const value = structuredClone(container); value.NetworkSettings.Ports = ports;
+    assert.throws(() => validate(value, { allowNullPublication: true, relay }), /port_binding_invalid/u);
+  }
+  for (const requested of [undefined, null, {}, { "5432/tcp": [] }, { "5432/tcp": [{ HostIp: "", HostPort: "55501" }] },
+    { "5432/tcp": [{ HostIp: "0.0.0.0", HostPort: "55500" }] }, { ...container.HostConfig.PortBindings, "other/tcp": [] }]) {
+    const value = structuredClone(container); value.HostConfig.PortBindings = requested;
+    assert.throws(() => validate(value, { allowNullPublication: true, relay }), /port_binding_invalid/u);
+  }
+  for (const changed of [{ Name: "/supabase_db_other" }, { State: { Running: false } }, { HostConfig: { NetworkMode: "bridge" } }]) {
+    assert.throws(() => validate({ ...container, ...changed }, { allowNullPublication: true, relay }), /container_network_invalid/u);
+  }
+  const dual = structuredClone(container); dual.NetworkSettings.Networks.bridge = { NetworkID: "b".repeat(64) };
+  assert.throws(() => validate(dual, { allowNullPublication: true, relay }), /container_network_invalid/u);
+  assert.equal(assertions, 1, "unknown or unsafe shapes never reach relay proof");
+});
+
 test("isolated CI checks native fixture and forward ledger without inventing production history", async () => {
   const { validateIsolatedMigrationLedger } = await import(runnerUrl.href);
   const versions = ["20261002114145", "20261002130443"];
@@ -3191,18 +3229,18 @@ test("isolated CI retains only bounded safe first and last pending maps on the o
   assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
 });
 
-test("isolated CI empty-map relay requires fresh internal routes and healthy owned loopback before SQL", async (t) => {
+test("isolated CI unpublished relay requires fresh internal routes and healthy owned loopback before SQL", async (t) => {
   const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
   const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
   const scenarios = ["empty-ready", "health-waits", "array-unpublished", "default-route", "unsafe-internal", "unsafe-requested", "unsafe-exclusive",
-    "undefined-map", "null-map", "partial-map", "malformed-map", "own-null", "ready-broad", "ready-unknown", "relay-failed", "health-cli-error", "health-ready-cli-error", "health-cli-finished"];
-  for (const scenario of scenarios) {
+    "undefined-map", "null-map", "partial-map", "malformed-map", "null-extra", "requested-extra", "ready-extra", "ready-wrong-port", "ready-wrong-owner", "ready-native", "ready-native-broken-relay", "ready-native-extra", "native-to-null", "ready-broad", "ready-unknown", "relay-failed", "health-cli-error", "health-ready-cli-error", "health-cli-finished"];
+  for (const [publication, scenario] of ["empty-map", "null-port"].flatMap((publication) => scenarios.map((scenario) => [publication, scenario]))) {
     const commands = []; const logs = []; const order = [];
     let startSignal; let finishStart; let inspectCount = 0; let networkInspectCount = 0; let routeCount = 0; let healthCount = 0; let relayOpened = false; let relayClosed = false;
-    const success = ["empty-ready", "health-waits", "array-unpublished"].includes(scenario);
-    const terminalUnknown = ["undefined-map", "null-map", "partial-map", "malformed-map"].includes(scenario);
+    const success = ["empty-ready", "health-waits", "array-unpublished", "ready-native"].includes(scenario);
+    const terminalUnknown = ["undefined-map", "null-map", "partial-map", "malformed-map", "native-to-null"].includes(scenario);
     const run = runIsolatedSupabaseDbTests({ root,
-      argv: ["--execute", "--authorized", "--request-id", `empty-map-relay-${scenario}`],
+      argv: ["--execute", "--authorized", "--request-id", `unpublished-relay-${publication}-${scenario}`],
       tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56400; return () => ++port; })(),
       executeNetwork: async (invocation) => {
         commands.push(invocation); const result = await isolatedNetworkFixture(invocation);
@@ -3218,13 +3256,23 @@ test("isolated CI empty-map relay requires fresh internal routes and healthy own
         }
         if (invocation.args[0] === "inspect") {
           inspectCount += 1;
-          const rows = JSON.parse(result.stdout); const container = rows[0]; container.NetworkSettings.Ports = {};
+          const rows = JSON.parse(result.stdout); const container = rows[0]; container.NetworkSettings.Ports = publication === "null-port" ? { "5432/tcp": null } : {};
           if (scenario === "array-unpublished") container.NetworkSettings.Ports["5432/tcp"] = [];
           if (scenario === "undefined-map") delete container.NetworkSettings.Ports;
           if (scenario === "null-map") container.NetworkSettings.Ports = null;
           if (scenario === "partial-map") container.NetworkSettings.Ports = { "other/tcp": [] };
           if (scenario === "malformed-map") container.NetworkSettings.Ports = [];
-          if (scenario === "own-null") container.NetworkSettings.Ports = { "5432/tcp": null };
+          if (scenario === "null-extra") container.NetworkSettings.Ports = { "5432/tcp": null, "other/tcp": [] };
+          if (scenario === "requested-extra") {
+            container.NetworkSettings.Ports = { "5432/tcp": null };
+            container.HostConfig.PortBindings["other/tcp"] = [];
+          }
+          if (relayOpened && scenario === "ready-extra") container.NetworkSettings.Ports = { "5432/tcp": null, "other/tcp": [] };
+          if (relayOpened && scenario === "ready-wrong-owner") container.Name = "/supabase_db_other";
+          if (relayOpened && scenario === "ready-wrong-port") container.NetworkSettings.Ports = { "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "56403" }] };
+          if (relayOpened && scenario.startsWith("ready-native")) container.NetworkSettings.Ports = { "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "56402" }] };
+          if (relayOpened && scenario === "ready-native-extra") container.NetworkSettings.Ports["other/tcp"] = [{ HostIp: "0.0.0.0", HostPort: "56403" }];
+          if (scenario === "native-to-null") container.NetworkSettings.Ports = { "5432/tcp": inspectCount === 1 ? [{ HostIp: "127.0.0.1", HostPort: "56402" }] : null };
           if (scenario === "unsafe-requested") container.HostConfig.PortBindings["5432/tcp"][0].HostIp = "0.0.0.0";
           if (scenario === "unsafe-exclusive") container.NetworkSettings.Networks.bridge = { NetworkID: "b".repeat(64) };
           if (relayOpened && scenario === "ready-broad") container.NetworkSettings.Ports = { "5432/tcp": [{ HostIp: "0.0.0.0", HostPort: "56402" }] };
@@ -3275,7 +3323,7 @@ test("isolated CI empty-map relay requires fresh internal routes and healthy own
         assert.deepEqual(order.slice(-3), ["network-proof", "routes", "health-ready"], "owned relay follows current network/routes and successful health proof");
         if (scenario === "relay-failed") throw new Error("synthetic_relay_bind_failed");
         relayOpened = true; order.push("open-relay"); finishStart();
-        return { assertBoundary: () => { assert.equal(relayOpened && !relayClosed, true); return true; }, close: async () => { relayClosed = true; } };
+        return { assertBoundary: () => { assert.equal(relayOpened && !relayClosed, true); if (scenario === "ready-native-broken-relay" && inspectCount > 1) throw Error("synthetic_relay_invalid"); return true; }, close: async () => { relayClosed = true; } };
       }, log: (entry) => logs.push(JSON.parse(entry)),
     });
     if (success) {
@@ -3283,12 +3331,12 @@ test("isolated CI empty-map relay requires fresh internal routes and healthy own
       if (scenario === "health-waits") assert.equal(healthCount, 2);
     } else {
       const expected = scenario === "default-route" ? /default_route_forbidden/u : scenario === "unsafe-internal" ? /network_invalid/u
-        : scenario === "unsafe-exclusive" ? /container_network_invalid/u : scenario === "relay-failed" ? /synthetic_relay_bind_failed/u
-          : ["health-cli-error", "health-ready-cli-error"].includes(scenario) ? /child_failed/u : /port_binding_invalid/u;
+        : ["unsafe-exclusive", "ready-wrong-owner"].includes(scenario) ? /container_network_invalid/u : scenario === "relay-failed" ? /synthetic_relay_bind_failed/u
+          : scenario === "ready-native-broken-relay" ? /synthetic_relay_invalid/u : ["health-cli-error", "health-ready-cli-error"].includes(scenario) ? /child_failed/u : /port_binding_invalid/u;
       await assert.rejects(run, expected);
       assert.equal(commands.some((call) => ["migration", "test", "status"].includes(call.args[0])), false);
       assert.equal(logs.some((entry) => entry.event === "isolated_supabase_db_network_verified"), false);
-      if (!["ready-broad", "ready-unknown"].includes(scenario)) assert.equal(relayOpened, false);
+      if (!scenario.startsWith("ready-")) assert.equal(relayOpened, false);
       if (relayOpened) assert.equal(relayClosed, true);
     }
     assert.equal(commands.filter((call) => call.args[0] === "stop").length, 1);
@@ -3297,10 +3345,10 @@ test("isolated CI empty-map relay requires fresh internal routes and healthy own
   }
 });
 
-test("isolated CI unhealthy or late-ready empty-map DB reaches the same startup deadline without relay or SQL", async (t) => {
+test("isolated CI unhealthy or late-ready unpublished DB reaches the same startup deadline without relay or SQL", async (t) => {
   const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
   const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
-  for (const readiness of ["unhealthy", "late-ready", "aborted-ready"]) {
+  for (const [publication, readiness] of ["empty-map", "null-port"].flatMap((publication) => ["unhealthy", "late-ready", "aborted-ready"].map((readiness) => [publication, readiness]))) {
     const commands = []; const logs = []; let startInvoked = false; let startAborted = false; let clockCalls = 0; let startSignal; let abortStartup;
     const originalNow = Date.now; const originalSetTimeout = globalThis.setTimeout;
     const clock = t.mock.method(Date, "now", () => startInvoked && readiness !== "aborted-ready" ? ++clockCalls * 120001 : originalNow());
@@ -3310,11 +3358,11 @@ test("isolated CI unhealthy or late-ready empty-map DB reaches the same startup 
     });
     try {
       await assert.rejects(runIsolatedSupabaseDbTests({ root,
-        argv: ["--execute", "--authorized", "--request-id", `${readiness}-empty-map-deadline`],
+        argv: ["--execute", "--authorized", "--request-id", `${readiness}-${publication}-deadline`],
         tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56420; return () => ++port; })(),
         executeNetwork: async (invocation) => {
           commands.push(invocation); const result = await isolatedNetworkFixture(invocation);
-          if (invocation.args[0] === "inspect") { const rows = JSON.parse(result.stdout); rows[0].NetworkSettings.Ports = {}; result.stdout = JSON.stringify(rows); }
+          if (invocation.args[0] === "inspect") { const rows = JSON.parse(result.stdout); rows[0].NetworkSettings.Ports = publication === "null-port" ? { "5432/tcp": null } : {}; result.stdout = JSON.stringify(rows); }
           if (invocation.args[0] === "exec" && invocation.args[2] === "pg_isready") {
             assert.equal(invocation.signal, startSignal);
             if (readiness === "aborted-ready") setImmediate(abortStartup);
