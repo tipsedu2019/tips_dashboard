@@ -7,6 +7,11 @@ select no_plan();
 create function pg_temp.basic_id(n integer) returns uuid language sql immutable as $$
  select ('bc220000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid
 $$;
+-- The mixed writer test needs a future Saturday peer. Historical lesson dates
+-- below remain immutable fixture history; only the new conflict follows KST now.
+create function pg_temp.basic_conflict_date() returns date language sql stable as $$
+ select date_trunc('week',now() at time zone 'Asia/Seoul')::date + 12
+$$;
 insert into dashboard_private.continuous_class_schedule_runtime(singleton,version)
 values(true,1) on conflict(singleton) do update set version=excluded.version;
 insert into auth.users(id,instance_id,aud,role,email) values
@@ -83,10 +88,18 @@ select lives_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301
 select is((select schedule_plan from public.classes where id=pg_temp.basic_id(301)),(select plan from basic_before),'weekly basic changes never regenerate stored dated input');
 select throws_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"room":"Synthetic room five","schedule_plan":{}}',pg_temp.basic_id(611),'{}')$$,
  'P0001','class_schedule_stale','mixed basic plus lesson edit still requires exact plan CAS');
+select ok(pg_temp.basic_conflict_date() > (now() at time zone 'Asia/Seoul')::date,
+ 'mixed conflict fixture is future in the same KST frame as operating validation');
+select is(extract(dow from pg_temp.basic_conflict_date())::int,6,'mixed conflict fixture matches the active Saturday peer');
+select is((select count(*)::int from jsonb_array_elements(public.get_timetable_operational_reference_v1()->'shadowSlots') s
+ where s->>'classId'=pg_temp.basic_id(302)::text and s->>'weekday'='6'),1,'active Saturday peer exists before the mixed writer');
 select throws_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),
- jsonb_build_object('room','Synthetic room five','schedule_plan',jsonb_set((select plan from basic_before),'{sessions}',(select plan->'sessions' from basic_before)||jsonb_build_array(jsonb_build_object('id','new-mixed-conflict','date','2026-10-31','scheduleState','active','startTime','16:30','endTime','18:00','teacherName','Synthetic basic teacher','classroomName','Synthetic room seven')))),pg_temp.basic_id(612),(select plan from basic_before))$$,
+ jsonb_build_object('room','Synthetic room five','schedule_plan',jsonb_set((select plan from basic_before),'{sessions}',(select plan->'sessions' from basic_before)||jsonb_build_array(jsonb_build_object('id','new-mixed-conflict','date',pg_temp.basic_conflict_date(),'scheduleState','active','startTime','16:30','endTime','18:00','teacherName','Synthetic basic teacher','classroomName','Synthetic room seven')))),pg_temp.basic_id(612),(select plan from basic_before))$$,
  '23P01','timetable_resource_conflict','separate mixed-plan writer policy is not broadened by a basic-info-only change');
 select is((select schedule_plan->'sessions' from public.classes where id=pg_temp.basic_id(301)),(select plan->'sessions' from basic_before),'rejected mixed save preserves all eighty session objects');
+reset role;
+select is((select count(*) from dashboard_private.class_schedule_mutation_receipts where request_key=pg_temp.basic_id(612)),0::bigint,'rejected mixed save leaves no success receipt');
+set local role authenticated;
 select set_config('request.jwt.claim.sub',pg_temp.basic_id(902)::text,true);
 select throws_ok($$select public.update_class_operational_v1(pg_temp.basic_id(301),'{"room":"Synthetic room five"}',pg_temp.basic_id(613),null)$$,
  '42501','class_schedule_forbidden','teacher cannot acquire basic-info write permission');

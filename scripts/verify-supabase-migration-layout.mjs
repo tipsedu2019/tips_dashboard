@@ -113,6 +113,7 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/registration_management_notification_source_recovery_test.sql",
   "supabase/tests/dashboard_google_chat_profile_mentions_test.sql",
   "supabase/tests/registration_manual_workflow_status_test.sql",
+  "supabase/tests/registration_teacher_case_detail_read_test.sql",
   "supabase/tests/operations_subject_completion_chat_test.sql",
   "supabase/tests/word_retest_google_chat_retirement_test.sql",
   "supabase/tests/standalone_approvals_retirement_test.sql",
@@ -195,9 +196,9 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c95097088cd7ed9337f9993f07707dc752ff70a56cc84dc5f040bde73126f49a"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "b3b585d07c79bbe1cd7655a4796aaf599df8320fdb121c98a0e18102e091372a"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "7fe2131a1be003a6dd56ec7c8fe62316886ea2846def85d85a2beaa024b0aae2"
+  "a997c2080664ae49acb6d4f3366bfc96109f34d23620c97f94fc7c444573cd00"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.

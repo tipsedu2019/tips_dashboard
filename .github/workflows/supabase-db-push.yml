@@ -229,6 +229,7 @@ jobs:
             --test supabase/tests/registration_management_notification_source_recovery_test.sql \
             --test supabase/tests/dashboard_google_chat_profile_mentions_test.sql \
             --test supabase/tests/registration_manual_workflow_status_test.sql \
+            --test supabase/tests/registration_teacher_case_detail_read_test.sql \
             --probe tests/probe-registration-management-recovery-concurrency.mjs \
             --probe tests/probe-registration-visit-cancellation-dto.mjs \
             --test supabase/tests/operations_subject_completion_chat_test.sql \

@@ -63,6 +63,7 @@ test("partial history does not relabel current entity snapshots as migration act
   assert.equal(items[0].actorKind, "migration");
   assert.deepEqual(buildRegistrationSubjectHistory({ ...detail, events: [] }, { partial: true }), []);
   assert.ok(buildRegistrationSubjectHistory({ ...detail, events: [] }).length > 0, "existing full-history fallback remains available to management");
+  assert.deepEqual(buildRegistrationSubjectHistory(detail), buildRegistrationSubjectHistory(detail, { partial: false }), "the management default retains the full-history contract");
 });
 
 test("a projected title-only legacy milestone keeps its label without exposing its removed payload", () => {
