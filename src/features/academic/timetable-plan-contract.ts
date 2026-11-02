@@ -155,7 +155,8 @@ export type TimetableOperatingReference = {
   catalogs: { teachers: ResourceOption[]; classrooms: ResourceOption[] };
   unresolvedOccupancies: OccupancyBlocker[];
   shadowFingerprint: string;
-  /** Includes all actual sessions, regardless of class status; no student/content fields. */
+  /** Operating projection: closed-class sessions end before the Korean close day.
+   * Legacy unstamped closures release today/future; original lesson history is separate. */
   datedSessions: DatedTimetableSession[];
   datedUnresolvedOccupancies: DatedOccupancyBlocker[];
   datedFingerprint: string;

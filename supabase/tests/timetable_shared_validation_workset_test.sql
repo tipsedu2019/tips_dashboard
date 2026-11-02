@@ -321,11 +321,9 @@ create function pg_temp.guard_counts() returns jsonb language sql volatile as $$
  'assert',coalesce((select calls from pg_stat_xact_user_functions where funcid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure),0))
 $$;
 
--- Today and tomorrow join three historical dates. Only changed Monday weekly
--- inputs on or after the cutoff require comparison; nonfinite dates always do.
--- Derive the exact omitted count independently from these five known dates.
-create temp table omitted_finite as select 2*count(*) n from generate_series(-3,1) delta
- where delta<0 or extract(dow from pg_temp.hday(delta))<>1;
+-- Today and tomorrow join three historical dates. The approved #234 release
+-- changes the dated projection, so every date is compared: no unchanged-bucket
+-- optimization is applicable. Historical-only cases above retain their oracle.
 select set_config('app.class_schedule_mutation','release2-rpc',true);
 insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,teacher_catalog_id,classroom_catalog_id,origin)
  select pg_temp.hid(604+n),pg_temp.hid(301),'boundary-'||n,pg_temp.hday(n),'active','09:00','10:00',pg_temp.hid(101),pg_temp.hid(201),'manual'
@@ -336,7 +334,7 @@ savepoint mixed_close;
 create temp table mixed_original as select dashboard_private.read_timetable_operating_reference_v1() value;
 select pg_temp.close_shape(pg_temp.hid(301));
 create temp table mixed_pair as select pg_temp.validation_pair() p;
-select line from mixed_pair cross join lateral pg_temp.assert_validation_pair(p,'historical/current/future mixed close','00000',4,(select n from omitted_finite)) as check_line(line);
+select line from mixed_pair cross join lateral pg_temp.assert_validation_pair(p,'historical/current/future mixed close','00000',10,0) as check_line(line);
 select is((select (p->>'oracleCalls')::bigint from mixed_pair),10::bigint,'frozen oracle expands both sides of all five mixed dates');
 select is((select reference from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current()),
  (select value from mixed_original),'mixed boundary comparison retains original transaction baseline');
@@ -353,14 +351,14 @@ set constraints all immediate;set constraints all deferred;
 savepoint infinite_close;
 select pg_temp.close_shape(pg_temp.hid(301));
 create temp table infinite_pair as select pg_temp.validation_pair() p;
-select line from infinite_pair cross join lateral pg_temp.assert_validation_pair(p,'real normalized nonfinite dates','00000',8,(select n from omitted_finite)) as check_line(line);
+select line from infinite_pair cross join lateral pg_temp.assert_validation_pair(p,'real normalized nonfinite dates','00000',14,0) as check_line(line);
 select is((select (p->>'oracleCalls')::bigint from infinite_pair),14::bigint,'oracle expands seven dates including both infinities');
 rollback to infinite_close;release infinite_close;
 savepoint german_dates;
 set local datestyle='German, DMY';
 select pg_temp.close_shape(pg_temp.hid(301));
 create temp table german_pair as select pg_temp.validation_pair() p;
-select line from german_pair cross join lateral pg_temp.assert_validation_pair(p,'German DMY normalized full reference','00000',8,(select n from omitted_finite)) as check_line(line);
+select line from german_pair cross join lateral pg_temp.assert_validation_pair(p,'German DMY normalized full reference','00000',14,0) as check_line(line);
 rollback to german_dates;release german_dates;
 set local datestyle='ISO, MDY';
 
@@ -406,7 +404,8 @@ select is((select status from public.classes where id=pg_temp.hid(301)),'수강'
 
 -- Legacy future exposure is deliberately arranged as grandfathered conflicting
 -- occupancy. Only fixture arrangement advances its baseline; tested writes do
--- not. Existing physical overlap must not excuse a new inherited identity.
+-- not. #234 explicitly replaces the former 23P01 future-inherited expectation:
+-- every target session from the close day is released, including inheritance.
 insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.hid(202),'Future peer room',array['영어']);
 insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule,teacher,room,schedule_plan,student_ids,waitlist_ids)
  values(pg_temp.hid(303),'Future inherited close target','영어','수강','legacy',
@@ -423,27 +422,27 @@ savepoint inherited_shape;
 create temp table inherited_before as select dashboard_private.read_timetable_operating_reference_v1() value;
 select pg_temp.close_shape(pg_temp.hid(303));
 create temp table inherited_after as select dashboard_private.read_timetable_operating_reference_v1() value;
-select is((select value->'datedSessions' from inherited_before),(select value->'datedSessions' from inherited_after),'future inherited bucket is unchanged by bare close');
-select ok(exists(select 1 from dashboard_private.timetable_effective_date_v1((select value from inherited_after),pg_temp.hday(7)) s
- where s->>'classId'=pg_temp.hid(303)::text and not exists(select 1 from dashboard_private.timetable_effective_date_v1((select value from inherited_before),pg_temp.hday(7)) old
- where dashboard_private.timetable_occupancy_key_v1(old)=dashboard_private.timetable_occupancy_key_v1(s))),
- 'pure close introduces the retained future inherited exact key');
+select ok(not exists(select 1 from inherited_after,jsonb_array_elements(value->'datedSessions') x
+ where x->>'classId'=pg_temp.hid(303)::text),'future target leaves the dated operating projection');
+select ok(not exists(select 1 from dashboard_private.timetable_effective_date_v1((select value from inherited_after),pg_temp.hday(7)) s
+ where s->>'classId'=pg_temp.hid(303)::text),'closed inherited identity cannot reappear as dated occupancy');
+select is((select schedule_plan#>>'{sessions,0,id}' from public.classes where id=pg_temp.hid(303)),
+ 'future-inherited','projection keeps original future lesson history');
 set local role authenticated;
 create temp table inherited_outcome as select pg_temp.validation_pair() p;
 reset role;
-select line from inherited_outcome cross join lateral pg_temp.assert_validation_pair(p,'future inherited new-key collision','23P01') as check_line(line);
-select is((select p#>>'{candidate,message}' from inherited_outcome),'timetable_resource_conflict','future collision retains exact conflict message');
-select ok((select p#>>'{candidate,detail}' from inherited_outcome) is not null,'actual authenticated administrator retains conflict DETAIL');
+select line from inherited_outcome cross join lateral pg_temp.assert_validation_pair(p,'approved future inherited release','00000') as check_line(line);
 rollback to inherited_shape;release inherited_shape;
 savepoint inherited_rpc;
 set local role authenticated;
 create temp table inherited_rpc_outcome as select pg_temp.try_close(pg_temp.hid(702)) p;
 reset role;
-select is((select p->>'sqlstate' from inherited_rpc_outcome),'23P01','real gateway rejects future inherited peer collision');
-select is((select p->>'message' from inherited_rpc_outcome),'timetable_resource_conflict','real gateway retains exact conflict message');
-select ok((select p->>'detail' from inherited_rpc_outcome) is not null,'real gateway retains authenticated conflict DETAIL');
-select is((select status from public.classes where id=pg_temp.hid(303)),'수강','rejected public close rolls back status');
-select is((select count(*) from dashboard_private.class_schedule_mutation_receipts where request_key=pg_temp.hid(702)),0::bigint,'rejected public close rolls back both receipts');
+select is((select p->>'sqlstate' from inherited_rpc_outcome),'00000','real gateway permits approved future inherited release');
+select is((select status from public.classes where id=pg_temp.hid(303)),'종강','real gateway commits the synthetic closed state');
+select is((select count(*) from dashboard_private.class_schedule_mutation_receipts where request_key=pg_temp.hid(702)),2::bigint,'successful public close retains both operation receipts');
+set constraints all immediate;set constraints all deferred;
+select is((select schedule_plan#>>'{sessions,0,id}' from public.classes where id=pg_temp.hid(303)),
+ 'future-inherited','fresh finalizer preserves raw lesson history');
 rollback to inherited_rpc;release inherited_rpc;
 
 
