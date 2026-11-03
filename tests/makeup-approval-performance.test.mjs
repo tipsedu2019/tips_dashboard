@@ -24,9 +24,14 @@ for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue241: teacher UTC slots 
   assert.equal(hasMakeupRequestRoomCollision(request, data(540)), false, '09:00 occupancy cannot block 18:00 request');
   assert.equal(hasMakeupRequestRoomCollision(request, data(1110)), true, 'real 18:30 conflict remains blocked');
   assert.equal(hasMakeupRequestRoomCollision(request, data(1200)), false, 'touching 20:00 boundary is not a conflict');
-  const legacy = { ...request, makeupSlots: [{ startAt: '2026-11-14T18:00:00', endAt: '2026-11-14T20:00:00', classroom: 'A' }] };
-  assert.equal(hasMakeupRequestRoomCollision(legacy, data(540)), false, 'legacy wall time is Seoul in every browser');
-  assert.equal(hasMakeupRequestRoomCollision(legacy, data(1110)), true, 'legacy wall time still detects the real conflict');
+  for (const fraction of ['', '.123', '.1234567']) {
+    const legacySlot = { startAt: `2026-11-14T18:00:00${fraction}`, endAt: `2026-11-14T20:00:00${fraction}`, classroom: 'A' };
+    const legacy = { ...request, makeupSlots: [legacySlot] };
+    assert.equal(toFormSlot(legacySlot).startTime, '18:00');
+    assert.equal(hasMakeupRequestRoomCollision(legacy, data(540)), false, 'legacy wall time is Seoul in every browser');
+    assert.equal(hasMakeupRequestRoomCollision(legacy, data(1110)), true, 'legacy wall time still detects the real conflict');
+    assert.equal(materializeSlot(toFormSlot(legacySlot)).startAt, `${legacySlot.startAt}+09:00`, 'canonicalization preserves source precision');
+  }
 });
 
 test('issue241: reread slots preserve overnight end dates and precise instants without a new write', () => {
@@ -45,6 +50,9 @@ test('issue241: reread slots preserve overnight end dates and precise instants w
     assert.equal(materializeSlot(toFormSlot({ startAt, endAt })), null, 'incomplete/invalid dates keep the context disabled');
   }
   assert.equal(getMakeupRequestTableValue(row(1, { makeupSlots: [{ startAt: '2026-02-30T09:00:00Z', endAt: 'raw end' }] }), 'makeupAt'), '2026-02-30 09:00 - raw end', 'invalid legacy text matches SQL fallback');
+  for (const timestamp of ['2026-11-14T23:59:60Z', '2026-11-14T09:00:00+16:00', '2026-11-14T24:00:00Z']) {
+    assert.equal(getMakeupRequestTableValue(row(1, { makeupSlots: [{ startAt: timestamp, endAt: 'raw end' }] }), 'makeupAt'), `${timestamp.slice(0, 10)} ${timestamp.slice(11, 16)} - raw end`, 'out-of-contract clock/offset retains the shared legacy fallback');
+  }
 });
 
 for (const [start, end, blocked] of [['09:00', '10:00', false], ['18:30', '19:30', true]]) test(`issue241: real workspace keeps UTC reservation query and ${start} collision decision`, async t => {

@@ -85,7 +85,7 @@ function toDate(value) {
     return null;
   }
 
-  const zoneless = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)$/);
+  const zoneless = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/);
   const date = new Date(zoneless
     ? `${zoneless[1]}T${zoneless[2]}+09:00`
     : raw);
@@ -115,8 +115,8 @@ export function toMakeupDateTimeInput(value) {
 export function toMakeupSlotTimestamp(value) {
   const raw = text(value);
   // Legacy wall times have always meant Seoul, including in a UTC browser.
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/.test(raw)) {
-    return toDate(raw)?.toISOString() || "";
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(raw)) {
+    return `${raw.replace(" ", "T")}+09:00`;
   }
   return raw;
 }
@@ -124,7 +124,7 @@ export function toMakeupSlotTimestamp(value) {
 export function formatMakeupDateTime(value) {
   if (!value) return "-";
   // Match the numbered SQL label contract. Do not reinterpret legacy free text.
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(value)) {
+  if (/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-](0\d|1[0-4]):[0-5]\d)$/.test(value)) {
     const local = toMakeupDateTimeInput(value);
     if (local) return local.replace("T", " ");
   }

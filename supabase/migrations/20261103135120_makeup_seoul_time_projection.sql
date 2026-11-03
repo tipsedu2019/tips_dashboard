@@ -29,11 +29,15 @@ begin
    when coalesce(value,'')='' then '-'
    when value ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}' then left(value,10)||' '||substring(value from 12 for 5)
    else value end
- from (select public.makeup_numbered_instant_v1(
+ from (select public.makeup_numbered_instant_v1(case
+   -- Accept only the same valid-clock subset as the JavaScript display.
+   -- PostgreSQL normalizes seconds=60 and rejects offsets that JS accepts;
+   -- both consumers retain their old raw label outside this shared subset.
+   when value ~ '^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-](0\d|1[0-4]):[0-5]\d)$' then
    -- Match JavaScript milliseconds: PostgreSQL would otherwise round a long
    -- fractional second into a different minute/day at a boundary.
    regexp_replace(value,'(\.[0-9]{3})[0-9]+','\1')
- ) instant) parsed$replacement$;
+   else null end) instant) parsed$replacement$;
     else
       anchor := $anchor$dates:=dates||array[substring(coalesce(nullif(s->>'startAt',''),r->>'makeup_start_at') from '^\d{4}-\d{2}-\d{2}'),substring(coalesce(nullif(s->>'endAt',''),r->>'makeup_end_at') from '^\d{4}-\d{2}-\d{2}')];$anchor$;
       replacement := $replacement$dates:=dates||array[substring(a from '^\d{4}-\d{2}-\d{2}'),substring(b from '^\d{4}-\d{2}-\d{2}')];$replacement$;

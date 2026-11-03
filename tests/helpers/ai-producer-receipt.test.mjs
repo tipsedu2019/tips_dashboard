@@ -1298,7 +1298,7 @@ test('class close occupancy pin rejects tampering and unregistered files without
 test('makeup Seoul time exact pin admits the approved source and preserves all188 previous entries',async()=>{
  const source=await snapshotAiSource();
  const pin=receiptProtocol.MAKEUP_SEOUL_TIME_MIGRATION;
- assert.deepEqual(pin,{fileName:'20261103135120_makeup_seoul_time_projection.sql',status:'final',sha256:'f326421fdce5b97281f2bcfb6af441c5b644e72c29ad5dfdc9db0c8863510f5d'});
+ assert.deepEqual(pin,{fileName:'20261103135120_makeup_seoul_time_projection.sql',status:'final',sha256:'f6375de323d3d7bfd1e2e52bec28d1a13437399bf214949c3ecdd5b957c325c4'});
  assert.ok(Object.isFrozen(pin));
  const path='supabase/migrations/'+pin.fileName;
  assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(file=>file===path).length,1);
