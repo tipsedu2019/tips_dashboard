@@ -941,6 +941,16 @@
       "sha256": "ef8167164cbe81c2a577e045e632bcdc5474cd1e5033e5973c6fa0140787fb01"
     },
     {
+      "fileName": "20261029100252_teacher_withdrawal_hours_snapshot.sql",
+      "status": "final",
+      "sha256": "4ea10823dd0165c4692f22530faa6bff1a0fb8c9260e6c4fa3ceeaac7e243530"
+    },
+    {
+      "fileName": "20261029105121_teacher_withdrawal_hours_server_snapshot.sql",
+      "status": "final",
+      "sha256": "26c131ad0473031fc3fa7c8ddfa640512ff872b3fedced5bbbf0317f35cc5f71"
+    },
+    {
       "fileName": "20261031120000_class_close_occupancy_release.sql",
       "status": "final",
       "sha256": "1872ae421e86e383e1c06ee9cc9df7a86c4c462ea6f9f2433cc254735f55fe63"

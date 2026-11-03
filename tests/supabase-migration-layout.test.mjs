@@ -1437,7 +1437,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "01c8eeda3b944091f42487a53ce44d6f60b3336a85ce7fe86d4144795d9fcc35"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "7fe2131a1be003a6dd56ec7c8fe62316886ea2846def85d85a2beaa024b0aae2"],
+    ["supabase-sql-review.yml", "fbf9601eb0c095243a61cf49e45aad7a29fa78c3d6cc4543134bdffae9eb9240"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2402,9 +2402,12 @@ test("isolated main·PR는 동일한 SQL 108개·probe 27개와 필수 PR 검사
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
-    const sqlTests = [...workflow.matchAll(/--test (supabase\/tests\/\S+\.sql)/g)].map((match) => match[1])
+    const fullStep = namedWorkflowStep(workflow, kind === "main" ? "Run isolated migration and schema contracts" : "Run isolated schema contracts")
+    const sqlTests = [...fullStep.matchAll(/--test (supabase\/tests\/\S+\.sql)/g)].map((match) => match[1])
     const probes = [...workflow.matchAll(/--probe (tests\/\S+\.mjs)/g)].map((match) => match[1])
     assert.deepEqual(sqlTests, EXPECTED_CI_SQL_TESTS)
+    assert.deepEqual([...workflow.matchAll(/--test (supabase\/tests\/\S+\.sql)/g)].map(match => match[1]),
+      kind === "pr" ? [...EXPECTED_CI_SQL_TESTS, ...WITHDRAWAL_FINAL_SQL] : EXPECTED_CI_SQL_TESTS)
     assert.deepEqual(probes, EXPECTED_CI_PROBES)
     assert.deepEqual(validateIsolatedCiWorkflow(workflow, kind), [])
     for (const path of EXPECTED_CI_SQL_TESTS) {
@@ -2536,3 +2539,137 @@ test('AI static step rejects a fake run field nested inside env text without wor
   }
  }
 });
+
+// Direct semantic validation deliberately excludes whole-workflow hash checks.
+// A newly pinned workflow still has to preserve these exact isolated contracts.
+const WITHDRAWAL_STATIC_STEP_NAME = "Test teacher withdrawal hours and committed boundaries"
+const WITHDRAWAL_PREFIX_STEP_NAME = "Verify teacher withdrawal committed prefixes and snapshot"
+const WITHDRAWAL_FINAL_STEP_NAME = "Verify teacher withdrawal ownership and formula"
+const WITHDRAWAL_STEP_NAMES = [WITHDRAWAL_STATIC_STEP_NAME, WITHDRAWAL_PREFIX_STEP_NAME, WITHDRAWAL_FINAL_STEP_NAME]
+const WITHDRAWAL_FINAL_SQL = [
+  "supabase/tests/teacher_own_request_workflow_test.sql",
+  "supabase/tests/teacher_withdrawal_hours_formula_test.sql",
+]
+function namedWorkflowStep(source, name) {
+  const start = source.indexOf(`      - name: ${name}\n`)
+  assert.ok(start >= 0, name)
+  const end = source.indexOf("\n      - name:", start + 1)
+  return source.slice(start, end < 0 ? undefined : end).trimEnd() + "\n"
+}
+async function withdrawalWorkflow() {
+  return readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
+}
+
+test("withdrawal PR exact supplemental steps preserve the unchanged full AI/main contracts", async () => {
+  const source = await withdrawalWorkflow()
+  assert.deepEqual(validateIsolatedCiWorkflow(source, "pr"), [])
+  assert.deepEqual(validateIsolatedCiWorkflow(await readFile(requiredWorkflowPath, "utf8"), "main"), [])
+  assert.equal(await sha256(requiredWorkflowPath), REQUIRED_DB_PUSH_WORKFLOW_SHA256)
+  assert.equal((source.match(/--execute\b/g) || []).length, 3)
+  const full = namedWorkflowStep(source, "Run isolated schema contracts")
+  assert.deepEqual([...full.matchAll(/--test (\S+)/g)].map(match => match[1]), EXPECTED_CI_SQL_TESTS)
+  assert.deepEqual([...full.matchAll(/--probe (\S+)/g)].map(match => match[1]), EXPECTED_CI_PROBES)
+  const final = namedWorkflowStep(source, WITHDRAWAL_FINAL_STEP_NAME)
+  assert.deepEqual([...final.matchAll(/--test (\S+)/g)].map(match => match[1]), WITHDRAWAL_FINAL_SQL)
+  for (const name of WITHDRAWAL_STEP_NAMES) assert.equal(source.split(`      - name: ${name}\n`).length - 1, 1)
+})
+
+test("withdrawal PR step omission duplication order and wrong-job registration are rejected without hash checks", async () => {
+  const source = await withdrawalWorkflow()
+  assert.deepEqual(validateIsolatedCiWorkflow(source, "pr"), [])
+  for (const name of WITHDRAWAL_STEP_NAMES) {
+    const step = namedWorkflowStep(source, name)
+    for (const [label, mutation] of [
+      ["missing", source.replace(step, "")],
+      ["duplicate", source + "\n" + step],
+      ["renamed", source.replace(`- name: ${name}\n`, `- name: Unregistered ${name}\n`)],
+      ["wrong job", source.replace(step, "").replace(name === WITHDRAWAL_STATIC_STEP_NAME
+        ? "      - name: Run isolated schema contracts\n" : "      - name: Test Supabase migration layout\n",
+      step + "\n" + (name === WITHDRAWAL_STATIC_STEP_NAME
+        ? "      - name: Run isolated schema contracts\n" : "      - name: Test Supabase migration layout\n"))],
+    ]) assertIncludesErrorCode(validateIsolatedCiWorkflow(mutation, "pr"), "isolated_ci_withdrawal_step_mismatch", `${name}: ${label}`)
+  }
+  const prefix = namedWorkflowStep(source, WITHDRAWAL_PREFIX_STEP_NAME)
+  const final = namedWorkflowStep(source, WITHDRAWAL_FINAL_STEP_NAME)
+  const swapped = source.replace(prefix, "__PREFIX_STEP__").replace(final, prefix).replace("__PREFIX_STEP__", final)
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(swapped, "pr"), "isolated_ci_runtime_step_inventory_mismatch")
+  const beforeFull = source.replace(prefix, "").replace("      - name: Run isolated schema contracts\n", prefix + "\n      - name: Run isolated schema contracts\n")
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(beforeFull, "pr"), "isolated_ci_runtime_step_inventory_mismatch")
+})
+
+test("withdrawal PR commands source revisions requests and SQL inventories are exact without hash checks", async () => {
+  const source = await withdrawalWorkflow()
+  assert.deepEqual(validateIsolatedCiWorkflow(source, "pr"), [])
+  const staticStep = namedWorkflowStep(source, WITHDRAWAL_STATIC_STEP_NAME)
+  for (const path of ["tests/teacher-withdrawal-hours.test.mjs", "tests/teacher-withdrawal-migration-prefix.test.mjs", "tests/teacher-withdrawal-hours-prefix-qa.test.mjs"]) {
+    for (const value of ["", path + " " + path, "tests/unregistered.test.mjs"])
+      assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(staticStep, staticStep.replace(path, value)), "pr"), "isolated_ci_withdrawal_step_mismatch")
+  }
+  for (const name of [WITHDRAWAL_PREFIX_STEP_NAME, WITHDRAWAL_FINAL_STEP_NAME]) {
+    const step = namedWorkflowStep(source, name)
+    for (const [from, to] of [
+      ["shell: bash", "shell: sh"],
+      ['TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase"', 'TASK_SUPABASE_CLI="/tmp/unreviewed"'],
+      ["node scripts/", "node ./scripts/"],
+      ["--execute", "--execute --execute"],
+      ["--execute", "--plan"],
+      ["--authorized", ""],
+      ['--review-base-sha "${BASE_SHA}"', '--review-base-sha "${HEAD_SHA}"'],
+      ['--review-head-sha "${HEAD_SHA}"', '--review-head-sha "fixed"'],
+      ["BASE_SHA: ${{ github.event.pull_request.base.sha }}", "BASE_SHA: ${{ github.sha }}"],
+      ["HEAD_SHA: ${{ github.event.pull_request.head.sha }}", "HEAD_SHA: ${{ github.sha }}"],
+      ["${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}", "fixed-id"],
+      ["        env:\n", "        env:\n          EXTRA: unreviewed\n"],
+    ]) {
+      assert.ok(step.includes(from), from)
+      assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(step, step.replace(from, to)), "pr"), "isolated_ci_withdrawal_step_mismatch")
+    }
+  }
+  const final = namedWorkflowStep(source, WITHDRAWAL_FINAL_STEP_NAME)
+  for (const flag of ["--review-head", "--require-final", "--verify-local-ledger"])
+    for (const replacement of ["", flag + " " + flag])
+      assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(final, final.replace(flag, replacement)), "pr"), "isolated_ci_withdrawal_step_mismatch")
+  for (const path of WITHDRAWAL_FINAL_SQL)
+    for (const replacement of ["", path + " --test " + path, "supabase/tests/unreviewed_test.sql"])
+      assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(final, final.replace(path, replacement)), "pr"), "isolated_ci_withdrawal_step_mismatch")
+  const reordered = final.replace(WITHDRAWAL_FINAL_SQL[0], "__FIRST_SQL__").replace(WITHDRAWAL_FINAL_SQL[1], WITHDRAWAL_FINAL_SQL[0]).replace("__FIRST_SQL__", WITHDRAWAL_FINAL_SQL[1])
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(final, reordered), "pr"), "isolated_ci_withdrawal_step_mismatch")
+})
+
+test("withdrawal PR supplemental steps reject skipped hidden extra and successful-early-exit execution", async () => {
+  const source = await withdrawalWorkflow()
+  assert.deepEqual(validateIsolatedCiWorkflow(source, "pr"), [])
+  for (const name of WITHDRAWAL_STEP_NAMES) {
+    const step = namedWorkflowStep(source, name)
+    for (const addition of ["          exit 0\n", "          set +e\n", "          node scripts/unreviewed.mjs\n", "          echo skipped; exit 0\n"]) {
+      for (const changed of [step.replace("        run: |\n", "        run: |\n" + addition), step + addition])
+        assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(step, changed), "pr"), "isolated_ci_withdrawal_step_mismatch")
+    }
+    for (const option of ["        if: success()\n", "        if: false\n", "        continue-on-error: true\n", "        working-directory: other\n"])
+      assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(step, step.replace(`- name: ${name}\n`, `- name: ${name}\n` + option)), "pr"), "isolated_ci_withdrawal_step_mismatch")
+    const runBody = step.split("        run: |\n")[1].split("\n").map(line => line ? "    " + line : line).join("\n")
+    const fake = `      - name: ${name}\n        run: exit 0\n        env:\n          FAKE: |\n            run: |\n${runBody}`
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(step, fake), "pr"), "isolated_ci_withdrawal_step_mismatch")
+  }
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source + "\n      - run: node scripts/other.mjs --execute\n", "pr"), "isolated_ci_execute_count_mismatch")
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source + "\n      - run: bash scripts/other.mjs\n", "pr"), "isolated_ci_indirect_execute_forbidden")
+})
+
+test("withdrawal PR additions remain forbidden in main and retain production and permission rejection", async () => {
+  const source = await withdrawalWorkflow()
+  const main = await readFile(requiredWorkflowPath, "utf8")
+  assert.deepEqual(validateIsolatedCiWorkflow(source, "pr"), [])
+  assert.deepEqual(validateIsolatedCiWorkflow(main, "main"), [])
+  for (const name of WITHDRAWAL_STEP_NAMES) {
+    const step = namedWorkflowStep(source, name)
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(main + "\n" + step, "main"), "isolated_ci_withdrawal_pr_only")
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(main + "\n" + step.replace(`- name: ${name}`, "- name: Renamed extra"), "main"), "isolated_ci_withdrawal_pr_only")
+  }
+  const prefix = namedWorkflowStep(source, WITHDRAWAL_PREFIX_STEP_NAME)
+  for (const [from, to, code] of [
+    ["--authorized", "--authorized --db-url postgres://synthetic", "isolated_ci_production_connection_forbidden"],
+    ["        env:\n", "        env:\n          TOKEN: ${{ secrets.PRODUCTION }}\n", "isolated_ci_production_secret_forbidden"],
+  ]) assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(prefix, prefix.replace(from, to)), "pr"), code)
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace("  contents: read", "  contents: write"), "pr"), "isolated_ci_permissions_mismatch")
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace("persist-credentials: false", "persist-credentials: true"), "pr"), "isolated_ci_checkout_credentials_mismatch")
+})

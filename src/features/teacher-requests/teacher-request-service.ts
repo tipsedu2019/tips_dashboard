@@ -11,13 +11,16 @@ const uuid = z.string().uuid()
 const text = z.string()
 const date = text.regex(/^\d{4}-\d{2}-\d{2}$/).nullable()
 const note = text.max(4000)
+const lessonHours = text.regex(/^(?:|(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?)$/)
 const makeupSlotInputSchema = z.object({ startAt: text, endAt: text, classroom: text }).strict()
 const inputSchemas = {
   transfer: z.object({ student_id: uuid, memo: note, from_class_id: uuid, to_class_id: uuid, transfer_reason: note,
     from_class_end_date: date, from_class_end_session: note, to_class_start_date: date, to_class_start_session: note,
     from_undistributed_textbooks: note, to_undistributed_textbooks: note }).strict(),
   withdrawal: z.object({ student_id: uuid, memo: note, class_id: uuid, withdrawal_date: date, withdrawal_session: note,
-    customer_reason: note, teacher_opinion: note, undistributed_textbooks: note }).strict(),
+    customer_reason: note, teacher_opinion: note, undistributed_textbooks: note,
+    completed_lesson_hours: lessonHours.optional(), four_week_lesson_hours: lessonHours.optional(),
+  }).strict().refine(value => (value.completed_lesson_hours === undefined) === (value.four_week_lesson_hours === undefined)),
   makeup: z.object({ request_kind: z.enum(["cancel_makeup", "cancel_only", "makeup_only"]), class_id: uuid, reason: note,
     cancel_date: date, original_lesson_session_id: uuid.nullable(), makeup_slots: z.array(makeupSlotInputSchema).max(30) }).strict(),
   textbook: z.object({ title: text, textbookId: uuid.nullable(), classId: uuid.nullable(), locationId: uuid.nullable(),
@@ -29,6 +32,15 @@ const makeupDetailInputSchema = inputSchemas.makeup.extend({
     .transform(({ startAt, endAt, classroom }) => ({ startAt, endAt, classroom }))).max(30),
 })
 export type RequestInput = Record<string, unknown>
+export function teacherWithdrawalHoursDisplay(input: RequestInput) {
+  const hours = (value: unknown) => lessonHours.safeParse(value).success && value !== "" ? Number(value) : null
+  const completed = hours(input.completed_lesson_hours), total = hours(input.four_week_lesson_hours)
+  return {
+    completed: completed === null ? "계산된 값 없음" : String(completed),
+    total: total === null ? "계산된 값 없음" : String(total),
+    progress: completed === null || total === null || total === 0 ? "계산된 값 없음" : `${Math.min(100, Math.round(100 * completed / total))}%`,
+  }
+}
 export type MakeupSlot = { startAt: string; endAt: string; classroom: string }
 const labelsSchema = z.object({ student: text.optional(), class: text.optional(), fromClass: text.optional(), toClass: text.optional(), textbook: text.optional(), location: text.optional() }).strict()
 const approverSchema = z.object({ profileId: uuid.nullable(), label: text.nullable() }).strict().nullable()
@@ -106,12 +118,19 @@ export async function readRequestReferences(domain: RequestDomain, classId: stri
 }
 export type RequestAttempt = { domain: RequestDomain; id: string | null; action: RequestAction; input: RequestInput; revision: string | null; requestId: string }
 export async function mutateOwnRequest(actorId: string, attempt: RequestAttempt) {
+  // Hours are read/display metadata. Keep the established eight-key write
+  // contract on both database versions; the updated server owns calculation.
+  const input = { ...attempt.input }
+  if (attempt.domain === "withdrawal" && (attempt.action === "create" || attempt.action === "update")) {
+    delete input.completed_lesson_hours
+    delete input.four_week_lesson_hours
+  }
   try {
-    if (attempt.action === "create" || attempt.action === "update") parseRequestInput(attempt.domain, attempt.input)
-    else parse(z.object({ note: note.trim().min(1) }).strict(), attempt.input)
+    if (attempt.action === "create" || attempt.action === "update") parseRequestInput(attempt.domain, input)
+    else parse(z.object({ note: note.trim().min(1) }).strict(), input)
   } catch { throw Object.assign(new Error("신청 입력을 확인해 주세요."), { code: "22023" }) }
   const data = await rpc("mutate_teacher_own_request_v1", { p_domain: attempt.domain, p_id: attempt.id, p_action: attempt.action,
-    p_input: attempt.input, p_expected_revision: attempt.revision, p_request_id: attempt.requestId })
+    p_input: input, p_expected_revision: attempt.revision, p_request_id: attempt.requestId })
   return parseDetail(data, attempt.domain, actorId, attempt.id || undefined)
 }
 export async function readRequestChanges(domain: RequestDomain, page: number, signal: AbortSignal) {
