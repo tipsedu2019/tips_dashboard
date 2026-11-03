@@ -944,6 +944,11 @@
       "fileName": "20261031120000_class_close_occupancy_release.sql",
       "status": "final",
       "sha256": "1872ae421e86e383e1c06ee9cc9df7a86c4c462ea6f9f2433cc254735f55fe63"
+    },
+    {
+      "fileName": "20261103170744_timetable_validation_per_date_inputs.sql",
+      "status": "final",
+      "sha256": "e45ca46ee41fafd1cedce8c6bef74c1c14133f2f2534deb9a49e99ab2970d4e4"
     }
   ]
 }
