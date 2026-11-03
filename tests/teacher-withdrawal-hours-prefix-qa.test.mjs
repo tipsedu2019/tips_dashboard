@@ -252,3 +252,38 @@ test('fault mismatch diagnostics: expected failure and successful rollback/retry
   assert.equal(result.verification.withdrawalPrefix.retryCommitted,true);
   assert.equal(h.logs.filter(entry=>entry.event===faultDiagnosticEvent).length,0);
 });
+
+// Exact canary-free child output observed at e9a61c59 in the supplemental CI step.
+const observedColoredFault={"code": 1, "stdout": "", "stderr": "Connecting to local database...\nApplying migration 20261029105121_teacher_withdrawal_hours_server_snapshot.sql...\n\u001b[31mERROR: teacher_withdrawal_prefix_injected_failure (SQLSTATE 23514)\nAt statement: 16\ndo $withdrawal_prefix_fault$ begin raise exception 'teacher_withdrawal_prefix_injected_failure' using errcode='23514'; end $withdrawal_prefix_fault$\u001b[39m\nTry rerunning the command with --debug to troubleshoot the error.\n"};
+test('SGR fault boundary: exact observed red ERROR line reaches rollback/retry and suffix checks',async t=>{
+  const h=await setup(t,'',true,true,observedColoredFault);const result=await h.run();
+  assert.equal(result.verification.withdrawalPrefix.rollbackVerified,true);
+  assert.equal(result.verification.withdrawalPrefix.retryCommitted,true);
+  assert.equal(result.verification.withdrawalPrefix.suffixCommitted,true);
+  assert.equal(h.logs.filter(entry=>entry.event===faultDiagnosticEvent).length,0);
+  assert.deepEqual(h.logs.filter(entry=>entry.event==='withdrawal_hours_boundary_test').map(entry=>entry.phase),['base','first_committed','failed_second_rollback']);
+});
+for(const [name,stderr,code]of [
+  ['different SQLSTATE',observedColoredFault.stderr.replace('(SQLSTATE 23514)','(SQLSTATE 42601)'),1],
+  ['different error',observedColoredFault.stderr.replace('ERROR: teacher_withdrawal_prefix_injected_failure','ERROR: other_failure'),1],
+  ['source echo only',"\u001b[31mdo $withdrawal_prefix_fault$ begin raise exception 'teacher_withdrawal_prefix_injected_failure' using errcode='23514'; end $withdrawal_prefix_fault$\u001b[39m\n",1],
+  ['success exit',observedColoredFault.stderr,0],
+  ['unsupported SGR',`\u001b[32m${exactFaultLine}\n`,1],
+  ['combined SGR',`\u001b[1;31m${exactFaultLine}\n`,1],
+  ['duplicate red prefix',`\u001b[31m\u001b[31m${exactFaultLine}\n`,1],
+  ['malformed SGR',`\u001b[31${exactFaultLine}\n`,1],
+  ['screen erase control',`\u001b[2K${exactFaultLine}\n`,1],
+  ['carriage-return rewrite',`not an error\r\u001b[31m${exactFaultLine}\n`,1],
+  ['backspace rewrite',`x\b\u001b[31m${exactFaultLine}\n`,1],
+  ['fragmented ERROR token',exactFaultLine.replace('ERROR','ER\u001b[31mROR')+'\n',1],
+  ['fragmented fault token',exactFaultLine.replace('prefix_injected','prefix_\u001b[31minjected')+'\n',1],
+  ['fragmented SQLSTATE',exactFaultLine.replace('23514','23\u001b[31m514')+'\n',1],
+  ['trailing line color reset',`\u001b[31m${exactFaultLine}\u001b[39m\n`,1],
+  ['nonboundary prefix',`prefix \u001b[31m${exactFaultLine}\n`,1]
+])test(`SGR fault boundary: ${name} stays rejected without token fabrication`,async t=>{
+  const h=await setup(t,'',true,true,{code,stdout:'',stderr});
+  await assert.rejects(h.run(),/withdrawal_prefix_expected_fault_missing/);
+  const events=h.logs.filter(entry=>entry.event===faultDiagnosticEvent);assert.equal(events.length,1);
+  assert.equal(events[0].stderr,stderr);assert.equal(events[0].exitCode,code);
+  assert.equal(h.restored(),false);
+});

@@ -174,7 +174,11 @@ export async function runWithdrawalHoursPrefixQa({argv=process.argv.slice(2),roo
    const injected=Buffer.from(injectWithdrawalPrefixFailure(originals[1].toString('utf8')));
    await writeFile(join(directory,WITHDRAWAL_PREFIX_FILES[1]),injected,{mode:0o600});
    const failed=await up(first+2,new Map([[WITHDRAWAL_PREFIX_FILES[1],injected]]));
-   if(failed.code===0||!new RegExp(`(?:^|\\n)ERROR: +${fault} +\\(SQLSTATE 23514\\)\\s*(?:\\r?\\n|$)`).test(`${failed.stdout}\n${failed.stderr}`)){
+   // Only the observed CLI red prefix at an ERROR line boundary is cosmetic.
+   // Never delete other controls or join fragments inside an error token.
+   const faultOutput=`${failed.stdout}\n${failed.stderr}`.split('\n')
+    .map(line=>line.startsWith('\u001b[31mERROR:')?line.slice(5):line).join('\n');
+   if(failed.code===0||!new RegExp(`(?:^|\\n)ERROR: +${fault} +\\(SQLSTATE 23514\\)\\s*(?:\\r?\\n|$)`).test(faultOutput)){
     log(JSON.stringify({event:'withdrawal_hours_prefix_fault_mismatch',exitCode:Number.isInteger(failed.code)?failed.code:null,
      stdout:sanitizeChildDiagnostic(failed.stdout),stderr:sanitizeChildDiagnostic(failed.stderr)}));
     invalid('expected_fault_missing');
