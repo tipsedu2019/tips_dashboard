@@ -32,7 +32,7 @@ test('fault injection preserves all migration bytes except the final transaction
   assert.throws(() => injectWithdrawalPrefixFailure('begin; commit; select 2;'));
 });
 
-async function setup(t, failure = '', withSuffix = false, withCredential = false) {
+async function setup(t, failure = '', withSuffix = false, withCredential = false, injectedResult = null) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(),'withdrawal-prefix-unit-')); t.after(() => fs.rm(directory,{recursive:true,force:true}));
   const root = path.join(directory,'source'), runtime = path.join(directory,'tips-supabase-db-qa-teacher-hours-prefix-unit');
   const sourceDirectory=path.join(root,'supabase','migrations'), stagedDirectory=path.join(runtime,'supabase','migrations');
@@ -59,6 +59,7 @@ async function setup(t, failure = '', withSuffix = false, withCredential = false
         if(source.includes('teacher_withdrawal_prefix_injected_failure')) {
           assert.equal(applied.includes(WITHDRAWAL_PREFIX_FILES[0].slice(0,14)),true);
           failedOnce=true;
+          if(injectedResult!==null)return injectedResult;
           if(failure==='unexpected-success') {applied=[...versions]; schema='2'.repeat(32); return {code:0,stdout:'',stderr:''};}
           if(failure==='source-echo') return {code:1,stdout:"raise exception 'teacher_withdrawal_prefix_injected_failure' using errcode='23514'",stderr:'ERROR: syntax_error (SQLSTATE 42601)'};
           if(failure==='wrong-error') return {code:1,stdout:'',stderr:'ERROR: teacher_withdrawal_prefix_injected_failure (SQLSTATE 42601)'};
@@ -204,4 +205,50 @@ for(const [failure,reason]of Object.entries({
   const h=await setup(t,failure,true,true);await assert.rejects(h.run(),new RegExp(reason));
   assert.equal(h.logs.filter(x=>x.event==='withdrawal_hours_boundary_test').length,0);
   assert.equal(h.restored(),false);
+});
+
+const faultDiagnosticEvent='withdrawal_hours_prefix_fault_mismatch';
+const exactFaultLine='ERROR: teacher_withdrawal_prefix_injected_failure (SQLSTATE 23514)';
+for(const [name,result,exitCode]of [
+  ['wrong SQLSTATE',{code:1,stdout:'',stderr:'ERROR: teacher_withdrawal_prefix_injected_failure (SQLSTATE 42601)'},1],
+  ['SQL source echo',{code:1,stdout:"raise exception 'teacher_withdrawal_prefix_injected_failure' using errcode='23514'",stderr:'ERROR: syntax_error (SQLSTATE 42601)'},1],
+  ['unexpected success',{code:0,stdout:'completed',stderr:''},0],
+  ['success with expected error text',{code:0,stdout:'',stderr:exactFaultLine},0],
+  ['noninteger exit code',{code:'failed',stdout:'',stderr:'ERROR: different_error (SQLSTATE 42601)'},null]
+])test(`fault mismatch diagnostics: ${name} stays rejected with one bounded event`,async t=>{
+  const h=await setup(t,'',true,true,result);
+  await assert.rejects(h.run(),/withdrawal_prefix_expected_fault_missing/);
+  const events=h.logs.filter(entry=>entry.event===faultDiagnosticEvent);
+  assert.equal(events.length,1);
+  assert.deepEqual(Object.keys(events[0]).sort(),['event','exitCode','stderr','stdout']);
+  assert.equal(events[0].exitCode,exitCode);
+  assert.equal(events[0].stdout,result.stdout);assert.equal(events[0].stderr,result.stderr);
+  assert.equal(h.restored(),false);
+  assert.deepEqual(h.logs.filter(entry=>entry.event==='withdrawal_hours_boundary_test').map(entry=>entry.phase),['base','first_committed']);
+});
+test('fault mismatch diagnostics: credential canaries are redacted in both streams and nowhere logged raw',async t=>{
+  const secrets=['synthetic_db_password_81','synthetic_bearer_82','synthetic_key_83','synthetic_secret_84','synthetic_token_85','eyJsyntheticAAAA.syntheticBBBB.syntheticCCCC','sbp_synthetic_86','sb_secret_synthetic_87'];
+  const credentialLines=[`postgres://unit:${secrets[0]}@localhost/unit`,`authorization: Bearer ${secrets[1]}`,`api_key="${secrets[2]}"`,`secret='${secrets[3]}'`,`token=${secrets[4]}`,secrets[5],secrets[6],secrets[7]].join('\n');
+  const h=await setup(t,'',true,true,{code:2,stdout:credentialLines,stderr:credentialLines+'\nERROR: different_error (SQLSTATE 42601)'});
+  await assert.rejects(h.run(),/withdrawal_prefix_expected_fault_missing/);
+  const events=h.logs.filter(entry=>entry.event===faultDiagnosticEvent);assert.equal(events.length,1);
+  assert.equal(events[0].exitCode,2);
+  for(const stream of ['stdout','stderr']){
+    assert.match(events[0][stream],/\[redacted\]/);assert.ok(events[0][stream].length<=8000);
+  }
+  const allLogs=JSON.stringify(h.logs);
+  for(const secret of secrets)assert.equal(allLogs.includes(secret),false,`raw canary must not enter logs: ${secret}`);
+  assert.match(events[0].stderr,/SQLSTATE 42601/);
+});
+test('fault mismatch diagnostics: each sanitized stream retains at most the final 8000 characters',async t=>{
+  const result={code:1,stdout:'s'.repeat(8100)+'stdout-tail',stderr:'e'.repeat(8100)+'stderr-tail (SQLSTATE 42601)'};
+  const h=await setup(t,'',true,true,result);await assert.rejects(h.run(),/withdrawal_prefix_expected_fault_missing/);
+  const events=h.logs.filter(entry=>entry.event===faultDiagnosticEvent);assert.equal(events.length,1);
+  for(const stream of ['stdout','stderr']){assert.equal(events[0][stream].length,8000);assert.equal(events[0][stream],result[stream].slice(-8000));}
+});
+test('fault mismatch diagnostics: expected failure and successful rollback/retry emit no mismatch event',async t=>{
+  const h=await setup(t,'',true,true);const result=await h.run();
+  assert.equal(result.verification.withdrawalPrefix.rollbackVerified,true);
+  assert.equal(result.verification.withdrawalPrefix.retryCommitted,true);
+  assert.equal(h.logs.filter(entry=>entry.event===faultDiagnosticEvent).length,0);
 });

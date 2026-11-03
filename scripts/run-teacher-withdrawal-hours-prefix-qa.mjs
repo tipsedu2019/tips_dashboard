@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile, rm, readdir, lstat, mkdir } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runIsolatedSupabaseDbTests, processResult, executeProcessWithDeadline, parseIsolatedMigrationLedger, validateIsolatedMigrationLedger, parsePgTapSummary } from './run-isolated-supabase-db-tests.mjs';
+import { runIsolatedSupabaseDbTests, processResult, executeProcessWithDeadline, parseIsolatedMigrationLedger, validateIsolatedMigrationLedger, parsePgTapSummary, sanitizeChildDiagnostic } from './run-isolated-supabase-db-tests.mjs';
 import { AI_CREDENTIAL_PREFIX } from './lib/ai-producer-receipt.mjs';
 const ROOT=resolve(fileURLToPath(new URL('..',import.meta.url)));
 export const WITHDRAWAL_PREFIX_FILES=Object.freeze(['20261029100252_teacher_withdrawal_hours_snapshot.sql','20261029105121_teacher_withdrawal_hours_server_snapshot.sql']);
@@ -174,7 +174,11 @@ export async function runWithdrawalHoursPrefixQa({argv=process.argv.slice(2),roo
    const injected=Buffer.from(injectWithdrawalPrefixFailure(originals[1].toString('utf8')));
    await writeFile(join(directory,WITHDRAWAL_PREFIX_FILES[1]),injected,{mode:0o600});
    const failed=await up(first+2,new Map([[WITHDRAWAL_PREFIX_FILES[1],injected]]));
-   if(failed.code===0||!new RegExp(`(?:^|\\n)ERROR: +${fault} +\\(SQLSTATE 23514\\)\\s*(?:\\r?\\n|$)`).test(`${failed.stdout}\n${failed.stderr}`))invalid('expected_fault_missing');
+   if(failed.code===0||!new RegExp(`(?:^|\\n)ERROR: +${fault} +\\(SQLSTATE 23514\\)\\s*(?:\\r?\\n|$)`).test(`${failed.stdout}\n${failed.stderr}`)){
+    log(JSON.stringify({event:'withdrawal_hours_prefix_fault_mismatch',exitCode:Number.isInteger(failed.code)?failed.code:null,
+     stdout:sanitizeChildDiagnostic(failed.stdout),stderr:sanitizeChildDiagnostic(failed.stderr)}));
+    invalid('expected_fault_missing');
+   }
    const failedLedger=await ledger();const expectedFailed=[...prefixLedger.rows,{local:versions[first+1],remote:null}].sort((a,b)=>a.local.localeCompare(b.local));
    if(!equal(failedLedger.rows,expectedFailed)||!equal(prefix,await fingerprint()))invalid('failed_second_rollback_drift');
    await pgTap('failed_second_rollback');if(!equal(prefix,await fingerprint()))invalid('failed_prefix_test_rollback_drift');
