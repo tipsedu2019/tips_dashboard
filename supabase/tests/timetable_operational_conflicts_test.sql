@@ -128,11 +128,19 @@ release savepoint manual_generation_input;
 update public.class_schedule_slots set start_time='12:00',end_time='13:00' where id='ad240000-0000-4000-8000-000000000404';
 select lives_ok($q$select public.generate_class_lesson_sessions_v1('ad240000-0000-4000-8000-000000000304',0,pg_temp.fixture_date(7),pg_temp.fixture_date(7),'ad240000-0000-4000-8000-000000000520')$q$,'safe generation retains existing projection and receipt behavior');
 select is((select count(*)::int from public.class_lesson_sessions where class_id='ad240000-0000-4000-8000-000000000304'),1,'safe generation creates exactly one session after the isolated input case');
--- Dated closed-class sessions remain authoritative.
+-- Closing releases all future types, including explicit makeup, without
+-- deleting the source history. A pre-close dated makeup remains historical.
+insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,teacher_catalog_id,classroom_catalog_id,origin)
+values('ad240000-0000-4000-8000-000000000699','ad240000-0000-4000-8000-000000000302','past-close-history',pg_temp.fixture_date(-21),'makeup','08:00','09:00','ad240000-0000-4000-8000-000000000102','ad240000-0000-4000-8000-000000000202','manual');
+create temp table close_makeup_before as select jsonb_agg(to_jsonb(s) order by id) rows
+from public.class_lesson_sessions s where class_id='ad240000-0000-4000-8000-000000000302';
 select set_config('app.class_close_mutation','v1',true);
 update public.classes set status='종강' where id='ad240000-0000-4000-8000-000000000302';
 set constraints all immediate;set constraints all deferred;
-select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),pg_temp.fixture_date(0)) x where x->>'classId'='ad240000-0000-4000-8000-000000000302'),1,'closed class retains valid actual makeup occupancy');
+select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),pg_temp.fixture_date(0)) x where x->>'classId'='ad240000-0000-4000-8000-000000000302'),0,'closed class releases future actual makeup occupancy');
+select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),pg_temp.fixture_date(-21)) x where x->>'classId'='ad240000-0000-4000-8000-000000000302'),1,'closed class preserves pre-close dated makeup occupancy');
+select is((select jsonb_agg(to_jsonb(s) order by id) from public.class_lesson_sessions s where class_id='ad240000-0000-4000-8000-000000000302'),(select rows from close_makeup_before),'closing projection preserves raw makeup history');
+select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),pg_temp.fixture_date(0)) x where x->>'classId'='ad240000-0000-4000-8000-000000000301'),1,'closing one class preserves other active occupancy');
 -- Target-period plan placement and the server snapshot use the same authority.
 select public.mutate_timetable_plan_v1(pg_temp.fixture_jsonb('{"operation":"create","planId":"ad240000-0000-4000-8000-000000000701","name":"기간 계획","targetStartDate":"@date(0)@","targetEndDate":"@date(0)@","requestKey":"period-plan"}'));
 create function pg_temp.plan_cmd(n int,a int,b int) returns jsonb language sql as $f$

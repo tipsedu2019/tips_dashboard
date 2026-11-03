@@ -71,6 +71,13 @@ jobs:
       - name: Test private AI capture receipt guards
         run: node --test tests/helpers/ai-producer-receipt.test.mjs
 
+      - name: Test teacher withdrawal hours and committed boundaries
+        run: |
+          node --test --experimental-strip-types \
+            tests/teacher-withdrawal-hours.test.mjs \
+            tests/teacher-withdrawal-migration-prefix.test.mjs \
+            tests/teacher-withdrawal-hours-prefix-qa.test.mjs
+
       - name: Test cached PostgreSQL fixture guards
         run: node --test tests/isolated-postgres-fixture-tests.test.mjs
 
@@ -300,6 +307,32 @@ jobs:
             --probe tests/probe-ai-agent-personal-integration.mjs \
             --probe tests/probe-ai-agent-thread-replies-concurrency.mjs \
             --probe tests/probe-timetable-nullable-room-concurrency.mjs
+
+      - name: Verify teacher withdrawal committed prefixes and snapshot
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-teacher-withdrawal-hours-prefix-qa.mjs \
+            --execute --authorized \
+            --request-id "teacher-hours-prefix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --review-base-sha "${BASE_SHA}" --review-head-sha "${HEAD_SHA}"
+
+      - name: Verify teacher withdrawal ownership and formula
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs \
+            --review-head --require-final --execute --authorized --verify-local-ledger \
+            --request-id "teacher-hours-final-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --review-base-sha "${BASE_SHA}" --review-head-sha "${HEAD_SHA}" \
+            --test supabase/tests/teacher_own_request_workflow_test.sql \
+            --test supabase/tests/teacher_withdrawal_hours_formula_test.sql
 
       - name: Test cached PostgreSQL fixture contracts
         run: node scripts/run-isolated-postgres-fixture-tests.mjs

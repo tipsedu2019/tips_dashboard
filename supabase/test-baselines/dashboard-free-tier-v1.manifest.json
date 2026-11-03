@@ -949,6 +949,11 @@
       "fileName": "20261029105121_teacher_withdrawal_hours_server_snapshot.sql",
       "status": "final",
       "sha256": "26c131ad0473031fc3fa7c8ddfa640512ff872b3fedced5bbbf0317f35cc5f71"
+    },
+    {
+      "fileName": "20261031120000_class_close_occupancy_release.sql",
+      "status": "final",
+      "sha256": "1872ae421e86e383e1c06ee9cc9df7a86c4c462ea6f9f2433cc254735f55fe63"
     }
   ]
 }
