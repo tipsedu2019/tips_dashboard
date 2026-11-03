@@ -134,6 +134,47 @@ for (const kind of ["level_test_booking", "visit_consultation_booking"]) {
       assert.equal(h.calls.provider, 1, "rescheduled appointment still requires explicit confirmation")
     })
   })
+
+  for (const change of ["place", "participants"]) {
+    test(`current booking ${kind}: non-time revision ${change} requires a fresh preview and explicit confirmation`, async () => {
+      const h = createBookingPreviewHarness(kind)
+      h.state.scheduledAt = "2099-11-08T15:30:00+09:00"
+      await withBookingDialog(h, async ({ click, button, render }) => {
+        const oldPreview = h.calls.responses.at(-1)
+        const oldContract = h.receipts.get(oldPreview.previewId).contract
+        // Revision advancement is a DB fixture, not a test of the revision writer.
+        h.state.revision = 9
+        if (change === "place") h.state.place = "팁스학원 2층"
+        else h.state.subjects = ["수학", "영어"]
+        await click("확인 후 발송")
+        assert.equal(h.calls.provider, 0, "the old receipt must fail the injected current-source check")
+        assert.equal(h.calls.marker, 0)
+        await render({ open: false })
+        await render({ open: true })
+        const nextPreview = h.calls.responses.at(-1)
+        assert.equal(nextPreview.readiness.sendAllowed, true)
+        assert.equal(nextPreview.latestMessage.messageId, h.oldMessage.messageId)
+        assert.notEqual(nextPreview.previewId, oldPreview.previewId)
+        assert.equal(nextPreview.facts.scheduleLabel, oldPreview.facts.scheduleLabel, "the appointment time is unchanged")
+        assert.notEqual(h.receipts.get(nextPreview.previewId).contract.sourceFingerprint, oldContract.sourceFingerprint)
+        if (change === "place") assert.equal(nextPreview.facts.placeLabel, h.state.place)
+        else assert.match(nextPreview.facts.subjectLabel, /영어/)
+        assert.equal(h.calls.send.length, 1, "opening the fresh preview cannot confirm it automatically")
+        await click("확인 후 발송", true)
+        assert.equal(h.calls.send.length, 2, "a double click still submits the new receipt once")
+        assert.equal(h.calls.send.at(-1).previewId, nextPreview.previewId)
+        assert.notEqual(h.calls.send.at(-1).requestKey, h.calls.send[0].requestKey)
+        assert.equal(h.calls.provider, 1, "only the synthetic provider stub is called")
+        assert.equal(h.calls.marker, 1)
+        assert.equal(h.history.length, 2)
+        await render({ open: false })
+        await render({ open: true })
+        assert.equal(h.calls.responses.at(-1).readiness.sendAllowed, false)
+        assert.equal(button("확인 후 발송"), undefined, "the now-occupied revision remains blocked")
+        assert.equal(h.calls.provider, 1)
+      })
+    })
+  }
 }
 
 test("current booking: a competing request winning the attempt gate cannot cause another provider call", async () => {

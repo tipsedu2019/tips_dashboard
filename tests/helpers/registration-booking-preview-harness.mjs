@@ -18,7 +18,8 @@ const READY = {
 // These fixtures exercise the existing SQL contract; they do not execute SQL.
 export function createBookingPreviewHarness(messageKind = "level_test_booking") {
   const target = { messageKind, sourceId: id(2) }
-  const state = { revision: 8, role: "staff", canceled: false, blocked: false, loseResponse: false, markerDenied: false, outcome: "accepted" }
+  const state = { revision: 8, role: "staff", canceled: false, blocked: false, loseResponse: false, markerDenied: false, outcome: "accepted",
+    scheduledAt: null, place: "팁스학원 3층", subjects: ["수학"] }
   const calls = { preview: [], responses: [], send: [], claim: [], marker: 0, provider: 0, delivery: [], source: [] }
   const receipts = new Map()
   const recorded = new Map()
@@ -43,12 +44,12 @@ export function createBookingPreviewHarness(messageKind = "level_test_booking") 
       return {
         messageKind, sourceId: input.sourceId, taskId: id(3), trackId: null,
         appointmentId: input.sourceId, sourceRevision: state.revision,
-        studentName: "합성 학생", parentPhoneDigits: "01012345678", subjects: ["수학"],
-        participants: [{ trackId: id(4), subject: "수학", workflowRevision: state.revision,
+        studentName: "합성 학생", parentPhoneDigits: "01012345678", subjects: [...state.subjects],
+        participants: state.subjects.map((subject, index) => ({ trackId: id(4 + index), subject, workflowRevision: state.revision,
           workflowStatus: appointmentKind === "level_test" ? "level_test_requested" : "consultation_requested",
-          activityId: id(6), activityStatus: state.canceled ? "canceled" : "scheduled" }],
-        appointmentKind, scheduledAt: `2099-11-${String(state.revision).padStart(2, "0")}T15:30:00+09:00`,
-        place: "팁스학원 3층",
+          activityId: id(6 + index), activityStatus: state.canceled ? "canceled" : "scheduled" })),
+        appointmentKind, scheduledAt: state.scheduledAt ?? `2099-11-${String(state.revision).padStart(2, "0")}T15:30:00+09:00`,
+        place: state.place,
       }
     },
   })
