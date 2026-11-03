@@ -101,6 +101,37 @@ function seoulDateTimeParts(value) {
   return Object.fromEntries(parts.map((part) => [part.type, part.value]));
 }
 
+// Editing uses Seoul wall time; stored/transported timestamps keep their instant.
+export function toMakeupDateTimeInput(value) {
+  const raw = text(value);
+  // A date without a clock is incomplete, and Date would normalize Feb 30.
+  if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(raw)) return "";
+  const day = new Date(`${raw.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== raw.slice(0, 10)) return "";
+  const parts = seoulDateTimeParts(raw);
+  return parts ? `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}` : "";
+}
+
+export function toMakeupSlotTimestamp(value) {
+  const raw = text(value);
+  // Legacy wall times have always meant Seoul, including in a UTC browser.
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/.test(raw)) {
+    return toDate(raw)?.toISOString() || "";
+  }
+  return raw;
+}
+
+export function formatMakeupDateTime(value) {
+  if (!value) return "-";
+  // Match the numbered SQL label contract. Do not reinterpret legacy free text.
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    const local = toMakeupDateTimeInput(value);
+    if (local) return local.replace("T", " ");
+  }
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  return match ? `${match[1]} ${match[2]}` : value;
+}
+
 export function toDateKey(value) {
   const raw = text(value);
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {

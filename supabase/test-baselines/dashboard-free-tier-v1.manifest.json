@@ -944,6 +944,11 @@
       "fileName": "20261031120000_class_close_occupancy_release.sql",
       "status": "final",
       "sha256": "1872ae421e86e383e1c06ee9cc9df7a86c4c462ea6f9f2433cc254735f55fe63"
+    },
+    {
+      "fileName": "20261103135120_makeup_seoul_time_projection.sql",
+      "status": "final",
+      "sha256": "f326421fdce5b97281f2bcfb6af441c5b644e72c29ad5dfdc9db0c8863510f5d"
     }
   ]
 }

@@ -1,8 +1,65 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { modules, id, row, stamp, transport, servicePath } from './helpers/makeup-numbered-harness.mjs';
+import { act } from 'react';
+import { modules, id, row, stamp, transport, servicePath, setup as setupWorkspace, button } from './helpers/makeup-numbered-harness.mjs';
 import { actionCases, actionFixture, loadActionService } from './helpers/makeup-action-fixture.mjs';
 import { resubmitFixture } from './helpers/makeup-resubmit-fixture.mjs';
+
+for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue241: teacher UTC slots retain Seoul display and collision instants in ${timezone}`, t => {
+  const previous = process.env.TZ; process.env.TZ = timezone;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  const load = modules(null, { '@/providers/auth-provider': {} });
+  const { seoulDateTimeInputToIso } = load('src/features/tasks/ops-task-service.ts');
+  const { getMakeupRequestTableValue, hasMakeupRequestRoomCollision, toFormSlot, materializeSlot } = load('src/features/makeup-requests/makeup-request-workspace.tsx');
+  const slot = { startAt: seoulDateTimeInputToIso('2026-11-14T18:00'), endAt: seoulDateTimeInputToIso('2026-11-14T20:00'), classroom: 'A' };
+  assert.equal(slot.startAt, '2026-11-14T09:00:00.000Z', 'teacher producer stores the correct instant');
+  const request = row(241, { makeupStartAt: slot.startAt, makeupEndAt: slot.endAt, makeupSlots: [slot] });
+  assert.equal(getMakeupRequestTableValue(request, 'makeupAt'), '2026-11-14 18:00 - 2026-11-14 20:00');
+  const reopened = toFormSlot(slot), materialized = materializeSlot(reopened);
+  assert.equal(reopened.date, '2026-11-14'); assert.equal(reopened.startTime, '18:00'); assert.equal(reopened.endTime, '20:00');
+  assert.equal(Date.parse(materialized.startAt), Date.parse(slot.startAt));
+  assert.equal(Date.parse(materialized.endAt), Date.parse(slot.endAt));
+  const data = startMinute => ({ classrooms: [{ name: 'A' }], classes: [], requests: [], academicEvents: [], collisionContextReady: true,
+    reservationContext: { reservations: [], activeEventRequestIds: [], effectiveSchedule: { version: 1, occupancies: [{ id: 'synthetic', classId: id(600), className: '합성 수업', date: '2026-11-14', startMinute, endMinute: startMinute + 60, classroom: 'A', uncertain: false, allRooms: false }] } } });
+  assert.equal(hasMakeupRequestRoomCollision(request, data(540)), false, '09:00 occupancy cannot block 18:00 request');
+  assert.equal(hasMakeupRequestRoomCollision(request, data(1110)), true, 'real 18:30 conflict remains blocked');
+  assert.equal(hasMakeupRequestRoomCollision(request, data(1200)), false, 'touching 20:00 boundary is not a conflict');
+  const legacy = { ...request, makeupSlots: [{ startAt: '2026-11-14T18:00:00', endAt: '2026-11-14T20:00:00', classroom: 'A' }] };
+  assert.equal(hasMakeupRequestRoomCollision(legacy, data(540)), false, 'legacy wall time is Seoul in every browser');
+  assert.equal(hasMakeupRequestRoomCollision(legacy, data(1110)), true, 'legacy wall time still detects the real conflict');
+});
+
+test('issue241: reread slots preserve overnight end dates and precise instants without a new write', () => {
+  const { getMakeupRequestTableValue, toFormSlot, materializeSlot } = modules(null, { '@/providers/auth-provider': {} })('src/features/makeup-requests/makeup-request-workspace.tsx');
+  for (const slot of [
+    { startAt: '2026-11-13T15:30:00Z', endAt: '2026-11-13T17:30:00Z' },
+    { startAt: '2026-11-14T14:30:01.123Z', endAt: '2026-11-14T16:30:02.456Z' },
+    { startAt: '2026-11-14T18:00:00+09:00', endAt: '2026-11-14T20:00:00+09:00' },
+  ]) {
+    const reread = materializeSlot(toFormSlot(slot));
+    assert.equal(Date.parse(reread.startAt), Date.parse(slot.startAt));
+    assert.equal(Date.parse(reread.endAt), Date.parse(slot.endAt));
+  }
+  assert.equal(getMakeupRequestTableValue(row(1, { makeupSlots: [{ startAt: '2026-11-14T14:59:59.9999999Z', endAt: '2026-11-14T15:30:00Z' }] }), 'makeupAt'), '2026-11-14 23:59 - 2026-11-15 00:30');
+  for (const [startAt, endAt] of [['2026-11-14', '2026-11-15'], ['2026-02-30T09:00:00Z', '2026-02-30T11:00:00Z'], ['bad', 'invalid']]) {
+    assert.equal(materializeSlot(toFormSlot({ startAt, endAt })), null, 'incomplete/invalid dates keep the context disabled');
+  }
+  assert.equal(getMakeupRequestTableValue(row(1, { makeupSlots: [{ startAt: '2026-02-30T09:00:00Z', endAt: 'raw end' }] }), 'makeupAt'), '2026-02-30 09:00 - raw end', 'invalid legacy text matches SQL fallback');
+});
+
+for (const [start, end, blocked] of [['09:00', '10:00', false], ['18:30', '19:30', true]]) test(`issue241: real workspace keeps UTC reservation query and ${start} collision decision`, async t => {
+  const p = await setupWorkspace(t, { search: '?view=approvalPending' });
+  const request = row(241, { canDecideSubject: true, makeupStartAt: '2026-11-14T09:00:00Z', makeupEndAt: '2026-11-14T11:00:00Z', makeupSlots: [] });
+  await act(async () => p.finish(p.numbered()[0], 1, { rows: [request] }));
+  await p.catalogs();
+  const context = p.context().at(-1);
+  assert.deepEqual(context.args.p_slots, [{ startAt: '2026-11-14T09:00:00.000Z', endAt: '2026-11-14T11:00:00.000Z' }]);
+  assert.equal(button('승인').disabled, true, 'context must finish before any approval');
+  await act(async () => context.resolve({ error: null, data: { reservations: [row(900, { makeupStartAt: `2026-11-14T${start}:00+09:00`, makeupEndAt: `2026-11-14T${end}:00+09:00`, makeupSlots: [] })], activeEventRequestIds: [] } }));
+  assert.match(document.body.textContent, /2026-11-14 18:00 - 2026-11-14 20:00/);
+  assert.equal(button('승인').disabled, blocked);
+  assert.equal(p.requests.filter(r => /transition|create|approve/.test(r.name || '')).length, 0, 'render/reload never writes or approves');
+});
 
 test('approval reads exact detail and preserves labels without loading workspace tables', async t => {
   const calls = [], sends = [], previous = globalThis.fetch;
