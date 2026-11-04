@@ -20,7 +20,7 @@ function modules(supabase, overrides = {}) {
     if (cache.has(file)) return cache.get(file).exports;
     const runtime = { exports: {} }; cache.set(file, runtime);
     let input = readFileSync(file, 'utf8');
-    if (file.endsWith('/makeup-request-workspace.tsx')) input += '\nexport { getMakeupRequestTableValue, getRequestEvent };';
+    if (file.endsWith('/makeup-request-workspace.tsx')) input += '\nexport { getMakeupRequestTableValue, getRequestEvent, toFormSlot, materializeSlot };';
     if (file.endsWith('/makeup-request-workspace.tsx') && overrides['@test/observer']) input = input.replace('  const selectedClassIdRef = useRef', '  require("@test/observer").observe({ input, editingRequest, editingRequestId, changeFilters, patch: setInput, patchActionNote: setActionNote, catalogs: catalogData });\n  const selectedClassIdRef = useRef');
     if (/\/makeup-request-(workspace\.tsx|service\.ts|model\.js)$/.test(file) && overrides['@test/date']) input = 'const Date = require("@test/date");\n' + input;
     const source = ts.transpileModule(input, { fileName: file, compilerOptions: {
