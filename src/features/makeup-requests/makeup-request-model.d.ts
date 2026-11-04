@@ -94,3 +94,6 @@ export function applyMakeupRequestToSchedulePlan(
 ): Record<string, unknown>;
 export function buildMakeupCalendarDrafts(request?: unknown): Array<Record<string, unknown>>;
 export function toDateKey(value: string | Date): string;
+export function toMakeupDateTimeInput(value: string): string;
+export function toMakeupSlotTimestamp(value: string): string;
+export function formatMakeupDateTime(value: string): string;

@@ -66,6 +66,9 @@ import {
   getAllowedApproverNames,
   getDefaultMakeupEndAt,
   getMakeupRequestEffectiveYear,
+  formatMakeupDateTime,
+  toMakeupDateTimeInput,
+  toMakeupSlotTimestamp,
   hasMakeupPart,
   MAKEUP_REQUEST_STATUS_LABELS,
   extractMakeupCalendarMeta,
@@ -194,9 +197,7 @@ function sortSubjectOptions(left: string, right: string) {
 }
 
 function formatDateTime(value: string) {
-  if (!value) return "-"
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
-  return match ? `${match[1]} ${match[2]}` : value
+  return formatMakeupDateTime(value)
 }
 
 function toText(value: unknown) {
@@ -1447,13 +1448,11 @@ function buildSlotDateTime(date = "", time = "") {
 }
 
 function getDatePart(value: string) {
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})/)
-  return match ? match[1] : ""
+  return toMakeupDateTimeInput(value).slice(0, 10)
 }
 
 function getTimePart(value: string) {
-  const match = value.match(/T(\d{2}:\d{2})/)
-  return match ? match[1] : ""
+  return toMakeupDateTimeInput(value).slice(11, 16)
 }
 
 function toFormSlot(slot: { id?: string; startAt?: string; endAt?: string; classroom?: string }) {
@@ -1462,6 +1461,8 @@ function toFormSlot(slot: { id?: string; startAt?: string; endAt?: string; class
     date: getDatePart(slot.startAt || ""),
     startTime: getTimePart(slot.startAt || ""),
     endTime: getTimePart(slot.endAt || ""),
+    startAt: toMakeupSlotTimestamp(slot.startAt || ""),
+    endAt: toMakeupSlotTimestamp(slot.endAt || ""),
     classroom: slot.classroom || "",
   }
 }
@@ -1474,8 +1475,8 @@ function materializeSlot(slot: MakeupRequestInput["makeupSlots"][number]) {
   if (!isCompleteSlotDateTime(slot)) return null
   return {
     ...slot,
-    startAt: buildSlotDateTime(slot.date, slot.startTime),
-    endAt: buildSlotDateTime(slot.date, slot.endTime),
+    startAt: slot.startAt || buildSlotDateTime(slot.date, slot.startTime),
+    endAt: slot.endAt || buildSlotDateTime(slot.date, slot.endTime),
     classroom: slot.classroom || "",
   }
 }
@@ -2473,9 +2474,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       makeupSlots: current.makeupSlots.map((slot) => {
         if (slot.id !== slotId) return slot
         const nextSlot = { ...slot, ...patch }
+        if ("date" in patch || "startTime" in patch) nextSlot.startAt = ""
+        if ("date" in patch || "endTime" in patch) nextSlot.endAt = ""
         if ((patch.date || patch.startTime) && nextSlot.date && nextSlot.startTime && !patch.endTime) {
           const defaultEndAt = getDefaultMakeupEndAt(buildSlotDateTime(nextSlot.date, nextSlot.startTime), selectedClass || {})
           nextSlot.endTime = getTimePart(defaultEndAt) || nextSlot.endTime
+          nextSlot.endAt = defaultEndAt
         }
         return nextSlot
       }),
