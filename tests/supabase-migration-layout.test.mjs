@@ -160,6 +160,10 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_thread_replies_test.sql",
   "supabase/tests/ai_agent_nonexpiring_chat_test.sql",
 ])
+const EXPECTED_PR_CI_SQL_TESTS = Object.freeze([
+  ...EXPECTED_CI_SQL_TESTS,
+  "supabase/tests/dashboard_audit_predecessor_lookup_test.sql",
+])
 const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
@@ -1437,7 +1441,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "118b4de63a7819971abe4e4ce8ce22f407455f7ecf4b4fa4818ddddec44888ca"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "7fe2131a1be003a6dd56ec7c8fe62316886ea2846def85d85a2beaa024b0aae2"],
+    ["supabase-sql-review.yml", "185adda33fb1de8c22ea6d1bfedc76de2b5063ccd8285eb49334b11be71b06a6"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2398,16 +2402,17 @@ async function assertPinnedPostdeployPredicates(source, requiredPredicates) {
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 }
 
-test("isolated main·PR는 동일한 SQL 108개·probe 27개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 기존 SQL 108개·probe 27개와 PR audit 회귀 1개를 정확히 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
+    const expectedSqlTests = kind === "pr" ? EXPECTED_PR_CI_SQL_TESTS : EXPECTED_CI_SQL_TESTS
     const sqlTests = [...workflow.matchAll(/--test (supabase\/tests\/\S+\.sql)/g)].map((match) => match[1])
     const probes = [...workflow.matchAll(/--probe (tests\/\S+\.mjs)/g)].map((match) => match[1])
-    assert.deepEqual(sqlTests, EXPECTED_CI_SQL_TESTS)
+    assert.deepEqual(sqlTests, expectedSqlTests)
     assert.deepEqual(probes, EXPECTED_CI_PROBES)
     assert.deepEqual(validateIsolatedCiWorkflow(workflow, kind), [])
-    for (const path of EXPECTED_CI_SQL_TESTS) {
+    for (const path of expectedSqlTests) {
       for (const target of ["", `--test ${path} --test ${path}`, "--test supabase/tests/unreviewed_test.sql"]) {
         assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace(`--test ${path}`, target), kind), "isolated_ci_sql_inventory_mismatch")
       }
@@ -2425,6 +2430,30 @@ test("isolated main·PR는 동일한 SQL 108개·probe 27개와 필수 PR 검사
   const artifactFixture = await createRepoFixture()
   await writeFile(join(artifactFixture, "scripts/verify-supabase-postdeploy-unapproved.mjs"), "export {}\n")
   assertIncludesErrorCode(await validateSupabaseMigrationLayout({ repoRoot: artifactFixture }), "postdeploy_contract_artifact_unapproved")
+})
+
+test("PR audit registration and checkout metadata reject omissions, duplicates, and command changes", async () => {
+  const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
+  const main = await readFile(requiredWorkflowPath, "utf8")
+  const auditTarget = "--test supabase/tests/dashboard_audit_predecessor_lookup_test.sql"
+  assert.equal(pr.split(auditTarget).length - 1, 1)
+  assert.ok(!main.includes(auditTarget))
+  assert.deepEqual(validateIsolatedCiWorkflow(pr, "pr"), [])
+  for (const target of ["", `${auditTarget} ${auditTarget}`, "--test supabase/tests/unreviewed_test.sql"]) {
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(pr.replace(auditTarget, target), "pr"),
+      "isolated_ci_sql_inventory_mismatch")
+  }
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(main.replace("--ai-producer-parity", `--ai-producer-parity ${auditTarget}`), "main"),
+    "isolated_ci_sql_inventory_mismatch")
+  const metadata = "          git rev-parse HEAD HEAD^{tree}\n"
+  assert.equal(pr.split(metadata).length - 1, 1)
+  for (const replacement of ["", metadata.repeat(2), "          git rev-parse HEAD\n", "          exit 0\n", `${metadata}          exit 0\n`]) {
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(pr.replace(metadata, replacement), "pr"),
+      "isolated_ci_direct_execute_body_mismatch")
+  }
+  const wrongOrder = pr.replace(`          set -euo pipefail\n${metadata}`, `${metadata}          set -euo pipefail\n`)
+  assert.notEqual(wrongOrder, pr)
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(wrongOrder, "pr"), "isolated_ci_direct_execute_body_mismatch")
 })
 
 
