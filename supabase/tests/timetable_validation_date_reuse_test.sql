@@ -3,9 +3,9 @@ select no_plan();
 
 -- Synthetic references isolate the final validator's computational cost and
 -- semantics. These transaction-local probe replacements roll back afterwards.
--- Pin the final optional-room validator without replacing its workset logic.
+-- Pin the final per-date validator without replacing its workset logic.
 select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),'sha256'),'hex'),
- '78baa5818e1ca12dbfba0975ab604bd7f95a1739e96225c662be35a4fcc72bca',
+ '5f0c7dbfa493acd25fcad3677ce9031ee5898e65edab65e6795b8dbbd888248d',
  'date coverage assertions execute the exact final shared-workset validator');
 select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.timetable_effective_workset_date_v1(jsonb,date,dashboard_private.timetable_validation_row_v1[])'::regprocedure),'sha256'),'hex'),
  '3d456b6b5af3469e8ed5e00dd0641e0a4afca12b5eb61e37d4833611195b6956',
