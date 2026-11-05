@@ -70,6 +70,7 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261103135120_makeup_seoul_time_projection.sql',
  'supabase/migrations/20261103170744_timetable_validation_per_date_inputs.sql',
  'supabase/migrations/20261105073151_dashboard_audit_predecessor_index_lookup.sql',
+ 'supabase/tests/dashboard_audit_predecessor_lookup_test.sql',
  'supabase/tests/class_public_memo_test.sql',
  'tests/probe-public-class-memo-dto.mjs',
  'src/features/management/management-service.js',
@@ -315,7 +316,9 @@ export function validateAiReceipt(receipt,{expected,source,raw,identity,now=Date
  assert.ok([receipt.startedAt,receipt.captureStartedAt,receipt.finishedAt,now].every(value=>Number.isSafeInteger(value)&&value>0),'receipt timestamp invalid');
  assert.ok(receipt.startedAt<=receipt.captureStartedAt && receipt.captureStartedAt<=receipt.finishedAt && receipt.finishedAt<=now && now-receipt.captureStartedAt<900_000,'receipt time window');
  assert.deepEqual(receipt.before,source,'receipt stale source');assert.deepEqual(receipt.after,source,'receipt closure drift');
- assert.deepEqual(receipt.sqlTests,AI_SQL_TESTS,'receipt SQL inventory');
+ const expectedSqlTests=expected.sqlTests===undefined?AI_SQL_TESTS:expected.sqlTests;
+ assert.ok(isApprovedAiSqlInventory(expectedSqlTests),'receipt expected SQL inventory');
+ assert.deepEqual(receipt.sqlTests,expectedSqlTests,'receipt SQL inventory');
  assert.deepEqual(receipt.probes,AI_PROBES,'receipt probe inventory');
  assert.deepEqual(receipt.migrations,CURRENT_AI_MIGRATIONS,'receipt migration drift');
  assert.deepEqual(receipt.credentialPrefix,{...AI_CREDENTIAL_PREFIX,committed:true},'committed credential-prefix evidence required');
@@ -339,7 +342,7 @@ export async function readCurrentAiCapture(identity,env=process.env,root=ROOT){
  for(const name of Object.keys(AI_PRODUCERS)){
   const rawPath=join(directory,AI_PRODUCERS[name].file),rawStat=await lstat(rawPath);assert.ok(rawStat.isFile());assert.equal(rawStat.mode&0o777,0o600);
   const raw=await readFile(rawPath);
-  validateAiReceipt(receipt,{expected:{runId:env.TASK_AI_RUN_ID,nonce:env.TASK_AI_RUN_NONCE,startedAt:Number(env.TASK_AI_STARTED_AT),captureStartedAt:Number(env.TASK_AI_CAPTURE_STARTED_AT)},source,raw,identity:name});
+  validateAiReceipt(receipt,{expected:{runId:env.TASK_AI_RUN_ID,nonce:env.TASK_AI_RUN_NONCE,startedAt:Number(env.TASK_AI_STARTED_AT),captureStartedAt:Number(env.TASK_AI_CAPTURE_STARTED_AT),sqlTests:env.TASK_AI_SQL_TESTS===undefined?undefined:JSON.parse(env.TASK_AI_SQL_TESTS)},source,raw,identity:name});
   payloads[name]=raw;
  }
  return JSON.parse(payloads[identity].toString());
@@ -455,6 +458,16 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_thread_replies_test.sql",
   "supabase/tests/ai_agent_nonexpiring_chat_test.sql",
 ]);
+
+// Preserve the existing main/AI run and register exactly the approved PR addition.
+export const PR_AI_SQL_TESTS = Object.freeze([
+  ...AI_SQL_TESTS,
+  "supabase/tests/dashboard_audit_predecessor_lookup_test.sql",
+]);
+export function isApprovedAiSqlInventory(tests){
+ return Array.isArray(tests)&&[AI_SQL_TESTS,PR_AI_SQL_TESTS].some(expected=>
+  tests.length===expected.length&&expected.every((path,index)=>tests[index]===path));
+}
 
 export const AI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",

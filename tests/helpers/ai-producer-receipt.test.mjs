@@ -284,16 +284,85 @@ test('registration final plans and copied candidate refusals launch no external 
  assert.deepEqual(await readFile(manifestPath),before);
   await fixture.assertRealSourcesUnchanged();
 });
-test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
+test('isolated workflows retain 108 main SQL tests and exactly one approved PR audit addition',async()=>{
  assert.equal(AI_SQL_TESTS.length,108);
+ assert.deepEqual(receiptProtocol.PR_AI_SQL_TESTS,[...AI_SQL_TESTS,'supabase/tests/dashboard_audit_predecessor_lookup_test.sql']);
+ assert.ok(Object.isFrozen(receiptProtocol.PR_AI_SQL_TESTS));
  assert.equal(AI_PROBES.length,27);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
  for(const name of isolatedWorkflows){
   const parsed=parseIsolatedDbArguments(parityArguments(await workflowInventory(name)));
-  assert.deepEqual(parsed.tests,AI_SQL_TESTS,name+' SQL inventory');
+  assert.deepEqual(parsed.tests,name==='supabase-sql-review.yml'?receiptProtocol.PR_AI_SQL_TESTS:AI_SQL_TESTS,name+' SQL inventory');
   assert.deepEqual(parsed.probes,AI_PROBES,name+' probe inventory');
  }
+});
+test('runner accepts only the two complete approved SQL inventories before isolated process launch',async(t)=>{
+ const fixture=await isolatedFinalSourceFixture(t);
+ const tempDirectory=await mkdtemp(join(tmpdir(),'ai-audit-inventory-boundary-'));
+ t.after(()=>rm(tempDirectory,{recursive:true,force:true}));
+ let launched=0,reachedRuntime=0;
+ const forbidden=async()=>{launched++;throw Error('external process forbidden in inventory regression');};
+ const boundaries={root:fixture.root,tempDirectory,executeProcess:forbidden,executeNetwork:forbidden,executeGit:forbidden,createRelay:forbidden,
+  allocatePort:()=>{reachedRuntime++;throw Error('approved_inventory_runtime_boundary');}};
+ for(const name of isolatedWorkflows){
+  await assert.rejects(fixture.run({...boundaries,argv:parityArguments(await workflowInventory(name))}),/^Error: approved_inventory_runtime_boundary$/);
+ }
+ assert.equal(reachedRuntime,2,'both exact workflow inventories pass registration and source snapshots');
+ const inventory=await workflowInventory('supabase-sql-review.yml'),audit=inventory.tests.at(-1);
+ const swapFirst=list=>[list[1],list[0],...list.slice(2)];
+ for(const changed of [
+  {...inventory,tests:inventory.tests.slice(1)},
+  {...inventory,tests:[...inventory.tests,audit]},
+  {...inventory,tests:[...AI_SQL_TESTS,'supabase/tests/unreviewed_test.sql']},
+  {...inventory,tests:[...inventory.tests,'supabase/tests/unreviewed_test.sql']},
+  {...inventory,tests:[audit,...AI_SQL_TESTS]},
+  {...inventory,tests:swapFirst(inventory.tests)},
+  {...inventory,probes:inventory.probes.slice(1)},
+  {...inventory,probes:[...inventory.probes,inventory.probes[0]]},
+  {...inventory,probes:swapFirst(inventory.probes)},
+ ])await assert.rejects(fixture.run({...boundaries,argv:parityArguments(changed)}),/^Error: isolated_ai_parity_full_run_required$/);
+ const argv=parityArguments(inventory);
+ for(const flag of ['--lint','--require-final','--postdeploy-contract','--transactional-preflight','--verify-local-ledger']){
+  await assert.rejects(fixture.run({...boundaries,argv:argv.filter(value=>value!==flag)}),/^Error: isolated_ai_parity_full_run_required$/);
+ }
+ await assert.rejects(fixture.run({...boundaries,argv,retainTempRoot:true}),/^Error: isolated_ai_parity_full_run_required$/);
+ assert.equal(reachedRuntime,2,'invalid registrations stop before runtime allocation');
+ assert.equal(launched,0);
+ await fixture.assertRealSourcesUnchanged();
+});
+test('PR audit receipts and consumers bind the exact requested inventory without accepting arbitrary extras',async(t)=>{
+ const source=await snapshotAiSource(),raw=Buffer.from('{"negativeProtocolFixture":true}'),now=Date.now();
+ const identity={runId:'a'.repeat(32),nonce:'b'.repeat(64),startedAt:now-1,captureStartedAt:now-1};
+ const receipt={version:1,...identity,finishedAt:now,before:source,after:source,migrations:CURRENT_AI_MIGRATIONS,
+  credentialPrefix:{...AI_CREDENTIAL_PREFIX,committed:true},probes:AI_PROBES,
+  captures:Object.fromEntries(Object.entries(AI_PRODUCERS).map(([name,p])=>[name,{producer:p.path,file:p.file,sourceSha256:source.closure.find(v=>v.path===p.path).sha256,sha256:hash(raw),bytes:raw.length}]))};
+ const directory=await mkdtemp(join(tmpdir(),'ai-audit-receipt-inventory-'));
+ t.after(()=>rm(directory,{recursive:true,force:true}));
+ const receiptPath=join(directory,'receipt.json');
+ for(const producer of Object.values(AI_PRODUCERS))await writeFile(join(directory,producer.file),raw,{mode:0o600});
+ const env={TASK_AI_RECEIPT:receiptPath,TASK_AI_CAPTURE_DIRECTORY:directory,TASK_AI_RUN_ID:identity.runId,TASK_AI_RUN_NONCE:identity.nonce,
+  TASK_AI_STARTED_AT:String(identity.startedAt),TASK_AI_CAPTURE_STARTED_AT:String(identity.captureStartedAt)};
+ for(const sqlTests of [AI_SQL_TESTS,receiptProtocol.PR_AI_SQL_TESTS]){
+  const current={...receipt,sqlTests},expected={...identity,sqlTests};
+  assert.equal(validateAiReceipt(current,{expected,source,raw,identity:'http',now}),true);
+  await writeFile(receiptPath,JSON.stringify(current),{mode:0o600});
+  assert.deepEqual(await receiptProtocol.readCurrentAiCapture('http',{...env,TASK_AI_SQL_TESTS:JSON.stringify(sqlTests)}),{negativeProtocolFixture:true});
+  const other=sqlTests===AI_SQL_TESTS?receiptProtocol.PR_AI_SQL_TESTS:AI_SQL_TESTS;
+  assert.throws(()=>validateAiReceipt({...current,sqlTests:other},{expected,source,raw,identity:'http',now}),/receipt SQL inventory/);
+  await assert.rejects(receiptProtocol.readCurrentAiCapture('http',{...env,TASK_AI_SQL_TESTS:JSON.stringify(other)}),/receipt SQL inventory/);
+ }
+ await assert.rejects(receiptProtocol.readCurrentAiCapture('http',env),/receipt SQL inventory/,'109-test receipts require an explicit 109-test expectation');
+ for(const sqlTests of [
+  [...receiptProtocol.PR_AI_SQL_TESTS,'supabase/tests/unreviewed_test.sql'],
+  [...AI_SQL_TESTS,'supabase/tests/unreviewed_test.sql'],
+  [...receiptProtocol.PR_AI_SQL_TESTS,receiptProtocol.PR_AI_SQL_TESTS.at(-1)],
+  [...receiptProtocol.PR_AI_SQL_TESTS].reverse(),
+  AI_SQL_TESTS.slice(1),null,
+ ])assert.throws(()=>validateAiReceipt({...receipt,sqlTests},{expected:{...identity,sqlTests},source,raw,identity:'http',now}),/receipt expected SQL inventory/);
+ const audit='supabase/tests/dashboard_audit_predecessor_lookup_test.sql';
+ assert.equal(source.closure.filter(row=>row.path===audit).length,1);
+ assert.equal(source.closure.find(row=>row.path===audit).sha256,hash(await readFile(join(repositoryRoot,audit))));
 });
 test('optional classroom final pin preserves all earlier migrations and rejects manifest or source drift',async()=>{
  const pin={fileName:'20261020134458_timetable_optional_classroom_occupancy.sql',status:'final',sha256:'31cd689964a52b5f084a8a167cb41a0b61b12403a88d4dff7b20d9106e29a8b6'};

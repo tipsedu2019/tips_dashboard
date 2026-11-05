@@ -56,6 +56,14 @@ PR schema job에 이 파일 1개를 추가해 PR 전용 SQL 목록은 109개, �
 
 추가 리뷰의 파일 SHA256은 workflow `185adda33fb1de8c22ea6d1bfedc76de2b5063ccd8285eb49334b11be71b06a6`, layout verifier `21a1f7296371e95a76360d1bff50e1d75874cc087d221a1b4870da2d660675aa`, layout test `f6e377e96167ad2df3e329f521c3aad3d040aa672c85c2dcac4c7e4f0058d076`이며 pgTAP은 위 파일 hash와 같다. 커밋 이후의 정확 HEAD/tree와 CI checkout SHA/tree는 PR 및 이슈의 결과 기록에 연결한다.
 
+### 첫 정식 CI의 등록 실패와 보완
+
+[PR #245](https://github.com/tipsedu2019/tips_dashboard/pull/245)의 최초 HEAD `720b99a069d91a41a105d90a4b0fb30f1e5adb65`에서 [schema job](https://github.com/tipsedu2019/tips_dashboard/actions/runs/42004506650/job/127167759904)은 DB/pgTAP 시작 전 `isolated_ai_parity_full_run_required`로 실패했다. workflow의 109개 목록에 비해 runner와 receipt 검증이 기존 108개만 인식한 등록 누락이다. 실제 checkout은 `ccca864479fbc36714e5a4635848d224a5276e67`, tree `6d28cac63a898bbaaeb21419c9318bb6b2608e38`로 검토한 HEAD tree와 같았다. 14개는 미실행이며 이 실패를 PASS로 합산하거나 같은 HEAD에서 rerun하지 않는다.
+
+보완은 runner·receipt의 정확 목록 등록과 회귀에 한정한다. 기존 108개 또는 정확한 108개 뒤 승인된 audit SQL 한 개를 붙인 109개만 허용한다. 최초 요청 목록을 run 상태와 consumer에 전달해 receipt와 정확 비교하며 109→108 축소, 108→109 치환, 임의 파일/중복/누락을 거절한다. 기존 flags·probe·freshness·nonce·migration 검증은 그대로다. 새 SQL을 source closure에 포함한다. 감사 migration·pgTAP 본문·workflow는 추가 변경하지 않는다.
+
+새 입력의 관련 회귀 3건은 3 PASS, fail/skip 0 (2.53초)다. 실제 runner가 두 승인된 전체 목록으로 process 경계에 도달하고 다른 목록·누락 flags/probe는 그 전에 거절하는 검사와 receipt/consumer 왕복을 포함한다. 기존 성공 검사는 반복하지 않았다. 보완 SHA256은 runner `1bfa2c2c70962bd3256a054ef613ef96a153b5d997230842acb2031255691a66`, receipt helper `4acc625124da6f15b7ac450c1e33bf700fb347be297339e9d85ca757693514d3`, helper test `101d9ba945001cba40f8474946cd93500d0373372252f765dd63f1581af0c5a2`다. 독립 Codex는 이 3개 hash와 기대 inventory 전달·음성 회귀를 확인했고 추가 P0/P1/P2 지적이 없었다. 아래 초기 리뷰 hash와 구분하며 새 commit의 실제 pgTAP 및 자동 CI 결과는 PR에 연결한다.
+
 독립 리뷰의 소스 기준은 `e8be004bff2d682899882321a0139c1f6ed008f1`과 미커밋 패치다. migration SHA는 위 표와 같고, 등록 파일 SHA256은 `scripts/lib/ai-producer-receipt.mjs` = `ae9def13bd83f4d80b999bbffe89e80a0b84c520afd5264a46075fbb0ccd7d45`, manifest = `4ec0337cf6d624f005b10e5e426db239fe9b0ca778a3a66c3b7500cc11b40116`, helper test = `4ee14aff43f638ec273535e4c7e4e644c51b027a6890f9c8d053c955a47ef6d2`다. runtime 및 pgTAP 입력은 위 개별 hash로 연결한다.
 
 ## 비공개 복구 자료 요건
