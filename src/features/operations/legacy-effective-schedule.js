@@ -127,8 +127,9 @@ export function occupancyOf(result, classId, id) {
     teacherId: result.values.teacherCatalogId ?? null, classroomId: result.values.classroomCatalogId ?? null };
 }
 
-const bindingFields = ['id', 'date', 'scheduleState', 'state', 'originalDate', 'makeupDate', 'isForced', 'sourceSlotId', 'makeupRequestId', 'makeupRequestRole', 'originalSessionId', 'makeupAdoption'];
-const binding = row => Object.fromEntries(bindingFields.filter(k => own(row, k)).map(k => [k, row[k]]));
+const bindingFields = ['id', 'date', 'scheduleState', 'state', 'originalDate', 'makeupDate', 'isForced', 'sourceSlotId', 'makeupRequestId', 'makeupRequestRole'];
+const binding = row => Object.fromEntries([...bindingFields, ...(object(row.makeupAdoption) ? ['originalSessionId', 'makeupAdoption'] : [])]
+  .filter(k => own(row, k)).map(k => [k, row[k]]));
 const canonical = value => Array.isArray(value) ? value.map(canonical) : object(value)
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
 const ordered = value => JSON.stringify(canonical(value));

@@ -121,6 +121,15 @@ test('adoption projection requires trusted provenance and exact nested binding, 
  assert.equal(resolve({approvedOverrideVerified:true}).values.classroomCatalogId,id(72));
 });
 
+test('ordinary legacy original-session linkage retains the existing source binding contract',()=>{
+ const lesson={...makeup};
+ const oldFields=['id','date','scheduleState','state','originalDate','makeupDate','isForced','sourceSlotId','makeupRequestId','makeupRequestRole'];
+ const rowBinding=Object.fromEntries(oldFields.filter(k=>Object.hasOwn(lesson,k)).map(k=>[k,lesson[k]]));
+ const context={approvedByIdentity:{[lesson.id]:{binding:rowBinding,approvedOverride:{startTime:'18:00',endTime:'20:00'},approvedOverrideVerified:true}}};
+ assert.equal(effectiveInputForLesson(plan,lesson,context).approvedOverrideVerified,true);
+ assert.equal(effectiveInputForLesson(plan,lesson,context).legacyAdoptionVerified,undefined);
+});
+
 for(const variant of ['date map','weekly date']) test(`save does not regenerate an adopted date from ${variant}`,()=>{
  const input={...structuredClone(plan),billingPeriods:[{id:'synthetic-billing',month:10,startDate:makeup.date,endDate:request.cancel_date}],selectedDays:variant==='weekly date'?[new Date(`${makeup.date}T00:00:00Z`).getUTCDay()]:[]};
  if(variant==='date map')input.sessionStates[makeup.date]={state:'makeup',originalDate:request.cancel_date,originalSessionId:original.id};

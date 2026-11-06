@@ -1603,7 +1603,7 @@ test('dated diff projection exact pin preserves the 191 prior migrations and rej
 
 test('legacy pair adoption exact final pin preserves all 192 prior entries and rejects drift',async()=>{
  const current=await snapshotAiSource(),pin=receiptProtocol.MAKEUP_LEGACY_PAIR_ADOPTION_MIGRATION;
- assert.deepEqual(pin,{fileName:'20261106062342_makeup_legacy_pair_adoption.sql',status:'final',sha256:'56b414d5f2e9ccaa7b3e9d7aa9c3732958faf5cfff76e69e1476c88bb025090d'});
+ assert.deepEqual(pin,{fileName:'20261106062342_makeup_legacy_pair_adoption.sql',status:'final',sha256:'44227227307e59de2429f7efa5e0a402c1ee9cf676d6ba520ec78fb7c6581909'});
  assert.ok(Object.isFrozen(pin));
  const sqlPath='supabase/migrations/'+pin.fileName;
  assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(path=>path===sqlPath).length,1);

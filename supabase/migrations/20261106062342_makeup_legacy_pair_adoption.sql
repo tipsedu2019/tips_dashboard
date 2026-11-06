@@ -175,7 +175,9 @@ begin
   if n<>1 then return false;end if;
   select s into current_row from jsonb_array_elements(p_current->'sessions') s where s->>'id'=ident;
   select s into expected from jsonb_array_elements(p_after->'sessions') s where s->>'id'=ident;
-  if current_row is null or expected is null or dashboard_private.legacy_effective_binding_v1(current_row) is distinct from dashboard_private.legacy_effective_binding_v1(expected) then return false;end if;
+  if current_row is null or expected is null or dashboard_private.legacy_effective_binding_v1(current_row) is distinct from dashboard_private.legacy_effective_binding_v1(expected)
+   or current_row->'originalSessionId' is distinct from expected->'originalSessionId'
+   or current_row->'makeupAdoption' is distinct from expected->'makeupAdoption' then return false;end if;
  end loop;
  return true;
 end $f$;
@@ -304,7 +306,10 @@ do $patch$
 declare src text; old text; replacement text; signature text;
 begin
  signature:='dashboard_private.legacy_effective_binding_v1(jsonb)';
- src:=pg_get_functiondef(signature::regprocedure);old:='''makeupRequestId'',''makeupRequestRole'']';replacement:='''makeupRequestId'',''makeupRequestRole'',''originalSessionId'',''makeupAdoption'']';
+ src:=pg_get_functiondef(signature::regprocedure);
+ old:=$old$where k=any(array['id','date','scheduleState','state','originalDate','makeupDate','isForced','sourceSlotId','makeupRequestId','makeupRequestRole'])$old$;
+ replacement:=$new$where k=any(array['id','date','scheduleState','state','originalDate','makeupDate','isForced','sourceSlotId','makeupRequestId','makeupRequestRole'])
+  or (jsonb_typeof(s->'makeupAdoption')='object' and k=any(array['originalSessionId','makeupAdoption']))$new$;
  if (length(src)-length(replace(src,old,'')))/length(old)<>1 then raise exception 'makeup_adoption_binding_source_drift';end if;
  execute replace(src,old,replacement);
  foreach signature in array array['dashboard_private.legacy_effective_context_v1(public.classes,jsonb)','dashboard_private.legacy_effective_context_for_dates_v1(public.classes,jsonb,date,date)'] loop
@@ -322,9 +327,11 @@ begin
   if signature like '%_for_dates_v1%' then replacement:=replace(replacement,'dashboard_private.makeup_legacy_adoption_current_v1(c.schedule_plan,schedule_plan_before,schedule_plan_after,request_json)','legacy_adoption_verified');end if;
   if (length(src)-length(replace(src,old,'')))/length(old)<>1 then raise exception 'makeup_adoption_context_source_drift';end if;
   src:=replace(src,old,replacement);
-  old:=$old$'approvedOverride',jsonb_build_object($old$;
-  replacement:=$new$'legacyAdoptionVerified',dashboard_private.makeup_legacy_adoption_current_v1(c.schedule_plan,candidate.schedule_plan_before,candidate.schedule_plan_after,candidate.request_json),
-   'approvedOverride',jsonb_build_object($new$;
+  old:=$old$  if sources ? source_id then source:=jsonb_set(source,'{approvedOverrideVerified}','false');end if;$old$;
+  replacement:=$new$  if dashboard_private.makeup_legacy_adoption_current_v1(c.schedule_plan,candidate.schedule_plan_before,candidate.schedule_plan_after,candidate.request_json) then
+   source:=source||jsonb_build_object('legacyAdoptionVerified',true);
+  end if;
+  if sources ? source_id then source:=jsonb_set(source,'{approvedOverrideVerified}','false');end if;$new$;
   if signature like '%_for_dates_v1%' then replacement:=replace(replacement,'dashboard_private.makeup_legacy_adoption_current_v1(c.schedule_plan,candidate.schedule_plan_before,candidate.schedule_plan_after,candidate.request_json)','candidate.legacy_adoption_verified');end if;
   if (length(src)-length(replace(src,old,'')))/length(old)<>1 then raise exception 'makeup_adoption_context_source_drift';end if;
   src:=replace(src,old,replacement);

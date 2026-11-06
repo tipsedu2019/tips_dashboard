@@ -24,6 +24,14 @@ create function pg_temp.producer_fixture() returns jsonb language sql immutable 
 -- END ACTUAL ADOPTION PRODUCER
 select is(pg_temp.producer_fixture()->'plan',pg_temp.plan(),'real JS producer uses the exact independent SQL before fixture');
 select is(pg_temp.producer_fixture()->'after',pg_temp.expected(pg_temp.request()),'real JS planner output equals independently expected preserved SQL plan');
+select is(dashboard_private.legacy_effective_binding_v1(pg_temp.plan()#>'{sessions,1}'),
+ jsonb_build_object('id','legacy-makeup-alpha','date','2050-10-06','state','makeup','scheduleState','makeup','originalDate','2050-10-20'),
+ 'ordinary row with originalSessionId retains exact old binding projection');
+select is(dashboard_private.legacy_effective_binding_v1(pg_temp.expected(pg_temp.request())#>'{sessions,1}'),
+ jsonb_build_object('id','legacy-makeup-alpha','date','2050-10-06','state','makeup','scheduleState','makeup','originalDate','2050-10-20',
+  'makeupRequestId',pg_temp.request()->>'id','makeupRequestRole','makeup','originalSessionId','legacy-original-alpha',
+  'makeupAdoption',pg_temp.expected(pg_temp.request())#>'{sessions,1,makeupAdoption}'),
+ 'adopted marker adds exact provenance keys without changing ordinary binding');
 select is(dashboard_private.makeup_legacy_pair_v1(pg_temp.plan(),pg_temp.request()),
  jsonb_build_object('originalId','legacy-original-alpha','makeupId','legacy-makeup-alpha','originalIndex',0,'makeupIndex',1,
   'cancelDate','2050-10-20','makeupDate','2050-10-06','startAt','2050-10-06T09:00:00.000Z','endAt','2050-10-06T11:00:00.000Z','classroom','Synthetic requested room'),
@@ -242,6 +250,15 @@ savepoint missing_calendar;
 delete from public.academic_events where id=pg_temp.sid(101);
 select is(public.get_makeup_approval_collision_context_v1(pg_temp.slots())->'legacyBindings','[]'::jsonb,'missing linked calendar cannot establish bound proof');
 rollback to missing_calendar;
+savepoint changed_original_ancestry;
+update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions,0,originalSessionId}','"unexpected-earlier-original"') where id=pg_temp.sid(4);
+select is(public.get_makeup_approval_collision_context_v1(pg_temp.slots())->'legacyBindings','[]'::jsonb,'unexpected original ancestry cannot bypass conditional binding projection');
+rollback to changed_original_ancestry;
+savepoint malformed_original_marker;
+update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions,0,makeupAdoption}','null') where id=pg_temp.sid(4);
+select is(public.get_makeup_approval_collision_context_v1(pg_temp.slots())->'legacyBindings','[]'::jsonb,'malformed marker on original row cannot bypass conditional binding projection');
+rollback to malformed_original_marker;
+
 savepoint changed_binding;
 update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions,1,makeupAdoption,originalId}','"different-original"') where id=pg_temp.sid(4);
 select is(public.get_makeup_approval_collision_context_v1(pg_temp.slots())->'legacyBindings','[]'::jsonb,'changed current marker cannot reuse saved binding');

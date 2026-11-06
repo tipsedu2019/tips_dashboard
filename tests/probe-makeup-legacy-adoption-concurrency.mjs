@@ -27,10 +27,11 @@ if (diagnostic) {
   container = `supabase_db_${project}`;
 }
 assert.match(nonce || '', /^[a-f0-9]{32}$/);
-const sessions = [], databases = [];
-const schema = 'legacy_adoption_probe';
+const sessions = [], namespaces = [];
+let schema = 'legacy_adoption_probe', fixturePrefix = 'af061106-0000-4000-8000';
+let fixtureClass = 'Synthetic legacy adoption', fixtureRoom = 'Synthetic requested room';
 const literal = value => "'" + String(value).replaceAll("'", "''") + "'";
-const id = n => `af061106-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const id = n => `${fixturePrefix}-${String(n).padStart(12, '0')}`;
 const started = Date.now();
 
 function spawnProcess(command, commandArgs, input) {
@@ -76,12 +77,12 @@ async function verifyBoundary() {
   const routes = await command(['exec', container, 'cat', '/proc/net/route']);
   assert.ok(!routes.split('\n').slice(1).some(line => line.trim().split(/\s+/)[1] === '00000000'), 'no default external route');
   if (diagnostic) {
-    const result = await query('template1', 'show listen_addresses;');
+    const result = await query('postgres', 'show listen_addresses;');
     assert.equal(result, '', 'diagnostic SQL is available through docker exec socket only');
   }
 }
 function session(database, sql, hold = false) {
-  assert.match(database, /^(?:template1|tips241_adoption_[a-f0-9]{12}_[a-z]+)$/);
+  assert.equal(database, 'postgres');
   const item = spawnProcess('docker', ['exec', '-i', container, 'psql', '-XqAt', '--set', 'ON_ERROR_STOP=1', '--set', 'VERBOSITY=verbose', '-U', 'postgres', '-d', database]);
   sessions.push(item);
   const preamble = "set timezone='UTC';set search_path=public,extensions;set statement_timeout='20s';\n";
@@ -152,16 +153,65 @@ seed = seed.replace(patchAccessor, `select value from ${schema}.patch_data`);
 seed = `begin;create schema ${schema};\n` + seed + `\ngrant usage on schema ${schema} to authenticated,service_role;grant execute on all functions in schema ${schema} to authenticated,service_role;grant select on all tables in schema ${schema} to authenticated,service_role;commit;\n`;
 assert.ok(!/select (?:is|ok|throws_ok|lives_ok|no_plan)\(/.test(seed));
 
+// Each case owns a fresh identity namespace in the already isolated database.
+// Audit predecessors are selected by entity table/id; all writes to these
+// fresh entities consistently use UTC. No shared scheduler/config is changed.
 async function prepare(label) {
-  const database = `tips241_adoption_${nonce.slice(0, 12)}_${label}`;
-  assert.equal(await query('template1', `select count(*) from pg_database where datname=${literal(database)};`), '0', 'never reuse a database from another run');
-  await query('template1', `create database ${database} template postgres;`);
-  databases.push(database);
-  await query(database, seed);
+  assert.ok(['replay','generation','competitor'].includes(label));
+  const hash = createHash('sha256').update(`${nonce}:${label}`).digest('hex');
+  fixturePrefix = `${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-8${hash.slice(17,20)}`;
+  schema = `legacy_adoption_${nonce.slice(0,12)}_${label}`;
+  const suffix = `${nonce.slice(0,12)} ${label}`;
+  fixtureClass = `Synthetic legacy adoption ${suffix}`;
+  fixtureRoom = `Synthetic requested room ${suffix}`;
+  const database = 'postgres', pattern = literal(fixturePrefix + '-%');
+  assert.equal(await query(database, `select count(*) from pg_namespace where nspname=${literal(schema)};`), '0');
+  assert.deepEqual(JSON.parse(await query(database, `select jsonb_build_array(
+    (select count(*) from public.makeup_requests where id::text like ${pattern}),
+    (select count(*) from public.classes where id::text like ${pattern}),
+    (select count(*) from auth.users where id::text like ${pattern}),
+    (select count(*) from public.academic_events where id::text like ${pattern}),
+    (select count(*) from public.teacher_catalogs where id::text like ${pattern}),
+    (select count(*) from public.classroom_catalogs where id::text like ${pattern}),
+    (select count(*) from dashboard_private.notification_request_ledger where request_id::text like ${pattern}));`)), Array(7).fill(0), 'never reuse another fixture namespace');
+  const caseSeed = seed.replaceAll('legacy_adoption_probe',schema)
+    .replaceAll('af061106-0000-4000-8000',fixturePrefix)
+    .replaceAll('Synthetic legacy adoption',fixtureClass)
+    .replaceAll('Synthetic requested room',fixtureRoom)
+    .replaceAll('Synthetic requested teacher',`Synthetic requested teacher ${suffix}`)
+    .replaceAll('legacy-adoption-',`legacy-adoption-${nonce.slice(0,12)}-${label}-`);
+  namespaces.push({schema,prefix:fixturePrefix});
+  await query(database, caseSeed);
   return database;
 }
+async function cleanupFixtures() {
+  for (const owned of namespaces) {
+    const pattern = literal(owned.prefix + '-%');
+    await query('postgres', `begin;
+      delete from dashboard_private.notification_event_fanout_jobs where event_id in
+        (select id from dashboard_private.notification_events where payload->>'makeup_request_id' like ${pattern});
+      delete from dashboard_private.notification_events where payload->>'makeup_request_id' like ${pattern};
+      delete from dashboard_private.notification_request_ledger where request_id::text like ${pattern};
+      delete from public.makeup_requests where id::text like ${pattern};
+      delete from public.academic_events where id::text like ${pattern};
+      delete from dashboard_private.makeup_subject_directors_v1 where profile_id::text like ${pattern};
+      drop schema if exists ${owned.schema} cascade;
+      commit;`);
+    assert.deepEqual(JSON.parse(await query('postgres', `select jsonb_build_array(
+      (select count(*) from public.makeup_requests where id::text like ${pattern}),
+      (select count(*) from public.academic_events where id::text like ${pattern}),
+      (select count(*) from dashboard_private.notification_request_ledger where request_id::text like ${pattern}),
+      (select count(*) from dashboard_private.notification_events where payload->>'makeup_request_id' like ${pattern}),
+      (select count(*) from dashboard_private.makeup_subject_directors_v1 where profile_id::text like ${pattern}));`)),[0,0,0,0,0]);
+  }
+  // Audited class/catalog/principal prerequisites remain until this disposable
+  // container is removed, matching the existing effective-approval probe.
+}
+let bystander;
 try {
   await verifyBoundary();
+  bystander = session('postgres', `set application_name='adoption-bystander-${nonce.slice(0,12)}';select pg_backend_pid();\n\\echo BYSTANDER_READY\n`, true);
+  await held(bystander, 'BYSTANDER_READY');
   {
     const database = await prepare('replay'), before = await counts(database);
     const first = session(database, actor('adoption-replay-first') + approve(310) + '\\echo APPROVAL_HELD\n', true);
@@ -194,7 +244,7 @@ try {
   {
     const database = await prepare('competitor'), before = await counts(database);
     const insert = `insert into public.makeup_requests(id,status,request_kind,subject,approval_group,requester_id,class_id,class_name,teacher_catalog_id,teacher_profile_id,approver_teacher_catalog_id,approver_profile_id,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots)
-      values('${id(30)}','approval_pending','cancel_makeup','영어','english','${id(802)}','${id(4)}','Synthetic legacy adoption','${id(1)}','${id(801)}','${id(1)}','${id(801)}','2050-10-20','2050-10-07T00:00:00Z','2050-10-07T01:00:00Z','Synthetic requested room','[{"startAt":"2050-10-07T09:00:00+09:00","endAt":"2050-10-07T10:00:00+09:00","classroom":"Synthetic requested room"}]');\n`;
+      values('${id(30)}','approval_pending','cancel_makeup','영어','english','${id(802)}','${id(4)}',${literal(fixtureClass)},'${id(1)}','${id(801)}','${id(1)}','${id(801)}','2050-10-20','2050-10-07T00:00:00Z','2050-10-07T01:00:00Z',${literal(fixtureRoom)},${literal(JSON.stringify([{startAt:'2050-10-07T09:00:00+09:00',endAt:'2050-10-07T10:00:00+09:00',classroom:fixtureRoom}]))});\n`;
     const creator = session(database, locked('adoption-competitor-create') + insert + '\\echo COMPETITOR_HELD\n', true);
     await held(creator, 'COMPETITOR_HELD');
     const approval = session(database, actor('adoption-competitor-waiter') + approve(312) + 'commit;');
@@ -207,12 +257,11 @@ try {
     assert.equal(await query(database, `select count(*) from public.makeup_requests where id='${id(30)}' and status='approval_pending';`), '1');
     console.log(JSON.stringify({ scenario: 'competing-request-created-during-lock-wait', passed: true, observedLockWait: true, sqlstate: 'P0001', error: 'makeup_legacy_pair_invalid', effects: 0, competitorOverlapsRequestedSlot: false }));
   }
+  assert.equal(await query('postgres', `select count(*) from pg_stat_activity where application_name='adoption-bystander-${nonce.slice(0,12)}' and backend_type='client backend';`),'1','ordinary source database connection remains alive throughout all races');
+  console.log(JSON.stringify({scenario:'unrelated-connection-preserved',passed:true,databaseClones:0,backendTerminations:0}));
 } finally {
   for (const item of sessions) if (!item.completed && !item.child.stdin.writableEnded) item.child.stdin.end('rollback;\n');
   await Promise.all(sessions.map(item => item.done));
-  for (const database of databases.reverse()) {
-    await query('template1', `select pg_terminate_backend(pid) from pg_stat_activity where datname=${literal(database)} and pid<>pg_backend_pid();`);
-    await query('template1', `drop database ${database};`);
-  }
+  await cleanupFixtures();
 }
-console.log(JSON.stringify({ passed: true, scenarios: 3, fixtureSha256: createHash('sha256').update(source).digest('hex'), disposableDatabasesRemoved: databases.length, productionCalls: 0, providerCalls: 0, diagnosticPlatform: diagnostic, elapsedMs: Date.now() - started }));
+console.log(JSON.stringify({ passed: true, scenarios: 3, fixtureSha256: createHash('sha256').update(source).digest('hex'), workflowNamespacesCleaned: namespaces.length, retainedPrerequisites: 'until disposable container teardown', databaseClones:0, backendTerminations:0, productionCalls: 0, providerCalls: 0, diagnosticPlatform: diagnostic, elapsedMs: Date.now() - started }));
