@@ -12,11 +12,12 @@ const timeValue = (x, end) => {
   return `${hour.padStart(2, '0')}:${minute}`;
 };
 // Same preservation-tag shape as the existing planner; never authorization.
-function requestOwned(row) {
+function requestOwned(row, adoptionVerified = false) {
   const id = row.makeupRequestId;
   if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return false;
   if (row.makeupRequestRole === 'cancel' && typeof (row.id || row.sessionKey) === 'string') return true;
   if (row.id === `makeup-cancel:${id}` && row.sessionKey === row.id) return true;
+  if (adoptionVerified && row.makeupRequestRole === 'makeup' && row.id === row.makeupAdoption?.makeupId) return true;
   const prefix = `makeup-request:${id}:`;
   return typeof row.id === 'string' && row.id.startsWith(prefix) && /^[0-9]+$/.test(row.id.slice(prefix.length)) && row.sessionKey === row.id;
 }
@@ -56,7 +57,7 @@ export function resolveEffectiveSchedule(input) {
   // raw names, including when it is empty/metadata-only. Names and IDs form one
   // resource group. Shared maps are fallbacks, never an identity for a lesson.
   // Request-owned rows keep the existing complete bypass of the shared map.
-  const sources = !requestOwned(row) && object(input.dateOverride)
+  const sources = !requestOwned(row, input.legacyAdoptionVerified === true && input.approvedOverrideVerified === true) && object(input.dateOverride)
     ? [{ name: 'session', value: Object.fromEntries([...fields, 'classroomUnresolved'].filter(key => own(row, key)).map(key => [key, row[key]])) },
       { name: 'date_override', value: input.dateOverride }]
     : [{ name: 'session', value: row }];
@@ -126,9 +127,11 @@ export function occupancyOf(result, classId, id) {
     teacherId: result.values.teacherCatalogId ?? null, classroomId: result.values.classroomCatalogId ?? null };
 }
 
-const bindingFields = ['id', 'date', 'scheduleState', 'state', 'originalDate', 'makeupDate', 'isForced', 'sourceSlotId', 'makeupRequestId', 'makeupRequestRole'];
+const bindingFields = ['id', 'date', 'scheduleState', 'state', 'originalDate', 'makeupDate', 'isForced', 'sourceSlotId', 'makeupRequestId', 'makeupRequestRole', 'originalSessionId', 'makeupAdoption'];
 const binding = row => Object.fromEntries(bindingFields.filter(k => own(row, k)).map(k => [k, row[k]]));
-const ordered = value => JSON.stringify(Object.fromEntries(Object.entries(value || {}).sort(([a], [b]) => a.localeCompare(b))));
+const canonical = value => Array.isArray(value) ? value.map(canonical) : object(value)
+  ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+const ordered = value => JSON.stringify(canonical(value));
 
 export function effectiveInputForLesson(plan, session, context) {
   const rows = Array.isArray(plan?.sessions) ? plan.sessions : [];
@@ -139,7 +142,7 @@ export function effectiveInputForLesson(plan, session, context) {
     sessionCountOnDate: rows.filter(row => row.date === session.date).length,
     ...(object(plan?.sessionSchedules?.[session.date]) ? { dateOverride: plan.sessionSchedules[session.date] } : {}),
     ...(source && ordered(source.binding) === ordered(binding(session))
-      ? { approvedOverride: source.approvedOverride, approvedOverrideVerified: source.approvedOverrideVerified } : {}),
+      ? { approvedOverride: source.approvedOverride, approvedOverrideVerified: source.approvedOverrideVerified, legacyAdoptionVerified: source.legacyAdoptionVerified } : {}),
   };
 }
 

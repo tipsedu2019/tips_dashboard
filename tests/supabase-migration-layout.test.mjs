@@ -161,7 +161,8 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_nonexpiring_chat_test.sql",
 ])
 const EXPECTED_PR_CI_SQL_TESTS = Object.freeze([
-  ...EXPECTED_CI_SQL_TESTS,
+  ...EXPECTED_CI_SQL_TESTS.flatMap(path => path === "supabase/tests/makeup_legacy_approval_occupancy_test.sql"
+    ? [path, "supabase/tests/makeup_legacy_pair_adoption_test.sql"] : [path]),
   "supabase/tests/dashboard_audit_predecessor_lookup_test.sql",
 ])
 const EXPECTED_CI_PROBES = Object.freeze([
@@ -193,6 +194,10 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-ai-agent-thread-replies-concurrency.mjs",
   "tests/probe-timetable-nullable-room-concurrency.mjs",
 ])
+const EXPECTED_PR_CI_PROBES = Object.freeze(EXPECTED_CI_PROBES.flatMap(path =>
+  path === "tests/probe-makeup-approval-collision-dto.mjs"
+    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]))
+
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
   "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
@@ -1439,9 +1444,9 @@ test("prepare ACL migration만 science 이후 protected function 참조로 허�
 test("approved manual production workflow requires its exact path and complete reviewed bytes", async () => {
   const workflowDir = join(repoRoot, ".github", "workflows")
   for (const [name, expectedHash] of [
-    ["free-tier-guardrails.yml", "118b4de63a7819971abe4e4ce8ce22f407455f7ecf4b4fa4818ddddec44888ca"],
+    ["free-tier-guardrails.yml", "b7eaa1de3620b7f486bb9fcf17ce9e8fd91820d4dfc491d21ab3a3fe38a0f923"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "185adda33fb1de8c22ea6d1bfedc76de2b5063ccd8285eb49334b11be71b06a6"],
+    ["supabase-sql-review.yml", "03636943bf99ef71b7a1f714dd0850c342a6f8052a0f6cc583174e28490a2739"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2402,22 +2407,23 @@ async function assertPinnedPostdeployPredicates(source, requiredPredicates) {
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 }
 
-test("isolated main·PR는 기존 SQL 108개·probe 27개와 PR audit 회귀 1개를 정확히 보존한다", async () => {
+test("isolated main·PR는 기존 SQL 108개·probe 27개와 PR audit·legacy adoption 회귀를 정확히 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
     const expectedSqlTests = kind === "pr" ? EXPECTED_PR_CI_SQL_TESTS : EXPECTED_CI_SQL_TESTS
+    const expectedProbes = kind === "pr" ? EXPECTED_PR_CI_PROBES : EXPECTED_CI_PROBES
     const sqlTests = [...workflow.matchAll(/--test (supabase\/tests\/\S+\.sql)/g)].map((match) => match[1])
     const probes = [...workflow.matchAll(/--probe (tests\/\S+\.mjs)/g)].map((match) => match[1])
     assert.deepEqual(sqlTests, expectedSqlTests)
-    assert.deepEqual(probes, EXPECTED_CI_PROBES)
+    assert.deepEqual(probes, expectedProbes)
     assert.deepEqual(validateIsolatedCiWorkflow(workflow, kind), [])
     for (const path of expectedSqlTests) {
       for (const target of ["", `--test ${path} --test ${path}`, "--test supabase/tests/unreviewed_test.sql"]) {
         assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace(`--test ${path}`, target), kind), "isolated_ci_sql_inventory_mismatch")
       }
     }
-    for (const path of EXPECTED_CI_PROBES) {
+    for (const path of expectedProbes) {
       assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace(`--probe ${path}`, ""), kind), "isolated_ci_probe_inventory_mismatch")
     }
   }
@@ -2536,7 +2542,7 @@ test('AI registration semantic guards fail independently of workflow hash pins',
   const start=source.indexOf('      - name: Test AI agent and Chat contracts'),end=source.indexOf('\n      - name:',start+8),step=source.slice(start,end);
   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,start)+source.slice(end)+step,kind),'isolated_ci_ai_static_inventory_mismatch');
   assertIncludesErrorCode(validateIsolatedCiWorkflow(source+step,kind),'isolated_ci_ai_static_command_count_mismatch');
-  for(const path of EXPECTED_CI_PROBES)for(const value of [`--probe ${path} --probe ${path}`,'--probe tests/probe-unknown.mjs'])
+  for(const path of kind === "pr" ? EXPECTED_PR_CI_PROBES : EXPECTED_CI_PROBES)for(const value of [`--probe ${path} --probe ${path}`,'--probe tests/probe-unknown.mjs'])
    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(`--probe ${path}`,value),kind),'isolated_ci_probe_inventory_mismatch');
  }
 });

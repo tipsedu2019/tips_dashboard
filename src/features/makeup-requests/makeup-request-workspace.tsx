@@ -652,7 +652,7 @@ export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceD
   }
   return requestSlots.some((slot) => {
     const formSlot = toFormSlot({ ...slot, classroom: slot.classroom || request.makeupClassroom })
-    return Boolean(getSlotRoomCollisionState(formSlot, data, request.id, request.subject)?.collisions.length)
+    return Boolean(getSlotRoomCollisionState(formSlot, data, request.id, request.subject, false, request)?.collisions.length)
   })
 }
 
@@ -1565,6 +1565,7 @@ function getSlotRoomAvailability(
   currentRequestId = "",
   subject = "",
   canIgnoreOrphanedMakeupEvents = false,
+  currentRequest?: MakeupRequest,
 ) {
   const materializedSlot = materializeSlot(slot)
   return buildRoomAvailability({
@@ -1578,6 +1579,8 @@ function getSlotRoomAvailability(
     ignoreOrphanedMakeupEvents: data.reservationContext ? true : canIgnoreOrphanedMakeupEvents,
     activeEventRequestIds: data.reservationContext?.activeEventRequestIds,
     effectiveSchedule: data.reservationContext?.effectiveSchedule,
+    legacyBindings: data.reservationContext?.legacyBindings,
+    currentRequest: currentRequest || data.requests.find(request => request.id === currentRequestId),
   }).map((room) => data.collisionContextReady === false ? { ...room, available: false } : room)
 }
 
@@ -1587,10 +1590,11 @@ function getSlotRoomCollisionState(
   currentRequestId = "",
   subject = "",
   canIgnoreOrphanedMakeupEvents = false,
+  currentRequest?: MakeupRequest,
 ) {
   const room = slot.classroom || ""
   if (!room) return null
-  return getSlotRoomAvailability(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents).find((item) => item.name === room) || null
+  return getSlotRoomAvailability(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents, currentRequest).find((item) => item.name === room) || null
 }
 
 function hasSlotRoomCollision(
@@ -2194,7 +2198,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       const requestId = typeof meta?.requestId === "string" ? meta.requestId.trim() : ""
       return meta?.kind === "makeup" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId) ? [requestId] : []
     }))].sort()
-    return { slots: uniqueSlots, eventRequestIds, invalidTargets }
+    const requestIds = [...new Set(requests.filter(request => request.requestKind === "cancel_makeup").map(request => request.id))].sort()
+    // A detail read can advance a request without changing its interval. Bind
+    // the local cache to every observed generation; these are not RPC fields.
+    const requestGenerations = [...new Set(requests.filter(request => request.requestKind === "cancel_makeup")
+      .map(request => JSON.stringify([request.id, request.updatedAt, request.status])))].sort()
+    return { slots: uniqueSlots, eventRequestIds, requestIds, requestGenerations, invalidTargets }
   }, [pageState.rows, selectedDetailRequest, editingRequest, approvalRequest, requestDialogOpen, input, catalogData.academicEvents])
   const contextScope = JSON.stringify([actorScope, catalogGeneration, contextRequest])
   const matchingContext = contextState.scope === contextScope ? contextState.context : undefined

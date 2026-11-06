@@ -4,6 +4,12 @@ const MAKEUP_REQUEST_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-
 export function isRequestMakeupSession(session) {
   const requestId = session?.makeupRequestId;
   if (typeof requestId !== 'string' || !MAKEUP_REQUEST_UUID.test(requestId)) return false;
+  const adoption = session.makeupAdoption;
+  if (session.makeupRequestRole === 'makeup' && adoption?.version === 1
+    && typeof session.id === 'string' && session.id.trim() && adoption.makeupId === session.id
+    && typeof adoption.originalId === 'string' && adoption.originalId.trim() && adoption.originalId !== session.id
+    && (session.sessionKey === undefined || session.sessionKey === session.id)
+    && typeof adoption.requestUpdatedAt === 'string' && Number.isFinite(Date.parse(adoption.requestUpdatedAt))) return true;
   if (session.makeupRequestRole === 'cancel' && typeof (session.id || session.sessionKey) === 'string') return true;
   if (session.id === `makeup-cancel:${requestId}` && session.sessionKey === session.id) return true;
   const prefix = `makeup-request:${requestId}:`;
@@ -1222,8 +1228,16 @@ export function calculateSchedulePlan(planInput) {
   const textbooks = normalizeTextbookCatalog(safePlanInput, safePlanInput);
   const requestMakeups = (safePlanInput.sessions || []).filter(isRequestMakeupSession);
   const requestCancelDates = new Set(requestMakeups.filter(session => session.makeupRequestRole === 'cancel' || session.id.startsWith('makeup-cancel:')).map(session => session.date));
+  const ordinarySessions = (safePlanInput.sessions || []).filter(session => !isRequestMakeupSession(session));
+  // Adoption keeps the existing date row. Regenerating that same row from its
+  // old date map or weekly pattern would append a duplicate before preservation.
+  // An independently stored ordinary lesson on the date still uses its normal
+  // generation path; canonical request-created makeup slots are unchanged.
+  const adoptedDates = new Set(requestMakeups.filter(session => session.makeupRequestRole === 'makeup' && session.makeupAdoption
+    && requestMakeups.filter(other => other.date === session.date && other.makeupRequestRole === 'makeup' && other.makeupAdoption).length === 1
+    && !ordinarySessions.some(other => other.date === session.date)).map(session => session.date));
   const existingMaps = buildExistingSessionMaps(
-    (safePlanInput.sessions || []).filter(session => !isRequestMakeupSession(session)),
+    ordinarySessions,
     textbooks,
   );
 
@@ -1277,7 +1291,7 @@ export function calculateSchedulePlan(planInput) {
       const hasBaseSession = selectedDays.includes(cursor.getDay());
 
       if (
-        !requestCancelDates.has(dateString) && (hasBaseSession ||
+        !requestCancelDates.has(dateString) && !adoptedDates.has(dateString) && (hasBaseSession ||
         overrideState === "force_active" ||
         overrideState === "exception" ||
         overrideState === "makeup" ||

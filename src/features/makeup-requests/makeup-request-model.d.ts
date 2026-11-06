@@ -85,6 +85,8 @@ export function buildRoomAvailability(options?: {
   ignoreOrphanedMakeupEvents?: boolean;
   activeEventRequestIds?: string[];
   effectiveSchedule?: MakeupEffectiveSchedule | null;
+  legacyBindings?: import('./makeup-legacy-pair.js').MakeupLegacyBinding[];
+  currentRequest?: unknown;
 }): MakeupRoomAvailability[];
 export function getDefaultMakeupEndAt(startAt: string, classItem?: unknown): string;
 export function applyMakeupRequestToSchedulePlan(

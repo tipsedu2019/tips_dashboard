@@ -71,7 +71,10 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261103170744_timetable_validation_per_date_inputs.sql',
  'supabase/migrations/20261105073151_dashboard_audit_predecessor_index_lookup.sql',
  'supabase/migrations/20261106015549_timetable_dated_diff_projection_reuse.sql',
+ 'supabase/migrations/20261106062342_makeup_legacy_pair_adoption.sql',
  'supabase/tests/dashboard_audit_predecessor_lookup_test.sql',
+ 'supabase/tests/makeup_legacy_pair_adoption_test.sql',
+ 'tests/probe-makeup-legacy-adoption-concurrency.mjs',
  'supabase/tests/class_public_memo_test.sql',
  'tests/probe-public-class-memo-dto.mjs',
  'src/features/management/management-service.js',
@@ -200,6 +203,7 @@ export const CLASS_CLOSE_OCCUPANCY_MIGRATION=Object.freeze({fileName:'2026103112
 export const MAKEUP_SEOUL_TIME_MIGRATION=Object.freeze({fileName:'20261103135120_makeup_seoul_time_projection.sql',status:'final',sha256:'f6375de323d3d7bfd1e2e52bec28d1a13437399bf214949c3ecdd5b957c325c4'});
 export const TIMETABLE_PER_DATE_INPUTS_MIGRATION=Object.freeze({fileName:'20261103170744_timetable_validation_per_date_inputs.sql',status:'final',sha256:'e45ca46ee41fafd1cedce8c6bef74c1c14133f2f2534deb9a49e99ab2970d4e4'});
 export const TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION=Object.freeze({fileName:'20261106015549_timetable_dated_diff_projection_reuse.sql',status:'final',sha256:'133044663cec2aa4b3f1bc4ae2dab7bcafb4a57c45d7b7d574baf834639f7ea6'});
+export const MAKEUP_LEGACY_PAIR_ADOPTION_MIGRATION=Object.freeze({"fileName":"20261106062342_makeup_legacy_pair_adoption.sql","status":"final","sha256":"56b414d5f2e9ccaa7b3e9d7aa9c3732958faf5cfff76e69e1476c88bb025090d"});
 export const AUDIT_PREDECESSOR_LOOKUP_MIGRATION=Object.freeze({fileName:'20261105073151_dashboard_audit_predecessor_index_lookup.sql',status:'final',sha256:'a1122689f58791337fbc5319d1e5b192bfd640dd96af9367f46924d517ebf069'});
 export const MAKEUP_SUBJECT_DIRECTOR_MIGRATION=Object.freeze({fileName:'20261027124217_makeup_subject_director_authority.sql',status:'final',sha256:'e83169f3cf477d661237bf218c06377fb378f9d39f20ab2ae5f73beb4a9aeca7'});
 export const TEACHER_OWN_REQUEST_MIGRATION=Object.freeze({fileName:'20261027005334_teacher_own_request_workflow.sql',status:'final',sha256:'3d37f0bdf749f2d3412cf49862844a525bc3967878e28a2341f9df0171337910'});
@@ -258,12 +262,12 @@ export async function snapshotAiSource(root=ROOT){
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
  const withdrawalNames=CURRENT_WITHDRAWAL_MIGRATIONS.map(m=>m.fileName);
  const integratedNames=[...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].map(m=>m.fileName);
- const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && !integratedNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==REGISTRATION_ENROLLMENT_MIGRATION.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName && m.fileName!==ACADEMIC_CALENDAR_MOVE_MIGRATION.fileName && m.fileName!==WORD_RETEST_COMPLETED_FAILED_MIGRATION.fileName && m.fileName!==OPTIONAL_CLASSROOM_MIGRATION.fileName && m.fileName!==CLASS_LESSON_INPUT_MIGRATION.fileName && m.fileName!==CLASS_BASIC_INFO_INPUT_MIGRATION.fileName && m.fileName!==TIMETABLE_PRESET_OWNED_MIGRATION.fileName && m.fileName!==CLASS_PUBLIC_MEMO_MIGRATION.fileName && m.fileName!==MANAGEMENT_CLASS_OWNERSHIP_MIGRATION.fileName && m.fileName!==DASHBOARD_ROLE_SCOPE_MIGRATION.fileName && m.fileName!==MAKEUP_RENDER_BRIDGE_MIGRATION.fileName && m.fileName!==TEACHER_OWN_REQUEST_MIGRATION.fileName && m.fileName!==MAKEUP_SUBJECT_DIRECTOR_MIGRATION.fileName && m.fileName!==CLASS_MONTH_SUMMARY_MIGRATION.fileName && m.fileName!==CLASS_CLOSE_OCCUPANCY_MIGRATION.fileName && m.fileName!==MAKEUP_SEOUL_TIME_MIGRATION.fileName && m.fileName!==TIMETABLE_PER_DATE_INPUTS_MIGRATION.fileName && m.fileName!==AUDIT_PREDECESSOR_LOOKUP_MIGRATION.fileName && m.fileName!==TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION.fileName);
+ const reviewedLegacy=manifest.orderedNewMigrations.filter(m=>!withdrawalNames.includes(m.fileName) && !integratedNames.includes(m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==REGISTRATION_ENROLLMENT_MIGRATION.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName && m.fileName!==ACADEMIC_CALENDAR_MOVE_MIGRATION.fileName && m.fileName!==WORD_RETEST_COMPLETED_FAILED_MIGRATION.fileName && m.fileName!==OPTIONAL_CLASSROOM_MIGRATION.fileName && m.fileName!==CLASS_LESSON_INPUT_MIGRATION.fileName && m.fileName!==CLASS_BASIC_INFO_INPUT_MIGRATION.fileName && m.fileName!==TIMETABLE_PRESET_OWNED_MIGRATION.fileName && m.fileName!==CLASS_PUBLIC_MEMO_MIGRATION.fileName && m.fileName!==MANAGEMENT_CLASS_OWNERSHIP_MIGRATION.fileName && m.fileName!==DASHBOARD_ROLE_SCOPE_MIGRATION.fileName && m.fileName!==MAKEUP_RENDER_BRIDGE_MIGRATION.fileName && m.fileName!==TEACHER_OWN_REQUEST_MIGRATION.fileName && m.fileName!==MAKEUP_SUBJECT_DIRECTOR_MIGRATION.fileName && m.fileName!==CLASS_MONTH_SUMMARY_MIGRATION.fileName && m.fileName!==CLASS_CLOSE_OCCUPANCY_MIGRATION.fileName && m.fileName!==MAKEUP_SEOUL_TIME_MIGRATION.fileName && m.fileName!==TIMETABLE_PER_DATE_INPUTS_MIGRATION.fileName && m.fileName!==AUDIT_PREDECESSOR_LOOKUP_MIGRATION.fileName && m.fileName!==TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION.fileName && m.fileName!==MAKEUP_LEGACY_PAIR_ADOPTION_MIGRATION.fileName);
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,192,'AI canonical manifest inventory');
- const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS,REGISTRATION_ENROLLMENT_MIGRATION,TIMETABLE_BATCH_SAVE_MIGRATION,ACADEMIC_CALENDAR_MOVE_MIGRATION,WORD_RETEST_COMPLETED_FAILED_MIGRATION,OPTIONAL_CLASSROOM_MIGRATION,CLASS_LESSON_INPUT_MIGRATION,CLASS_BASIC_INFO_INPUT_MIGRATION,TIMETABLE_PRESET_OWNED_MIGRATION,CLASS_PUBLIC_MEMO_MIGRATION,MANAGEMENT_CLASS_OWNERSHIP_MIGRATION,DASHBOARD_ROLE_SCOPE_MIGRATION,MAKEUP_RENDER_BRIDGE_MIGRATION,TEACHER_OWN_REQUEST_MIGRATION,MAKEUP_SUBJECT_DIRECTOR_MIGRATION,CLASS_MONTH_SUMMARY_MIGRATION,CLASS_CLOSE_OCCUPANCY_MIGRATION,MAKEUP_SEOUL_TIME_MIGRATION,TIMETABLE_PER_DATE_INPUTS_MIGRATION,AUDIT_PREDECESSOR_LOOKUP_MIGRATION,TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
+ assert.equal(manifest.orderedNewMigrations.length,193,'AI canonical manifest inventory');
+ const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS,THREAD_REPLY_MIGRATION,NONEXPIRING_CHAT_MIGRATION,...CURRENT_PR126_MIGRATIONS,TIMETABLE_VALIDATION_MIGRATION,...TIMETABLE_CLOSE_MIGRATIONS,REGISTRATION_ENROLLMENT_MIGRATION,TIMETABLE_BATCH_SAVE_MIGRATION,ACADEMIC_CALENDAR_MOVE_MIGRATION,WORD_RETEST_COMPLETED_FAILED_MIGRATION,OPTIONAL_CLASSROOM_MIGRATION,CLASS_LESSON_INPUT_MIGRATION,CLASS_BASIC_INFO_INPUT_MIGRATION,TIMETABLE_PRESET_OWNED_MIGRATION,CLASS_PUBLIC_MEMO_MIGRATION,MANAGEMENT_CLASS_OWNERSHIP_MIGRATION,DASHBOARD_ROLE_SCOPE_MIGRATION,MAKEUP_RENDER_BRIDGE_MIGRATION,TEACHER_OWN_REQUEST_MIGRATION,MAKEUP_SUBJECT_DIRECTOR_MIGRATION,CLASS_MONTH_SUMMARY_MIGRATION,CLASS_CLOSE_OCCUPANCY_MIGRATION,MAKEUP_SEOUL_TIME_MIGRATION,TIMETABLE_PER_DATE_INPUTS_MIGRATION,AUDIT_PREDECESSOR_LOOKUP_MIGRATION,TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION,MAKEUP_LEGACY_PAIR_ADOPTION_MIGRATION].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');
  for(const m of CURRENT_WITHDRAWAL_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'reviewed withdrawal migration source drift');
@@ -290,6 +294,7 @@ export async function snapshotAiSource(root=ROOT){
  assert.equal(hash(await readFile(join(root,'supabase/migrations',TIMETABLE_PER_DATE_INPUTS_MIGRATION.fileName))),TIMETABLE_PER_DATE_INPUTS_MIGRATION.sha256,'timetable per-date inputs migration source drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',AUDIT_PREDECESSOR_LOOKUP_MIGRATION.fileName))),AUDIT_PREDECESSOR_LOOKUP_MIGRATION.sha256,'audit predecessor lookup migration source drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION.fileName))),TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION.sha256,'timetable dated diff projection migration source drift');
+ assert.equal(hash(await readFile(join(root,'supabase/migrations',MAKEUP_LEGACY_PAIR_ADOPTION_MIGRATION.fileName))),MAKEUP_LEGACY_PAIR_ADOPTION_MIGRATION.sha256,'makeup legacy pair adoption migration source drift');
  assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
  for(const m of CURRENT_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
  const sourceHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}}).trim();
@@ -322,7 +327,7 @@ export function validateAiReceipt(receipt,{expected,source,raw,identity,now=Date
  const expectedSqlTests=expected.sqlTests===undefined?AI_SQL_TESTS:expected.sqlTests;
  assert.ok(isApprovedAiSqlInventory(expectedSqlTests),'receipt expected SQL inventory');
  assert.deepEqual(receipt.sqlTests,expectedSqlTests,'receipt SQL inventory');
- assert.deepEqual(receipt.probes,AI_PROBES,'receipt probe inventory');
+ assert.deepEqual(receipt.probes,approvedAiProbesForSqlInventory(expectedSqlTests),'receipt probe inventory');
  assert.deepEqual(receipt.migrations,CURRENT_AI_MIGRATIONS,'receipt migration drift');
  assert.deepEqual(receipt.credentialPrefix,{...AI_CREDENTIAL_PREFIX,committed:true},'committed credential-prefix evidence required');
  assert.deepEqual(Object.keys(receipt.captures).sort(),['chat','http']);
@@ -462,9 +467,10 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_nonexpiring_chat_test.sql",
 ]);
 
-// Preserve the existing main/AI run and register exactly the approved PR addition.
+// Preserve the existing main/AI run and register exactly the approved PR additions.
 export const PR_AI_SQL_TESTS = Object.freeze([
-  ...AI_SQL_TESTS,
+  ...AI_SQL_TESTS.flatMap(path => path === "supabase/tests/makeup_legacy_approval_occupancy_test.sql"
+    ? [path, "supabase/tests/makeup_legacy_pair_adoption_test.sql"] : [path]),
   "supabase/tests/dashboard_audit_predecessor_lookup_test.sql",
 ]);
 export function isApprovedAiSqlInventory(tests){
@@ -501,3 +507,16 @@ export const AI_PROBES = Object.freeze([
   "tests/probe-ai-agent-thread-replies-concurrency.mjs",
   "tests/probe-timetable-nullable-room-concurrency.mjs",
 ]);
+
+// The SQL and probe lists form one exact approved run. Mixing the main SQL
+// inventory with PR probes (or the inverse) is not an approved full run.
+export const PR_AI_PROBES = Object.freeze(AI_PROBES.flatMap(path =>
+  path === "tests/probe-makeup-approval-collision-dto.mjs"
+    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]));
+export function approvedAiProbesForSqlInventory(tests){
+ if(!Array.isArray(tests))return null;
+ for(const [sql,probes] of [[AI_SQL_TESTS,AI_PROBES],[PR_AI_SQL_TESTS,PR_AI_PROBES]]){
+  if(tests.length===sql.length&&sql.every((path,index)=>tests[index]===path))return probes;
+ }
+ return null;
+}
