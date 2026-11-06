@@ -9,7 +9,7 @@ select no_plan();
 -- Pin the final per-date unchanged-input body; it retains the shared workset,
 -- collision checks, concurrency guards and independent comparison oracles.
 select is(md5((select prosrc from pg_proc where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure)),
- 'f43f5adf0c9ed1ed6b195de6940bb639','final validator body matches the per-date unchanged-input migration');
+ '5f577a02f6ee20daf14284c62e4ded05','final validator body matches the dated-diff projection reuse migration');
 
 -- Exact operational fe872 validator, frozen before this native-day experiment. Both paths
 -- call the REAL complete reader and REAL effective-date helper. No production
@@ -699,7 +699,7 @@ begin
  end loop;
 end$copy$;
 select is((select source_md5 from native_copy_provenance where label='native_original'),'23930d704f99b99ea763a04e51f871ef','synthetic oracle copied exact fe body');
-select is((select source_md5 from native_copy_provenance where label='native_candidate'),'f43f5adf0c9ed1ed6b195de6940bb639','synthetic candidate copied exact per-date validator');
+select is((select source_md5 from native_copy_provenance where label='native_candidate'),'5f577a02f6ee20daf14284c62e4ded05','synthetic candidate copied exact dated-diff projection validator');
 create function pg_temp.native_outcome(original boolean) returns jsonb language plpgsql security definer set search_path='' as $$
 declare r jsonb;c text;m text;det text;
 begin
@@ -917,6 +917,202 @@ select is((r.candidate#>'{outcome,value}')::text,c.after_ref::text,
  from per_date_results r join per_date_cases c using(label) where c.expected_code='00000' order by label;
 select ok((r.candidate->>'calls')::bigint>=2,'per-date '||r.label||': rejection reaches complete effective comparison')
  from per_date_results r join per_date_cases c using(label) where c.expected_code='23P01' order by label;
+
+-- @dated-diff-projection-regression begin
+-- The oracle is the COMPLETE previous validator. Reversing only this patch
+-- must recover its independently frozen body hash; unrelated candidate edits
+-- cannot be blessed. Production definitions and the real effective/intersection
+-- helpers stay unchanged. Existing native wrappers replace only inputs and
+-- observation boundaries, not dated_diff or the diagnostic formatter.
+create temp table projection_copy_provenance(source_md5 text,prior_md5 text);
+do $projection_copy$
+declare candidate_body text;prior_body text;probe_body text;
+ old_select text:=$prior_select$   select coalesce(array_agg(distinct dt) filter(where dt is not null),'{}'::date[])
+   into changed_dated_dates
+   from ((select v::text collate "C" raw_dated,dt from unnest(old_workset)
+          except all select v::text collate "C",dt from unnest(new_workset))
+         union all
+         (select v::text collate "C" raw_dated,dt from unnest(new_workset)
+          except all select v::text collate "C",dt from unnest(old_workset))) changed_dated;$prior_select$;
+ new_select text:=$new_select$   with old_raw_dated as materialized (
+    select v::text collate "C" raw_dated,dt from unnest(old_workset)
+   ), new_raw_dated as materialized (
+    select v::text collate "C" raw_dated,dt from unnest(new_workset)
+   )
+   select coalesce(array_agg(distinct dt) filter(where dt is not null),'{}'::date[])
+   into changed_dated_dates
+   from ((select raw_dated,dt from old_raw_dated
+          except all select raw_dated,dt from new_raw_dated)
+         union all
+         (select raw_dated,dt from new_raw_dated
+          except all select raw_dated,dt from old_raw_dated)) changed_dated;$new_select$;
+begin
+ select prosrc into candidate_body from pg_proc
+ where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure;
+ if md5(candidate_body) is distinct from '5f577a02f6ee20daf14284c62e4ded05'
+  or length(candidate_body)-length(replace(candidate_body,new_select,''))<>length(new_select) then
+  raise exception 'dated projection regression candidate drift';
+ end if;
+ prior_body:=replace(candidate_body,new_select,old_select);
+ if md5(prior_body) is distinct from 'f43f5adf0c9ed1ed6b195de6940bb639' then
+  raise exception 'dated projection regression prior oracle drift';
+ end if;
+ execute format('create function pg_temp.projection_prior_validator() returns jsonb language plpgsql security definer set search_path='''' as %L',prior_body);
+ probe_body:=replace(prior_body,
+  'select reference into oldref from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current();',
+  'select before_reference into oldref from pg_temp.native_inputs;');
+ probe_body:=replace(probe_body,'dashboard_private.read_timetable_operating_reference_v1()','pg_temp.native_reader()');
+ probe_body:=replace(probe_body,'dashboard_private.timetable_effective_workset_date_v1(','pg_temp.native_workset_effective(');
+ probe_body:=replace(probe_body,'dashboard_private.timetable_intersects_v1(','pg_temp.native_intersects(');
+ execute format('create function pg_temp.projection_prior_native() returns jsonb language plpgsql security definer set search_path='''' as %L',probe_body);
+ insert into pg_temp.projection_copy_provenance values(md5(candidate_body),md5(prior_body));
+end
+$projection_copy$;
+select is((select prior_md5 from projection_copy_provenance),'f43f5adf0c9ed1ed6b195de6940bb639',
+ 'dated projection oracle is the exact prior complete validator, not a mirrored diff helper');
+
+create function pg_temp.projection_run(candidate boolean) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare r jsonb;outcome jsonb;code text;msg text;detail text;n bigint;trace jsonb;
+begin
+ truncate pg_temp.native_trace,pg_temp.workset_raw_reads;
+ perform setval('pg_temp.native_helper_steps',1,false);
+ begin
+  if candidate then r:=pg_temp.native_candidate();else r:=pg_temp.projection_prior_native();end if;
+  outcome:=jsonb_build_object('sqlstate','00000','message',null,'detail',null,'value',r);
+ exception when others then
+  get stacked diagnostics code=RETURNED_SQLSTATE,msg=MESSAGE_TEXT,detail=PG_EXCEPTION_DETAIL;
+  outcome:=jsonb_build_object('sqlstate',code,'message',msg,'detail',nullif(detail,''));
+ end;
+ select case when is_called then last_value else 0 end into n from pg_temp.native_helper_steps;
+ select coalesce(jsonb_agg(event order by ord),'[]') into trace from pg_temp.native_trace;
+ return jsonb_build_object('outcome',outcome,'calls',n,'trace',trace);
+end$$;
+create temp table projection_cases(label text primary key,before_ref jsonb,after_ref jsonb,
+ expected_code text,expected_message text,expected_calls bigint,expected_dates jsonb);
+-- One mixed case combines raw identities, multiplicity and NULL boundaries;
+-- it does not duplicate the former nine-case/45-assertion suite. Weekly removal
+-- reaches dated_diff even when 1/1.0 compare equal as JSONB values.
+insert into projection_cases
+ select 'raw identities multiplicity and NULL together',
+ pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(
+  pg_temp.native_row('numeric',pg_temp.hday(-4)::text)||'{"sourceSlotId":1}',
+  pg_temp.native_row('string',pg_temp.hday(-3)::text)||'{"sourceSlotId":1}',
+  pg_temp.native_row('duplicate',pg_temp.hday(-2)::text),pg_temp.native_row('duplicate',pg_temp.hday(-2)::text),
+  pg_temp.native_row('null-date',null),pg_temp.native_row('removed',pg_temp.hday(7)::text)),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(
+  pg_temp.native_row('numeric',pg_temp.hday(-4)::text)||'{"sourceSlotId":1.0}',
+  pg_temp.native_row('string',pg_temp.hday(-3)::text)||'{"sourceSlotId":"1"}',
+  pg_temp.native_row('duplicate',pg_temp.hday(-2)::text)),cutoff),
+ '00000',null,10,jsonb_build_array(null,null,pg_temp.hday(-4),pg_temp.hday(-4),pg_temp.hday(-3),pg_temp.hday(-3),pg_temp.hday(-2),pg_temp.hday(-2),pg_temp.hday(7),pg_temp.hday(7))
+ from current_guard_data
+ union all select 'unchanged dated array keeps the fast case',
+ pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('same',past)),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('same',past)),cutoff),
+ '00000',null,0,'[]' from current_guard_data
+ union all select 'old malformed date still precedes new malformed date',
+ pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('old','old-projection-date')),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('new','new-projection-date')),cutoff),
+ '22007','%old-projection-date%',0,null from current_guard_data
+ union all select 'new malformed date follows complete old preparation',
+ pg_temp.native_ref(jsonb_build_array(w),jsonb_build_array(pg_temp.native_row('old',past)),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(pg_temp.native_row('new','2026-02-30')),cutoff),
+ '22008','%2026-02-30%',0,null from current_guard_data;
+insert into projection_cases
+ select 'two increased historical duplicate keys retain first conflict DETAIL',
+ pg_temp.native_ref('[]',jsonb_build_array(
+  pg_temp.native_row('first',pg_temp.hday(-2)::text),
+  pg_temp.native_row('first-peer',pg_temp.hday(-2)::text)||jsonb_build_object('classId',pg_temp.hid(304)),
+  pg_temp.native_row('second',pg_temp.hday(-1)::text),
+  pg_temp.native_row('second-peer',pg_temp.hday(-1)::text)||jsonb_build_object('classId',pg_temp.hid(304))),cutoff),
+ pg_temp.native_ref('[]',jsonb_build_array(
+  pg_temp.native_row('first',pg_temp.hday(-2)::text),pg_temp.native_row('first',pg_temp.hday(-2)::text),
+  pg_temp.native_row('first-peer',pg_temp.hday(-2)::text)||jsonb_build_object('classId',pg_temp.hid(304)),
+  pg_temp.native_row('second',pg_temp.hday(-1)::text),pg_temp.native_row('second',pg_temp.hday(-1)::text),
+  pg_temp.native_row('second-peer',pg_temp.hday(-1)::text)||jsonb_build_object('classId',pg_temp.hid(304))),cutoff),
+ '23P01','timetable_resource_conflict',2,null from current_guard_data;
+create function pg_temp.projection_pairs() returns table(label text,original jsonb,candidate jsonb)
+language plpgsql security definer set search_path='' as $$
+declare c record;o jsonb;n jsonb;
+begin
+ for c in select * from pg_temp.projection_cases cases order by cases.label loop
+  truncate pg_temp.native_inputs;
+  insert into pg_temp.native_inputs values(c.before_ref,c.after_ref,'real');
+  o:=pg_temp.projection_run(false);n:=pg_temp.projection_run(true);
+  return query select c.label,o,n;
+ end loop;
+end$$;
+-- The real admin fixture reaches the original diagnostic formatter. No
+-- permission helper or DETAIL construction is replaced by this regression.
+set local role authenticated;
+create temp table projection_results as select * from pg_temp.projection_pairs();
+reset role;
+select is(r.candidate#>>'{outcome,sqlstate}',c.expected_code,'dated projection '||r.label||': exact SQLSTATE')
+ from projection_results r join projection_cases c using(label) order by label;
+select is(r.candidate->'outcome',r.original->'outcome','dated projection '||r.label||': complete result or first error MESSAGE/DETAIL parity')
+ from projection_results r order by label;
+select is((r.candidate->>'calls')::bigint,c.expected_calls,'dated projection '||r.label||': independent helper coverage')
+ from projection_results r join projection_cases c using(label) order by label;
+select is(jsonb_build_object('calls',r.candidate->'calls','trace',r.candidate->'trace'),
+ jsonb_build_object('calls',r.original->'calls','trace',r.original->'trace'),
+ 'dated projection '||r.label||': exact helper and witness order parity') from projection_results r order by label;
+select ok(r.candidate#>>'{outcome,message}' like c.expected_message,'dated projection '||r.label||': specific first error')
+ from projection_results r join projection_cases c using(label) where c.expected_message is not null order by label;
+select is((r.candidate#>'{outcome,value}')::text,c.after_ref::text,'dated projection '||r.label||': complete fresh reference text')
+ from projection_results r join projection_cases c using(label) where c.expected_code='00000' order by label;
+select is((select coalesce(jsonb_agg(t->'date' order by t->>'date' nulls first),'[]')
+ from jsonb_array_elements(r.candidate->'trace') t where t->>'kind'='effective'),c.expected_dates,
+ 'dated projection '||r.label||': exact retained date coverage')
+ from projection_results r join projection_cases c using(label) where c.expected_dates is not null order by label;
+select ok((r.candidate#>>'{outcome,detail}')::jsonb @> '{"version":1,"confirmedCount":1,"unresolvedCount":0,"truncated":false}'
+ and ((r.candidate#>>'{outcome,detail}')::jsonb#>>'{confirmed,0,date}') in(pg_temp.hday(-2)::text,pg_temp.hday(-1)::text),
+ 'dated projection multiple-date conflict retains a nonempty first-date DETAIL')
+ from projection_results r where label='two increased historical duplicate keys retain first conflict DETAIL';
+-- @dated-diff-projection-regression end
+
+-- @dated-diff-live-regression begin
+-- Compare the UNMODIFIED installed final function directly with the exact
+-- prior body, both using the real reader and captured write baseline.
+create function pg_temp.projection_live_outcome(candidate boolean) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare r jsonb;code text;msg text;detail text;
+begin
+ if candidate then r:=dashboard_private.validate_timetable_operating_reference_v1();
+ else r:=pg_temp.projection_prior_validator();end if;
+ return jsonb_build_object('sqlstate','00000','value',r);
+exception when others then
+ get stacked diagnostics code=RETURNED_SQLSTATE,msg=MESSAGE_TEXT,detail=PG_EXCEPTION_DETAIL;
+ return jsonb_build_object('sqlstate',code,'message',msg,'detail',nullif(detail,''));
+end$$;
+create function pg_temp.projection_live_pair() returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare o jsonb;c jsonb;
+begin
+ o:=pg_temp.projection_live_outcome(false);c:=pg_temp.projection_live_outcome(true);
+ return jsonb_build_object('original',o,'candidate',c);
+end$$;
+savepoint projection_two_real_conflicts;
+select set_config('app.class_schedule_mutation','release2-rpc',true);
+insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,teacher_catalog_id,classroom_catalog_id,origin)
+ values(pg_temp.hid(609),pg_temp.hid(301),'projection-conflict-first',pg_temp.hday(-2),'active','09:30','10:30',pg_temp.hid(102),pg_temp.hid(202),'manual'),
+       (pg_temp.hid(610),pg_temp.hid(301),'projection-conflict-second',pg_temp.hday(-1),'active','09:30','10:30',pg_temp.hid(102),pg_temp.hid(202),'manual');
+select set_config('app.class_schedule_mutation','',true);
+set local role authenticated;
+create temp table projection_live_result as select pg_temp.projection_live_pair() p;
+reset role;
+select is((select p#>>'{candidate,sqlstate}' from projection_live_result),'23P01','installed final validator rejects the first of two real date conflicts');
+select is((select p#>>'{candidate,message}' from projection_live_result),'timetable_resource_conflict','installed final validator retains exact conflict message');
+select is((select p->'candidate' from projection_live_result),(select p->'original' from projection_live_result),
+ 'installed final validator retains the complete first error and DETAIL of the exact prior body');
+select ok((select (p#>>'{candidate,detail}')::jsonb @> '{"version":1,"confirmedCount":1,"unresolvedCount":0,"truncated":false}'
+ and ((p#>>'{candidate,detail}')::jsonb#>>'{confirmed,0,sameClass}')='true'
+ and ((p#>>'{candidate,detail}')::jsonb#>>'{confirmed,0,date}') in(pg_temp.hday(-2)::text,pg_temp.hday(-1)::text)
+ from projection_live_result),'installed final validator reports a concrete first-date same-class conflict');
+rollback to projection_two_real_conflicts;release projection_two_real_conflicts;
+select is((select count(*) from public.class_lesson_sessions where id in(pg_temp.hid(609),pg_temp.hid(610))),0::bigint,
+ 'rollback removes both real projection regression rows');
+-- @dated-diff-live-regression end
+
 select is((select count(*) from production_functions old join pg_proc p using(oid)
  where (old.body,old.proowner,old.proacl,old.proconfig,old.provolatile,old.prosecdef)
  is distinct from (md5(p.prosrc),p.proowner,p.proacl,p.proconfig,p.provolatile,p.prosecdef)),0::bigint,
