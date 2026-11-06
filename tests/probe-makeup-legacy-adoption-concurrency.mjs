@@ -7,8 +7,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 // Only disposable local databases. No application HTTP, provider API, remote
 // connection string, production account or operating request is accepted.
 const args = process.argv.slice(2);
+if (args[0] === '--self-test-boundary') { assert.equal(args.length,1); boundaryRegression(); process.exit(0); }
 const diagnostic = args[0] === '--diagnostic-container';
-let container, nonce, expectedPort;
+let container, nonce, expectedPort, project;
 if (diagnostic) {
   assert.equal(args.length, 4);
   assert.equal(args[1], 'tips241-legacy-pg17-diag');
@@ -22,7 +23,7 @@ if (diagnostic) {
   assert.ok(url.port); expectedPort = url.port;
   nonce = process.env.TASK_LOCAL_DB_NONCE;
   const config = await readFile('supabase/config.toml', 'utf8');
-  const project = config.match(/^project_id = "(tips_supabase_db_qa_[a-f0-9]{12})"/m)?.[1];
+  project = config.match(/^project_id = "(tips_supabase_db_qa_[a-f0-9]{12})"/m)?.[1];
   assert.ok(project); assert.ok(config.includes(`[db]\nport = ${expectedPort}\n`));
   container = `supabase_db_${project}`;
 }
@@ -55,31 +56,92 @@ async function command(commandArgs) {
   assert.equal(result.code, 0, result.stderr);
   return result.stdout;
 }
-async function verifyBoundary() {
-  const [info] = JSON.parse(await command(['inspect', container]));
-  assert.equal(info.State.Running, true); assert.equal(info.HostConfig.NetworkMode === 'host', false);
-  assert.ok(!(info.Mounts || []).some(m => m.Type === 'bind'), 'no host files or credentials mounted');
-  if (diagnostic) {
-    assert.equal(info.Config.Labels['tips.issue'], '241');
-    assert.equal(info.Config.Labels['tips.purpose'], 'isolated-diagnostic');
+// Requested bindings can inherit a network default. Only actual publication
+// must be a loopback address; concrete unpublished maps are safe for docker exec.
+// This does not use or attest the runner's separate owned loopback relay.
+function validateBoundary(target, info, network, routes) {
+  const object = x => Boolean(x && typeof x === 'object' && !Array.isArray(x));
+  const expectedNetwork = target.diagnostic ? 'tips241-legacy-pg17-diag-net' : `${target.project}_internal`;
+  assert.match(info.Id || '', /^[a-f0-9]{64}$/);
+  assert.equal(info.Name, `/${target.container}`); assert.equal(info.State?.Running, true);
+  assert.ok(Array.isArray(info.Mounts) && !info.Mounts.some(m => m.Type === 'bind'), 'no host mounts');
+  assert.ok(info.HostConfig?.Binds == null || (Array.isArray(info.HostConfig.Binds) && info.HostConfig.Binds.length === 0), 'no requested host binds');
+  assert.match(network.Id || '', /^[a-f0-9]{64}$/); assert.equal(network.Name, expectedNetwork);
+  assert.equal(network.Driver, 'bridge'); assert.equal(network.Internal, true); assert.equal(network.EnableIPv6, false);
+  assert.deepEqual(Object.keys(info.NetworkSettings?.Networks || {}), [expectedNetwork]);
+  assert.equal(info.NetworkSettings.Networks[expectedNetwork].NetworkID, network.Id);
+  assert.ok([network.Id,expectedNetwork].includes(info.HostConfig.NetworkMode));
+  assert.deepEqual(Object.keys(network.Containers || {}), [info.Id]);
+  assert.equal(network.Containers[info.Id].Name, target.container);
+  if (target.diagnostic) {
+    for (const labels of [info.Config?.Labels, network.Labels]) {
+      assert.equal(labels?.['tips.issue'], '241'); assert.equal(labels?.['tips.purpose'], 'isolated-diagnostic');
+    }
+  } else {
+    assert.equal(network.Labels?.['tips.isolated-db-qa'], target.project);
+    assert.equal(network.Options?.['com.docker.network.bridge.host_binding_ipv4'], '127.0.0.1');
   }
-  const networks = Object.keys(info.NetworkSettings.Networks);
-  assert.equal(networks.length, 1);
-  const [network] = JSON.parse(await command(['network', 'inspect', networks[0]]));
-  assert.equal(network.Internal, true); assert.equal(network.EnableIPv6, false);
-  for (const [port, bindings] of Object.entries(info.HostConfig.PortBindings || {})) {
-    if (diagnostic) assert.equal((bindings || []).length, 0, 'diagnostic has no published port');
-    else for (const binding of bindings || []) {
-      assert.equal(port, '5432/tcp'); assert.equal(binding.HostIp, '127.0.0.1');
-      assert.equal(binding.HostPort, expectedPort);
+  const requested = info.HostConfig.PortBindings, published = info.NetworkSettings.Ports;
+  assert.ok(object(requested) && object(published), 'concrete requested and published maps required');
+  if (target.diagnostic) assert.deepEqual(Object.keys(requested), []);
+  else {
+    assert.deepEqual(Object.keys(requested), ['5432/tcp']);
+    assert.ok(Array.isArray(requested['5432/tcp']) && requested['5432/tcp'].length > 0);
+    for (const binding of requested['5432/tcp']) {
+      assert.ok(object(binding) && ['', '127.0.0.1', '::1'].includes(binding.HostIp));
+      assert.equal(binding.HostPort, target.expectedPort);
     }
   }
-  const routes = await command(['exec', container, 'cat', '/proc/net/route']);
-  assert.ok(!routes.split('\n').slice(1).some(line => line.trim().split(/\s+/)[1] === '00000000'), 'no default external route');
-  if (diagnostic) {
-    const result = await query('postgres', 'show listen_addresses;');
-    assert.equal(result, '', 'diagnostic SQL is available through docker exec socket only');
+  assert.ok(Object.keys(published).length === 0 || Object.keys(published).join('|') === '5432/tcp');
+  if (Object.hasOwn(published, '5432/tcp')) {
+    const actual = published['5432/tcp'];
+    assert.ok(actual === null || Array.isArray(actual), 'unknown publication is not concrete absence');
+    for (const binding of actual || []) {
+      assert.equal(target.diagnostic, false, 'diagnostic has no published port');
+      assert.ok(object(binding) && ['127.0.0.1', '::1'].includes(binding.HostIp));
+      assert.equal(binding.HostPort, target.expectedPort);
+    }
   }
+  const lines = String(routes).trim().split(/\r?\n/);
+  assert.match(lines[0] || '', /^Iface\s+Destination\s+Gateway\s+Flags\b/); assert.ok(lines.length > 1);
+  for (const line of lines.slice(1)) {
+    const [iface, destination, gateway, flags] = line.trim().split(/\s+/);
+    assert.ok(iface && /^[a-f0-9]{8}$/i.test(destination || '') && /^[a-f0-9]{8}$/i.test(gateway || '') && /^[a-f0-9]{4}$/i.test(flags || ''));
+    assert.ok(destination !== '00000000' || !(parseInt(flags,16) & 1), 'no active external default route');
+  }
+}
+function boundaryRegression() {
+  const target = {diagnostic:false,project:'tips_supabase_db_qa_123456789abc',container:'supabase_db_tips_supabase_db_qa_123456789abc',expectedPort:'55432'};
+  const dbId = 'a'.repeat(64), netId = 'b'.repeat(64), netName = `${target.project}_internal`;
+  const base = {target,info:{Id:dbId,Name:`/${target.container}`,State:{Running:true},Mounts:[],HostConfig:{NetworkMode:netId,PortBindings:{'5432/tcp':[{HostIp:'',HostPort:'55432'}]}},NetworkSettings:{Networks:{[netName]:{NetworkID:netId}},Ports:{'5432/tcp':[{HostIp:'127.0.0.1',HostPort:'55432'}]}}},network:{Id:netId,Name:netName,Driver:'bridge',Internal:true,EnableIPv6:false,Labels:{'tips.isolated-db-qa':target.project},Options:{'com.docker.network.bridge.host_binding_ipv4':'127.0.0.1'},Containers:{[dbId]:{Name:target.container}}},routes:'Iface Destination Gateway Flags\neth0 000012AC 00000000 0001\n'};
+  const check = v => validateBoundary(v.target,v.info,v.network,v.routes);
+  const positives = [v=>{},v=>{v.info.NetworkSettings.Ports={};},v=>{v.info.NetworkSettings.Ports={'5432/tcp':null};},v=>{v.info.NetworkSettings.Ports={'5432/tcp':[]};},v=>{v.info.NetworkSettings.Ports['5432/tcp'][0].HostIp='::1';},v=>{v.info.HostConfig.PortBindings['5432/tcp'][0].HostIp='127.0.0.1';}];
+  for (const mutate of positives) {const v=structuredClone(base);mutate(v);assert.doesNotThrow(()=>check(v));}
+  const negatives = [
+    v=>{v.network.Options={};},v=>{v.network.Options['com.docker.network.bridge.host_binding_ipv4']='0.0.0.0';},
+    v=>{v.network.Internal=false;},v=>{v.network.Driver='host';},v=>{v.network.EnableIPv6=true;},v=>{v.network.Labels={};},
+    v=>{v.network.Id='c'.repeat(64);},v=>{v.network.Name='foreign';},v=>{v.network.Containers={};},v=>{v.info.Name='/foreign';},
+    v=>{v.info.HostConfig.NetworkMode='host';},v=>{v.info.NetworkSettings.Networks.other={NetworkID:'c'.repeat(64)};},
+    v=>{v.info.Mounts=[{Type:'bind'}];},v=>{v.info.HostConfig.Binds=['/host:/data'];},
+    v=>{v.info.HostConfig.PortBindings={};},v=>{v.info.HostConfig.PortBindings['5432/tcp']=[];},
+    v=>{v.info.HostConfig.PortBindings['5432/tcp'][0].HostIp='0.0.0.0';},v=>{v.info.HostConfig.PortBindings['5432/tcp'][0].HostPort='5432';},
+    v=>{v.info.HostConfig.PortBindings['3000/tcp']=[];},v=>{v.info.NetworkSettings.Ports['5432/tcp'][0].HostIp='0.0.0.0';},
+    v=>{v.info.NetworkSettings.Ports['5432/tcp'][0].HostIp='';},v=>{v.info.NetworkSettings.Ports['5432/tcp'][0].HostPort='5432';},
+    v=>{v.info.NetworkSettings.Ports['3000/tcp']=null;},v=>{delete v.info.NetworkSettings.Ports;},v=>{v.info.NetworkSettings.Ports=null;},
+    v=>{v.info.NetworkSettings.Ports={'5432/tcp':undefined};},v=>{v.info.NetworkSettings.Ports={'5432/tcp':{}};},
+    v=>{v.info.NetworkSettings.Ports={'5432/tcp':[null]};},v=>{v.routes='';},v=>{v.routes+='eth0 00000000 010012AC 0003\n';}
+  ];
+  for (const mutate of negatives) {const v=structuredClone(base);mutate(v);assert.throws(()=>check(v));}
+  console.log(JSON.stringify({boundaryRegression:true,accepted:positives.length,rejected:negatives.length,relayAttested:false}));
+}
+async function verifyBoundary() {
+  const descriptors = JSON.parse(await command(['inspect', container])); assert.equal(descriptors.length,1);
+  const info = descriptors[0];
+  const names = Object.keys(info.NetworkSettings?.Networks || {}); assert.equal(names.length,1);
+  const descriptorsNetwork = JSON.parse(await command(['network','inspect',names[0]])); assert.equal(descriptorsNetwork.length,1);
+  const routes = await command(['exec', container, 'cat', '/proc/net/route']);
+  validateBoundary({diagnostic,project,container,expectedPort},info,descriptorsNetwork[0],routes);
+  if (diagnostic) assert.equal(await query('postgres','show listen_addresses;'),'', 'diagnostic SQL uses docker exec socket only');
 }
 function session(database, sql, hold = false) {
   assert.equal(database, 'postgres');
@@ -209,6 +271,7 @@ async function cleanupFixtures() {
 }
 let bystander;
 try {
+  boundaryRegression();
   await verifyBoundary();
   bystander = session('postgres', `set application_name='adoption-bystander-${nonce.slice(0,12)}';select pg_backend_pid();\n\\echo BYSTANDER_READY\n`, true);
   await held(bystander, 'BYSTANDER_READY');
