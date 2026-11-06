@@ -138,7 +138,8 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_nonexpiring_chat_test.sql",
 ])
 const PR_ISOLATED_SQL_TESTS = Object.freeze([
-  ...ISOLATED_SQL_TESTS,
+  ...ISOLATED_SQL_TESTS.flatMap(path => path === "supabase/tests/makeup_legacy_approval_occupancy_test.sql"
+    ? [path, "supabase/tests/makeup_legacy_pair_adoption_test.sql"] : [path]),
   "supabase/tests/dashboard_audit_predecessor_lookup_test.sql",
 ])
 const ISOLATED_PROBES = Object.freeze([
@@ -171,6 +172,10 @@ const ISOLATED_PROBES = Object.freeze([
   "tests/probe-timetable-nullable-room-concurrency.mjs",
 ])
 
+const PR_ISOLATED_PROBES = Object.freeze(ISOLATED_PROBES.flatMap(path =>
+  path === "tests/probe-makeup-approval-collision-dto.mjs"
+    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]))
+
 const AI_STATIC_TESTS = Object.freeze([
   "tests/ai-agent-personal-credential-service.test.mjs",
   "tests/ai-agent-personal-credential-workspace.test.mjs",
@@ -201,7 +206,7 @@ const AI_STATIC_TESTS = Object.freeze([
 // step reordering cannot expand the isolated CI execution boundary.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c95097088cd7ed9337f9993f07707dc752ff70a56cc84dc5f040bde73126f49a"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "185adda33fb1de8c22ea6d1bfedc76de2b5063ccd8285eb49334b11be71b06a6"
+  "03636943bf99ef71b7a1f714dd0850c342a6f8052a0f6cc583174e28490a2739"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -213,7 +218,7 @@ const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-pr
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
   "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "118b4de63a7819971abe4e4ce8ce22f407455f7ecf4b4fa4818ddddec44888ca"],
+  ["free-tier-guardrails.yml", "b7eaa1de3620b7f486bb9fcf17ce9e8fd91820d4dfc491d21ab3a3fe38a0f923"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
   [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
@@ -1288,7 +1293,7 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   const sqlTests = [...command.matchAll(/--test\s+(\S+)/g)].map((match) => match[1])
   const probes = [...command.matchAll(/--probe\s+(\S+)/g)].map((match) => match[1])
   reject(!equalJson(sqlTests, kind === "pr" ? PR_ISOLATED_SQL_TESTS : ISOLATED_SQL_TESTS), "isolated_ci_sql_inventory_mismatch")
-  reject(!equalJson(probes, ISOLATED_PROBES), "isolated_ci_probe_inventory_mismatch")
+  reject(!equalJson(probes, kind === "pr" ? PR_ISOLATED_PROBES : ISOLATED_PROBES), "isolated_ci_probe_inventory_mismatch")
   for (const flag of ["--review-head", "--lint", "--require-final", "--execute", "--authorized",
     "--postdeploy-contract", "--transactional-preflight", "--verify-local-ledger", "--ai-producer-parity"]) {
     reject(command.split(/\s+/).filter((part) => part === flag).length !== 1,

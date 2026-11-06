@@ -964,6 +964,11 @@
       "fileName": "20261106015549_timetable_dated_diff_projection_reuse.sql",
       "status": "final",
       "sha256": "133044663cec2aa4b3f1bc4ae2dab7bcafb4a57c45d7b7d574baf834639f7ea6"
+    },
+    {
+      "fileName": "20261106062342_makeup_legacy_pair_adoption.sql",
+      "status": "final",
+      "sha256": "44227227307e59de2429f7efa5e0a402c1ee9cf676d6ba520ec78fb7c6581909"
     }
   ]
 }

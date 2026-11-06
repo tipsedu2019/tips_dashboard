@@ -3,6 +3,12 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { approvalDbFixtureSql } from './fixtures/makeup-approval-db-fixture.mjs';
 import { effectiveApprovalFixtureSql } from './fixtures/legacy-effective-approval-db-fixture.mjs';
+import { adoptionDbFixtureSql } from './fixtures/makeup-legacy-pair-db-fixture.mjs';
+
+test('legacy adoption SQL executes the exact current plan and calendar producers', async () => {
+  const sql = await readFile(new URL('../supabase/tests/makeup_legacy_pair_adoption_test.sql', import.meta.url), 'utf8');
+  assert.ok(sql.includes(adoptionDbFixtureSql()));
+});
 
 test('pgTAP payload is the exact current approval producer output', async () => {
   const sql = await readFile(new URL('../supabase/tests/makeup_legacy_approval_occupancy_test.sql', import.meta.url), 'utf8');

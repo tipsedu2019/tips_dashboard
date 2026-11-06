@@ -1,4 +1,5 @@
 import { hasCancelPart, hasMakeupPart, normalizeMakeupSlots, toDateKey } from './makeup-request-model.js';
+import { findLegacyMakeupPair, matchingLegacyMakeupBinding } from './makeup-legacy-pair.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const clock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -31,7 +32,7 @@ function slotOccupancy(slot, teacher, classrooms) {
 // Approval is a bounded edit, not a regeneration of billing/history/defaults.
 // Resources are fetched server-side from the request's IDs/names, never inferred
 // from current weekly defaults or copied from a historical exception.
-export function buildLegacyMakeupApprovalPlan(rawPlan, request, { teacher = null, classrooms = [] } = {}) {
+export function buildLegacyMakeupApprovalPlan(rawPlan, request, { teacher = null, classrooms = [], legacyBinding = null } = {}) {
   if (!record(rawPlan) || !UUID.test(text(request.id))
     || (rawPlan.sessions !== undefined && !Array.isArray(rawPlan.sessions))) invalid();
   const before = rawPlan.sessions || [];
@@ -42,7 +43,7 @@ export function buildLegacyMakeupApprovalPlan(rawPlan, request, { teacher = null
     || !Number.isFinite(Date.parse(`${cancelDate}T00:00:00Z`))
     || new Date(`${cancelDate}T00:00:00Z`).toISOString().slice(0, 10) !== cancelDate)) invalid();
   const canceled = hasCancel ? before.filter(row => row.date === cancelDate) : [];
-  if (canceled.length > 1 || canceled.some(row => !['active', ''].includes(text(row.scheduleState || row.state)))) invalid();
+  if (canceled.length > 1) invalid();
   if (hasMakeup && (!record(teacher) || !UUID.test(text(teacher.id))
     || teacher.id !== request.teacher_catalog_id || !text(teacher.name))) invalid();
   const slots = hasMakeup ? normalizeMakeupSlots(request, text(request.makeup_classroom)) : [];
@@ -53,6 +54,15 @@ export function buildLegacyMakeupApprovalPlan(rawPlan, request, { teacher = null
   // lessons. Do not reopen weekly defaults by guessing this exceptional case.
   const occupancies = slots.map(slot => slotOccupancy(slot, teacher, classrooms));
   if (hasCancel && occupancies.some(slot => slot.date === cancelDate)) invalid();
+  if (canceled.some(row => !['active', ''].includes(text(row.scheduleState || row.state)))) {
+    const binding = matchingLegacyMakeupBinding(request, slots, legacyBinding ? [legacyBinding] : []);
+    const pair = occupancies.length === 1 ? findLegacyMakeupPair(rawPlan, cancelDate, occupancies[0].date) : null;
+    if (!binding || binding.mode !== 'reuse' || !pair || pair.original.id !== binding.originalId || pair.makeup.id !== binding.makeupId) invalid();
+    const adoption = { version: 1, requestUpdatedAt: binding.requestUpdatedAt, originalId: pair.original.id, makeupId: pair.makeup.id };
+    return { ...rawPlan, sessions: before.map(row => row === pair.original
+      ? { ...row, makeupRequestId: request.id, makeupRequestRole: 'cancel' }
+      : row === pair.makeup ? { ...row, ...occupancies[0], makeupRequestId: request.id, makeupRequestRole: 'makeup', makeupAdoption: adoption } : row) };
+  }
   const ids = before.map(row => text(row.id || row.sessionKey));
   const canceledId = text(canceled[0]?.id || canceled[0]?.sessionKey);
   if (canceled.length && (!canceledId || ids.filter(id => id === canceledId).length !== 1)) invalid();
