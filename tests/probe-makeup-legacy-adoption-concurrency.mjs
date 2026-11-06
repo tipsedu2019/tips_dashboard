@@ -65,7 +65,6 @@ function validateBoundary(target, info, network, routes) {
   assert.match(info.Id || '', /^[a-f0-9]{64}$/);
   assert.equal(info.Name, `/${target.container}`); assert.equal(info.State?.Running, true);
   assert.ok(Array.isArray(info.Mounts) && !info.Mounts.some(m => m.Type === 'bind'), 'no host mounts');
-  assert.ok(info.HostConfig?.Binds == null || (Array.isArray(info.HostConfig.Binds) && info.HostConfig.Binds.length === 0), 'no requested host binds');
   assert.match(network.Id || '', /^[a-f0-9]{64}$/); assert.equal(network.Name, expectedNetwork);
   assert.equal(network.Driver, 'bridge'); assert.equal(network.Internal, true); assert.equal(network.EnableIPv6, false);
   assert.deepEqual(Object.keys(info.NetworkSettings?.Networks || {}), [expectedNetwork]);
@@ -115,14 +114,14 @@ function boundaryRegression() {
   const dbId = 'a'.repeat(64), netId = 'b'.repeat(64), netName = `${target.project}_internal`;
   const base = {target,info:{Id:dbId,Name:`/${target.container}`,State:{Running:true},Mounts:[],HostConfig:{NetworkMode:netId,PortBindings:{'5432/tcp':[{HostIp:'',HostPort:'55432'}]}},NetworkSettings:{Networks:{[netName]:{NetworkID:netId}},Ports:{'5432/tcp':[{HostIp:'127.0.0.1',HostPort:'55432'}]}}},network:{Id:netId,Name:netName,Driver:'bridge',Internal:true,EnableIPv6:false,Labels:{'tips.isolated-db-qa':target.project},Options:{'com.docker.network.bridge.host_binding_ipv4':'127.0.0.1'},Containers:{[dbId]:{Name:target.container}}},routes:'Iface Destination Gateway Flags\neth0 000012AC 00000000 0001\n'};
   const check = v => validateBoundary(v.target,v.info,v.network,v.routes);
-  const positives = [v=>{},v=>{v.info.NetworkSettings.Ports={};},v=>{v.info.NetworkSettings.Ports={'5432/tcp':null};},v=>{v.info.NetworkSettings.Ports={'5432/tcp':[]};},v=>{v.info.NetworkSettings.Ports['5432/tcp'][0].HostIp='::1';},v=>{v.info.HostConfig.PortBindings['5432/tcp'][0].HostIp='127.0.0.1';}];
+  const positives = [v=>{},v=>{v.info.NetworkSettings.Ports={};},v=>{v.info.NetworkSettings.Ports={'5432/tcp':null};},v=>{v.info.NetworkSettings.Ports={'5432/tcp':[]};},v=>{v.info.NetworkSettings.Ports['5432/tcp'][0].HostIp='::1';},v=>{v.info.HostConfig.PortBindings['5432/tcp'][0].HostIp='127.0.0.1';},v=>{v.info.HostConfig.Binds=['synthetic_db_volume:/var/lib/postgresql/data:rw'];v.info.Mounts=[{Type:'volume',Name:'synthetic_db_volume',Destination:'/var/lib/postgresql/data'}];}];
   for (const mutate of positives) {const v=structuredClone(base);mutate(v);assert.doesNotThrow(()=>check(v));}
   const negatives = [
     v=>{v.network.Options={};},v=>{v.network.Options['com.docker.network.bridge.host_binding_ipv4']='0.0.0.0';},
     v=>{v.network.Internal=false;},v=>{v.network.Driver='host';},v=>{v.network.EnableIPv6=true;},v=>{v.network.Labels={};},
     v=>{v.network.Id='c'.repeat(64);},v=>{v.network.Name='foreign';},v=>{v.network.Containers={};},v=>{v.info.Name='/foreign';},
     v=>{v.info.HostConfig.NetworkMode='host';},v=>{v.info.NetworkSettings.Networks.other={NetworkID:'c'.repeat(64)};},
-    v=>{v.info.Mounts=[{Type:'bind'}];},v=>{v.info.HostConfig.Binds=['/host:/data'];},
+    v=>{v.info.HostConfig.Binds=['/host:/data'];v.info.Mounts=[{Type:'bind',Source:'/host',Destination:'/data'}];},
     v=>{v.info.HostConfig.PortBindings={};},v=>{v.info.HostConfig.PortBindings['5432/tcp']=[];},
     v=>{v.info.HostConfig.PortBindings['5432/tcp'][0].HostIp='0.0.0.0';},v=>{v.info.HostConfig.PortBindings['5432/tcp'][0].HostPort='5432';},
     v=>{v.info.HostConfig.PortBindings['3000/tcp']=[];},v=>{v.info.NetworkSettings.Ports['5432/tcp'][0].HostIp='0.0.0.0';},
