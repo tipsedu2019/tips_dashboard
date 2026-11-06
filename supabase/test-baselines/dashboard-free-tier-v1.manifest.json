@@ -959,6 +959,11 @@
       "fileName": "20261105073151_dashboard_audit_predecessor_index_lookup.sql",
       "status": "final",
       "sha256": "a1122689f58791337fbc5319d1e5b192bfd640dd96af9367f46924d517ebf069"
+    },
+    {
+      "fileName": "20261106015549_timetable_dated_diff_projection_reuse.sql",
+      "status": "final",
+      "sha256": "133044663cec2aa4b3f1bc4ae2dab7bcafb4a57c45d7b7d574baf834639f7ea6"
     }
   ]
 }
