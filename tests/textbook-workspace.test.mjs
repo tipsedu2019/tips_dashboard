@@ -1,4 +1,5 @@
 import test from "node:test";
+import { setup, id, inventoryHistoryRow } from "./helpers/textbook-numbered-harness.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -72,7 +73,8 @@ function loadTextbookService() {
         if (specifier === "@/lib/public-classes-cache-invalidation.js") {
           return { url: cacheInvalidationStubUrl, shortCircuit: true };
         }
-        if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL) {
+        // Only app modules need extension resolution; leave dependency CommonJS paths intact.
+        if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL?.startsWith(new URL("src/", root).href)) {
           return nextResolve(withKnownExtension(new URL(specifier, context.parentURL).href), context);
         }
         return nextResolve(specifier, context);
@@ -1670,10 +1672,9 @@ test("inventory tab shows stock change audit history", async () => {
   assert.match(workspaceSource, /function InventoryHistoryPanel/);
   assert.match(workspaceSource, /재고 이력/);
   assert.match(workspaceSource, /rows=\{numbered\.inventoryHistory\.rows\}/);
-  assert.match(workspaceSource, /actor: row\.actorLabel \|\| \(row\.actorId === currentUserId \? currentUserLabel : row\.actorId\) \|\| "-"/);
+  // Actor labels and session boundaries are exercised by the mounted tests below.
   assert.match(workspaceSource, /row\.actor/);
   assert.match(workspaceSource, /currentUserLabel/);
-  assert.match(workspaceSource, /actor: row\.actorLabel/);
   assert.match(workspaceSource, /canDeleteHistory=\{canDeleteTextbookHistory\}/);
   assert.match(workspaceSource, /aria-label=\{`\$\{row\.textbookTitle\} 재고 이력 삭제`\}/);
   assert.match(workspaceSource, /textbookService\.deleteInventoryHistory/);
@@ -2914,3 +2915,53 @@ test("textbook master list and filters use taxonomy arrays", async () => {
     /getTextbookGradeLabel\(getTextbookGradeLevel\(row\)\) \|\| getTextbookSchoolLevelLabel/,
   );
 });
+
+const preparedRowIds = (surface) => [...document.querySelectorAll(`[data-prepared-surface="${surface}"]`)]
+  .map((node) => node.getAttribute("data-prepared-row-id"))
+
+async function acceptActorHistory(h, rows) {
+  await h.resolve(h.requests.findLast(request => request.name === "list_textbook_location_reference_page_v1"), {
+    rows: [{ value: id(900), label: "본관", searchText: "본관 main" }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: id(900), code: "main", name: "본관" },
+  })
+  await h.resolve(h.requests.findLast(request => request.name === "list_textbook_inventory_history_page_v1"), { rows, page: 1, pageSize: 10, totalCount: rows.length })
+}
+
+function assertHistoryActors(expected) {
+  const desktop = [...document.querySelectorAll('[data-prepared-surface="inventory-history-desktop"]')]
+  const mobile = [...document.querySelectorAll('[data-prepared-surface="inventory-history-mobile"]')]
+  assert.deepEqual(desktop.map(row => row.children[5].textContent.trim()), expected)
+  assert.deepEqual(mobile.map(row => row.querySelector('.grid-cols-2').lastElementChild.textContent.trim()), expected)
+  assert.doesNotMatch(document.querySelector('[aria-label="재고 이력"]').textContent, /[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}/i)
+}
+
+for (const name of ["합성 본인 이름", "  ", ` ${id(804).toUpperCase()} `]) {
+  test(`inventory history actor labels use existing names without UUID or email fallback: ${name.trim() || "blank"}`, async t => {
+    const h = await setup(t, { search: "?textbookTab=inventory", auth: { user: { id: id(804), name, email: "synthetic-viewer@test.invalid" } } })
+    const labels = ["합성 기록 이름", "", ` ${id(901).toUpperCase()} `, "00000000-0000-0000-0000-000000000000", "a2030000-0000-7000-8000-000000000901", "  ", ""]
+    const rows = labels.map((actorLabel, index) => ({ ...inventoryHistoryRow(index), actorLabel, actorId: index === 6 ? id(804) : id(901), actor: id(901) }))
+    await acceptActorHistory(h, rows)
+    const unknown = "실행자 확인 불가"
+    assertHistoryActors(["합성 기록 이름", unknown, unknown, unknown, unknown, unknown, name === "합성 본인 이름" ? name : unknown])
+    for (const surface of ["inventory-history-desktop", "inventory-history-mobile"]) assert.deepEqual(preparedRowIds(surface), rows.map(row => row.id))
+    assert.equal(h.requests.some(request => request.table || /^(create|update|delete)_/.test(request.name || "")), false)
+    assert.equal(h.requests.some(request => /teacher|profile/.test(request.name || "")), false, "actor display must not add identity lookups")
+    await h.assertNoLegacyReads()
+  })
+}
+
+test("inventory history actor labels follow the current session without attributing other users' records to it", async t => {
+  const h = await setup(t, { search: "?textbookTab=inventory", auth: { user: { id: id(804), name: "합성 이전 사용자", email: "before@test.invalid" } } })
+  const rows = [804, 805].map((actor, index) => ({ ...inventoryHistoryRow(index), actorId: id(actor), actorLabel: "", actor: id(actor) }))
+  await acceptActorHistory(h, rows)
+  assertHistoryActors(["합성 이전 사용자", "실행자 확인 불가"])
+  await h.auth({ user: { id: id(805), name: "합성 새 사용자", email: "after@test.invalid" } })
+  assert.equal(document.querySelector('[aria-label="재고 이력"]').textContent.includes("합성 이전 사용자"), false)
+  await acceptActorHistory(h, rows)
+  assertHistoryActors(["실행자 확인 불가", "합성 새 사용자"])
+  const requestsBeforeNameChange = h.requests.length
+  await h.auth({ user: { id: id(805), name: "합성 갱신 이름", email: "after@test.invalid" } })
+  assertHistoryActors(["실행자 확인 불가", "합성 갱신 이름"])
+  assert.equal(h.requests.length, requestsBeforeNameChange, "display-only name changes require no reads or writes")
+  await h.assertNoLegacyReads()
+})

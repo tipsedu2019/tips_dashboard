@@ -5227,7 +5227,7 @@ function TextbookOperationsWorkspaceContent({ requestsOnly }: { requestsOnly: bo
             loading={numbered.inventoryHistory.loading || (!inventoryLocationReference.ready && !inventoryLocationReference.error)}
             readError={Boolean(numbered.inventoryHistory.error || inventoryLocationReference.error)}
             currentUserId={currentUserId}
-            currentUserLabel={currentUserLabel}
+            currentUserLabel={text(user?.name)}
             canDeleteHistory={canDeleteTextbookHistory}
             saving={saving}
             onDeleteHistory={deleteInventoryHistory}
@@ -6938,6 +6938,11 @@ function TextbookTable({
   );
 }
 
+function getInventoryHistoryDisplayLabel(value: unknown) {
+  const label = text(value);
+  return /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(label) ? "" : label;
+}
+
 function InventoryHistoryPanel({
   readFeedback,
   rows: transportRows,
@@ -6961,7 +6966,9 @@ function InventoryHistoryPanel({
 }) {
   const rows = useMemo(() => transportRows.map((row) => ({
     ...row,
-    actor: row.actorLabel || (row.actorId === currentUserId ? currentUserLabel : row.actorId) || "-",
+    actor: getInventoryHistoryDisplayLabel(row.actorLabel)
+      || (row.actorId === currentUserId ? getInventoryHistoryDisplayLabel(currentUserLabel) : "")
+      || "실행자 확인 불가",
   })), [currentUserId, currentUserLabel, transportRows]);
   const emptyLabel = loading ? "재고 이력을 불러오는 중…" : readError ? "재고 이력을 불러오지 못했습니다" : "재고 이력이 없습니다";
 
