@@ -23,7 +23,7 @@ test("registration verifier targets the refined shared application contract", as
   const verifier = registrationVerifier(source)
 
   for (const marker of [
-    "자동 이력 보기",
+    "업무 처리 이력",
     "과목별 등록 진행",
     "registration-subject-tab-",
     "학년을 먼저 선택",
@@ -64,7 +64,7 @@ test("create verification is subject-first, grade-scoped, and never saves", asyn
   assert.doesNotMatch(intakeWorkflowSource, /과학 선택 전에 학년을 먼저 선택하세요\./)
   assert.match(verifier, /새봄고/)
   assert.match(verifier, /새봄초|새봄중/)
-  assert.match(verifier, /getByRole\("button", \{ name: "자동 이력 보기" \}\)[\s\S]*?count\(\)/)
+  assert.match(verifier, /getByRole\("button", \{ name: "업무 처리 이력" \}\)[\s\S]*?count\(\)/)
   assert.doesNotMatch(verifier, /getByRole\("checkbox"/)
   assert.doesNotMatch(verifier, /saveCreateButton|prematureSaveButton|createdResult|replayLastFixtureCreate/)
 })
@@ -94,8 +94,10 @@ test("history popover verifies content, focus return, and isolated Escape behavi
   const source = await readFile(verifierUrl, "utf8")
   const verifier = registrationVerifier(source)
 
-  assert.match(verifier, /getByRole\("button", \{ name: "자동 이력 보기" \}\)/)
-  assert.match(verifier, /getByLabel\("등록 자동 이력"\)/)
+  assert.match(verifier, /getByRole\("button", \{ name: "업무 처리 이력" \}\)/)
+  assert.match(verifier, /getByLabel\("등록 업무 처리 이력"\)/)
+  assert.equal(/historyPanel\.getByText\("업무 처리 이력", \{ exact: true \}\)\.waitFor/.test(verifier), true,
+    "The verifier must await the renamed visible history heading, not a stale label")
   assert.match(verifier, /historyPanel\.getByRole\("list"\)/)
   assert.match(verifier, /historyPanel\.getByRole\("listitem"\)/)
   assert.match(verifier, /document\.activeElement/)

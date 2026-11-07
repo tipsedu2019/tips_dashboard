@@ -87,9 +87,9 @@ async function mount(t, detail = detailFixture()) {
   const document = dom.window.document
   return {
     document,
-    trigger: host.querySelector('button[aria-label="자동 이력 보기"]'),
+    trigger: host.querySelector('button[aria-label="업무 처리 이력"]'),
     outside: host.querySelector("[data-outside]"),
-    timeline: () => document.querySelector('section[aria-label="등록 자동 이력"]'),
+    timeline: () => document.querySelector('section[aria-label="등록 업무 처리 이력"]'),
   }
 }
 
@@ -97,10 +97,11 @@ test("automatic history opens one read-only timeline with honest actors and time
   const view = await mount(t)
   assert.ok(view.trigger)
   assert.equal(view.trigger.type, "button")
+  assert.equal(view.trigger.textContent, "업무 처리 이력", "History must have a visible label, not only an icon accessible name")
   assert.equal(view.timeline(), null)
   await flush(() => view.trigger.click())
   assert.equal(view.trigger.getAttribute("aria-expanded"), "true")
-  assert.equal(view.document.querySelectorAll('section[aria-label="등록 자동 이력"]').length, 1)
+  assert.equal(view.document.querySelectorAll('section[aria-label="등록 업무 처리 이력"]').length, 1)
   const timeline = view.timeline()
   const rows = [...timeline.querySelectorAll(":scope > ol > li")]
   assert.equal(rows.length, 4)
@@ -142,7 +143,7 @@ test("Escape restores history-trigger focus while outside interaction keeps focu
 test("an empty case opens an explicit empty automatic history without edit or send controls", async (t) => {
   const view = await mount(t, { tracks: [], events: [] })
   await flush(() => view.trigger.click())
-  assert.match(view.timeline().textContent, /아직 자동 이력이 없습니다/u)
+  assert.match(view.timeline().textContent, /아직 업무 처리 이력이 없습니다/u)
   assert.equal(view.timeline().querySelectorAll("button, input, textarea, select, a").length, 0)
 })
 
@@ -165,7 +166,7 @@ test("safe creation and legacy titles survive repeated details, Escape, and reop
     await flush(() => { view.trigger.focus(); view.trigger.click() })
     const timeline = view.timeline()
     assert.ok(timeline)
-    assert.equal(view.document.querySelectorAll('section[aria-label="등록 자동 이력"]').length, 1)
+    assert.equal(view.document.querySelectorAll('section[aria-label="등록 업무 처리 이력"]').length, 1)
     const rows = [...timeline.querySelectorAll(":scope > ol > li")]
     assert.equal(rows.length, 9)
     const created = rows.find(row => row.querySelector("p").textContent.includes("2026. 10. 09."))

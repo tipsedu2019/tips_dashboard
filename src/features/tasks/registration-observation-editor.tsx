@@ -753,7 +753,23 @@ export function RegistrationObservationEditor({
 
   return (
     <div className="grid gap-4">
-      <p role="status" className="text-sm font-medium">{statusLabel}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p role="status" className="text-sm font-medium">{statusLabel}</p>
+            {canBook && onOpenCustomerMessage ? (
+              <Button
+                type="button"
+                data-registration-message-entry="observation_booking"
+                size="form"
+                variant="outline"
+                disabled={saving || !customerMessageTarget}
+                onClick={() => {
+                  if (customerMessageTarget) onOpenCustomerMessage(customerMessageTarget)
+                }}
+              >
+                청강 예약 안내 알림톡
+              </Button>
+            ) : null}
+      </div>
 
       {canBook ? (
         <div className="grid gap-3">
@@ -813,19 +829,6 @@ export function RegistrationObservationEditor({
 
           <div className="flex flex-wrap gap-2">
             <Button size="form" ref={saveDialogTriggerRef} type="button" onClick={openSaveConfirmation} disabled={saving || mutationCommitted || !bookingDirty || sessionsLoading}>{bookingDirty ? "청강 예약 저장" : "저장됨"}</Button>
-            {onOpenCustomerMessage ? (
-              <Button
-                type="button"
-                size="form"
-                variant="outline"
-                disabled={saving || !customerMessageTarget}
-                onClick={() => {
-                  if (customerMessageTarget) onOpenCustomerMessage(customerMessageTarget)
-                }}
-              >
-                청강 예약 안내 알림톡
-              </Button>
-            ) : null}
             {current?.appointmentStatus === "scheduled" ? <Button type="button" size="form" variant="outline" onClick={() => void cancelBooking()} disabled={saving || mutationCommitted}>예약 취소</Button> : null}
           </div>
           {onOpenCustomerMessage && !customerMessageTarget ? <p className="text-xs text-muted-foreground">청강 예약을 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
