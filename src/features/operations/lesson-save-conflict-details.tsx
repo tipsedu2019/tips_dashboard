@@ -11,7 +11,10 @@ function dateLabel(row: { date?: string; weekday?: number }) {
   return row.date || (row.weekday === undefined ? "날짜 확인 필요" : `매주 ${["일", "월", "화", "수", "목", "금", "토"][row.weekday]}요일`);
 }
 
-export function LessonSaveConflictDetails({ details }: { details: TimetableOperationalConflictDetails }) {
+export function LessonSaveConflictDetails({ details, confirmedGuidance = "겹친 회차의 시간·선생님·강의실을 조정한 뒤 다시 저장해 주세요." }: {
+  details: TimetableOperationalConflictDetails;
+  confirmedGuidance?: string;
+}) {
   return <div className="grid w-full min-w-0 gap-3">
     {details.confirmedCount > 0 ? <section aria-label="확인된 일정 충돌" className="grid min-w-0 gap-1">
       <p className="font-medium">확인된 일정 충돌 {details.confirmedCount}건</p>
@@ -27,7 +30,7 @@ export function LessonSaveConflictDetails({ details }: { details: TimetableOpera
         </li>)}
       </ul>
       {details.confirmedCount > details.confirmed.length ? <p>전체 {details.confirmedCount}건 중 {details.confirmed.length}건 표시</p> : null}
-      <p>겹친 회차의 시간·선생님·강의실을 조정한 뒤 다시 저장해 주세요.</p>
+      <p>{confirmedGuidance}</p>
     </section> : null}
     {details.unresolvedCount > 0 ? <section aria-label="정보 확인 필요" className="grid min-w-0 gap-1">
       <p className="font-medium">정보 확인 필요 {details.unresolvedCount}건</p>
