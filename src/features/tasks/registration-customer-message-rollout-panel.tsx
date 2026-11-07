@@ -19,6 +19,7 @@ import type {
   RegistrationObservationSolapiReadiness,
 } from "./registration-customer-message-contract"
 import { createRegistrationCustomerMessageAdminClient } from "./registration-customer-message-service"
+import { REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_VERIFICATION_MESSAGE } from "./registration-customer-message-errors"
 import { runRegistrationCustomerMessageRolloutAction } from "./registration-customer-message-rollout"
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -61,7 +62,7 @@ async function getAccessToken() {
 
 function readableError(error: unknown) {
   const code = error instanceof Error ? error.message : ""
-  if (code.includes("template_drift")) return "승인 템플릿과 서버 문구 또는 버튼이 다릅니다."
+  if (code.includes("template_drift")) return REGISTRATION_CUSTOMER_MESSAGE_TEMPLATE_VERIFICATION_MESSAGE
   if (code.includes("provider_unavailable")) return "SOLAPI 템플릿 상태를 확인할 수 없습니다."
   if (code.includes("auth_required") || code.includes("unauthorized")) return "관리자 로그인을 다시 확인해 주세요."
   if (code.includes("invalid")) return "테스트 등록 또는 메시지 식별값을 다시 확인해 주세요."

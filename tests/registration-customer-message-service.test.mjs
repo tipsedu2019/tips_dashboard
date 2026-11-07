@@ -299,7 +299,7 @@ test("customer message errors use stable operator-facing Korean guidance", () =>
     ],
     [
       "registration_customer_message_template_drift",
-      "새 알림톡 템플릿 승인 후 발송할 수 있습니다.",
+      "템플릿 상태 또는 내용을 확인하지 못했습니다. 관리팀에서 등록·승인 상태와 검증 결과를 확인해 주세요.",
     ],
     [
       "registration_customer_message_body_too_long",
