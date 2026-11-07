@@ -627,6 +627,9 @@ function getMakeupRequestCardValue(request: MakeupRequest, columnKey: MakeupRequ
 }
 
 export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
+  // Until the dated context is verified, raw weekly catalogs cannot prove a
+  // collision. Loading/error feedback and approval readiness stay separate.
+  if (workspaceData.collisionContextReady === false) return false
   let data = workspaceData
   const context = data.reservationContext
   const completedReservation = context?.reservations.find((item) => item.id === request.id && item.status === "completed")
