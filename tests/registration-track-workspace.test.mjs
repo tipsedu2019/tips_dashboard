@@ -887,7 +887,8 @@ test("saved detail exposes automatic history from a header clock popover only", 
   assert.match(timeline, /embedded\?: boolean/)
   assert.match(timeline, /embedded\s*\?[^:]+:[^}]+/)
   assert.doesNotMatch(timeline, /subjectFilter|stageFilter|과목 전체|단계 전체|<select/)
-  assert.match(timeline, /누가 · 언제 · 무엇을 · 어떻게/)
+  assert.match(timeline, /시각이 없는 기록은 아래에 모읍니다/)
+  assert.match(timeline, /시간 확인 불가 항목의 순서는 발생 순서를 뜻하지 않습니다/)
 })
 
 test("create and detail share the approved subject-first inquiry controls", async () => {
