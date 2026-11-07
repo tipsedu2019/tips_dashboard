@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   free-tier-guardrails:
     runs-on: ubuntu-latest
@@ -19,6 +23,8 @@ jobs:
           node-version: 22.18.0
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Verify PR concurrency boundary
+        run: node --test tests/pr-ci-concurrency.test.mjs
       - name: Verify safe login returns and authentication guards
         run: node --test --experimental-strip-types tests/auth-login-return.test.mjs tests/auth-login.test.mjs tests/password-recovery.test.mjs tests/auth-guard-loading.test.mjs tests/auth-session-refresh.test.mjs tests/bootstrap-recovery.test.mjs tests/page-recovery.test.mjs
       - name: Verify atomic textbook inventory writes
