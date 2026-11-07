@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client"
 import ts from "typescript"
 import { createRegistrationCustomerMessageClient } from "../src/features/tasks/registration-customer-message-service.ts"
 import { formatRegistrationMessageTimestamp } from "../src/features/tasks/registration-customer-message-labels.ts"
+import { renderRegistrationCustomerMessage } from "../src/features/tasks/server/registration-customer-message-catalog.ts"
 
 const require = createRequire(import.meta.url)
 const { JSDOM } = require("jsdom")
@@ -65,6 +66,12 @@ async function loadMountedDialog() {
     }],
     ["./registration-customer-message-labels", { formatRegistrationMessageTimestamp }],
   ])
+  // The baseline has no scope helper. Load the actual helper when the product
+  // introduces it; a missing UI assertion, not a synthetic helper, establishes RED.
+  const subjectScopeUrl = new URL("../src/features/tasks/registration-preview-subject-scope.ts", import.meta.url)
+  if (await sourceOrEmpty(subjectScopeUrl)) {
+    localModules.set("./registration-preview-subject-scope", await import(subjectScopeUrl.href))
+  }
   const runtimeRequire = (specifier) => {
     if (specifier === "react" || specifier === "react/jsx-runtime") return require(specifier)
     const local = localModules.get(specifier)
@@ -436,4 +443,313 @@ test("등록 fixture도 입학 수업정보와 모든 문의하기 버튼을 실
   assert.match(source, /classroomLabel:\s*"본관 301호"/)
   assert.match(source, /firstLessonLabel:\s*"8월 17일 월요일 오후 6:00–8:00"/)
   assert.equal((source.match(/host:\s*"tipsedu\.channel\.io"/g) || []).length, 7)
+})
+
+const SCOPE_TASK = "d6400000-0000-4000-8000-000000000010"
+const SCOPE_OTHER_TASK = "d6400000-0000-4000-8000-000000000011"
+const SCOPE_SOURCE = "d6400000-0000-4000-8000-000000000012"
+const SCOPE_OTHER_SOURCE = "d6400000-0000-4000-8000-000000000013"
+const SCOPE_TRACKS = Object.freeze([
+  Object.freeze({ id: "d6400000-0000-4000-8000-000000000014", taskId: SCOPE_TASK, subject: "영어" }),
+  Object.freeze({ id: "d6400000-0000-4000-8000-000000000015", taskId: SCOPE_TASK, subject: "수학" }),
+])
+const SCOPE_LABEL = "이번 미리보기 대상 과목"
+const SCOPE_EXCLUDED = "현재 불러온 등록 과목 중 미포함"
+const SCOPE_UNKNOWN = "현재 불러온 등록 과목과 비교할 수 없습니다."
+const SCOPE_CAVEAT = "이번 미리보기의 미포함 여부는 과거 발송 여부를 뜻하지 않습니다."
+
+function scopeContext(target, tracks = SCOPE_TRACKS, taskId = SCOPE_TASK) {
+  return { taskId, target: { ...target }, tracks: tracks.map(track => ({ ...track })) }
+}
+
+function scopePreview(messageKind = "level_test_booking", subjects = ["영어"]) {
+  const rendered = renderRegistrationCustomerMessage({
+    kind: messageKind,
+    facts: {
+      studentName: "합성 학생",
+      subjects,
+      scheduledAt: "2099-08-17T09:00:00.000Z",
+      place: "본관",
+      appointmentKind: messageKind === "level_test_booking" ? "level_test" : "visit_consultation",
+      ...(messageKind === "observation_booking" ? {
+        campus: "본관", className: "합성 영어반", teacherName: "합성 선생님",
+      } : {}),
+    },
+  })
+  return {
+    ...observationPreview(SCOPE_SOURCE),
+    messageKind,
+    studentName: "합성 학생",
+    facts: rendered.facts,
+    body: rendered.body,
+    buttons: rendered.buttons.map(button => ({ name: button.name, type: button.type, host: new URL(button.linkMobile).host })),
+  }
+}
+
+async function mountSubjectScope(t, { messageKind = "level_test_booking", response, context, previewResponse } = {}) {
+  const Dialog = await loadMountedDialog()
+  const dom = new JSDOM('<!doctype html><html><body><button id="opener">열기</button><div id="scope-root"></div></body></html>')
+  const descriptors = new Map(["window", "document", "navigator", "crypto", "IS_REACT_ACT_ENVIRONMENT"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, navigator: dom.window.navigator, crypto: dom.window.crypto, IS_REACT_ACT_ENVIRONMENT: true })) {
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
+  }
+  const calls = []
+  const client = createRegistrationCustomerMessageClient({
+    getAccessToken: async () => "synthetic-scope-token",
+    fetch: async (url, init) => {
+      const body = JSON.parse(init.body)
+      calls.push({ url, method: init.method, body, signal: init.signal })
+      if (url === "/api/solapi/registration/preview" || url === "/api/solapi/registration/bundles/preview") {
+        const payload = previewResponse ? await previewResponse(body, init.signal) : response ?? scopePreview(messageKind)
+        return { ok: true, json: async () => payload }
+      }
+      if (url === "/api/solapi/registration/send") {
+        return { ok: true, json: async () => ({
+          ok: true, messageId: "d6400000-0000-4000-8000-000000000016", messageKind,
+          currentStatus: "accepted", recipientLast4: "5678", confirmedByName: "합성 관리자",
+          confirmedAt: "2099-08-12T00:01:00.000Z", updatedAt: "2099-08-12T00:01:00.000Z",
+          canCheck: false, idempotent: false,
+        }) }
+      }
+      assert.fail(`Unexpected synthetic scope request: ${url}`)
+    },
+  })
+  const root = createRoot(dom.window.document.getElementById("scope-root"))
+  const target = { messageKind, sourceId: SCOPE_SOURCE }
+  let props = { open: true, onOpenChange: () => undefined, target, client, viewerRole: "staff", caseSubjects: context === undefined ? scopeContext(target) : context }
+  const view = {
+    document: dom.window.document, calls,
+    async render(patch = {}) {
+      props = { ...props, ...patch }
+      await act(async () => { root.render(createElement(Dialog, props)); await new Promise(resolve => setImmediate(resolve)) })
+    },
+    text: () => dom.window.document.body.textContent,
+    row(label) {
+      const dt = [...dom.window.document.querySelectorAll("dt")].find(node => node.textContent.replace(/\s*·\s*$/u, "").trim() === label)
+      return dt?.parentElement.querySelector("dd")?.textContent ?? null
+    },
+    confirm: () => [...dom.window.document.querySelectorAll("button")].find(button => button.textContent === "확인 후 발송"),
+  }
+  t.after(async () => {
+    await act(async () => root.unmount())
+    dom.window.close()
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  })
+  await view.render()
+  return view
+}
+
+for (const messageKind of ["level_test_booking", "visit_consultation_booking", "observation_booking"]) {
+  test(`subject scope: ${messageKind} distinguishes the actual preview from current saved subjects without blocking confirmation`, async t => {
+    const response = scopePreview(messageKind)
+    const view = await mountSubjectScope(t, { messageKind, response })
+    assert.equal(view.row(SCOPE_LABEL), response.facts.subjectLabel)
+    assert.equal(view.row(SCOPE_EXCLUDED), "수학")
+    assert.equal(view.text().includes(SCOPE_CAVEAT), true)
+    assert.equal(view.text().includes(SCOPE_UNKNOWN), false)
+    assert.doesNotMatch(view.text(), /미발송|모두 발송|전체 포함/u)
+    assert.equal(view.confirm()?.disabled, false)
+    assert.deepEqual(view.calls.map(({ url, body }) => ({ url, body })), [{
+      url: "/api/solapi/registration/preview", body: { messageKind, sourceId: SCOPE_SOURCE },
+    }])
+    await act(async () => { view.confirm().click(); view.confirm().click(); await new Promise(resolve => setImmediate(resolve)) })
+    const sends = view.calls.filter(call => call.url.endsWith("/send"))
+    assert.equal(sends.length, 1)
+    assert.deepEqual(Object.keys(sends[0].body).sort(), ["previewId", "requestKey"])
+    assert.equal(sends[0].body.previewId, response.previewId)
+    assert.equal(typeof sends[0].body.requestKey, "string")
+    assert.equal(view.calls.filter(call => call.url.endsWith("/preview")).length, 1)
+  })
+}
+
+test("subject scope: canonical complete subjects and reordered immutable context do not invent exclusions or refetch", async t => {
+  const target = { messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }
+  const response = scopePreview(target.messageKind, ["수학", "영어", "영어"])
+  assert.equal(response.facts.subjectLabel, "영어 · 수학", "the actual producer removes duplicate subject inputs")
+  const view = await mountSubjectScope(t, { response })
+  assert.equal(view.row(SCOPE_LABEL), "영어 · 수학")
+  assert.equal(view.row(SCOPE_EXCLUDED), null)
+  assert.equal(view.text().includes(SCOPE_UNKNOWN), false)
+  assert.equal(view.text().includes(SCOPE_CAVEAT), true)
+  await view.render({ caseSubjects: scopeContext(target, [...SCOPE_TRACKS].reverse()) })
+  assert.equal(view.text().includes(SCOPE_UNKNOWN), false)
+  assert.equal(view.calls.length, 1)
+  assert.deepEqual(SCOPE_TRACKS.map(track => track.subject), ["영어", "수학"])
+  assert.equal(view.confirm().disabled, false)
+})
+
+const unknownScopeCases = [
+  ["missing current context", { context: null }],
+  ["empty current tracks", { context: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, []) }],
+  ["duplicate saved subject labels", { context: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, [...SCOPE_TRACKS, { ...SCOPE_TRACKS[1], id: SCOPE_OTHER_SOURCE }]) }],
+  ["duplicate track identities", { context: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, [SCOPE_TRACKS[0], { ...SCOPE_TRACKS[1], id: SCOPE_TRACKS[0].id }]) }],
+  ["unknown current subject", { context: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, [{ ...SCOPE_TRACKS[0], subject: "기타" }, SCOPE_TRACKS[1]]) }],
+  ["foreign case track", { context: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, [{ ...SCOPE_TRACKS[0], taskId: SCOPE_OTHER_TASK }, SCOPE_TRACKS[1]]) }],
+  ["outer case identity mismatch", { context: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, SCOPE_TRACKS, SCOPE_OTHER_TASK) }],
+  ["context target mismatch", { context: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_OTHER_SOURCE }) }],
+  ["context kind mismatch", { context: scopeContext({ messageKind: "visit_consultation_booking", sourceId: SCOPE_SOURCE }) }],
+  ["comma summary", { label: "영어, 수학" }],
+  ["custom summary", { label: "영어 외 1과목" }],
+  ["empty summary", { label: "" }],
+  ["partially recognized summary", { label: "영어 · 기타" }],
+  ["duplicate preview labels", { label: "영어 · 영어" }],
+  ["noncanonical separator", { label: "영어·수학" }],
+  ["preview subject absent from current tracks", { label: "과학" }],
+  ["response kind mismatch", { responseKind: "visit_consultation_booking" }],
+]
+for (const [name, input] of unknownScopeCases) {
+  test(`subject scope: ${name} stays unknown without guessing from body or blocking ready confirmation`, async t => {
+    const response = scopePreview()
+    if (Object.hasOwn(input, "label")) response.facts = { ...response.facts, subjectLabel: input.label }
+    if (input.responseKind) response.messageKind = input.responseKind
+    response.body = "합성 본문 영어 · 수학 — 이 본문에서 과목을 추측하지 않습니다."
+    const view = await mountSubjectScope(t, { response, ...(Object.hasOwn(input, "context") ? { context: input.context } : {}) })
+    // A response for a different kind cannot establish the requested preview's
+    // subjects; this is an unknown comparison, not another loading state.
+    assert.equal(view.row(SCOPE_LABEL), input.responseKind ? "확인할 수 없음" : response.facts.subjectLabel || "확인할 수 없음")
+    assert.equal(view.row(SCOPE_EXCLUDED), null)
+    assert.equal(view.text().includes(SCOPE_UNKNOWN), true)
+    assert.equal(view.text().includes(SCOPE_CAVEAT), true)
+    assert.equal(view.confirm()?.disabled, false)
+    assert.equal(view.calls.length, 1)
+    assert.deepEqual(view.calls[0].body, { messageKind: "level_test_booking", sourceId: SCOPE_SOURCE })
+    if (name === "missing current context") {
+      await act(async () => { view.confirm().click(); await new Promise(resolve => setImmediate(resolve)) })
+      assert.equal(view.calls.filter(call => call.url.endsWith("/send")).length, 1)
+    }
+  })
+}
+
+for (const [name, changedTracks] of [
+  ["add", [...SCOPE_TRACKS, { id: "d6400000-0000-4000-8000-000000000017", taskId: SCOPE_TASK, subject: "과학" }]],
+  ["remove", SCOPE_TRACKS.slice(0, 1)],
+  ["replace identity with same labels", SCOPE_TRACKS.map(track => track.subject === "수학" ? { ...track, id: SCOPE_OTHER_SOURCE } : track)],
+]) {
+  test(`subject scope: saved track ${name} invalidates comparison without reloading preview or changing send DTO`, async t => {
+    const view = await mountSubjectScope(t)
+    assert.equal(view.row(SCOPE_EXCLUDED), "수학")
+    await view.render({ caseSubjects: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, changedTracks) })
+    assert.equal(view.row(SCOPE_LABEL), "영어")
+    assert.equal(view.row(SCOPE_EXCLUDED), null)
+    assert.equal(view.text().includes(SCOPE_UNKNOWN), true)
+    assert.equal(view.calls.length, 1)
+    assert.equal(view.confirm().disabled, false)
+  })
+}
+
+test("subject scope: tracks changing during loading cannot be paired with the older request snapshot", async t => {
+  const pending = controlledPromise()
+  const view = await mountSubjectScope(t, { previewResponse: async () => pending.promise })
+  assert.equal(view.row(SCOPE_LABEL), null)
+  assert.equal(view.row(SCOPE_EXCLUDED), null)
+  assert.equal(view.confirm().disabled, true)
+  await view.render({ caseSubjects: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, SCOPE_TRACKS.slice(0, 1)) })
+  await act(async () => { pending.resolve(scopePreview()); await pending.promise })
+  assert.equal(view.row(SCOPE_LABEL), "영어")
+  assert.equal(view.row(SCOPE_EXCLUDED), null)
+  assert.equal(view.text().includes(SCOPE_UNKNOWN), true)
+  assert.equal(view.calls.length, 1)
+})
+
+test("subject scope: late previous target responses cannot overwrite the next case comparison", async t => {
+  const first = controlledPromise()
+  const second = controlledPromise()
+  const view = await mountSubjectScope(t, { previewResponse: async target => target.sourceId === SCOPE_SOURCE ? first.promise : second.promise })
+  const target = { messageKind: "level_test_booking", sourceId: SCOPE_OTHER_SOURCE }
+  const tracks = [{ ...SCOPE_TRACKS[1], taskId: SCOPE_OTHER_TASK }]
+  await view.render({ target, caseSubjects: scopeContext(target, tracks, SCOPE_OTHER_TASK) })
+  assert.equal(view.row(SCOPE_LABEL), null)
+  assert.equal(view.row(SCOPE_EXCLUDED), null)
+  await act(async () => { second.resolve(scopePreview("level_test_booking", ["수학"])); await second.promise })
+  assert.equal(view.row(SCOPE_LABEL), "수학")
+  assert.equal(view.row(SCOPE_EXCLUDED), null)
+  assert.equal(view.text().includes(SCOPE_UNKNOWN), false)
+  await act(async () => { first.resolve(scopePreview()); await first.promise })
+  assert.equal(view.row(SCOPE_LABEL), "수학")
+  assert.equal(view.text().includes(SCOPE_UNKNOWN), false)
+  assert.equal(view.calls[0].signal.aborted, true)
+  assert.deepEqual(view.calls.map(call => call.body), [
+    { messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, target,
+  ])
+})
+
+test("subject scope: closing then reopening starts a fresh comparison for the current saved tracks", async t => {
+  const view = await mountSubjectScope(t)
+  assert.equal(view.row(SCOPE_EXCLUDED), "수학")
+  await view.render({ open: false })
+  assert.equal(view.row(SCOPE_LABEL), null)
+  await view.render({ open: true, caseSubjects: scopeContext({ messageKind: "level_test_booking", sourceId: SCOPE_SOURCE }, SCOPE_TRACKS.slice(0, 1)) })
+  assert.equal(view.row(SCOPE_LABEL), "영어")
+  assert.equal(view.row(SCOPE_EXCLUDED), null)
+  assert.equal(view.text().includes(SCOPE_UNKNOWN), false)
+  assert.equal(view.calls.length, 2)
+})
+
+for (const mode of ["expired", "duplicate_locked", "pending", "accepted", "unknown", "failed_hold", "readiness blocked"]) {
+  test(`subject scope: ${mode} retains the existing confirmation guard`, async t => {
+    const response = scopePreview()
+    if (mode === "expired") response.expiresAt = "2000-01-01T00:00:00.000Z"
+    else if (mode === "duplicate_locked") response.readiness = { ...response.readiness, blockers: ["duplicate_locked"] }
+    else if (mode === "readiness blocked") response.readiness = { ...response.readiness, sendAllowed: false, blockers: ["activation_off"] }
+    else response.latestMessage = {
+      messageId: "d6400000-0000-4000-8000-000000000016", messageKind: response.messageKind,
+      currentStatus: mode, confirmedByName: "합성 관리자", confirmedAt: "2026-08-12T00:00:00.000Z",
+      updatedAt: "2026-08-12T00:00:00.000Z", canCheck: false,
+    }
+    const view = await mountSubjectScope(t, { response })
+    assert.equal(view.row(SCOPE_LABEL), "영어")
+    if (mode === "expired") {
+      assert.equal(view.row(SCOPE_EXCLUDED), null)
+      assert.equal(view.text().includes(SCOPE_UNKNOWN), true)
+    } else assert.equal(view.row(SCOPE_EXCLUDED), "수학")
+    const confirmation = view.confirm()
+    assert.equal(!confirmation || confirmation.disabled, true)
+    assert.equal(view.calls.filter(call => call.url.endsWith("/send")).length, 0)
+    assert.equal(view.text().includes(SCOPE_CAVEAT), true)
+    assert.doesNotMatch(view.text(), /미발송|모두 발송|전체 포함/u)
+  })
+}
+
+for (const messageKind of ["waiting_notice", "admission_application", "appointment_reminder", "observation_reminder", "level_test_booking_bundle"]) {
+  test(`subject scope: unsupported ${messageKind} keeps its existing presentation`, async t => {
+    const response = { ...scopePreview(), messageKind }
+    const view = await mountSubjectScope(t, { messageKind, response })
+    assert.equal(view.row("대상"), "영어")
+    assert.equal(view.row(SCOPE_LABEL), null)
+    assert.equal(view.row(SCOPE_EXCLUDED), null)
+    assert.equal(view.text().includes(SCOPE_CAVEAT), false)
+    assert.equal(view.text().includes(SCOPE_UNKNOWN), false)
+  })
+}
+
+test("subject scope: a next-target preview failure clears the preceding scope rather than claiming an empty preview", async t => {
+  const view = await mountSubjectScope(t, { previewResponse: async target => {
+    if (target.sourceId === SCOPE_OTHER_SOURCE) throw new Error("synthetic_preview_failure")
+    return scopePreview()
+  } })
+  assert.equal(view.row(SCOPE_EXCLUDED), "수학")
+  const target = { messageKind: "level_test_booking", sourceId: SCOPE_OTHER_SOURCE }
+  await view.render({ target, caseSubjects: scopeContext(target) })
+  assert.equal(view.row(SCOPE_LABEL), null)
+  assert.equal(view.row(SCOPE_EXCLUDED), null)
+  assert.match(view.document.querySelector('[role="alert"]').textContent, /미리보기를 불러오지 못했습니다/u)
+  assert.equal(view.confirm().disabled, true)
+  assert.equal(view.calls.filter(call => call.url.endsWith("/send")).length, 0)
+})
+
+test("subject scope: expiry timer removes a previously known comparison without making another request", async t => {
+  const view = await mountSubjectScope(t, { previewResponse: async () => ({
+    ...scopePreview(), expiresAt: new Date(Date.now() + 500).toISOString(),
+  }) })
+  assert.equal(view.row(SCOPE_EXCLUDED), "수학")
+  assert.equal(view.confirm().disabled, false)
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 550)) })
+  assert.equal(view.row(SCOPE_LABEL), "영어")
+  assert.equal(view.row(SCOPE_EXCLUDED), null)
+  assert.equal(view.text().includes(SCOPE_UNKNOWN), true)
+  assert.equal(view.confirm().disabled, true)
+  assert.equal(view.calls.length, 1)
 })
