@@ -563,7 +563,7 @@ create function pg_temp.nd_context() returns jsonb language sql stable as $$
  select dashboard_private.legacy_effective_context_v1(c) from public.classes c where id=pg_temp.ndid(4)
 $$;
 select is(jsonb_build_array(pg_temp.nd_context()#>'{approvedByIdentity,legacy-makeup-alpha,approvedOverrideVerified}',
- pg_temp.nd_context()#>'{approvedByIdentity,legacy-makeup-alpha,legacyAdoptionVerified}),'[true,true]'::jsonb,
+ pg_temp.nd_context()#>'{approvedByIdentity,legacy-makeup-alpha,legacyAdoptionVerified}'),'[true,true]'::jsonb,
  'actual current context independently verifies sparse adopted identity and approval');
 insert into date_override_captures values('adopted',dashboard_private.read_timetable_operating_reference_v1(),pg_temp.date_override_baseline_reader());
 select is(candidate::text,baseline::text,'verified legacy adoption whole DTO matches baseline using current helpers')
