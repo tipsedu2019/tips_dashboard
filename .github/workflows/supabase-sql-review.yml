@@ -295,6 +295,7 @@ jobs:
             --test supabase/tests/ai_agent_thread_replies_test.sql \
             --test supabase/tests/ai_agent_nonexpiring_chat_test.sql \
             --test supabase/tests/dashboard_audit_predecessor_lookup_test.sql \
+            --test supabase/tests/timetable_date_override_native_reader_test.sql \
             --probe tests/probe-ai-agent-auth-concurrency.mjs \
             --probe tests/probe-ai-agent-claim-concurrency.mjs \
             --probe tests/probe-ai-agent-space-policy-concurrency.mjs \
