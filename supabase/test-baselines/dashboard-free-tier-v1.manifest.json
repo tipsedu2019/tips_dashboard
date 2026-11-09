@@ -974,6 +974,11 @@
       "fileName": "20261109015335_timetable_date_override_native_reader.sql",
       "status": "final",
       "sha256": "1344006e60eac96354b9547c11fec52d6b484ac808450b43124834799678fd44"
+    },
+    {
+      "fileName": "20261109122711_legacy_context_adoption_reuse.sql",
+      "status": "final",
+      "sha256": "8608efe5e2f2220021933beb68f9459960ae5313ca0c2b2490e1a7c5a833fbe4"
     }
   ]
 }
