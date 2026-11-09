@@ -557,7 +557,7 @@ select is((select schedule_plan from public.classes where id=pg_temp.ndid(4)),
 -- This read fixture has no date map; a failed proof cannot inherit four defaults.
 savepoint date_override_sparse;
 update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions,1}',
- schedule_plan#>'{sessions,1}'-array['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'])
+ (schedule_plan#>'{sessions,1}')-array['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'])
 where id=pg_temp.ndid(4);
 create function pg_temp.nd_context() returns jsonb language sql stable as $$
  select dashboard_private.legacy_effective_context_v1(c) from public.classes c where id=pg_temp.ndid(4)
