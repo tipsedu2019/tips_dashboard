@@ -477,6 +477,11 @@ update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_af
  (schedule_plan_after#>'{sessions,1}')-'makeupRequestId') where id=pg_temp.crid(3);
 update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions,1}',
  (schedule_plan#>'{sessions,1}')-'makeupRequestId') where id=pg_temp.crid(4);
+-- Explicit synthetic schedule proof keeps this ordinary-path case independent
+-- of the notification payload version installed by the schema baseline.
+update public.makeup_request_events set payload=jsonb_set(payload,'{makeup_schedule}',
+ '[{"start_at":"2050-10-06T18:00:00+09:00","end_at":"2050-10-06T20:00:00+09:00","place":"Context reuse adoption room"}]'::jsonb)
+where request_id=pg_temp.crid(3) and event_type='approved';
 insert into context_captures values('ordinary_gate',pg_temp.capture_context(false),pg_temp.capture_context(true));
 select is(candidate,baseline,'ordinary gate retains full context and original fallback evaluation result')
 from context_captures where label='ordinary_gate';
