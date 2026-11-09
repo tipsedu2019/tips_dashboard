@@ -421,10 +421,10 @@ select is((select count(*) from dashboard_private.notification_deliveries),(sele
 select is((select count(*) from public.student_class_enrollment_history),(select enrollments from no_send),'reader changes no enrollment history');
 select is((select count(*) from public.dashboard_audit_logs),(select audits from no_send),'reader and probes leave no audit record');
 select is((select provolatile::text from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'s','reader remains STABLE');
--- The final reader adds the approved close projection after optional rooms;
--- the inheritance/freshness/security assertions above still exercise that body.
+-- The final reader includes close projection and the date-override native path;
+-- inheritance/freshness/security assertions must exercise that exact body.
 select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'sha256'),'hex'),
- 'd577eaaa428d6793d0e01963c7f03cfeb2af64798464e7aca46b31b1db9a9909',
+ 'c156891001660788d8ebdbf783eb841d3bd2f48f1a2087ee83cf9bfb4294d7aa',
  'assertions execute the exact final inheritance reader body');
 select ok((select prosecdef from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'reader remains SECURITY DEFINER');
 select ok((select proconfig @> array['search_path=""'] from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),
