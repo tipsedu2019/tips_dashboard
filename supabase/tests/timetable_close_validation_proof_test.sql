@@ -1116,7 +1116,7 @@ insert into public.classes(id,name,subject,class_type,grade,teacher,room,schedul
  capacity,fee,student_ids,waitlist_ids,textbook_ids,textbook_usage,lessons,schedule_storage_mode,schedule_plan)
 select pg_temp.proof_id(n),'Proof class '||n,'영어','정규','중1','Proof teacher '||n,'Proof room '||n,
  '월 09:00-10:00','수강',12,100000,'[]','[]','[]','{}','[]',case when n=3 then 'normalized' else 'legacy' end,
- jsonb_build_object('sessions',case when n=3 then '[]'::jsonb else jsonb_build_array(
+ jsonb_build_object('amount',1,'sessions',case when n=3 then '[]'::jsonb else jsonb_build_array(
  jsonb_build_object('id','proof-active-'||n,'date','2050-01-03','state','active','scheduleState','active',
  'startTime','09:00','endTime','10:00','teacherCatalogId',pg_temp.proof_id(100+n),'classroomCatalogId',pg_temp.proof_id(200+n)),
  jsonb_build_object('id','proof-makeup-'||n,'date','2050-01-04','state','makeup','scheduleState','makeup',
@@ -1174,20 +1174,35 @@ begin
 end$$;
 create function pg_temp.proof_case(p_label text,p_mutation text,p_hit boolean,p_state text default '00000')
 returns void language plpgsql as $$
-declare candidate jsonb;original jsonb;calls_before bigint;hit boolean;answer jsonb;
+declare candidate jsonb;original jsonb;calls_before bigint;completed_reads bigint;hit boolean;answer jsonb;
 begin
  begin
   perform pg_temp.proof_prime();
+  if p_label='numeric representation remains exact'
+   and (select (schedule_plan->'amount')::text from public.classes where id=pg_temp.proof_id(2)) is distinct from '1'
+  then raise exception 'numeric fixture was not primed with integer 1';end if;
   set local session_replication_role=replica;
   if p_mutation<>'' then execute p_mutation;end if;
   set local session_replication_role=origin;
   calls_before:=pg_temp.proof_calls();candidate:=pg_temp.proof_capture(true);
-  hit:=candidate->>'sqlstate'='00000' and calls_before=pg_temp.proof_calls();
+  completed_reads:=pg_temp.proof_calls()-calls_before;
+  hit:=candidate->>'sqlstate'='00000' and completed_reads=0;
+  -- Function statistics count completed reader calls. A conflict after a
+  -- successful read must prove entry independently of its error/hit flag.
+  if (p_state in('00000','23P01') and completed_reads<>case when p_hit then 0 else 1 end)
+   or (p_state='57014' and candidate->>'message' is distinct from 'synthetic_cancel')
+   or (p_state='40001' and candidate->>'message' is distinct from 'synthetic_serialization')
+   or (p_state='42501' and completed_reads<>0)
+  then raise exception 'reader-entry evidence mismatch %: %',p_label,completed_reads;end if;
   original:=pg_temp.proof_capture(false);
   if candidate::text is distinct from original::text or hit is distinct from p_hit or candidate->>'sqlstate'<>p_state
   then raise exception 'proof mismatch %: candidate %, original %, hit % expected %',p_label,
    candidate->>'sqlstate',original->>'sqlstate',hit,p_hit;end if;
   answer:=jsonb_build_object('sqlstate',candidate->>'sqlstate','expectedState',p_state,'cacheHit',hit,
+   'completedReaderCalls',completed_reads,
+   'readerEntryEvidence',case when completed_reads>0 then 'completed reader statistic'
+    when p_state in('57014','40001') then 'exact injected reader error'
+    when p_state='42501' then 'permission fails before reader; no entry claimed' else 'successful cache hit' end,
    'exactReturnedTextAndErrorEqual',true,'returnedHash',md5(candidate::text));
   raise exception using errcode='ZP001',message='reset_synthetic_case';
  exception when sqlstate 'ZP001' then null;end;
@@ -1275,38 +1290,71 @@ begin
  perform pg_temp.proof_check('baseline deletion cascades proof removal',true);
 end $boundary$;
 
--- An actual gateway close retains all three validation invocations and both
--- assertions, including the deferred finalizer. Only two full reader calls are
--- needed for the unchanged source state; legacy makeup and normalized rows
--- coexist. Original regression suites cover roster release and rejected writes.
-create function pg_temp.proof_gateway_integration() returns void language plpgsql security definer set search_path='' as $gateway$
-declare reader_before bigint;validator_before bigint;assert_before bigint;answer jsonb;patch jsonb;evidence jsonb;
+-- A proof-metadata read error is independent of a reader error. Instrument
+-- only the isolated helper after priming; update its test contract to ensure
+-- the injected error is reached inside the helper's existing exception handler.
+create sequence pg_temp.proof_failure_probe;
+do $metadata_failure$
+declare answer jsonb;original jsonb;definition text;body text;before_entries bigint;before_reads bigint;evidence jsonb;
 begin
  begin
-  select jsonb_build_object('name',name,'class_type',class_type,'subject',subject,'subject_area_key',subject_area_key,
-   'grade',grade,'teacher',teacher,'room',room,'schedule',schedule,'capacity',capacity,'fee',fee,
-   'status','종강','textbook_ids',textbook_ids,'textbook_usage',textbook_usage) into patch from public.classes where id=pg_temp.proof_id(1);
-  reader_before:=pg_temp.proof_calls();
-  select coalesce(sum(calls),0) into validator_before from pg_stat_xact_user_functions where funcid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure;
-  select coalesce(sum(calls),0) into assert_before from pg_stat_xact_user_functions where funcid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure;
-  answer:=public.update_class_operational_v1(pg_temp.proof_id(1),patch,pg_temp.proof_id(801),null);
-  set constraints all immediate;
-  evidence:=jsonb_build_object('reads',pg_temp.proof_calls()-reader_before,
-   'validations',(select coalesce(sum(calls),0)-validator_before from pg_stat_xact_user_functions where funcid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),
-   'assertions',(select coalesce(sum(calls),0)-assert_before from pg_stat_xact_user_functions where funcid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure),
-   'status',answer#>>'{classRow,status}','receiptStatus',answer#>>'{closeResult,status}',
-   'proofs',(select count(*) from dashboard_private.timetable_validation_reuse_proofs where transaction_id=txid_current()));
-  if evidence is distinct from '{"reads":2,"validations":3,"assertions":2,"status":"종강","receiptStatus":"종강","proofs":0}'::jsonb
-  then raise exception 'gateway boundary mismatch: %',evidence;end if;
+  perform pg_temp.proof_prime();
+  select prosrc,pg_get_functiondef(oid) into body,definition from pg_proc
+   where oid='dashboard_private.timetable_close_validation_input_v1(jsonb)'::regprocedure;
+  execute replace(definition,body,replace(body,' select jsonb_build_object(',
+   $inject$ perform nextval('pg_temp.proof_failure_probe');
+ raise exception using errcode='42501',message='synthetic_proof_metadata_denied';
+ select jsonb_build_object($inject$));
+  update dashboard_private.timetable_validation_reuse_contracts c
+  set fingerprint=sha256(convert_to(to_jsonb(p)::text,'UTF8')) from pg_proc p
+  where c.object_kind='function' and c.object_oid=p.oid
+   and p.oid='dashboard_private.timetable_close_validation_input_v1(jsonb)'::regprocedure;
+  before_entries:=nextval('pg_temp.proof_failure_probe');before_reads:=pg_temp.proof_calls();
+  answer:=pg_temp.proof_capture(true);
+  if (select last_value from pg_temp.proof_failure_probe)<>before_entries+1
+   or pg_temp.proof_calls()<>before_reads+1 or answer->>'sqlstate'<>'00000'
+  then raise exception 'proof metadata error did not fall back to one fresh reader';end if;
+  original:=pg_temp.proof_capture(false);
+  if answer::text is distinct from original::text then raise exception 'metadata failure changed original result';end if;
+  evidence:=jsonb_build_object('proofErrorReached',true,'freshReaderCalls',1,'exactReturnedTextAndErrorEqual',true);
   raise exception using errcode='ZP001';
  exception when sqlstate 'ZP001' then null;end;
- perform pg_temp.proof_check('gateway retains assertions and deferred validation',true,evidence);
-end $gateway$;
-revoke all on function pg_temp.proof_gateway_integration() from public;
-grant execute on function pg_temp.proof_gateway_integration() to authenticated;
-set local role authenticated;
-select pg_temp.proof_gateway_integration();
+ perform pg_temp.proof_check('proof metadata access failure uses original fresh validation',true,evidence);
+end $metadata_failure$;
+
+-- Direct role-level RPC invocation: no SECURITY DEFINER test wrapper grants
+-- the caller a privilege it would not have. The real gateway retains all three
+-- validations, both assertions, and the deferred finalizer.
+create temp table proof_gateway_before as select pg_temp.proof_calls() reader_calls,
+ (select coalesce(sum(calls),0) from pg_stat_xact_user_functions where funcid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure) validator_calls,
+ (select coalesce(sum(calls),0) from pg_stat_xact_user_functions where funcid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure) assertion_calls;
+select set_config('test.proof_gateway_patch',jsonb_build_object('name',name,'class_type',class_type,'subject',subject,'subject_area_key',subject_area_key,
+ 'grade',grade,'teacher',teacher,'room',room,'schedule',schedule,'capacity',capacity,'fee',fee,
+ 'status','종강','textbook_ids',textbook_ids,'textbook_usage',textbook_usage)::text,true)
+from public.classes where id=pg_temp.proof_id(1);
+set local role anon;
+select throws_ok($$select public.update_class_operational_v1('fe101234-0000-4000-8000-000000000001',current_setting('test.proof_gateway_patch')::jsonb,'fe101234-0000-4000-8000-000000000801',null)$$,
+ '42501','permission denied for function update_class_operational_v1','anonymous role cannot call closing gateway directly');
 reset role;
+set local role authenticated;
+select set_config('test.proof_gateway_result',public.update_class_operational_v1(
+ 'fe101234-0000-4000-8000-000000000001',current_setting('test.proof_gateway_patch')::jsonb,
+ 'fe101234-0000-4000-8000-000000000801',null)::text,true);
+set constraints all immediate;
+reset role;
+do $gateway$
+declare evidence jsonb;answer jsonb:=current_setting('test.proof_gateway_result')::jsonb;
+begin
+ select jsonb_build_object('reads',pg_temp.proof_calls()-b.reader_calls,
+  'validations',(select coalesce(sum(calls),0)-b.validator_calls from pg_stat_xact_user_functions where funcid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),
+  'assertions',(select coalesce(sum(calls),0)-b.assertion_calls from pg_stat_xact_user_functions where funcid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure),
+  'status',answer#>>'{classRow,status}','receiptStatus',answer#>>'{closeResult,status}',
+  'proofs',(select count(*) from dashboard_private.timetable_validation_reuse_proofs where transaction_id=txid_current()))
+ into evidence from pg_temp.proof_gateway_before b;
+ if evidence is distinct from '{"reads":2,"validations":3,"assertions":2,"status":"종강","receiptStatus":"종강","proofs":0}'::jsonb
+ then raise exception 'direct authenticated gateway boundary mismatch: %',evidence;end if;
+ perform pg_temp.proof_check('direct authenticated gateway retains assertions and deferred validation',true,evidence);
+end $gateway$;
 
 select ok(passed,label) from pg_temp.proof_results order by label;
 select is(evidence->>'sqlstate',evidence->>'expectedState',label||': exact SQLSTATE') from pg_temp.proof_results where evidence ? 'expectedState' order by label;
