@@ -984,6 +984,11 @@
       "fileName": "20261110022947_legacy_adoption_pair_reuse.sql",
       "status": "final",
       "sha256": "cc7864eb84265b3c6d57fbdfba627ddc82dc06252331ac8c1ba601010c21101f"
+    },
+    {
+      "fileName": "20261110095800_makeup_legacy_snapshot_ownership.sql",
+      "status": "final",
+      "sha256": "faa9dbdc9f0e707b2b3bd9ce88156b70d664353f1f2233c35ddcc9d5d8fc13d3"
     }
   ]
 }

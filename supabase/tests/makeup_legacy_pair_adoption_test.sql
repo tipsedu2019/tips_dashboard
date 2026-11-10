@@ -145,6 +145,170 @@ select throws_ok($$select pg_temp.approve(202,jsonb_set(pg_temp.patch(),'{schedu
 select throws_ok($$select pg_temp.approve(203,jsonb_set(pg_temp.patch(),'{schedule_plan_after,sessions,1,makeupAdoption,requestUpdatedAt}','"2000-01-01T00:00:00+00:00"'))$$,'P0001','makeup_legacy_pair_stale','writer rejects stale request generation even with unchanged status');
 reset role;
 
+-- #249: a prior whole-class snapshot is not itself ownership of a later pair.
+savepoint unrelated_completed_snapshot;
+set local session_replication_role=replica;
+create temp table snapshot_history_fixture as
+select jsonb_build_object('sessions',jsonb_build_array(
+ ((pg_temp.plan()#>'{sessions,0}')-array['makeupDate','originalDate','originalSessionId'])||jsonb_build_object('state','active','scheduleState','active','progress',1),
+ jsonb_build_object('id','history-original','date','2050-09-20','state','active')),
+ 'sessionStates','{}'::jsonb,'sessionSchedules','{}'::jsonb) before_plan;
+insert into public.makeup_requests
+select (jsonb_populate_record(null::public.makeup_requests,to_jsonb(r)||jsonb_build_object(
+ 'id',pg_temp.sid(30),'status','completed','cancel_date','2050-09-20',
+ 'makeup_start_at','2050-09-23T09:00:00Z','makeup_end_at','2050-09-23T11:00:00Z',
+ 'makeup_slots',jsonb_build_array(jsonb_build_object('startAt','2050-09-23T09:00:00Z','endAt','2050-09-23T11:00:00Z','classroom','Synthetic requested room')),
+ 'approved_at','2050-09-01T00:00:00Z','approved_by',pg_temp.sid(801),
+ 'schedule_plan_before',f.before_plan,
+ 'schedule_plan_after',jsonb_set(jsonb_set(f.before_plan,'{sessions,1,state}','"exception"'),'{sessions}',
+ jsonb_build_array(f.before_plan#>'{sessions,0}',jsonb_build_object('id','history-original','date','2050-09-20','state','exception'),
+ jsonb_build_object('id','history-makeup','date','2050-09-23','state','makeup','originalDate','2050-09-20','originalSessionId','history-original')))))).*
+from public.makeup_requests r cross join snapshot_history_fixture f where r.id=pg_temp.sid(3);
+insert into public.makeup_request_events(request_id,event_type,actor_id) values(pg_temp.sid(30),'approved',pg_temp.sid(801));
+set local session_replication_role=origin;
+create function pg_temp.snapshot_competes() returns boolean language sql stable as $f$
+ select dashboard_private.makeup_legacy_pair_competing_v1(r,dashboard_private.makeup_legacy_pair_v1(pg_temp.plan(),to_jsonb(r)))
+ from public.makeup_requests r where r.id=pg_temp.sid(3)
+$f$;
+select ok(not pg_temp.snapshot_competes(),'unchanged ordinary row in unrelated completed snapshot is not pair ownership');
+select pg_temp.actor(801);set local role authenticated;
+select is(jsonb_array_length(public.get_makeup_reservation_context_v1(pg_temp.slots(),array[]::uuid[])->'legacyBindings'),1,'authenticated reader retains verified self binding despite unrelated whole snapshot');
+reset role;
+set local timezone='Asia/Seoul';
+select ok(not pg_temp.snapshot_competes(),'unrelated snapshot classification is correct in Seoul');
+set local timezone='UTC';
+select ok(not pg_temp.snapshot_competes(),'unrelated snapshot classification is correct in UTC');
+-- Keep every genuine or ambiguous claimant blocked. Fixture writes do not run
+-- production triggers; the real reader and writer checks below do.
+set local session_replication_role=replica;
+savepoint snapshot_variant;
+update public.makeup_requests set cancel_date='2050-10-20' where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'same cancellation keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set status='approval_pending' where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'pending history keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set status='revision_requested' where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'revision history keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set status='refund_pending' where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'refund history keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set approved_at=null where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'no approval timestamp keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set approved_by=null where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'no approver keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set original_lesson_session_id='ab101110-0000-4000-8000-000000000090' where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'normalized history keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_before=null where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'null before keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_before='{}'::jsonb where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'wrong before sessions keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set makeup_slots='{}'::jsonb where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'slot malformed keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set makeup_slots='[]'::jsonb where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'missing slot keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set makeup_start_at=makeup_start_at+interval '1 hour' where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'slot disagrees keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions,0,progress}','2') where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'original changed keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions,0,progress}','1.0') where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'numeric representation changed keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions}',(schedule_plan_after->'sessions')-0) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'original removed keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions}',(schedule_plan_after->'sessions')||jsonb_build_array(schedule_plan_after#>'{sessions,0}')) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'original duplicated keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions}',(schedule_plan_after->'sessions')||'[{"id":"alias","sessionKey":"legacy-original-alpha"}]'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'original alias added keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_before=jsonb_set(schedule_plan_before,'{sessions}',(schedule_plan_before->'sessions')||'[{"id":"legacy-makeup-alpha"}]'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'makeup identity present keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions}',(schedule_plan_after->'sessions')||'[{"id":"alias","sessionKey":"legacy-makeup-alpha"}]'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'makeup alias present keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions,2,originalSessionId}','"legacy-original-alpha"') where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'crosslink present keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessionStates}', '{"2050-10-20":{"state":"exception"}}') where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'date override changed keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessionSchedules}','null') where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'date map malformed keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions}',(schedule_plan_after->'sessions')||'[null]'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'invalid snapshot row keeps ownership conflict');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_before=jsonb_set(schedule_plan_before,'{sessions,0,state}','"exception"'::jsonb),schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions,0,state}','"exception"'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'unchanged claimed row state stays blocked');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_before=jsonb_set(schedule_plan_before,'{sessions,0,makeupRequestId}','"other"'::jsonb),schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions,0,makeupRequestId}','"other"'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'unchanged claimed row makeupRequestId stays blocked');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_before=jsonb_set(schedule_plan_before,'{sessions,0,makeupRequestRole}','"cancel"'::jsonb),schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions,0,makeupRequestRole}','"cancel"'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'unchanged claimed row makeupRequestRole stays blocked');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_before=jsonb_set(schedule_plan_before,'{sessions,0,makeupAdoption}','null'::jsonb),schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions,0,makeupAdoption}','null'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'unchanged claimed row makeupAdoption stays blocked');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+update public.makeup_requests set schedule_plan_before=jsonb_set(schedule_plan_before,'{sessions,0,originalDate}','"2050-09-20"'::jsonb),schedule_plan_after=jsonb_set(schedule_plan_after,'{sessions,0,originalDate}','"2050-09-20"'::jsonb) where id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'unchanged claimed row originalDate stays blocked');
+rollback to snapshot_variant;
+savepoint snapshot_variant;
+delete from public.makeup_request_events where request_id=pg_temp.sid(30);
+select ok(pg_temp.snapshot_competes(),'missing approval audit keeps historical ownership ambiguous');
+rollback to snapshot_variant;
+set local session_replication_role=origin;
+-- The actual approved transition must accept this case, keeping all ordinary
+-- source, authority, collision, audit, lock and idempotency validation.
+update dashboard_private.timetable_operating_write_baselines set reference=dashboard_private.read_timetable_operating_reference_v1() where transaction_id=txid_current();
+set constraints all immediate;set constraints all deferred;
+select pg_temp.actor(801,'service_role');set local role service_role;
+select lives_ok($$select pg_temp.approve(211)$$,'actual approval accepts verified pair with unrelated completed history');
+reset role;
+select is((select schedule_plan from public.classes where id=pg_temp.sid(4)),pg_temp.patch()->'schedule_plan_after','approval changes only exact requested pair delta');
+select is((select status from public.makeup_requests where id=pg_temp.sid(3)),'completed','actual approval reaches completed state');
+rollback to unrelated_completed_snapshot;
+
 savepoint competitor;
 insert into public.makeup_requests(id,status,request_kind,subject,approval_group,requester_id,class_id,class_name,teacher_catalog_id,teacher_profile_id,approver_teacher_catalog_id,approver_profile_id,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots)
 values(pg_temp.sid(30),'approval_pending','cancel_makeup','영어','english',pg_temp.sid(802),pg_temp.sid(4),'Synthetic legacy adoption',pg_temp.sid(1),pg_temp.sid(801),pg_temp.sid(1),pg_temp.sid(801),'2050-10-20','2050-10-07T00:00:00Z','2050-10-07T01:00:00Z','Synthetic requested room','[{"startAt":"2050-10-07T09:00:00+09:00","endAt":"2050-10-07T10:00:00+09:00","classroom":"Synthetic requested room"}]');
