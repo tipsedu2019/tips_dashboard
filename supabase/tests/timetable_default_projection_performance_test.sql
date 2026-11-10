@@ -424,7 +424,7 @@ select is((select provolatile::text from pg_proc where oid='dashboard_private.re
 -- The final reader includes close projection and the date-override native path;
 -- inheritance/freshness/security assertions must exercise that exact body.
 select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'sha256'),'hex'),
- 'c156891001660788d8ebdbf783eb841d3bd2f48f1a2087ee83cf9bfb4294d7aa',
+ '352ca0b0cba6c1ce8783eed7a176d752729da4a8813351549e822abf77ab5f6e',
  'assertions execute the exact final inheritance reader body');
 select ok((select prosecdef from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'reader remains SECURITY DEFINER');
 select ok((select proconfig @> array['search_path=""'] from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),

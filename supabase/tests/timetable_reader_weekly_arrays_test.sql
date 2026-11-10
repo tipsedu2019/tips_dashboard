@@ -254,7 +254,11 @@ begin begin
 create function pg_temp.wa_equivalent(mutation text,expected_state text default '00000') returns boolean language plpgsql as $$
 declare a jsonb;b jsonb;
 begin begin
- if mutation<>'' then perform set_config('session_replication_role','replica',true);execute mutation;perform set_config('session_replication_role','origin',true);end if;
+ if mutation<>'' then
+  set local session_replication_role=replica;
+  execute mutation;
+  set local session_replication_role=origin;
+ end if;
  a:=pg_temp.wa_capture(true);b:=pg_temp.wa_capture(false);
  if a::text is distinct from b::text or a->>'state' is distinct from expected_state then raise exception 'reader difference % %',a->>'state',b->>'state';end if;
  raise exception using errcode='ZW002';exception when sqlstate 'ZW002' then return true;end;end $$;
