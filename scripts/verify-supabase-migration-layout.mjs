@@ -144,6 +144,7 @@ const PR_ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/timetable_date_override_native_reader_test.sql",
   "supabase/tests/legacy_context_adoption_reuse_test.sql",
   "supabase/tests/legacy_adoption_pair_reuse_test.sql",
+  "supabase/tests/timetable_close_validation_proof_test.sql",
 ])
 const ISOLATED_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
@@ -209,7 +210,7 @@ const AI_STATIC_TESTS = Object.freeze([
 // step reordering cannot expand the isolated CI execution boundary.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c95097088cd7ed9337f9993f07707dc752ff70a56cc84dc5f040bde73126f49a"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "a04f23493fbf9051b8f7f40a00a328a50221ed5f76d1e13759df7471abe2fdb2"
+  "a52e8cbc1ef3e7b3fc4c721f86fbeb01d5aac8c9f8427541e92cf04c2d67a0ff"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
