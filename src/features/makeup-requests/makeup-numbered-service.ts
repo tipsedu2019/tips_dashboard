@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase"
 import { validatePageSize, type DataTablePageSize, type NumberedPage } from "@/lib/numbered-pagination"
 import { normalizeMakeupSlots, type MakeupEffectiveSchedule } from "./makeup-request-model.js"
 import { readMakeupEffectiveSchedule } from "./makeup-effective-occupancy"
+import { isLegacyMakeupBinding, type MakeupLegacyBinding } from "./makeup-legacy-pair.js"
 import type { MakeupRequest, MakeupSlotInput } from "./makeup-request-service"
 
 export const MAKEUP_NUMBERED_COLUMNS = ["status", "className", "subject", "teacher", "requester", "reason", "cancelDate", "makeupAt", "makeupRoom", "approver", "submittedAt", "revisionRequestedAt", "approvedAt", "rejectedAt", "canceledAt", "returnedReason", "rejectedReason", "finalNote", "canceledNote"] as const
@@ -28,7 +29,7 @@ export type MakeupNumberedPage = NumberedPage<MakeupRequest> & {
   subjectOptions: MakeupFilterOption[]; teacherOptions: MakeupFilterOption[]
 }
 export type MakeupReservation = Pick<MakeupRequest, "id" | "status" | "className" | "makeupStartAt" | "makeupEndAt" | "makeupClassroom" | "makeupSlots">
-export type MakeupReservationContext = { reservations: MakeupReservation[]; activeEventRequestIds: string[]; effectiveSchedule?: MakeupEffectiveSchedule | null }
+export type MakeupReservationContext = { reservations: MakeupReservation[]; activeEventRequestIds: string[]; effectiveSchedule?: MakeupEffectiveSchedule | null; legacyBindings?: MakeupLegacyBinding[] }
 
 const views = ["mine", "approvalPending", "makeupPending", "refundPending", "closed"]
 const statuses = ["approval_pending", "revision_requested", "rejected", "manager_pending", "makeup_pending", "refund_pending", "completed", "canceled"]
@@ -119,23 +120,28 @@ export async function readMakeupDetail({ id, signal }: { id: string; signal?: Ab
   if (!isRequest(data) || data.id.toLowerCase() !== id.toLowerCase()) throw invalid("makeup_detail_response_invalid")
   return normalizeWireSlots(data)
 }
-export async function readMakeupReservationContext({ slots, eventRequestIds, signal }: { slots: MakeupSlotInput[]; eventRequestIds: string[]; signal?: AbortSignal }): Promise<MakeupReservationContext> {
+export async function readMakeupReservationContext({ slots, eventRequestIds, requestIds = [], signal }: { slots: MakeupSlotInput[]; eventRequestIds: string[]; requestIds?: string[]; signal?: AbortSignal }): Promise<MakeupReservationContext> {
   if (!Array.isArray(slots) || !slots.every((slot) => object(slot) && typeof slot.startAt === "string" && typeof slot.endAt === "string" && Number.isFinite(Date.parse(slot.startAt)) && Date.parse(slot.startAt) < Date.parse(slot.endAt))
-    || !Array.isArray(eventRequestIds) || !eventRequestIds.every(uuid)) throw invalid("makeup_reservation_request_invalid")
+    || !Array.isArray(eventRequestIds) || !eventRequestIds.every(uuid)
+    || !Array.isArray(requestIds) || requestIds.length > 256 || !requestIds.every(uuid) || !uniqueIds(requestIds)) throw invalid("makeup_reservation_request_invalid")
   if (!supabase) throw invalid("makeup_client_missing")
   signal?.throwIfAborted()
   const deadline = AbortSignal.timeout(8_000)
   const combined = signal ? AbortSignal.any([signal, deadline]) : deadline
-  const { data, error } = await supabase.rpc("get_makeup_reservation_context_v1", { p_slots: slots.map(({ startAt, endAt }) => ({ startAt: new Date(startAt!).toISOString(), endAt: new Date(endAt!).toISOString() })), p_event_request_ids: eventRequestIds }).abortSignal(combined).retry(false)
+  const { data, error } = await supabase.rpc("get_makeup_reservation_context_v1", { p_slots: slots.map(({ startAt, endAt }, index) => ({ startAt: new Date(startAt!).toISOString(), endAt: new Date(endAt!).toISOString(), ...(index === 0 && requestIds.length ? { requestIds } : {}) })), p_event_request_ids: eventRequestIds }).abortSignal(combined).retry(false)
   combined.throwIfAborted(); assertResult(error)
   if (!object(data) || !Array.isArray(data.reservations) || !data.reservations.every((row) => object(row) && isRawSlotsEnvelope(row) && uuid(row.id) && ["approval_pending", "manager_pending", "makeup_pending", "completed"].includes(String(row.status))
     && ["className", "makeupStartAt", "makeupEndAt", "makeupClassroom"].every((key) => typeof row[key] === "string") && Array.isArray(row.makeupSlots) && row.makeupSlots.every(isSlot))
     || !Array.isArray(data.activeEventRequestIds) || !data.activeEventRequestIds.every((id) => uuid(id) && eventRequestIds.some((requested) => requested.toLowerCase() === id.toLowerCase()))
     || !uniqueIds(data.activeEventRequestIds)
     || !uniqueIds(data.reservations.map((row) => row.id))) throw invalid("makeup_reservation_response_invalid")
+  const legacyBindings = data.legacyBindings ?? []
+  if (!Array.isArray(legacyBindings) || !legacyBindings.every(isLegacyMakeupBinding)
+    || !legacyBindings.every(binding => requestIds.includes(binding.requestId))
+    || !uniqueIds(legacyBindings.map(binding => binding.requestId))) throw invalid("makeup_reservation_response_invalid")
   const effectiveSchedule = await readMakeupEffectiveSchedule({ slots, signal: combined,
     readBatch: (batch) => supabase!.rpc("get_makeup_effective_occupancy_v1", { p_slots: batch }).abortSignal(combined).retry(false),
   })
   return { reservations: (data.reservations as MakeupReservation[]).map(normalizeWireSlots), activeEventRequestIds: data.activeEventRequestIds,
-    effectiveSchedule }
+    effectiveSchedule, legacyBindings }
 }

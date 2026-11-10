@@ -258,6 +258,10 @@ insert into batch_cases(n,label,sessions) values
 -- it is confined to this rolled-back test and absent from all timing evidence.
 create sequence pg_temp.native_input_calls;
 create sequence pg_temp.native_resolver_calls;
+-- These four unique-date explicit rows now use the approved date-override
+-- native path. Track them separately so all remaining fallback counts stay exact.
+create sequence pg_temp.date_override_input_calls;
+create sequence pg_temp.date_override_resolver_calls;
 create sequence pg_temp.generic_input_calls;
 create sequence pg_temp.generic_resolver_calls;
 create sequence pg_temp.approval_input_calls;
@@ -270,24 +274,31 @@ create or replace function dashboard_private.legacy_effective_input_v1(p_plan js
 returns jsonb language plpgsql immutable security invoker set search_path='' as $p$
 begin
  if p_session->>'id'='makeup-request:eb130000-0000-4000-8000-000000910040:0' then perform nextval('pg_temp.approval_input_calls');end if;
- if p_session->'_nativeProbe'='true'::jsonb then perform nextval('pg_temp.native_input_calls');else perform nextval('pg_temp.generic_input_calls');end if;
+ if p_session->'_nativeProbe'='true'::jsonb then perform nextval('pg_temp.native_input_calls');
+ elsif p_session->>'id'=any(array['empty-map','full-map','partial-map','clear-map']) then perform nextval('pg_temp.date_override_input_calls');
+ else perform nextval('pg_temp.generic_input_calls');end if;
  return pg_temp.original_batch_input(p_plan,p_session,p_context,p_identity_count,p_date_count);
 end $p$;
 create or replace function dashboard_private.resolve_legacy_effective_schedule_v1(p jsonb)
 returns jsonb language plpgsql immutable security invoker set search_path='' as $p$
 begin
  if p#>>'{session,id}'='makeup-request:eb130000-0000-4000-8000-000000910040:0' then perform nextval('pg_temp.approval_resolver_calls');end if;
- if p#>'{session,_nativeProbe}'='true'::jsonb then perform nextval('pg_temp.native_resolver_calls');else perform nextval('pg_temp.generic_resolver_calls');end if;
+ if p#>'{session,_nativeProbe}'='true'::jsonb then perform nextval('pg_temp.native_resolver_calls');
+ elsif p#>>'{session,id}'=any(array['empty-map','full-map','partial-map','clear-map']) then perform nextval('pg_temp.date_override_resolver_calls');
+ else perform nextval('pg_temp.generic_resolver_calls');end if;
  return pg_temp.original_batch_resolver(p);
 end $p$;
 create function pg_temp.reset_probes() returns void language plpgsql as $p$begin
  perform setval('pg_temp.native_input_calls',1,false);perform setval('pg_temp.native_resolver_calls',1,false);
+ perform setval('pg_temp.date_override_input_calls',1,false);perform setval('pg_temp.date_override_resolver_calls',1,false);
  perform setval('pg_temp.generic_input_calls',1,false);perform setval('pg_temp.generic_resolver_calls',1,false);
  perform setval('pg_temp.approval_input_calls',1,false);perform setval('pg_temp.approval_resolver_calls',1,false);
 end $p$;
 create function pg_temp.probes() returns jsonb language sql as $p$
 select jsonb_build_object('nativeInput',(select case when is_called then last_value else 0 end from pg_temp.native_input_calls),
  'nativeResolver',(select case when is_called then last_value else 0 end from pg_temp.native_resolver_calls),
+ 'dateOverrideInput',(select case when is_called then last_value else 0 end from pg_temp.date_override_input_calls),
+ 'dateOverrideResolver',(select case when is_called then last_value else 0 end from pg_temp.date_override_resolver_calls),
  'genericInput',(select case when is_called then last_value else 0 end from pg_temp.generic_input_calls),
  'genericResolver',(select case when is_called then last_value else 0 end from pg_temp.generic_resolver_calls),
  'approvalInput',(select case when is_called then last_value else 0 end from pg_temp.approval_input_calls),
@@ -832,6 +843,8 @@ alter table control_probe add column calls jsonb;
 update control_probe set calls=pg_temp.probes();
 select ok((calls->>'nativeInput')::int>10,'frozen baseline really invokes input helper for ordinary explicit cohort') from control_probe;
 select ok((calls->>'nativeResolver')::int>10,'frozen baseline really resolves ordinary explicit cohort') from control_probe;
+select is((calls->>'dateOverrideInput')::int,4,'frozen baseline invokes input for all four eligible date-override rows') from control_probe;
+select is((calls->>'dateOverrideResolver')::int,4,'frozen baseline resolves all four eligible date-override rows') from control_probe;
 select pg_temp.reset_probes();
 create temp table native_probe as select dashboard_private.read_timetable_operating_reference_v1() reference;
 alter table native_probe add column calls jsonb;
@@ -839,6 +852,8 @@ update native_probe set calls=pg_temp.probes();
 select is((select reference from native_probe),(select reference from control_probe),'instrumented reader remains exact whole-reference parity');
 select is((select (calls->>'nativeInput')::int from native_probe),0,'native ordinary rows bypass actual generic input helper');
 select is((select (calls->>'nativeResolver')::int from native_probe),0,'native ordinary rows bypass actual generic resolver');
+select is((select (calls->>'dateOverrideInput')::int from native_probe),0,'eligible date overrides bypass actual generic input helper');
+select is((select (calls->>'dateOverrideResolver')::int from native_probe),0,'eligible date overrides bypass actual generic resolver');
 select is((select calls->'genericInput' from native_probe),(select calls->'genericInput' from control_probe),'every generic fallback still invokes original input path');
 select is((select calls->'genericResolver' from native_probe),(select calls->'genericResolver' from control_probe),'every generic fallback still invokes original resolver path');
 

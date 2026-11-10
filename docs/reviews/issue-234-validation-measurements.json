@@ -1,0 +1,173 @@
+{
+  "measure-validator.log": {
+    "mode": "isolated exact validator with synthetic JSON reader (not full schema/writer)",
+    "server": "PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+    "classes": 84,
+    "measurements": [
+      {
+        "hash": "14a9b0b1bbbd717e9ea74b4388291d75",
+        "label": "control",
+        "elapsed_ms": 918.25
+      },
+      {
+        "hash": "14a9b0b1bbbd717e9ea74b4388291d75",
+        "label": "candidate",
+        "elapsed_ms": 1331.249
+      }
+    ],
+    "new_sessions": 10686,
+    "old_sessions": 10752,
+    "expected_hash": "14a9b0b1bbbd717e9ea74b4388291d75"
+  },
+  "measure-validator-scale.log": {
+    "mode": "isolated exact validator with synthetic JSON reader (not full schema/writer)",
+    "server": "PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+    "classes": 336,
+    "measurements": [
+      {
+        "hash": "3768c45433f1f211d661f141575ff626",
+        "label": "candidate",
+        "elapsed_ms": 5736.052
+      },
+      {
+        "hash": "3768c45433f1f211d661f141575ff626",
+        "label": "control",
+        "elapsed_ms": 3736.203
+      }
+    ],
+    "new_sessions": 42942,
+    "old_sessions": 43008,
+    "expected_hash": "3768c45433f1f211d661f141575ff626"
+  },
+  "measure-combined.log": {
+    "mode": "exact reader+validator with minimal synthetic schema (no auth/writer/triggers)",
+    "classes": 84,
+    "measurements": [
+      {
+        "hash": "b0ad69734e5e995b5bcc66bdee1d2542",
+        "label": "baseline_reader",
+        "elapsed_ms": 762.353
+      },
+      {
+        "hash": "fb29224ef79514e48b43755095902a97",
+        "label": "control_validator_including_reader",
+        "elapsed_ms": 2196.013
+      },
+      {
+        "hash": "fb29224ef79514e48b43755095902a97",
+        "label": "per_date_validator_including_reader",
+        "elapsed_ms": 2197.694
+      }
+    ],
+    "source_sessions": 10752
+  },
+  "measure-combined-history.log": {
+    "mode": "exact reader+validator with minimal synthetic schema (no auth/writer/triggers)",
+    "classes": 84,
+    "distribution": "120 historical dates /8 current-future dates",
+    "measurements": [
+      {
+        "hash": "49e0a8c527803ef3a1181cb606df00bf",
+        "label": "baseline_reader",
+        "elapsed_ms": 794.898
+      },
+      {
+        "hash": "207970738338d91ca0cb055616e70e5a",
+        "label": "control_validator_including_reader",
+        "elapsed_ms": 2138.116
+      },
+      {
+        "hash": "207970738338d91ca0cb055616e70e5a",
+        "label": "per_date_validator_including_reader",
+        "elapsed_ms": 1972.447
+      }
+    ],
+    "source_sessions": 10752
+  },
+  "measure-actual-reader.log": {
+    "mode": "exact full reader/helper functions on minimal synthetic schema; no writer/auth/deferred triggers",
+    "classes": 84,
+    "measurements": [
+      {
+        "hash": "b0ad69734e5e995b5bcc66bdee1d2542",
+        "bytes": 6247593,
+        "label": "before_close",
+        "blockers": 0,
+        "dated_rows": 10752,
+        "elapsed_ms": 851.681
+      },
+      {
+        "hash": "fb29224ef79514e48b43755095902a97",
+        "bytes": 6208996,
+        "label": "after_synthetic_close",
+        "blockers": 0,
+        "dated_rows": 10686,
+        "elapsed_ms": 901.097
+      }
+    ],
+    "function_stats": [
+      {
+        "calls": 2,
+        "funcname": "read_timetable_operating_reference_v1",
+        "self_time": 1145.973513,
+        "total_time": 1580.714706
+      },
+      {
+        "calls": 2,
+        "funcname": "project_class_close_occupancy_v1",
+        "self_time": 190.345127,
+        "total_time": 191.298234
+      },
+      {
+        "calls": 168,
+        "funcname": "legacy_effective_context_v1",
+        "self_time": 60.508667,
+        "total_time": 124.890485
+      },
+      {
+        "calls": 335,
+        "funcname": "read_timetable_class_weekly_v2",
+        "self_time": 122.985653,
+        "total_time": 122.985653
+      },
+      {
+        "calls": 2,
+        "funcname": "read_timetable_weekly_reference_v1",
+        "self_time": 59.178666,
+        "total_time": 118.552474
+      },
+      {
+        "calls": 336,
+        "funcname": "academic_class_status_v1",
+        "self_time": 1.72308,
+        "total_time": 1.72308
+      },
+      {
+        "calls": 1,
+        "funcname": "pid",
+        "self_time": 0.068453,
+        "total_time": 0.068453
+      }
+    ],
+    "legacy_source_sessions": 10752
+  },
+  "scope": "Synthetic isolated PostgreSQL 17.11; not production, not full writer/auth/RLS/migration-chain verification. Single paired observations, not benchmark distributions.",
+  "source_base": "28c66fc1938dd50a9c397cc794a697a00fa9a9ed",
+  "selected_function_sha256": "f1897a199abbb9355b2633acf7cae78a5cdc463876489de410d75625d42bc52e",
+  "selected_migration_sha256": "e45ca46ee41fafd1cedce8c6bef74c1c14133f2f2534deb9a49e99ab2970d4e4",
+  "selected_source_note": "Historical-heavy measurement uses final selected function. Earlier mixed combined measurement uses equivalent per-date body before retaining the existing whole-array-equal fast case; it is not a final-source performance claim.",
+  "cancellation": [
+    {
+      "method": "statement_timeout=8s, 107520 synthetic rows",
+      "sqlstate": "57014",
+      "message": "canceling statement due to statement timeout",
+      "marker_rolled_back": true
+    },
+    {
+      "method": "cancel task-owned backend after 8s, statement_timeout=0",
+      "sqlstate": "57014",
+      "message": "canceling statement due to user request",
+      "marker_rolled_back": true
+    }
+  ]
+}

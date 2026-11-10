@@ -10,6 +10,7 @@ import {
   parseDateValue,
 } from "../../lib/class-schedule-planner.js";
 import { resolveAcademicDirector } from "../../lib/academic-director-assignment.js";
+import { matchingLegacyMakeupBinding, excludesLegacyMakeupOccupancy } from './makeup-legacy-pair.js';
 
 export const MAKEUP_REQUEST_STATUSES = [
   "approval_pending",
@@ -710,6 +711,8 @@ export function buildRoomAvailability({
   ignoreOrphanedMakeupEvents = false,
   activeEventRequestIds,
   effectiveSchedule,
+  legacyBindings,
+  currentRequest,
 } = {}) {
   const selectedSubject = text(subject);
   const roomNames = buildRoomOptions(classrooms, classes, { subject: selectedSubject });
@@ -723,9 +726,11 @@ export function buildRoomAvailability({
   for (const slot of targetSlots) {
     addRoomName(roomNames, slot.classroom);
   }
+  const legacyBinding = text(currentRequest?.id) === text(currentRequestId)
+    ? matchingLegacyMakeupBinding(currentRequest, targetSlots, legacyBindings) : null;
   const collisions = [
     ...(effectiveSchedule?.version === 1
-      ? buildEffectiveClassCollisions(effectiveSchedule, targetSlots, roomNames)
+      ? buildEffectiveClassCollisions({ ...effectiveSchedule, occupancies: effectiveSchedule.occupancies.filter(row => !excludesLegacyMakeupOccupancy(legacyBinding, row)) }, targetSlots, roomNames)
       : buildRegularClassCollisions(classes, targetSlots)),
     ...buildMakeupRequestCollisions(requests, targetSlots, currentRequestId),
     ...buildAcademicEventCollisions(academicEvents, targetSlots, currentRequestId, activeRequestIds),

@@ -161,6 +161,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git rev-parse HEAD HEAD^{tree}
           TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs \
             --review-head --lint --require-final --execute --authorized \
             --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
@@ -214,6 +215,8 @@ jobs:
             --test supabase/tests/performance_catalog_taxonomy_test.sql \
             --test supabase/tests/makeup_approval_collision_candidates_test.sql \
             --test supabase/tests/makeup_legacy_approval_occupancy_test.sql \
+            --test supabase/tests/makeup_legacy_pair_adoption_test.sql \
+            --probe tests/probe-makeup-legacy-adoption-concurrency.mjs \
             --test supabase/tests/makeup_numbered_pages_test.sql \
             --test supabase/tests/makeup_numbered_optional_keys_test.sql \
             --probe tests/probe-makeup-approval-collision-dto.mjs \
@@ -291,6 +294,10 @@ jobs:
             --test supabase/tests/agent_personal_dashboard_read_test.sql \
             --test supabase/tests/ai_agent_thread_replies_test.sql \
             --test supabase/tests/ai_agent_nonexpiring_chat_test.sql \
+            --test supabase/tests/dashboard_audit_predecessor_lookup_test.sql \
+            --test supabase/tests/timetable_date_override_native_reader_test.sql \
+            --test supabase/tests/legacy_context_adoption_reuse_test.sql \
+            --test supabase/tests/legacy_adoption_pair_reuse_test.sql \
             --probe tests/probe-ai-agent-auth-concurrency.mjs \
             --probe tests/probe-ai-agent-claim-concurrency.mjs \
             --probe tests/probe-ai-agent-space-policy-concurrency.mjs \

@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "scope": "Whole original audit trigger and reviewed candidate migration in minimal synthetic PostgreSQL17 schema. Not full Supabase migration chain, production auth/RLS, operating writer, or operating data validation.",
+  "source": {
+    "path": "supabase/migrations/20260814115116_dashboard_audit_diff_format.sql",
+    "sha256": "8fcd458950cee39866dc6be500628f79f4a9ad7a2ae45f54eefe683f79f0871d"
+  },
+  "migration": {
+    "path": "supabase/migrations/20261105073151_dashboard_audit_predecessor_index_lookup.sql",
+    "sha256": "a1122689f58791337fbc5319d1e5b192bfd640dd96af9367f46924d517ebf069"
+  },
+  "fixture": {
+    "path": "scripts/fixtures/issue-234-audit-trigger.sql",
+    "sha256": "ff198ffdb886c862146c7fe676cf0576560aedf3e4672dace44979da94348684"
+  },
+  "runner": {
+    "path": "scripts/verify-issue-234-audit-trigger.mjs",
+    "sha256": "65de67205f9b3b7fb10fe87a3f752792b63a3121f37b0a2063ddb507e3c9b413"
+  },
+  "isolation": {
+    "image": "postgres:17-alpine",
+    "pull": "never",
+    "network": "none",
+    "publishedPorts": [],
+    "hostBinds": [],
+    "resourceScope": "unique task-owned disposable container",
+    "cpus": 2,
+    "memoryMiB": 768,
+    "cleanedUp": true
+  },
+  "syntheticBoundaries": [
+    "small source tables with nullable text IDs; no production FKs/business triggers",
+    "synthetic current_dashboard_role helper, not production authentication",
+    "real original migration writer role/owner/RLS/sequence/index/function/trigger DDL",
+    "no Supabase API/bootstrap/notification/provider connection"
+  ],
+  "imageId": "sha256:ab20e934b27ba3ff927c1b4c9ff8cf6c32f315f743efe68dd3441182a87fb085",
+  "server": {
+    "version": "PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+    "server_version_num": "170011"
+  },
+  "originalConcurrency": {
+    "sameRow": {
+      "rowWait": {
+        "wait": "transactionid",
+        "waitType": "Lock",
+        "blockedByExpected": true
+      },
+      "chain": {
+        "chains": 1,
+        "events": 4,
+        "linked": true,
+        "ordinals": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sequences": [
+          1,
+          2,
+          3,
+          5
+        ],
+        "finalValue": "3"
+      }
+    },
+    "sameEntityDifferentRows": {
+      "advisoryWait": {
+        "wait": "advisory",
+        "waitType": "Lock",
+        "blockedByExpected": true
+      },
+      "rejectedSqlstate": "55000",
+      "atomic": {
+        "events": 1,
+        "newRows": 1,
+        "oldRows": 1
+      }
+    }
+  },
+  "adoption": {
+    "originalBodyMd5": "f7951cd0fc505c7f70adff982d8a5684",
+    "candidateBodyMd5": "1a0d2be77da0876869cfa21505419988",
+    "oidPreserved": true,
+    "allNonbodyPgProcMetadataPreserved": true,
+    "ownerAclSecurityDefinerSearchPathPreserved": true,
+    "indexPoliciesSequenceRelationAndTriggerDefinitionsPreserved": true,
+    "owner": "dashboard_audit_writer_v2"
+  },
+  "wholeTrigger": {
+    "assertionsPerVersion": 26,
+    "normalizedEventsPerVersion": 17,
+    "assertions": [
+      "DELETE keeps full preimage and chain",
+      "INSERT after DELETE starts a new chain",
+      "INSERT records first full chain",
+      "NULL and empty IDs keep distinct predecessor chains",
+      "UPDATE patch, hashes, predecessor and ordinal",
+      "actor and request context retained",
+      "all recorded predecessor edges preserve hash chain and ordinal",
+      "anon cannot write fixture business rows",
+      "authenticated cannot advance audit sequence",
+      "authenticated cannot insert audit directly",
+      "caller lacks direct audit mutation and sequence and trigger privileges",
+      "full_v1 is excluded from predecessor lookup",
+      "hash mismatch rejects with SQLSTATE 55000",
+      "invalid audit context stays SQLSTATE 22023",
+      "invalid context does not allocate event sequence",
+      "malformed actor preserves original fallback",
+      "next successful event keeps contiguous ordinal across sequence gap",
+      "no predecessor DELETE preserves FOUND=false boundary",
+      "no predecessor UPDATE preserves FOUND=false boundary",
+      "no-op UPDATE is audited",
+      "nonexistent source UPDATE and DELETE produce no audit event",
+      "prior DELETE cannot be silently continued",
+      "rejected hash write is atomic",
+      "rollback removes business and audit rows but keeps sequence gap",
+      "synthetic caller policy denies viewer insert",
+      "writer has actual restricted role and audit RLS"
+    ],
+    "normalizedTracesIdentical": true,
+    "traceSha256": "ace4ba21e143a8dfd8379f2591d1a43878a81d0adb3481da6b81bfba7b0b76a6",
+    "finalSequencePerVersion": 19
+  },
+  "candidateConcurrency": {
+    "sameRow": {
+      "rowWait": {
+        "wait": "transactionid",
+        "waitType": "Lock",
+        "blockedByExpected": true
+      },
+      "chain": {
+        "chains": 1,
+        "events": 4,
+        "linked": true,
+        "ordinals": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sequences": [
+          1,
+          2,
+          3,
+          5
+        ],
+        "finalValue": "3"
+      }
+    },
+    "sameEntityDifferentRows": {
+      "advisoryWait": {
+        "wait": "advisory",
+        "waitType": "Lock",
+        "blockedByExpected": true
+      },
+      "rejectedSqlstate": "55000",
+      "atomic": {
+        "events": 1,
+        "newRows": 1,
+        "oldRows": 1
+      }
+    }
+  },
+  "rejections": [
+    {
+      "label": "exact reapply",
+      "sqlstate": "55000",
+      "atomic": true
+    },
+    {
+      "label": "different predecessor anchor",
+      "sqlstate": "55000",
+      "atomic": true
+    },
+    {
+      "label": "unrelated body drift",
+      "sqlstate": "55000",
+      "atomic": true
+    },
+    {
+      "label": "missing exact function signature",
+      "sqlstate": "55000",
+      "atomic": true
+    }
+  ],
+  "result": "PASS"
+}
