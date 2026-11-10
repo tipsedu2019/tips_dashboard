@@ -1163,10 +1163,10 @@ begin
  insert into dashboard_private.timetable_operating_write_baselines(transaction_id,reference)
  values(txid_current(),dashboard_private.read_timetable_operating_reference_v1());
  -- Isolate proof equivalence from the gateway integration case below.
- perform set_config('session_replication_role','replica',true);
+ set local session_replication_role=replica;
  update public.classes set status='종강',closed_at=transaction_timestamp(),closed_by=pg_temp.proof_id(901)
  where id=pg_temp.proof_id(1);
- perform set_config('session_replication_role','origin',true);
+ set local session_replication_role=origin;
  answer:=pg_temp.proof_capture(true);
  if answer->>'sqlstate'<>'00000'
  or not exists(select 1 from dashboard_private.timetable_validation_reuse_proofs where transaction_id=txid_current())
@@ -1178,9 +1178,9 @@ declare candidate jsonb;original jsonb;calls_before bigint;hit boolean;answer js
 begin
  begin
   perform pg_temp.proof_prime();
-  perform set_config('session_replication_role','replica',true);
+  set local session_replication_role=replica;
   if p_mutation<>'' then execute p_mutation;end if;
-  perform set_config('session_replication_role','origin',true);
+  set local session_replication_role=origin;
   calls_before:=pg_temp.proof_calls();candidate:=pg_temp.proof_capture(true);
   hit:=candidate->>'sqlstate'='00000' and calls_before=pg_temp.proof_calls();
   original:=pg_temp.proof_capture(false);

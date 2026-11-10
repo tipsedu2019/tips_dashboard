@@ -75,6 +75,11 @@ revoke it before comparison, and roll back completely. A focused PostgreSQL 17
 fixture with a nonsuperuser database owner verified the `55000` installation
 rejection, unchanged `42501` fallback, and historical oracle provenance. Product
 migration and recovery bytes did not change for this test correction.
+The subsequent CI reached all existing schema tests successfully, then rejected
+the new fixture's function-form `set_config` for `session_replication_role`.
+Fixture preparation now uses the same transaction-local `SET LOCAL` command as
+the existing schema setup, returning to origin mode before validation. It does
+not grant a new parameter privilege or change product functions.
 
 The synthetic timing omitted student/enrollment release load, production
 contention and HTTP/browser cancellation. Makeup approval #249 uses a separate
