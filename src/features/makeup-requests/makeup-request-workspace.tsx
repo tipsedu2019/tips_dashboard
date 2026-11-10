@@ -626,10 +626,7 @@ function getMakeupRequestCardValue(request: MakeupRequest, columnKey: MakeupRequ
   return getMakeupRequestTableValue(request, columnKey)
 }
 
-export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
-  // Until the dated context is verified, raw weekly catalogs cannot prove a
-  // collision. Loading/error feedback and approval readiness stay separate.
-  if (workspaceData.collisionContextReady === false) return false
+function getMakeupRequestCollisionInputs(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
   let data = workspaceData
   const context = data.reservationContext
   const completedReservation = context?.reservations.find((item) => item.id === request.id && item.status === "completed")
@@ -653,10 +650,51 @@ export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceD
     })
     data = { ...data, reservationContext: { ...context, effectiveSchedule: { ...effectiveSchedule, occupancies } } }
   }
+  return { data, requestSlots }
+}
+
+export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
+  // Until the dated context is verified, raw weekly catalogs cannot prove a
+  // collision. Loading/error feedback and approval readiness stay separate.
+  if (workspaceData.collisionContextReady === false) return false
+  const { data, requestSlots } = getMakeupRequestCollisionInputs(request, workspaceData)
   return requestSlots.some((slot) => {
     const formSlot = toFormSlot({ ...slot, classroom: slot.classroom || request.makeupClassroom })
     return Boolean(getSlotRoomCollisionState(formSlot, data, request.id, request.subject, false, request)?.collisions.length)
   })
+}
+
+export function getMakeupRequestRoomCollisions(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
+  if (workspaceData.collisionContextReady === false) return []
+  const { data, requestSlots } = getMakeupRequestCollisionInputs(request, workspaceData)
+  return requestSlots.flatMap((slot) => {
+    const formSlot = toFormSlot({ ...slot, classroom: slot.classroom || request.makeupClassroom })
+    return getSlotRoomCollisionState(formSlot, data, request.id, request.subject, false, request)?.collisions || []
+  })
+}
+
+const MAKEUP_COLLISION_SOURCE_LABELS = {
+  regular_class: "수업 시간표",
+  makeup_request: "휴보강 신청",
+  academic_event: "학사 일정",
+} as const
+
+export function MakeupRequestRoomCollisionDetails({ request, data }: { request: MakeupRequest; data: MakeupRequestWorkspaceData }) {
+  const collisions = getMakeupRequestRoomCollisions(request, data)
+  if (collisions.length === 0) return null
+  return (
+    <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+      <p className="font-medium">보강 강의실 충돌 있음</p>
+      <ul aria-label="강의실 충돌 내역" className="mt-2 grid min-w-0 gap-2">
+        {collisions.map((collision, index) => (
+          <li key={`${collision.source}:${collision.id || ""}:${index}`} className="min-w-0 break-words">
+            <p>{MAKEUP_COLLISION_SOURCE_LABELS[collision.source]} · {collision.title || "이름 미확인"}</p>
+            <p>{collision.classroom} · {collision.detail || [collision.startLabel, collision.endLabel].filter(Boolean).join("–") || "시간 미확인"}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 function handleOpenKeyDown(event: ReactKeyboardEvent, onOpenDetail: () => void) {
@@ -819,11 +857,7 @@ function MakeupRequestDetailCard({
               {getStatusLabel(request.status)}
             </Badge>
           </div>
-          {hasRoomCollision ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              보강 강의실 충돌 있음
-            </div>
-          ) : null}
+          {hasRoomCollision ? <MakeupRequestRoomCollisionDetails request={request} data={data} /> : null}
           <dl className="grid gap-3 text-sm md:grid-cols-2">
             {!commonRead && <MakeupDetailInfo label="사유" value={request.reason || "-"} />}
             <MakeupDetailInfo label="휴강일" value={request.cancelDate || "-"} />
