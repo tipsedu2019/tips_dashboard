@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { act } from 'react';
+import { act, createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { modules, transport, servicePath, setup, button } from './helpers/makeup-numbered-harness.mjs';
 import { legacyId, legacyPairFixture } from './helpers/makeup-legacy-pair-fixture.mjs';
 
@@ -11,6 +12,46 @@ function context(f, patch = {}) {
   return { classrooms: [f.room], classes: [], requests: [], academicEvents: [], collisionContextReady: true,
     reservationContext: { reservations: [], activeEventRequestIds: [], effectiveSchedule: { version: 1, occupancies: [f.occupancy] }, legacyBindings: [f.binding], ...patch } };
 }
+
+for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue249 collision details preserve verified exclusions and show each source in ${timezone}`, t => {
+  const previous = process.env.TZ; process.env.TZ = timezone;
+  t.after(() => previous === undefined ? delete process.env.TZ : process.env.TZ = previous);
+  const f = legacyPairFixture();
+  const load = modules(null, { '@/providers/auth-provider': {} });
+  const { getMakeupRequestRoomCollisions: details, hasMakeupRequestRoomCollision: collision,
+    MakeupRequestRoomCollisionDetails: View } = load(workspacePath);
+  const { MAKEUP_CALENDAR_NOTE_MARKER } = load('src/features/makeup-requests/makeup-request-model.js');
+  const peer = { ...f.occupancy, id: 'synthetic-peer-occupancy', className: '<script>synthetic title</script> ' + '긴 수업명 '.repeat(16) };
+  const other = { ...f.entry, id: legacyId(91), className: '다른 합성 신청' };
+  const data = { ...context(f, { reservations: [other], activeEventRequestIds: [legacyId(92)],
+    effectiveSchedule: { version: 1, occupancies: [f.occupancy, peer] } }), academicEvents: [{
+      id: legacyId(93), title: '다른 합성 일정', note: MAKEUP_CALENDAR_NOTE_MARKER + JSON.stringify({
+        kind: 'makeup', requestId: legacyId(92), classroom: f.room.name, startAt: f.slot.startAt, endAt: f.slot.endAt,
+      }),
+    }] };
+  const rows = details(f.entry, data);
+  assert.deepEqual(rows.map(r => r.source), ['regular_class', 'makeup_request', 'academic_event']);
+  assert.equal(rows[0].id, peer.id, 'verified own pair is excluded but a different lesson of the same class remains');
+  assert.equal(rows[0].detail, '2050-10-06 19:30-21:30');
+  assert.equal(collision(f.entry, data), true);
+  const html = renderToStaticMarkup(createElement(View, { request: f.entry, data }));
+  for (const label of ['강의실 충돌 내역', '수업 시간표', '휴보강 신청', '학사 일정', f.room.name, '2050-10-06 19:30-21:30', '다른 합성 신청', '다른 합성 일정']) assert.ok(html.includes(label), label);
+  assert.ok(html.includes('&lt;script&gt;synthetic title&lt;/script&gt;'), 'titles are rendered as text');
+  assert.ok(!html.includes('<script>'));
+  for (const id of [peer.id, f.entry.id, legacyId(91), legacyId(92), legacyId(93)]) assert.ok(!html.includes(id), 'internal identifiers are not displayed');
+  const unverified = { ...data, collisionContextReady: false };
+  assert.deepEqual(details(f.entry, unverified), [], 'stale or pending context cannot publish collision details');
+  assert.equal(renderToStaticMarkup(createElement(View, { request: f.entry, data: unverified })), '');
+  const stale = { ...data, reservationContext: { ...data.reservationContext, legacyBindings: [{ ...f.binding, requestUpdatedAt: '2050-09-29T00:00:00+00:00' }] } };
+  assert.equal(details(f.entry, stale).length, 4, 'an outdated proof never hides the original occupancy');
+  const uncertain = context(f, { effectiveSchedule: { version: 1, occupancies: [{ ...peer, startMinute: null, endMinute: null, uncertain: true, allRooms: true }] } });
+  assert.match(details(f.entry, uncertain)[0].detail, /정보 미정/);
+  assert.equal(collision(f.entry, uncertain), true, 'unknown authoritative occupancy retains the approval guard');
+  const completed = { ...f.entry, status: 'completed' };
+  const canonical = { ...f.occupancy, id: `legacy-session:${f.entry.classId}:makeup-request:${f.entry.id}:0`, startMinute: 1080, endMinute: 1200 };
+  const completedData = context(f, { reservations: [completed], legacyBindings: [], effectiveSchedule: { version: 1, occupancies: [canonical] } });
+  assert.deepEqual(details(completed, completedData), [], 'completed canonical own-lesson exclusion matches the existing badge contract');
+});
 
 for (const timezone of ['UTC', 'Asia/Seoul']) test(`legacy pair consumer uses precise proof and requested Seoul interval in ${timezone}`, t => {
   const old = process.env.TZ; process.env.TZ = timezone;
@@ -92,6 +133,15 @@ for (const [label, other] of [['verified pair', false], ['other same-class lesso
   for (const region of [table, mobile, detail]) {
     assert.equal(region.textContent.includes('충돌 있음'), other);
     assert.match(region.textContent, /2050-10-06 18:00 - 2050-10-06 20:00/);
+  }
+  const collisionDetails = detail.querySelector('[aria-label="강의실 충돌 내역"]');
+  assert.equal(Boolean(collisionDetails), other, 'detail shows exactly the collision that still blocks approval');
+  if (other) {
+    assert.match(collisionDetails.textContent, /수업 시간표/);
+    assert.ok(collisionDetails.textContent.includes(f.entry.className));
+    assert.ok(collisionDetails.textContent.includes(f.room.name));
+    assert.match(collisionDetails.textContent, /2050-10-06 19:30-21:30/);
+    assert.ok(!collisionDetails.textContent.includes('synthetic-other-same-class'), 'internal occupancy IDs are not user-facing details');
   }
   assert.equal(button('승인').disabled, other);
   assert.equal(p.requests.some(r => /transition|create|approve/.test(r.name || '')), false, 'display does not submit approval');

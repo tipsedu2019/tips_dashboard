@@ -5,6 +5,60 @@ import { modules, id, row, stamp, transport, servicePath, setup as setupWorkspac
 import { actionCases, actionFixture, loadActionService } from './helpers/makeup-action-fixture.mjs';
 import { resubmitFixture } from './helpers/makeup-resubmit-fixture.mjs';
 
+for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue241 follow-up: unverified context cannot produce a confirmed room warning in ${timezone}`, t => {
+  const previous = process.env.TZ; process.env.TZ = timezone;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  const { hasMakeupRequestRoomCollision } = modules(null, { '@/providers/auth-provider': {} })('src/features/makeup-requests/makeup-request-workspace.tsx');
+  const request = row(241, { classId: id(600), makeupStartAt: '2026-11-14T09:00:00Z', makeupEndAt: '2026-11-14T11:00:00Z' });
+  const catalog = { classrooms: [{ name: 'A' }], classes: [{ id: id(601), name: '합성 종료 수업', schedule: '토 18:00-20:00', room: 'A', status: '종강' }], requests: [request], academicEvents: [] };
+  const context = (occupancies = [], reservations = [request]) => ({ reservations, activeEventRequestIds: [request.id], effectiveSchedule: { version: 1, occupancies } });
+  const occupancy = (startMinute, patch = {}) => ({ id: 'synthetic-peer', classId: id(601), className: '합성 수업', date: '2026-11-14', classroom: 'A', startMinute, endMinute: startMinute + 60, uncertain: false, allRooms: false, ...patch });
+  assert.equal(hasMakeupRequestRoomCollision(request, catalog), true, 'legacy callers retain their weekly-schedule contract');
+  assert.equal(hasMakeupRequestRoomCollision(request, { ...catalog, collisionContextReady: false }), false, 'pending or failed dated context is not proof of a collision');
+  assert.equal(hasMakeupRequestRoomCollision(request, { ...catalog, collisionContextReady: false, reservationContext: context([occupancy(1110)]) }), false, 'an unaccepted old context cannot supply a current warning');
+  const ready = reservationContext => ({ ...catalog, collisionContextReady: true, reservationContext });
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context())), false, 'dated empty context overrides a stale weekly catalog and excludes the request itself');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(540)]))), false, '09:00 occupancy cannot conflict with 18:00');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(1110)]))), true, 'real 18:30 overlap stays blocked');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(1200)]))), false, 'touching end boundary stays clear');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(1110, { classId: request.classId })]))), true, 'same class is not enough to ignore a different occupied lesson');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(null, { endMinute: null, uncertain: true, allRooms: true })]))), true, 'uncertain authoritative occupancy remains conservatively blocked');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([], [{ ...request, id: id(242) }]))), true, 'a different active request remains a collision');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([], [{ ...request, id: id(242), status: 'canceled' }]))), false, 'canceled request is not an active reservation');
+});
+
+for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue241 follow-up: list and detail keep approval gated through context error and recovery in ${timezone}`, async t => {
+  const previous = process.env.TZ; process.env.TZ = timezone;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  const p = await setupWorkspace(t, { search: '?view=approvalPending' });
+  const request = row(241, { canDecideSubject: true, className: '합성 보강', makeupStartAt: '2026-11-14T09:00:00Z', makeupEndAt: '2026-11-14T11:00:00Z' });
+  const catalogs = () => act(async () => {
+    for (const r of p.requests.filter(r => r.table)) r.resolve({ error: null, data: r.table === 'classes'
+      ? [{ id: id(601), name: '합성 종료 수업', subject: '영어', schedule: '토 18:00-20:00', classroom: 'A', status: '종강' }]
+      : r.table === 'classroom_catalogs' ? [{ name: 'A' }] : [] });
+  });
+  const assertUnverified = () => {
+    assert.doesNotMatch(document.body.textContent, /충돌 있음/, 'loading/error is not a confirmed collision on either list layout');
+    const approvals = [...document.querySelectorAll('button')].filter(node => node.textContent.trim() === '승인');
+    assert.ok(approvals.length > 0); assert.ok(approvals.every(node => node.disabled), 'approval remains disabled until the context is verified');
+  };
+  await act(async () => p.finish(p.numbered()[0], 1, { rows: [request] }));
+  await catalogs();
+  assert.match(document.body.textContent, /예약 충돌 정보 확인 중/); assertUnverified();
+  await act(async () => p.context().at(-1).resolve({ data: null, error: { code: 'XX000', message: 'synthetic context unavailable' } }));
+  assert.ok(button('예약 다시 확인')); assertUnverified();
+  await act(async () => button('휴보강 신청 상세 열기').click());
+  await act(async () => p.requests.filter(r => r.name === 'get_makeup_detail_v1').at(-1).resolve({ data: request, error: null }));
+  assert.match(document.querySelector('[role="dialog"]').textContent, /2026-11-14 18:00 - 2026-11-14 20:00/); assertUnverified();
+  await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await act(async () => button('예약 다시 확인').click()); await catalogs();
+  assertUnverified();
+  await act(async () => p.context().at(-1).resolve({ data: { reservations: [request], activeEventRequestIds: [] }, error: null }));
+  assert.doesNotMatch(document.body.textContent, /충돌 있음|예약 충돌 정보 확인 중|예약 충돌 정보를 불러오지 못했습니다/);
+  assert.equal(button('승인').disabled, false, 'verified empty effective occupancy and own reservation are clear');
+  assert.equal(p.requests.filter(r => /transition|create|approve/.test(r.name || '')).length, 0, 'checking and retrying never submits an approval');
+});
+
 for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue241: teacher UTC slots retain Seoul display and collision instants in ${timezone}`, t => {
   const previous = process.env.TZ; process.env.TZ = timezone;
   t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
