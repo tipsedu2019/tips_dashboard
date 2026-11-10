@@ -168,6 +168,7 @@ const EXPECTED_PR_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/legacy_context_adoption_reuse_test.sql",
   "supabase/tests/legacy_adoption_pair_reuse_test.sql",
   "supabase/tests/timetable_close_validation_proof_test.sql",
+  "supabase/tests/timetable_reader_weekly_arrays_test.sql",
 ])
 const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
@@ -1450,7 +1451,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "b7eaa1de3620b7f486bb9fcf17ce9e8fd91820d4dfc491d21ab3a3fe38a0f923"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "a52e8cbc1ef3e7b3fc4c721f86fbeb01d5aac8c9f8427541e92cf04c2d67a0ff"],
+    ["supabase-sql-review.yml", "6b36a398ad935eb2e8b1b50f6a680f7f4161fa3e06aa71a85157e34b57dae994"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {

@@ -299,6 +299,7 @@ jobs:
             --test supabase/tests/legacy_context_adoption_reuse_test.sql \
             --test supabase/tests/legacy_adoption_pair_reuse_test.sql \
             --test supabase/tests/timetable_close_validation_proof_test.sql \
+            --test supabase/tests/timetable_reader_weekly_arrays_test.sql \
             --probe tests/probe-ai-agent-auth-concurrency.mjs \
             --probe tests/probe-ai-agent-claim-concurrency.mjs \
             --probe tests/probe-ai-agent-space-policy-concurrency.mjs \
