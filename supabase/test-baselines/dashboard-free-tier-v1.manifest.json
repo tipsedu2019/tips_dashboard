@@ -994,6 +994,11 @@
       "fileName": "20261110095800_makeup_legacy_snapshot_ownership.sql",
       "status": "final",
       "sha256": "faa9dbdc9f0e707b2b3bd9ce88156b70d664353f1f2233c35ddcc9d5d8fc13d3"
+    },
+    {
+      "fileName": "20261110140429_timetable_reader_weekly_arrays.sql",
+      "status": "final",
+      "sha256": "615db840b31c7653182893d159374b4d91a550940472a1fe1c152fd3c6c1ecac"
     }
   ]
 }
