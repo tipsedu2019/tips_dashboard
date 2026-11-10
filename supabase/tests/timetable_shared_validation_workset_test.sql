@@ -9,7 +9,7 @@ select no_plan();
 -- Pin the final per-date unchanged-input body; it retains the shared workset,
 -- collision checks, concurrency guards and independent comparison oracles.
 select is(md5((select prosrc from pg_proc where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure)),
- '5f577a02f6ee20daf14284c62e4ded05','final validator body matches the dated-diff projection reuse migration');
+ '4c8050293e2dbb8cb9ff0a7ae93a413e','final validator body matches the close validation proof migration');
 
 -- Exact operational fe872 validator, frozen before this native-day experiment. Both paths
 -- call the REAL complete reader and REAL effective-date helper. No production
@@ -699,7 +699,7 @@ begin
  end loop;
 end$copy$;
 select is((select source_md5 from native_copy_provenance where label='native_original'),'23930d704f99b99ea763a04e51f871ef','synthetic oracle copied exact fe body');
-select is((select source_md5 from native_copy_provenance where label='native_candidate'),'5f577a02f6ee20daf14284c62e4ded05','synthetic candidate copied exact dated-diff projection validator');
+select is((select source_md5 from native_copy_provenance where label='native_candidate'),'4c8050293e2dbb8cb9ff0a7ae93a413e','synthetic candidate copied exact proof-aware validator');
 create function pg_temp.native_outcome(original boolean) returns jsonb language plpgsql security definer set search_path='' as $$
 declare r jsonb;c text;m text;det text;
 begin
@@ -919,14 +919,15 @@ select ok((r.candidate->>'calls')::bigint>=2,'per-date '||r.label||': rejection 
  from per_date_results r join per_date_cases c using(label) where c.expected_code='23P01' order by label;
 
 -- @dated-diff-projection-regression begin
--- The oracle is the COMPLETE previous validator. Reversing only this patch
--- must recover its independently frozen body hash; unrelated candidate edits
+-- The oracle is the COMPLETE previous validator. Removing the exact proof
+-- wrapper and then reversing the dated projection must recover both frozen
+-- historical body hashes; unrelated candidate edits
 -- cannot be blessed. Production definitions and the real effective/intersection
 -- helpers stay unchanged. Existing native wrappers replace only inputs and
 -- observation boundaries, not dated_diff or the diagnostic formatter.
 create temp table projection_copy_provenance(source_md5 text,prior_md5 text);
 do $projection_copy$
-declare candidate_body text;prior_body text;probe_body text;
+declare candidate_body text;prior_body text;probe_body text;installed_body_md5 text;
  old_select text:=$prior_select$   select coalesce(array_agg(distinct dt) filter(where dt is not null),'{}'::date[])
    into changed_dated_dates
    from ((select v::text collate "C" raw_dated,dt from unnest(old_workset)
@@ -949,9 +950,33 @@ declare candidate_body text;prior_body text;probe_body text;
 begin
  select prosrc into candidate_body from pg_proc
  where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure;
- if md5(candidate_body) is distinct from '5f577a02f6ee20daf14284c62e4ded05'
+ installed_body_md5:=md5(candidate_body);
+ if installed_body_md5 is distinct from '4c8050293e2dbb8cb9ff0a7ae93a413e'
   or length(candidate_body)-length(replace(candidate_body,new_select,''))<>length(new_select) then
   raise exception 'dated projection regression candidate drift';
+ end if;
+ candidate_body:=replace(candidate_body,$proof_variables$
+ -- Private proof only for a close performed in this transaction. The complete
+ -- original validator below remains the fallback on every input/contract change.
+ proof_token jsonb; proof_baseline_hash bytea; proof_reference jsonb;
+$proof_variables$,'');
+ candidate_body:=replace(candidate_body,$proof_lookup$ if current_user='postgres' then
+  proof_token:=dashboard_private.timetable_close_validation_input_v1(oldref);
+ end if;
+ if proof_token is not null then
+  proof_baseline_hash:=sha256(convert_to(oldref::text,'UTF8'));
+  select p.reference into proof_reference
+  from dashboard_private.timetable_validation_reuse_proofs p
+  where p.transaction_id=txid_current() and p.baseline_hash=proof_baseline_hash
+    and p.input_token=proof_token;
+  if found then return proof_reference;end if;
+ end if;
+$proof_lookup$,'');
+ candidate_body:=replace(candidate_body,
+ 'if proof_token is not null then perform dashboard_private.remember_timetable_close_validation_v1(oldref,proof_baseline_hash,proof_token,newref);end if; return newref;',
+ 'return newref;');
+ if md5(candidate_body) is distinct from '5f577a02f6ee20daf14284c62e4ded05' then
+  raise exception 'dated projection regression pre-proof oracle drift';
  end if;
  prior_body:=replace(candidate_body,new_select,old_select);
  if md5(prior_body) is distinct from 'f43f5adf0c9ed1ed6b195de6940bb639' then
@@ -965,7 +990,7 @@ begin
  probe_body:=replace(probe_body,'dashboard_private.timetable_effective_workset_date_v1(','pg_temp.native_workset_effective(');
  probe_body:=replace(probe_body,'dashboard_private.timetable_intersects_v1(','pg_temp.native_intersects(');
  execute format('create function pg_temp.projection_prior_native() returns jsonb language plpgsql security definer set search_path='''' as %L',probe_body);
- insert into pg_temp.projection_copy_provenance values(md5(candidate_body),md5(prior_body));
+ insert into pg_temp.projection_copy_provenance values(installed_body_md5,md5(prior_body));
 end
 $projection_copy$;
 select is((select prior_md5 from projection_copy_provenance),'f43f5adf0c9ed1ed6b195de6940bb639',

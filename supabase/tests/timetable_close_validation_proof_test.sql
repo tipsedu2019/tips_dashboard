@@ -1087,7 +1087,8 @@ begin
  perform pg_temp.proof_lifecycle('forward rejects dependency attribute drift',
  'alter function dashboard_private.makeup_legacy_pair_v1(jsonb,jsonb) cost 99','forward','close_validation_proof_dependency_boundary_drift');
  perform pg_temp.proof_lifecycle('forward rejects dependency owner drift',
- 'alter function dashboard_private.makeup_legacy_pair_v1(jsonb,jsonb) owner to service_role','forward','close_validation_proof_dependency_boundary_drift');
+ 'grant create on schema dashboard_private to service_role;alter function dashboard_private.makeup_legacy_pair_v1(jsonb,jsonb) owner to service_role;revoke create on schema dashboard_private from service_role',
+ 'forward','close_validation_proof_dependency_boundary_drift');
  answer:=pg_temp.proof_migration_capture(pg_temp.proof_migration_sql('forward'));
  if answer->>'sqlstate'<>'00000' or pg_temp.proof_registry() is distinct from saved
  then raise exception 'forward roundtrip changed existing metadata %',answer;end if;
@@ -1225,7 +1226,12 @@ select pg_temp.proof_case('later normalized overlap still conflicts','update pub
 select pg_temp.proof_case('planner setting changed','set local enable_seqscan=off',false,'00000');
 select pg_temp.proof_case('RLS policy changed','create policy synthetic_proof_policy on public.classes for select using(true)',false,'00000');
 select pg_temp.proof_case('root COST drift','alter function dashboard_private.validate_timetable_operating_reference_v1() cost 99',false,'00000');
-select pg_temp.proof_case('root owner drift preserves permission error','alter function dashboard_private.validate_timetable_operating_reference_v1() owner to service_role;alter function pg_temp.proof_original_validate() owner to service_role',false,'42501');
+-- Ownership transfer requires CREATE on both schemas even for a BYPASSRLS
+-- database owner. Grant only inside this rolled-back synthetic case and revoke
+-- before evaluating either validator; no application privilege remains relaxed.
+select pg_temp.proof_case('root owner drift preserves permission error',format(
+ 'grant create on schema dashboard_private,%I to service_role;alter function dashboard_private.validate_timetable_operating_reference_v1() owner to service_role;alter function pg_temp.proof_original_validate() owner to service_role;revoke create on schema dashboard_private,%I from service_role',
+ pg_my_temp_schema()::regnamespace::text,pg_my_temp_schema()::regnamespace::text),false,'42501');
 select pg_temp.proof_case('past correction requires fresh validation','insert into dashboard_private.past_lesson_state_correction_contexts(transaction_id,actor_profile_id,class_id,lesson_id,session_date,corrected_plan,target_occupancy,reviewed_blockers,review_hash) values(txid_current(),pg_temp.proof_id(901),pg_temp.proof_id(2),''unknown'',''2000-01-01'',''{}'',''{}'',''[]'',''synthetic'')',false,'00000');
 select pg_temp.proof_case('numeric representation remains exact','update public.classes set schedule_plan=jsonb_set(schedule_plan,''{amount}'',''1.0''::jsonb) where id=pg_temp.proof_id(2)',false,'00000');
 select pg_temp.proof_case('reader cancellation propagates','create or replace function dashboard_private.read_timetable_operating_reference_v1() returns jsonb language plpgsql security definer set search_path='''' as $cancel$begin raise exception ''synthetic_cancel'' using errcode=''57014'';end $cancel$',false,'57014');

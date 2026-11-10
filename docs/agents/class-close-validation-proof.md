@@ -67,6 +67,15 @@ recovery, definition drift, the same domain boundaries and the authenticated
 gateway. Full required CI and independent review of the exact tested source
 remain release gates. Native diagnostics are not an independent review.
 
+The first full-schema CI exposed stale validator pins in two existing tests and
+an ownership-test setup that assumed superuser privileges. The tests now pin
+the new installed body while recovering the unchanged historical oracle hashes.
+Ownership mutations grant schema CREATE only inside the disposable test case,
+revoke it before comparison, and roll back completely. A focused PostgreSQL 17
+fixture with a nonsuperuser database owner verified the `55000` installation
+rejection, unchanged `42501` fallback, and historical oracle provenance. Product
+migration and recovery bytes did not change for this test correction.
+
 The synthetic timing omitted student/enrollment release load, production
 contention and HTTP/browser cancellation. Makeup approval #249 uses a separate
 date-scoped reader and has not been diagnosed by this closing experiment.
