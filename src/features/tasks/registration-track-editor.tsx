@@ -1743,6 +1743,11 @@ export function RegistrationApplication({
         if (!open) setCustomerMessageTarget(null)
       }}
       target={activeCustomerMessageTarget}
+      caseSubjects={activeCustomerMessageTarget ? {
+        taskId: detail.task.id,
+        target: activeCustomerMessageTarget,
+        tracks: orderedTracks.map(({ id, taskId, subject }) => ({ id, taskId, subject })),
+      } : undefined}
       client={customerMessageClient}
       viewerRole={viewerRole || "assistant"}
       triggerRef={customerMessageTriggerRef}
