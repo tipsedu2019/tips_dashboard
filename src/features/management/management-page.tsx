@@ -2,6 +2,8 @@
 
 import { isClassCloseConfirmationError, type ClassCloseConfirmationError } from "./class-close-confirmation";
 import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
+import { parseTimetableOperationalConflictDetails, type TimetableOperationalConflictDetails } from "../academic/timetable-operational-conflict-details";
+import { LessonSaveConflictDetails } from "../operations/lesson-save-conflict-details";
 import { Fragment, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -1260,7 +1262,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     };
   }, []);
   const [pendingClassScheduleInitialization, setPendingClassScheduleInitialization] = useState<PendingClassScheduleInitialization | null>(null);
-  const [operationError, setOperationError] = useState<string | null>(null);
+  const [operationError, setOperationErrorState] = useState<string | null>(null);
+  const [classSaveConflict, setClassSaveConflict] = useState<{
+    details: TimetableOperationalConflictDetails; detailRequestId: number; form: string; schedule?: string;
+  } | null>(null);
+  const setOperationError = useCallback((message: string | null) => {
+    setOperationErrorState(message);
+    setClassSaveConflict(null);
+  }, []);
   const [saveNotice, setSaveNotice] = useState("");
   const [relationRefresh, setRelationRefreshState] = useState<RelationRefreshFeedback | null>(null);
   const relationRefreshRef = useRef<RelationRefreshFeedback | null>(null);
@@ -1559,7 +1568,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [kind, relationPickerOpen, relationQuery, selectedRow]);
+  }, [kind, relationPickerOpen, relationQuery, selectedRow, setOperationError]);
   const studentClassSubjectOptions = useMemo(
     () => kind === "students" ? getStudentClassSubjectOptions(availableRelatedRows) : [],
     [availableRelatedRows, kind],
@@ -2134,6 +2143,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     : normalizedScheduleDefaults ? toContinuousClassScheduleSlots(normalizedScheduleDefaults.slots)
     : formatClassScheduleSlots(parseClassScheduleSlots(savedForm.schedule, savedForm.teacher, savedForm.classroom)));
   const selectedRowId = selectedRow?.id;
+  const currentClassSaveConflict = kind === "classes" && dialogMode === "detail"
+    && classSaveConflict?.detailRequestId === detailRequestRef.current
+    && classSaveConflict.form === formDraft && classSaveConflict.schedule === scheduleDraft
+    ? classSaveConflict.details : null;
+  useEffect(() => {
+    // A later edit or detail lifetime must not revive an old save's evidence.
+    if (classSaveConflict && !currentClassSaveConflict) setClassSaveConflict(null);
+  }, [classSaveConflict, currentClassSaveConflict]);
   const requiresDraftConfirmation = useCallback(() => {
     const submitted = savingDraftRef.current;
     const currentSubmission = submitted?.detailRequestId === detailRequestRef.current ? submitted : null;
@@ -2525,7 +2542,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setNormalizedScheduleDefaults(normalizedDefaults);
       }
     }
-  }, [acceptDetailRow, beginDetailRequest, kind, loadDetail, writeClassDetailRoute, writeStudentDetailRoute]);
+  }, [acceptDetailRow, beginDetailRequest, kind, loadDetail, setOperationError, writeClassDetailRoute, writeStudentDetailRoute]);
 
   useEffect(() => {
     if (kind !== "classes" || loading || !requestedClassId) {
@@ -2666,7 +2683,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     } finally {
       finishSaving();
     }
-  }, [beginSaving, canMutateRows, classFormReferences, finishSaving, kind, reconcileManagementPage]);
+  }, [beginSaving, canMutateRows, classFormReferences, finishSaving, kind, reconcileManagementPage, setOperationError]);
 
   const deleteRows = useCallback(async (rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2697,7 +2714,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     } finally {
       finishSaving();
     }
-  }, [beginSaving, canMutateRows, finishSaving, kind, reconcileManagementPage]);
+  }, [beginSaving, canMutateRows, finishSaving, kind, reconcileManagementPage, setOperationError]);
 
   const handleBulkDeleteRows = useCallback((rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2769,7 +2786,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       };
     }
     return base;
-  }, [beginDetailRequest, canMutateRows, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, loadRelationPage, openRow, requestManagementNavigation]);
+  }, [beginDetailRequest, canMutateRows, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, loadRelationPage, openRow, requestManagementNavigation, setOperationError]);
 
   const deleteActionLabel = "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;
@@ -2974,6 +2991,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           setPendingClassClose({ error: saveError, form: submittedForm, payload, detailRequestId: detailRequestRef.current });
         } else {
           setOperationError(getSaveErrorMessage(saveError));
+          const details = kind === "classes" ? parseTimetableOperationalConflictDetails(saveError) : null;
+          if (details) setClassSaveConflict({ details, detailRequestId: detailRequestRef.current, form: formDraft, schedule: scheduleDraft });
         }
       }
     } finally {
@@ -3705,8 +3724,16 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 {renderRelationManagementSection()}
               </div>
               <DialogFooter data-testid="class-detail-actions" className="class-sheet-actions" aria-busy={saving}>
-                {operationError ? <Alert variant="destructive" role="alert" className="max-h-24 basis-full overflow-y-auto">
-                  <AlertDescription>{operationError}</AlertDescription>
+                {operationError ? <Alert variant="destructive" role="alert"
+                  tabIndex={currentClassSaveConflict ? 0 : undefined}
+                  aria-label={currentClassSaveConflict ? "수업 저장 오류 상세" : undefined}
+                  className={cn("basis-full overflow-y-auto", currentClassSaveConflict
+                    ? "max-h-64 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" : "max-h-24")}>
+                  <AlertDescription className="min-w-0">
+                    <p>{operationError}</p>
+                    {currentClassSaveConflict ? <LessonSaveConflictDetails details={currentClassSaveConflict}
+                      confirmedGuidance="표시된 일정의 시간·선생님·강의실을 확인해 주세요." /> : null}
+                  </AlertDescription>
                 </Alert> : null}
                 {currentPendingClassClose && !saving ? <Alert role="status" className="basis-full">
                   <AlertDescription>{currentPendingClassClose.error.message}</AlertDescription>
