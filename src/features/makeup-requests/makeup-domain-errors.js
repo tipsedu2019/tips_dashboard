@@ -2,6 +2,7 @@
 const staleMessages = new Set([
   "makeup_request_stale_status", "makeup_request_source_changed",
   "makeup_schedule_plan_stale", "makeup_lesson_session_stale",
+  "makeup_legacy_pair_stale", "makeup_legacy_pair_invalid",
 ])
 const collisionMessages = new Set(["makeup_room_collision", "makeup_calendar_event_conflict", "timetable_resource_conflict"])
 export function isMakeupDomainConflict(error) {

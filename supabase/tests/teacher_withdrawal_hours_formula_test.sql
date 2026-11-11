@@ -75,6 +75,17 @@ insert into withdrawal_formula_vectors values
 ('edge-float-half-boundary-minute-roundtrip','{"schedule_plan":{"selectedDays":[1],"sessions":[{"id":"a","date":"2026-11-02","sessionNumber":1,"lessonHours":"0.049999999999999996"}]},"schedule":""}'::jsonb,'2026-11-02'::date,'{"completed_lesson_hours": "0", "four_week_lesson_hours": "0.2"}'::jsonb,'{"completed_lesson_hours": "0", "four_week_lesson_hours": "0.2"}'::jsonb,'independent review actual-management regression'),
 ('edge-exponent-session-number-resets-legacy-cycle','{"schedule_plan":{"sessions":[{"id":"a","date":"2026-11-02","sessionNumber":1,"lessonHours":2},{"id":"b","date":"2026-11-04","sessionNumber":"1e0","lessonHours":2}]},"schedule":"월수19~21"}'::jsonb,'2026-11-04'::date,'{"completed_lesson_hours": "2", "four_week_lesson_hours": "16"}'::jsonb,'{"completed_lesson_hours": "2", "four_week_lesson_hours": "16"}'::jsonb,'independent review actual-management regression'),
 ('edge-whitespace-selected-day-coerces-sunday','{"schedule_plan":{"selectedDays":[" "],"sessions":[{"id":"a","date":"2026-11-01","sessionNumber":1,"lessonHours":3},{"id":"b","date":"2026-11-02","sessionNumber":2,"lessonHours":2}]},"schedule":"월 19~21"}'::jsonb,'2026-11-02'::date,'{"completed_lesson_hours": "5", "four_week_lesson_hours": "12"}'::jsonb,'{"completed_lesson_hours": "5", "four_week_lesson_hours": "12"}'::jsonb,'independent review actual-management regression');
+insert into withdrawal_formula_vectors values
+('parity-half-below','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[{"id":"a","date":"2026-11-02","sessionNumber":1,"lessonHours":"0.049999999999999996"}]}}'::jsonb,'2026-11-02'::date,'{"completed_lesson_hours":"0","four_week_lesson_hours":"0.2"}'::jsonb,'{"completed_lesson_hours":"0","four_week_lesson_hours":"0.2"}'::jsonb,'numeric parity regression'),
+('parity-half-exact','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[{"id":"a","date":"2026-11-02","sessionNumber":1,"lessonHours":"0.05"}]}}'::jsonb,'2026-11-02'::date,'{"completed_lesson_hours":"0.1","four_week_lesson_hours":"0.2"}'::jsonb,'{"completed_lesson_hours":"0.1","four_week_lesson_hours":"0.2"}'::jsonb,'numeric parity regression'),
+('parity-half-above','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[{"id":"a","date":"2026-11-02","sessionNumber":1,"lessonHours":"0.05000000000000001"}]}}'::jsonb,'2026-11-02'::date,'{"completed_lesson_hours":"0.1","four_week_lesson_hours":"0.2"}'::jsonb,'{"completed_lesson_hours":"0.1","four_week_lesson_hours":"0.2"}'::jsonb,'numeric parity regression'),
+('parity-minutes-boundary','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[{"id":"a","date":"2026-11-02","lessonMinutes":"2.9999999999999996"}]}}'::jsonb,'2026-11-02'::date,'{"completed_lesson_hours":"0","four_week_lesson_hours":"0.2"}'::jsonb,'{"completed_lesson_hours":"0","four_week_lesson_hours":"0.2"}'::jsonb,'numeric parity regression'),
+('parity-sparse-duplicate-sort','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[null,{}, {"id":"late","date":"2026-11-09","sessionNumber":2,"lessonHours":"0.049999999999999996"},{"id":"early","date":"2026-11-02","sessionNumber":1,"lessonHours":"0.049999999999999996"},{"id":"early","date":"2026-11-02","lessonHours":99},{"id":"cancelled","date":"2026-11-09","state":"cancelled","lessonHours":99}]}}'::jsonb,'2026-11-09'::date,'{"completed_lesson_hours":"0.1","four_week_lesson_hours":"0.2"}'::jsonb,'{"completed_lesson_hours":"0.1","four_week_lesson_hours":"0.2"}'::jsonb,'numeric parity regression'),
+('parity-numeric-id-dedupe','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[{"id":1.00,"date":"2026-11-02","sessionNumber":1,"lessonHours":2},{"id":1,"date":"2026-11-09","sessionNumber":2,"lessonHours":99}]}}'::jsonb,'2026-11-02'::date,'{"completed_lesson_hours":"2","four_week_lesson_hours":"8"}'::jsonb,'{"completed_lesson_hours":"2","four_week_lesson_hours":"8"}'::jsonb,'numeric parity regression'),
+('parity-numeric-string-dedupe','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[{"id":1.00,"date":"2026-11-02","sessionNumber":1,"lessonHours":2},{"id":"1","date":"2026-11-09","sessionNumber":2,"lessonHours":99}]}}'::jsonb,'2026-11-02'::date,'{"completed_lesson_hours":"2","four_week_lesson_hours":"8"}'::jsonb,'{"completed_lesson_hours":"2","four_week_lesson_hours":"8"}'::jsonb,'numeric parity regression'),
+('parity-numeric-leading-zero-distinct','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[{"id":1.00,"date":"2026-11-02","sessionNumber":1,"lessonHours":2},{"id":"01","date":"2026-11-09","sessionNumber":2,"lessonHours":3}]}}'::jsonb,'2026-11-09'::date,'{"completed_lesson_hours":"5","four_week_lesson_hours":"8"}'::jsonb,'{"completed_lesson_hours":"5","four_week_lesson_hours":"8"}'::jsonb,'numeric parity regression'),
+('parity-numeric-decimal-string-distinct','{"schedule":"","schedule_plan":{"selectedDays":[1],"sessions":[{"id":1.00,"date":"2026-11-02","sessionNumber":1,"lessonHours":2},{"id":"1.00","date":"2026-11-09","sessionNumber":2,"lessonHours":3}]}}'::jsonb,'2026-11-09'::date,'{"completed_lesson_hours":"5","four_week_lesson_hours":"8"}'::jsonb,'{"completed_lesson_hours":"5","four_week_lesson_hours":"8"}'::jsonb,'numeric parity regression'),
+('parity-numeric-billing-id','{"schedule":"","schedule_plan":{"selectedDays":[1],"billingPeriods":[{"id":1.00,"startDate":"2026-11-01","endDate":"2026-11-30"}],"sessions":[{"id":"a","date":"2026-11-02","sessionNumber":1,"lessonHours":2,"billingId":1.00},{"id":"b","date":"2026-11-09","sessionNumber":2,"lessonHours":3,"billingId":1}]}}'::jsonb,'2026-11-09'::date,'{"completed_lesson_hours":"5","four_week_lesson_hours":"8"}'::jsonb,'{"completed_lesson_hours":"5","four_week_lesson_hours":"8"}'::jsonb,'numeric parity regression');
 select is(dashboard_private.calculate_teacher_withdrawal_hours_v1(class_input,selected_date),server_expected,id||': '||policy)
  from withdrawal_formula_vectors order by id;
 set local timezone='UTC';
@@ -128,5 +139,35 @@ select is(dashboard_private.calculate_teacher_withdrawal_hours_v1(
  jsonb_build_object('schedule',U&'월\008519\0085~\008521','schedule_plan',
  '{"selectedDays":[1],"sessions":[{"date":"2026-11-02","state":"active"}]}'::jsonb),'2026-11-02'),
  '{"completed_lesson_hours":"1","four_week_lesson_hours":"4"}'::jsonb,'U+0085 is not JavaScript whitespace and cannot invent a schedule duration');
+
+-- Precision must not depend on the caller's numeric presentation setting.
+-- These are synthetic function inputs; diagnostics expose only their bits.
+select diag('WITHDRAWAL_FLOAT_BEFORE '||current_setting('extra_float_digits'));
+set local extra_float_digits=0;
+select diag('WITHDRAWAL_FLOAT_BITS input='||encode(float8send('0.049999999999999996'::double precision),'hex')||
+ ' json='||encode(float8send((jsonb_build_object('h','0.049999999999999996'::double precision)->>'h')::double precision),'hex'));
+select is(dashboard_private.calculate_teacher_withdrawal_hours_v1(class_input,selected_date),server_expected,'precision0: '||id)
+ from withdrawal_formula_vectors where id like 'parity-%' or id='edge-float-half-boundary-minute-roundtrip' order by id;
+select is(current_setting('extra_float_digits'),'0','calculator preserves caller precision0');
+set local extra_float_digits=1;
+select is(dashboard_private.calculate_teacher_withdrawal_hours_v1(class_input,selected_date),server_expected,'precision1: '||id)
+ from withdrawal_formula_vectors where id like 'parity-%' or id='edge-float-half-boundary-minute-roundtrip' order by id;
+select is(current_setting('extra_float_digits'),'1','calculator preserves caller precision1');
+set local extra_float_digits=3;
+select is(dashboard_private.calculate_teacher_withdrawal_hours_v1(class_input,selected_date),server_expected,'precision3: '||id)
+ from withdrawal_formula_vectors where id like 'parity-%' or id='edge-float-half-boundary-minute-roundtrip' order by id;
+select is(current_setting('extra_float_digits'),'3','calculator preserves caller precision3');
+select is(dashboard_private.withdrawal_first_scalar_v1('{"id":-1.00}',array['id']),'-1','negative integral numeric identity canonicalizes');
+select is(dashboard_private.withdrawal_first_scalar_v1('{"id":9007199254740991.00}',array['id']),'9007199254740991','maximum safe integral numeric identity canonicalizes');
+select is(dashboard_private.withdrawal_first_scalar_v1('{"id":1e0}',array['id']),'1','integral exponent identity canonicalizes');
+select is(dashboard_private.withdrawal_first_scalar_v1('{"id":"1.00"}',array['id']),'1.00','decimal string identity stays distinct');
+select is(dashboard_private.withdrawal_first_scalar_v1('{"id":"01"}',array['id']),'01','leading-zero string identity stays distinct');
+select is(dashboard_private.withdrawal_first_scalar_v1('{"id":0,"sessionId":"fallback"}',array['id','sessionId']),'fallback','numeric zero retains existing JS fallback');
+select is(dashboard_private.withdrawal_first_scalar_v1('{"id":"0","sessionId":"fallback"}',array['id','sessionId']),'0','string zero remains an explicit identity');
+select throws_ok($q$select dashboard_private.withdrawal_first_scalar_v1('{"id":1.25}',array['id'])$q$,'22023','withdrawal_schedule_metadata_unsupported','fractional numeric identity remains rejected');
+select throws_ok($q$select dashboard_private.withdrawal_first_scalar_v1('{"id":-9007199254740992}',array['id'])$q$,'22023','withdrawal_schedule_metadata_unsupported','negative unsafe numeric identity remains rejected');
+select ok(not has_function_privilege('anon','dashboard_private.withdrawal_first_scalar_v1(jsonb,text[])','EXECUTE'),'corrected scalar remains private to anonymous');
+select ok(not has_function_privilege('authenticated','dashboard_private.calculate_teacher_withdrawal_hours_v1(jsonb,date)','EXECUTE'),'corrected calculator remains private to authenticated');
+
 select * from finish();
 rollback;

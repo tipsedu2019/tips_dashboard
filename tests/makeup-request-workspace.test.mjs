@@ -987,7 +987,7 @@ test("makeup datetime and room controls stay within operational candidates", () 
   assert.doesNotMatch(dateTimePickerSource, />\s*적용\s*</);
   assert.match(dateTimePickerSource, /onWheelCapture=\{\(event\) => event\.stopPropagation\(\)\}/);
   assert.match(dateTimePickerSource, /onTouchMoveCapture=\{\(event\) => event\.stopPropagation\(\)\}/);
-  assert.match(workspaceSource, /getSlotRoomCollisionState\(formSlot, data, request\.id, request\.subject\)/);
+  assert.match(workspaceSource, /getSlotRoomCollisionState\(formSlot, data, request\.id, request\.subject, false, request\)/);
 });
 
 test("makeup approval completes makeup-bearing requests and keeps cancel-only requests tracked", () => {

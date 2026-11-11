@@ -66,6 +66,9 @@ import {
   getAllowedApproverNames,
   getDefaultMakeupEndAt,
   getMakeupRequestEffectiveYear,
+  formatMakeupDateTime,
+  toMakeupDateTimeInput,
+  toMakeupSlotTimestamp,
   hasMakeupPart,
   MAKEUP_REQUEST_STATUS_LABELS,
   extractMakeupCalendarMeta,
@@ -194,9 +197,7 @@ function sortSubjectOptions(left: string, right: string) {
 }
 
 function formatDateTime(value: string) {
-  if (!value) return "-"
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
-  return match ? `${match[1]} ${match[2]}` : value
+  return formatMakeupDateTime(value)
 }
 
 function toText(value: unknown) {
@@ -625,7 +626,7 @@ function getMakeupRequestCardValue(request: MakeupRequest, columnKey: MakeupRequ
   return getMakeupRequestTableValue(request, columnKey)
 }
 
-export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
+function getMakeupRequestCollisionInputs(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
   let data = workspaceData
   const context = data.reservationContext
   const completedReservation = context?.reservations.find((item) => item.id === request.id && item.status === "completed")
@@ -649,10 +650,51 @@ export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceD
     })
     data = { ...data, reservationContext: { ...context, effectiveSchedule: { ...effectiveSchedule, occupancies } } }
   }
+  return { data, requestSlots }
+}
+
+export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
+  // Until the dated context is verified, raw weekly catalogs cannot prove a
+  // collision. Loading/error feedback and approval readiness stay separate.
+  if (workspaceData.collisionContextReady === false) return false
+  const { data, requestSlots } = getMakeupRequestCollisionInputs(request, workspaceData)
   return requestSlots.some((slot) => {
     const formSlot = toFormSlot({ ...slot, classroom: slot.classroom || request.makeupClassroom })
-    return Boolean(getSlotRoomCollisionState(formSlot, data, request.id, request.subject)?.collisions.length)
+    return Boolean(getSlotRoomCollisionState(formSlot, data, request.id, request.subject, false, request)?.collisions.length)
   })
+}
+
+export function getMakeupRequestRoomCollisions(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
+  if (workspaceData.collisionContextReady === false) return []
+  const { data, requestSlots } = getMakeupRequestCollisionInputs(request, workspaceData)
+  return requestSlots.flatMap((slot) => {
+    const formSlot = toFormSlot({ ...slot, classroom: slot.classroom || request.makeupClassroom })
+    return getSlotRoomCollisionState(formSlot, data, request.id, request.subject, false, request)?.collisions || []
+  })
+}
+
+const MAKEUP_COLLISION_SOURCE_LABELS = {
+  regular_class: "수업 시간표",
+  makeup_request: "휴보강 신청",
+  academic_event: "학사 일정",
+} as const
+
+export function MakeupRequestRoomCollisionDetails({ request, data }: { request: MakeupRequest; data: MakeupRequestWorkspaceData }) {
+  const collisions = getMakeupRequestRoomCollisions(request, data)
+  if (collisions.length === 0) return null
+  return (
+    <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+      <p className="font-medium">보강 강의실 충돌 있음</p>
+      <ul aria-label="강의실 충돌 내역" className="mt-2 grid min-w-0 gap-2">
+        {collisions.map((collision, index) => (
+          <li key={`${collision.source}:${collision.id || ""}:${index}`} className="min-w-0 break-words">
+            <p>{MAKEUP_COLLISION_SOURCE_LABELS[collision.source]} · {collision.title || "이름 미확인"}</p>
+            <p>{collision.classroom} · {collision.detail || [collision.startLabel, collision.endLabel].filter(Boolean).join("–") || "시간 미확인"}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 function handleOpenKeyDown(event: ReactKeyboardEvent, onOpenDetail: () => void) {
@@ -815,11 +857,7 @@ function MakeupRequestDetailCard({
               {getStatusLabel(request.status)}
             </Badge>
           </div>
-          {hasRoomCollision ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              보강 강의실 충돌 있음
-            </div>
-          ) : null}
+          {hasRoomCollision ? <MakeupRequestRoomCollisionDetails request={request} data={data} /> : null}
           <dl className="grid gap-3 text-sm md:grid-cols-2">
             {!commonRead && <MakeupDetailInfo label="사유" value={request.reason || "-"} />}
             <MakeupDetailInfo label="휴강일" value={request.cancelDate || "-"} />
@@ -1447,13 +1485,11 @@ function buildSlotDateTime(date = "", time = "") {
 }
 
 function getDatePart(value: string) {
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})/)
-  return match ? match[1] : ""
+  return toMakeupDateTimeInput(value).slice(0, 10)
 }
 
 function getTimePart(value: string) {
-  const match = value.match(/T(\d{2}:\d{2})/)
-  return match ? match[1] : ""
+  return toMakeupDateTimeInput(value).slice(11, 16)
 }
 
 function toFormSlot(slot: { id?: string; startAt?: string; endAt?: string; classroom?: string }) {
@@ -1462,6 +1498,8 @@ function toFormSlot(slot: { id?: string; startAt?: string; endAt?: string; class
     date: getDatePart(slot.startAt || ""),
     startTime: getTimePart(slot.startAt || ""),
     endTime: getTimePart(slot.endAt || ""),
+    startAt: toMakeupSlotTimestamp(slot.startAt || ""),
+    endAt: toMakeupSlotTimestamp(slot.endAt || ""),
     classroom: slot.classroom || "",
   }
 }
@@ -1474,8 +1512,8 @@ function materializeSlot(slot: MakeupRequestInput["makeupSlots"][number]) {
   if (!isCompleteSlotDateTime(slot)) return null
   return {
     ...slot,
-    startAt: buildSlotDateTime(slot.date, slot.startTime),
-    endAt: buildSlotDateTime(slot.date, slot.endTime),
+    startAt: slot.startAt || buildSlotDateTime(slot.date, slot.startTime),
+    endAt: slot.endAt || buildSlotDateTime(slot.date, slot.endTime),
     classroom: slot.classroom || "",
   }
 }
@@ -1564,6 +1602,7 @@ function getSlotRoomAvailability(
   currentRequestId = "",
   subject = "",
   canIgnoreOrphanedMakeupEvents = false,
+  currentRequest?: MakeupRequest,
 ) {
   const materializedSlot = materializeSlot(slot)
   return buildRoomAvailability({
@@ -1577,6 +1616,8 @@ function getSlotRoomAvailability(
     ignoreOrphanedMakeupEvents: data.reservationContext ? true : canIgnoreOrphanedMakeupEvents,
     activeEventRequestIds: data.reservationContext?.activeEventRequestIds,
     effectiveSchedule: data.reservationContext?.effectiveSchedule,
+    legacyBindings: data.reservationContext?.legacyBindings,
+    currentRequest: currentRequest || data.requests.find(request => request.id === currentRequestId),
   }).map((room) => data.collisionContextReady === false ? { ...room, available: false } : room)
 }
 
@@ -1586,10 +1627,11 @@ function getSlotRoomCollisionState(
   currentRequestId = "",
   subject = "",
   canIgnoreOrphanedMakeupEvents = false,
+  currentRequest?: MakeupRequest,
 ) {
   const room = slot.classroom || ""
   if (!room) return null
-  return getSlotRoomAvailability(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents).find((item) => item.name === room) || null
+  return getSlotRoomAvailability(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents, currentRequest).find((item) => item.name === room) || null
 }
 
 function hasSlotRoomCollision(
@@ -2193,7 +2235,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       const requestId = typeof meta?.requestId === "string" ? meta.requestId.trim() : ""
       return meta?.kind === "makeup" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId) ? [requestId] : []
     }))].sort()
-    return { slots: uniqueSlots, eventRequestIds, invalidTargets }
+    const requestIds = [...new Set(requests.filter(request => request.requestKind === "cancel_makeup").map(request => request.id))].sort()
+    // A detail read can advance a request without changing its interval. Bind
+    // the local cache to every observed generation; these are not RPC fields.
+    const requestGenerations = [...new Set(requests.filter(request => request.requestKind === "cancel_makeup")
+      .map(request => JSON.stringify([request.id, request.updatedAt, request.status])))].sort()
+    return { slots: uniqueSlots, eventRequestIds, requestIds, requestGenerations, invalidTargets }
   }, [pageState.rows, selectedDetailRequest, editingRequest, approvalRequest, requestDialogOpen, input, catalogData.academicEvents])
   const contextScope = JSON.stringify([actorScope, catalogGeneration, contextRequest])
   const matchingContext = contextState.scope === contextScope ? contextState.context : undefined
@@ -2473,9 +2520,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       makeupSlots: current.makeupSlots.map((slot) => {
         if (slot.id !== slotId) return slot
         const nextSlot = { ...slot, ...patch }
+        if ("date" in patch || "startTime" in patch) nextSlot.startAt = ""
+        if ("date" in patch || "endTime" in patch) nextSlot.endAt = ""
         if ((patch.date || patch.startTime) && nextSlot.date && nextSlot.startTime && !patch.endTime) {
           const defaultEndAt = getDefaultMakeupEndAt(buildSlotDateTime(nextSlot.date, nextSlot.startTime), selectedClass || {})
           nextSlot.endTime = getTimePart(defaultEndAt) || nextSlot.endTime
+          nextSlot.endAt = defaultEndAt
         }
         return nextSlot
       }),

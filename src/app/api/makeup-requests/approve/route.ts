@@ -14,6 +14,7 @@ import { buildAcademicEventMutationPayload } from "@/features/operations/academi
 import { attemptMakeupApprovalReplay } from "@/features/makeup-requests/makeup-approval-replay.js"
 import { buildLegacyMakeupApprovalPlan } from "@/features/makeup-requests/makeup-approval-plan.js"
 import { readMakeupEffectiveSchedule } from "@/features/makeup-requests/makeup-effective-occupancy"
+import { isLegacyMakeupBinding, matchingLegacyMakeupBinding, type MakeupLegacyBinding } from "@/features/makeup-requests/makeup-legacy-pair.js"
 
 export const runtime = "nodejs"
 
@@ -109,7 +110,7 @@ function prepareAcademicEvent(draft: JsonRecord) {
   }
 }
 
-async function buildApprovalEffects(client: SupabaseClient, requestRow: JsonRecord, classRow: JsonRecord) {
+async function buildApprovalEffects(client: SupabaseClient, requestRow: JsonRecord, classRow: JsonRecord, legacyBinding: MakeupLegacyBinding | null = null) {
   const schedulePlanBefore = isRecord(classRow.schedule_plan) ? classRow.schedule_plan : {}
   let schedulePlanAfter: JsonRecord
   if (classRow.schedule_storage_mode === "normalized") {
@@ -131,7 +132,7 @@ async function buildApprovalEffects(client: SupabaseClient, requestRow: JsonReco
       teacher = isRecord(teacherResult.data) ? teacherResult.data : null
       classrooms = asArray(roomResult.data).filter(isRecord)
     }
-    schedulePlanAfter = buildLegacyMakeupApprovalPlan(schedulePlanBefore, requestRow, { teacher, classrooms })
+    schedulePlanAfter = buildLegacyMakeupApprovalPlan(schedulePlanBefore, requestRow, { teacher, classrooms, legacyBinding })
   }
   const calendarDrafts = buildMakeupCalendarDrafts(requestRow)
   const calendarEvents = calendarDrafts.map((draft) => (
@@ -172,6 +173,7 @@ function assertNoRoomCollision(
   academicEvents: JsonRecord[],
   classrooms: JsonRecord[],
   effectiveSchedule?: MakeupEffectiveSchedule | null,
+  legacyBindings?: MakeupLegacyBinding[],
 ) {
   if (!hasMakeupPart(requestRow)) return
   const slots = normalizeMakeupSlots(requestRow, text(requestRow.makeup_classroom))
@@ -184,6 +186,8 @@ function assertNoRoomCollision(
     currentRequestId: text(requestRow.id),
     subject: text(requestRow.subject),
     effectiveSchedule,
+    legacyBindings,
+    currentRequest: requestRow,
   })
   for (const slot of slots) {
     const room = text(slot.classroom || requestRow.makeup_classroom)
@@ -269,25 +273,30 @@ export async function POST(request: Request) {
       final_note: note,
     }
     if (!isRefundApproval(eventRows)) {
+      let legacyBinding: MakeupLegacyBinding | null = null
       if (hasMakeupPart(requestRow)) {
         // Keep legacy schedule parsing and pending reservations in the preflight;
         // locked database guards still make the final concurrency decision.
         const slots = normalizeMakeupSlots(requestRow, text(requestRow.makeup_classroom))
         const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8_000)])
         const { data: context, error: contextError } = await serverClient.rpc("get_makeup_approval_collision_context_v1", {
-          p_slots: slots,
+          p_slots: slots.map((slot, index) => ({ ...slot, ...(index === 0 && requestRow.request_kind === "cancel_makeup" ? { requestIds: [requestId] } : {}) })),
         }).abortSignal(signal).retry(false)
         signal.throwIfAborted()
         if (contextError) throw contextError
         if (!isRecord(context) || ![context.classes, context.requests, context.academicEvents].every(
           (rows) => Array.isArray(rows) && rows.every(isRecord),
         )) throw new Error("makeup_approval_context_invalid")
+        const legacyBindings = context.legacyBindings ?? []
+        if (!Array.isArray(legacyBindings) || !legacyBindings.every(isLegacyMakeupBinding)
+          || legacyBindings.some(binding => binding.requestId !== requestId) || legacyBindings.length > 1) throw new Error("makeup_approval_context_invalid")
+        legacyBinding = matchingLegacyMakeupBinding(requestRow, slots, legacyBindings)
         const effectiveSchedule = await readMakeupEffectiveSchedule({ slots, signal,
           readBatch: (batch) => serverClient.rpc("get_makeup_effective_occupancy_v1", { p_slots: batch }).abortSignal(signal).retry(false),
         })
-        assertNoRoomCollision(requestRow, context.classes as JsonRecord[], context.requests as JsonRecord[], context.academicEvents as JsonRecord[], [], effectiveSchedule)
+        assertNoRoomCollision(requestRow, context.classes as JsonRecord[], context.requests as JsonRecord[], context.academicEvents as JsonRecord[], [], effectiveSchedule, legacyBindings)
       }
-      Object.assign(patch, await buildApprovalEffects(serverClient, requestRow, classRow))
+      Object.assign(patch, await buildApprovalEffects(serverClient, requestRow, classRow, legacyBinding))
     }
 
     const { data, error } = await serverClient.rpc("transition_makeup_request_v2", {
@@ -310,6 +319,8 @@ export async function POST(request: Request) {
       ? "보강 강의실 충돌이 있어 승인하지 못했습니다."
       : message === "makeup_request_source_changed"
         ? "신청 후 수업 정보가 변경되어 다시 확인해야 합니다."
+        : message === "makeup_legacy_pair_stale" || message === "makeup_legacy_pair_invalid"
+          ? "기존 휴강·보강 일정과 신청의 연결을 다시 확인해야 합니다. 최신 내용을 불러온 후 확인해 주세요."
         : message === "makeup_lesson_session_stale"
           ? "승인 후 수업 회차가 변경되어 승인 취소할 수 없습니다."
         : "휴보강 승인을 완료하지 못했습니다."

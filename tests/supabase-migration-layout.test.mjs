@@ -160,6 +160,16 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_thread_replies_test.sql",
   "supabase/tests/ai_agent_nonexpiring_chat_test.sql",
 ])
+const EXPECTED_PR_CI_SQL_TESTS = Object.freeze([
+  ...EXPECTED_CI_SQL_TESTS.flatMap(path => path === "supabase/tests/makeup_legacy_approval_occupancy_test.sql"
+    ? [path, "supabase/tests/makeup_legacy_pair_adoption_test.sql"] : [path]),
+  "supabase/tests/dashboard_audit_predecessor_lookup_test.sql",
+  "supabase/tests/timetable_date_override_native_reader_test.sql",
+  "supabase/tests/legacy_context_adoption_reuse_test.sql",
+  "supabase/tests/legacy_adoption_pair_reuse_test.sql",
+  "supabase/tests/timetable_close_validation_proof_test.sql",
+  "supabase/tests/timetable_reader_weekly_arrays_test.sql",
+])
 const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
@@ -189,6 +199,10 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-ai-agent-thread-replies-concurrency.mjs",
   "tests/probe-timetable-nullable-room-concurrency.mjs",
 ])
+const EXPECTED_PR_CI_PROBES = Object.freeze(EXPECTED_CI_PROBES.flatMap(path =>
+  path === "tests/probe-makeup-approval-collision-dto.mjs"
+    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]))
+
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
   "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
@@ -1435,9 +1449,9 @@ test("prepare ACL migration만 science 이후 protected function 참조로 허�
 test("approved manual production workflow requires its exact path and complete reviewed bytes", async () => {
   const workflowDir = join(repoRoot, ".github", "workflows")
   for (const [name, expectedHash] of [
-    ["free-tier-guardrails.yml", "01c8eeda3b944091f42487a53ce44d6f60b3336a85ce7fe86d4144795d9fcc35"],
+    ["free-tier-guardrails.yml", "b7eaa1de3620b7f486bb9fcf17ce9e8fd91820d4dfc491d21ab3a3fe38a0f923"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "fbf9601eb0c095243a61cf49e45aad7a29fa78c3d6cc4543134bdffae9eb9240"],
+    ["supabase-sql-review.yml", "42e3fd61192dd5e0f32ec212e98f53b4a9e0ac245f9c4df3656d608b2895ef5e"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2398,24 +2412,26 @@ async function assertPinnedPostdeployPredicates(source, requiredPredicates) {
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 }
 
-test("isolated main·PR는 동일한 SQL 108개·probe 27개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 기존 SQL 108개·probe 27개와 PR audit·legacy adoption 회귀를 정확히 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
+    const expectedSqlTests = kind === "pr" ? EXPECTED_PR_CI_SQL_TESTS : EXPECTED_CI_SQL_TESTS
+    const expectedProbes = kind === "pr" ? EXPECTED_PR_CI_PROBES : EXPECTED_CI_PROBES
     const fullStep = namedWorkflowStep(workflow, kind === "main" ? "Run isolated migration and schema contracts" : "Run isolated schema contracts")
     const sqlTests = [...fullStep.matchAll(/--test (supabase\/tests\/\S+\.sql)/g)].map((match) => match[1])
     const probes = [...workflow.matchAll(/--probe (tests\/\S+\.mjs)/g)].map((match) => match[1])
-    assert.deepEqual(sqlTests, EXPECTED_CI_SQL_TESTS)
+    assert.deepEqual(sqlTests, expectedSqlTests)
     assert.deepEqual([...workflow.matchAll(/--test (supabase\/tests\/\S+\.sql)/g)].map(match => match[1]),
-      kind === "pr" ? [...EXPECTED_CI_SQL_TESTS, ...WITHDRAWAL_FINAL_SQL] : EXPECTED_CI_SQL_TESTS)
-    assert.deepEqual(probes, EXPECTED_CI_PROBES)
+      kind === "pr" ? [...expectedSqlTests, ...WITHDRAWAL_FINAL_SQL] : expectedSqlTests)
+    assert.deepEqual(probes, expectedProbes)
     assert.deepEqual(validateIsolatedCiWorkflow(workflow, kind), [])
-    for (const path of EXPECTED_CI_SQL_TESTS) {
+    for (const path of expectedSqlTests) {
       for (const target of ["", `--test ${path} --test ${path}`, "--test supabase/tests/unreviewed_test.sql"]) {
         assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace(`--test ${path}`, target), kind), "isolated_ci_sql_inventory_mismatch")
       }
     }
-    for (const path of EXPECTED_CI_PROBES) {
+    for (const path of expectedProbes) {
       assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace(`--probe ${path}`, ""), kind), "isolated_ci_probe_inventory_mismatch")
     }
   }
@@ -2428,6 +2444,30 @@ test("isolated main·PR는 동일한 SQL 108개·probe 27개와 필수 PR 검사
   const artifactFixture = await createRepoFixture()
   await writeFile(join(artifactFixture, "scripts/verify-supabase-postdeploy-unapproved.mjs"), "export {}\n")
   assertIncludesErrorCode(await validateSupabaseMigrationLayout({ repoRoot: artifactFixture }), "postdeploy_contract_artifact_unapproved")
+})
+
+test("PR audit registration and checkout metadata reject omissions, duplicates, and command changes", async () => {
+  const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
+  const main = await readFile(requiredWorkflowPath, "utf8")
+  const auditTarget = "--test supabase/tests/dashboard_audit_predecessor_lookup_test.sql"
+  assert.equal(pr.split(auditTarget).length - 1, 1)
+  assert.ok(!main.includes(auditTarget))
+  assert.deepEqual(validateIsolatedCiWorkflow(pr, "pr"), [])
+  for (const target of ["", `${auditTarget} ${auditTarget}`, "--test supabase/tests/unreviewed_test.sql"]) {
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(pr.replace(auditTarget, target), "pr"),
+      "isolated_ci_sql_inventory_mismatch")
+  }
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(main.replace("--ai-producer-parity", `--ai-producer-parity ${auditTarget}`), "main"),
+    "isolated_ci_sql_inventory_mismatch")
+  const metadata = "          git rev-parse HEAD HEAD^{tree}\n"
+  assert.equal(pr.split(metadata).length - 1, 1)
+  for (const replacement of ["", metadata.repeat(2), "          git rev-parse HEAD\n", "          exit 0\n", `${metadata}          exit 0\n`]) {
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(pr.replace(metadata, replacement), "pr"),
+      "isolated_ci_direct_execute_body_mismatch")
+  }
+  const wrongOrder = pr.replace(`          set -euo pipefail\n${metadata}`, `${metadata}          set -euo pipefail\n`)
+  assert.notEqual(wrongOrder, pr)
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(wrongOrder, "pr"), "isolated_ci_direct_execute_body_mismatch")
 })
 
 
@@ -2510,7 +2550,7 @@ test('AI registration semantic guards fail independently of workflow hash pins',
   const start=source.indexOf('      - name: Test AI agent and Chat contracts'),end=source.indexOf('\n      - name:',start+8),step=source.slice(start,end);
   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,start)+source.slice(end)+step,kind),'isolated_ci_ai_static_inventory_mismatch');
   assertIncludesErrorCode(validateIsolatedCiWorkflow(source+step,kind),'isolated_ci_ai_static_command_count_mismatch');
-  for(const path of EXPECTED_CI_PROBES)for(const value of [`--probe ${path} --probe ${path}`,'--probe tests/probe-unknown.mjs'])
+  for(const path of kind === "pr" ? EXPECTED_PR_CI_PROBES : EXPECTED_CI_PROBES)for(const value of [`--probe ${path} --probe ${path}`,'--probe tests/probe-unknown.mjs'])
    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(`--probe ${path}`,value),kind),'isolated_ci_probe_inventory_mismatch');
  }
 });
@@ -2567,8 +2607,8 @@ test("withdrawal PR exact supplemental steps preserve the unchanged full AI/main
   assert.equal(await sha256(requiredWorkflowPath), REQUIRED_DB_PUSH_WORKFLOW_SHA256)
   assert.equal((source.match(/--execute\b/g) || []).length, 3)
   const full = namedWorkflowStep(source, "Run isolated schema contracts")
-  assert.deepEqual([...full.matchAll(/--test (\S+)/g)].map(match => match[1]), EXPECTED_CI_SQL_TESTS)
-  assert.deepEqual([...full.matchAll(/--probe (\S+)/g)].map(match => match[1]), EXPECTED_CI_PROBES)
+  assert.deepEqual([...full.matchAll(/--test (\S+)/g)].map(match => match[1]), EXPECTED_PR_CI_SQL_TESTS)
+  assert.deepEqual([...full.matchAll(/--probe (\S+)/g)].map(match => match[1]), EXPECTED_PR_CI_PROBES)
   const final = namedWorkflowStep(source, WITHDRAWAL_FINAL_STEP_NAME)
   assert.deepEqual([...final.matchAll(/--test (\S+)/g)].map(match => match[1]), WITHDRAWAL_FINAL_SQL)
   for (const name of WITHDRAWAL_STEP_NAMES) assert.equal(source.split(`      - name: ${name}\n`).length - 1, 1)

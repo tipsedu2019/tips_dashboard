@@ -1,8 +1,127 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { modules, id, row, stamp, transport, servicePath } from './helpers/makeup-numbered-harness.mjs';
+import { act } from 'react';
+import { modules, id, row, stamp, transport, servicePath, setup as setupWorkspace, button } from './helpers/makeup-numbered-harness.mjs';
 import { actionCases, actionFixture, loadActionService } from './helpers/makeup-action-fixture.mjs';
 import { resubmitFixture } from './helpers/makeup-resubmit-fixture.mjs';
+
+for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue241 follow-up: unverified context cannot produce a confirmed room warning in ${timezone}`, t => {
+  const previous = process.env.TZ; process.env.TZ = timezone;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  const { hasMakeupRequestRoomCollision } = modules(null, { '@/providers/auth-provider': {} })('src/features/makeup-requests/makeup-request-workspace.tsx');
+  const request = row(241, { classId: id(600), makeupStartAt: '2026-11-14T09:00:00Z', makeupEndAt: '2026-11-14T11:00:00Z' });
+  const catalog = { classrooms: [{ name: 'A' }], classes: [{ id: id(601), name: '합성 종료 수업', schedule: '토 18:00-20:00', room: 'A', status: '종강' }], requests: [request], academicEvents: [] };
+  const context = (occupancies = [], reservations = [request]) => ({ reservations, activeEventRequestIds: [request.id], effectiveSchedule: { version: 1, occupancies } });
+  const occupancy = (startMinute, patch = {}) => ({ id: 'synthetic-peer', classId: id(601), className: '합성 수업', date: '2026-11-14', classroom: 'A', startMinute, endMinute: startMinute + 60, uncertain: false, allRooms: false, ...patch });
+  assert.equal(hasMakeupRequestRoomCollision(request, catalog), true, 'legacy callers retain their weekly-schedule contract');
+  assert.equal(hasMakeupRequestRoomCollision(request, { ...catalog, collisionContextReady: false }), false, 'pending or failed dated context is not proof of a collision');
+  assert.equal(hasMakeupRequestRoomCollision(request, { ...catalog, collisionContextReady: false, reservationContext: context([occupancy(1110)]) }), false, 'an unaccepted old context cannot supply a current warning');
+  const ready = reservationContext => ({ ...catalog, collisionContextReady: true, reservationContext });
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context())), false, 'dated empty context overrides a stale weekly catalog and excludes the request itself');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(540)]))), false, '09:00 occupancy cannot conflict with 18:00');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(1110)]))), true, 'real 18:30 overlap stays blocked');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(1200)]))), false, 'touching end boundary stays clear');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(1110, { classId: request.classId })]))), true, 'same class is not enough to ignore a different occupied lesson');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([occupancy(null, { endMinute: null, uncertain: true, allRooms: true })]))), true, 'uncertain authoritative occupancy remains conservatively blocked');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([], [{ ...request, id: id(242) }]))), true, 'a different active request remains a collision');
+  assert.equal(hasMakeupRequestRoomCollision(request, ready(context([], [{ ...request, id: id(242), status: 'canceled' }]))), false, 'canceled request is not an active reservation');
+});
+
+for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue241 follow-up: list and detail keep approval gated through context error and recovery in ${timezone}`, async t => {
+  const previous = process.env.TZ; process.env.TZ = timezone;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  const p = await setupWorkspace(t, { search: '?view=approvalPending' });
+  const request = row(241, { canDecideSubject: true, className: '합성 보강', makeupStartAt: '2026-11-14T09:00:00Z', makeupEndAt: '2026-11-14T11:00:00Z' });
+  const catalogs = () => act(async () => {
+    for (const r of p.requests.filter(r => r.table)) r.resolve({ error: null, data: r.table === 'classes'
+      ? [{ id: id(601), name: '합성 종료 수업', subject: '영어', schedule: '토 18:00-20:00', classroom: 'A', status: '종강' }]
+      : r.table === 'classroom_catalogs' ? [{ name: 'A' }] : [] });
+  });
+  const assertUnverified = () => {
+    assert.doesNotMatch(document.body.textContent, /충돌 있음/, 'loading/error is not a confirmed collision on either list layout');
+    const approvals = [...document.querySelectorAll('button')].filter(node => node.textContent.trim() === '승인');
+    assert.ok(approvals.length > 0); assert.ok(approvals.every(node => node.disabled), 'approval remains disabled until the context is verified');
+  };
+  await act(async () => p.finish(p.numbered()[0], 1, { rows: [request] }));
+  await catalogs();
+  assert.match(document.body.textContent, /예약 충돌 정보 확인 중/); assertUnverified();
+  await act(async () => p.context().at(-1).resolve({ data: null, error: { code: 'XX000', message: 'synthetic context unavailable' } }));
+  assert.ok(button('예약 다시 확인')); assertUnverified();
+  await act(async () => button('휴보강 신청 상세 열기').click());
+  await act(async () => p.requests.filter(r => r.name === 'get_makeup_detail_v1').at(-1).resolve({ data: request, error: null }));
+  assert.match(document.querySelector('[role="dialog"]').textContent, /2026-11-14 18:00 - 2026-11-14 20:00/); assertUnverified();
+  await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await act(async () => button('예약 다시 확인').click()); await catalogs();
+  assertUnverified();
+  await act(async () => p.context().at(-1).resolve({ data: { reservations: [request], activeEventRequestIds: [] }, error: null }));
+  assert.doesNotMatch(document.body.textContent, /충돌 있음|예약 충돌 정보 확인 중|예약 충돌 정보를 불러오지 못했습니다/);
+  assert.equal(button('승인').disabled, false, 'verified empty effective occupancy and own reservation are clear');
+  assert.equal(p.requests.filter(r => /transition|create|approve/.test(r.name || '')).length, 0, 'checking and retrying never submits an approval');
+});
+
+for (const timezone of ['UTC', 'Asia/Seoul']) test(`issue241: teacher UTC slots retain Seoul display and collision instants in ${timezone}`, t => {
+  const previous = process.env.TZ; process.env.TZ = timezone;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  const load = modules(null, { '@/providers/auth-provider': {} });
+  const { seoulDateTimeInputToIso } = load('src/features/tasks/ops-task-service.ts');
+  const { getMakeupRequestTableValue, hasMakeupRequestRoomCollision, toFormSlot, materializeSlot } = load('src/features/makeup-requests/makeup-request-workspace.tsx');
+  const slot = { startAt: seoulDateTimeInputToIso('2026-11-14T18:00'), endAt: seoulDateTimeInputToIso('2026-11-14T20:00'), classroom: 'A' };
+  assert.equal(slot.startAt, '2026-11-14T09:00:00.000Z', 'teacher producer stores the correct instant');
+  const request = row(241, { makeupStartAt: slot.startAt, makeupEndAt: slot.endAt, makeupSlots: [slot] });
+  assert.equal(getMakeupRequestTableValue(request, 'makeupAt'), '2026-11-14 18:00 - 2026-11-14 20:00');
+  const reopened = toFormSlot(slot), materialized = materializeSlot(reopened);
+  assert.equal(reopened.date, '2026-11-14'); assert.equal(reopened.startTime, '18:00'); assert.equal(reopened.endTime, '20:00');
+  assert.equal(Date.parse(materialized.startAt), Date.parse(slot.startAt));
+  assert.equal(Date.parse(materialized.endAt), Date.parse(slot.endAt));
+  const data = startMinute => ({ classrooms: [{ name: 'A' }], classes: [], requests: [], academicEvents: [], collisionContextReady: true,
+    reservationContext: { reservations: [], activeEventRequestIds: [], effectiveSchedule: { version: 1, occupancies: [{ id: 'synthetic', classId: id(600), className: '합성 수업', date: '2026-11-14', startMinute, endMinute: startMinute + 60, classroom: 'A', uncertain: false, allRooms: false }] } } });
+  assert.equal(hasMakeupRequestRoomCollision(request, data(540)), false, '09:00 occupancy cannot block 18:00 request');
+  assert.equal(hasMakeupRequestRoomCollision(request, data(1110)), true, 'real 18:30 conflict remains blocked');
+  assert.equal(hasMakeupRequestRoomCollision(request, data(1200)), false, 'touching 20:00 boundary is not a conflict');
+  for (const fraction of ['', '.123', '.1234567']) {
+    const legacySlot = { startAt: `2026-11-14T18:00:00${fraction}`, endAt: `2026-11-14T20:00:00${fraction}`, classroom: 'A' };
+    const legacy = { ...request, makeupSlots: [legacySlot] };
+    assert.equal(toFormSlot(legacySlot).startTime, '18:00');
+    assert.equal(hasMakeupRequestRoomCollision(legacy, data(540)), false, 'legacy wall time is Seoul in every browser');
+    assert.equal(hasMakeupRequestRoomCollision(legacy, data(1110)), true, 'legacy wall time still detects the real conflict');
+    assert.equal(materializeSlot(toFormSlot(legacySlot)).startAt, `${legacySlot.startAt}+09:00`, 'canonicalization preserves source precision');
+  }
+});
+
+test('issue241: reread slots preserve overnight end dates and precise instants without a new write', () => {
+  const { getMakeupRequestTableValue, toFormSlot, materializeSlot } = modules(null, { '@/providers/auth-provider': {} })('src/features/makeup-requests/makeup-request-workspace.tsx');
+  for (const slot of [
+    { startAt: '2026-11-13T15:30:00Z', endAt: '2026-11-13T17:30:00Z' },
+    { startAt: '2026-11-14T14:30:01.123Z', endAt: '2026-11-14T16:30:02.456Z' },
+    { startAt: '2026-11-14T18:00:00+09:00', endAt: '2026-11-14T20:00:00+09:00' },
+  ]) {
+    const reread = materializeSlot(toFormSlot(slot));
+    assert.equal(Date.parse(reread.startAt), Date.parse(slot.startAt));
+    assert.equal(Date.parse(reread.endAt), Date.parse(slot.endAt));
+  }
+  assert.equal(getMakeupRequestTableValue(row(1, { makeupSlots: [{ startAt: '2026-11-14T14:59:59.9999999Z', endAt: '2026-11-14T15:30:00Z' }] }), 'makeupAt'), '2026-11-14 23:59 - 2026-11-15 00:30');
+  for (const [startAt, endAt] of [['2026-11-14', '2026-11-15'], ['2026-02-30T09:00:00Z', '2026-02-30T11:00:00Z'], ['bad', 'invalid']]) {
+    assert.equal(materializeSlot(toFormSlot({ startAt, endAt })), null, 'incomplete/invalid dates keep the context disabled');
+  }
+  assert.equal(getMakeupRequestTableValue(row(1, { makeupSlots: [{ startAt: '2026-02-30T09:00:00Z', endAt: 'raw end' }] }), 'makeupAt'), '2026-02-30 09:00 - raw end', 'invalid legacy text matches SQL fallback');
+  for (const timestamp of ['2026-11-14T23:59:60Z', '2026-11-14T09:00:00+16:00', '2026-11-14T24:00:00Z']) {
+    assert.equal(getMakeupRequestTableValue(row(1, { makeupSlots: [{ startAt: timestamp, endAt: 'raw end' }] }), 'makeupAt'), `${timestamp.slice(0, 10)} ${timestamp.slice(11, 16)} - raw end`, 'out-of-contract clock/offset retains the shared legacy fallback');
+  }
+});
+
+for (const [start, end, blocked] of [['09:00', '10:00', false], ['18:30', '19:30', true]]) test(`issue241: real workspace keeps UTC reservation query and ${start} collision decision`, async t => {
+  const p = await setupWorkspace(t, { search: '?view=approvalPending' });
+  const request = row(241, { canDecideSubject: true, makeupStartAt: '2026-11-14T09:00:00Z', makeupEndAt: '2026-11-14T11:00:00Z', makeupSlots: [] });
+  await act(async () => p.finish(p.numbered()[0], 1, { rows: [request] }));
+  await p.catalogs();
+  const context = p.context().at(-1);
+  assert.deepEqual(context.args.p_slots, [{ startAt: '2026-11-14T09:00:00.000Z', endAt: '2026-11-14T11:00:00.000Z' }]);
+  assert.equal(button('승인').disabled, true, 'context must finish before any approval');
+  await act(async () => context.resolve({ error: null, data: { reservations: [row(900, { makeupStartAt: `2026-11-14T${start}:00+09:00`, makeupEndAt: `2026-11-14T${end}:00+09:00`, makeupSlots: [] })], activeEventRequestIds: [] } }));
+  assert.match(document.body.textContent, /2026-11-14 18:00 - 2026-11-14 20:00/);
+  assert.equal(button('승인').disabled, blocked);
+  assert.equal(p.requests.filter(r => /transition|create|approve/.test(r.name || '')).length, 0, 'render/reload never writes or approves');
+});
 
 test('approval reads exact detail and preserves labels without loading workspace tables', async t => {
   const calls = [], sends = [], previous = globalThis.fetch;

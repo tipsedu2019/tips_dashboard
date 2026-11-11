@@ -87,8 +87,8 @@ select is((pg_temp.page('{"subject":"영어","teacher":"name:교사 801","period
 select is((pg_temp.page('{"period":"custom","dateFrom":"2026-08-01","dateTo":"2026-08-01"}')->>'totalCount')::integer,112,'period cancel date matching');
 select is((pg_temp.page('{"period":"custom","dateFrom":"2026-09-03","dateTo":""}')->>'totalCount')::integer,1,'custom open boundary plus date/time fallback slot');
 select is((pg_temp.page('{"filterColumn":"makeupAt","search":"2026-09-01 09:00 - 2026-09-02 10:00"}')->>'totalCount')::integer,1,'source offset timestamp display preserves full endpoints');
-select is((pg_temp.page('{"filterColumn":"approvedAt","search":"2026-07-01 03:00"}')->>'totalCount')::integer,1,'stored approvedAt preferred over latest event');
-select is((pg_temp.page('{"filterColumn":"canceledAt","search":"2026-07-02 04:00"}')->>'totalCount')::integer,1,'stored canceledAt preferred over latest cancellation');
+select is((pg_temp.page('{"filterColumn":"approvedAt","search":"2026-07-01 12:00"}')->>'totalCount')::integer,1,'stored approvedAt preferred over latest event');
+select is((pg_temp.page('{"filterColumn":"canceledAt","search":"2026-07-02 13:00"}')->>'totalCount')::integer,1,'stored canceledAt preferred over latest cancellation');
 select is((pg_temp.page('{"filterColumn":"finalNote","search":"시스템"}')->>'totalCount')::integer,0,'system approval notes suppressed');
 select is((pg_temp.page('{"filterColumn":"finalNote","search":"같은 메모"}')->>'totalCount')::integer,0,'matching cancellation notes suppressed');
 select diag('system-note whitespace mismatches='||(select jsonb_agg(codepoint)::text from unnest(array[9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279])codepoint where public.makeup_numbered_values_v1(jsonb_build_object('final_note','보강'||chr(codepoint)||'2026-08-31'||chr(codepoint)||'09:00-10:00'),'{}','{}')->>'finalNote'<>'-'));
@@ -111,9 +111,9 @@ select is((pg_temp.page('{"filterColumn":"makeupAt","search":"invalid - also inv
 -- Match the pinned UTC RPC wire representation while probing its pure helper.
 set local timezone='UTC';
 select is(public.makeup_numbered_values_v1(to_jsonb(r),'{}','{"teacher":"교사 801","requester":"교사 801","approver":"교사 804"}')-'dates',
- '{"status":"결재자 승인 대기","className":"수업 10","subject":"영어","teacher":"교사 801","requester":"교사 801","reason":"사유 10","cancelDate":"2026-08-01","makeupAt":"2026-08-31 00:00 - 2026-08-31 01:00","makeupRoom":"A","approver":"교사 804","submittedAt":"2026-08-01 00:00","revisionRequestedAt":"-","approvedAt":"-","rejectedAt":"-","canceledAt":"-","returnedReason":"-","rejectedReason":"-","finalNote":"-","canceledNote":"-"}'::jsonb,'all nineteen table display keys match raw UI strings and dash fallbacks') from public.makeup_requests r where r.id=pg_temp.mid(10);
+ '{"status":"결재자 승인 대기","className":"수업 10","subject":"영어","teacher":"교사 801","requester":"교사 801","reason":"사유 10","cancelDate":"2026-08-01","makeupAt":"2026-08-31 09:00 - 2026-08-31 10:00","makeupRoom":"A","approver":"교사 804","submittedAt":"2026-08-01 09:00","revisionRequestedAt":"-","approvedAt":"-","rejectedAt":"-","canceledAt":"-","returnedReason":"-","rejectedReason":"-","finalNote":"-","canceledNote":"-"}'::jsonb,'all nineteen table display keys match Seoul UI strings and dash fallbacks') from public.makeup_requests r where r.id=pg_temp.mid(10);
 select ok((pg_temp.page(jsonb_build_object('filterColumn',column_name,'search',search_text,'sortColumn',column_name,'sortDirection','asc'))->>'totalCount')::integer>0,'full-scope search and sort column '||column_name)
-from (values ('status','결재자 승인 대기'),('className','수업 10'),('subject','수학'),('teacher','교사 2'),('requester','교사 805'),('reason','검색'),('cancelDate','2026-08-01'),('makeupAt','2026-09-01 09:00'),('makeupRoom','B'),('approver','교사 803'),('submittedAt','2026-08-01 00:00'),('revisionRequestedAt','2026-08-29 01:00'),('approvedAt','2026-07-01 03:00'),('rejectedAt','-'),('canceledAt','2026-07-02 04:00'),('returnedReason','-'),('rejectedReason','-'),('finalNote','높은 ID'),('canceledNote','취소 메모')) cases(column_name,search_text);
+from (values ('status','결재자 승인 대기'),('className','수업 10'),('subject','수학'),('teacher','교사 2'),('requester','교사 805'),('reason','검색'),('cancelDate','2026-08-01'),('makeupAt','2026-09-01 09:00'),('makeupRoom','B'),('approver','교사 803'),('submittedAt','2026-08-01 09:00'),('revisionRequestedAt','2026-08-29 10:00'),('approvedAt','2026-07-01 12:00'),('rejectedAt','-'),('canceledAt','2026-07-02 13:00'),('returnedReason','-'),('rejectedReason','-'),('finalNote','높은 ID'),('canceledNote','취소 메모')) cases(column_name,search_text);
 set local timezone='Asia/Seoul';
 select is((pg_temp.page('{"view":"makeupPending"}')->>'totalCount')::integer,1,'makeupPending exact status');
 select is((pg_temp.page('{"view":"refundPending"}')->>'totalCount')::integer,1,'refundPending exact status');
@@ -236,5 +236,70 @@ select is((select count(*) from dashboard_private.notification_events),(select e
 select is((select count(*) from dashboard_private.notification_event_fanout_jobs),(select jobs from precision_read_before),'precision reads no jobs');
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from seed_before),'precision fixture and reads no deliveries');
 select is((select count(*) from public.makeup_request_events),(select request_events from precision_read_before),'precision reads no request history writes');
+-- Issue #241: the teacher producer stores 18:00 KST as 09:00Z. Formatting
+-- must never reinterpret those UTC clock digits as a new Seoul instant.
+select pg_temp.actor(804);
+select ok(not p.prosecdef and p.provolatile='i' and 'search_path=""'=any(p.proconfig)
+  and has_function_privilege('authenticated',p.oid,'execute')
+  and not has_function_privilege('anon',p.oid,'execute')
+  and not has_function_privilege('public',p.oid,'execute'),
+  'Seoul projection retains invoker immutability pinned path and ACL '||p.proname)
+from pg_proc p where p.oid in ('public.makeup_numbered_time_label_v1(text)'::regprocedure,
+  'public.makeup_numbered_values_v1(jsonb,jsonb,jsonb)'::regprocedure);
+create temp table seoul_time_cases(value text,expected text);
+insert into seoul_time_cases values
+ ('2026-11-14T09:00:00.000Z','2026-11-14 18:00'),
+ ('2026-11-14T18:00:00+09:00','2026-11-14 18:00'),
+ ('2026-11-14T09:00:00+00:00','2026-11-14 18:00'),
+ ('2026-11-14T04:00:00-05:00','2026-11-14 18:00'),
+ ('2026-11-14T15:30:00Z','2026-11-15 00:30'),
+ ('2026-12-31T15:00:00Z','2027-01-01 00:00'),
+ ('2026-11-14T14:59:59.9999999Z','2026-11-14 23:59'),
+ ('2026-11-14T09:00:59.9999999Z','2026-11-14 18:00'),
+ ('2026-11-14T09:00:60Z','2026-11-14 09:00'),
+ ('2026-11-14T18:00:00+16:00','2026-11-14 18:00'),
+ ('2026-11-14T24:00:00Z','2026-11-14 24:00'),
+ ('2026-11-14T18:00:00','2026-11-14 18:00'),
+ ('invalid','invalid'),('', '-'),(null,'-');
+set local timezone='UTC';
+select is(public.makeup_numbered_time_label_v1(value),expected,'UTC session Seoul label '||coalesce(value,'NULL')) from seoul_time_cases;
+set local timezone='Asia/Seoul';
+select is(public.makeup_numbered_time_label_v1(value),expected,'Seoul session same label '||coalesce(value,'NULL')) from seoul_time_cases;
+select is(public.makeup_numbered_values_v1('{"status":"canceled","makeup_slots":[{"startAt":"2026-11-14T14:59:59.9999999Z","endAt":"2026-11-14T15:00:00Z"}]}','{}','{}')->'dates',
+  '["2026-11-14","2026-11-15"]'::jsonb,'period keys use exact Seoul endpoints without rounding fractional seconds');
+select is(public.makeup_numbered_values_v1('{"status":"canceled"}','{}','{}')->>'status','취소·철회','final teacher withdrawal label is preserved');
+insert into public.makeup_requests(id,status,subject,approval_group,requester_id,teacher_profile_id,approver_profile_id,class_name,request_kind,reason,makeup_slots,makeup_start_at,makeup_end_at,makeup_classroom,created_at)
+select pg_temp.mid(n),'approval_pending','영어','english',pg_temp.mid(801),pg_temp.mid(801),pg_temp.mid(804),'TZ241 '||n,'makeup_only','synthetic timezone regression',
+ jsonb_build_array(jsonb_build_object('startAt',a,'endAt',b,'classroom','TZ241')),a::timestamptz,b::timestamptz,'TZ241','2026-11-01T00:00:00Z'
+from (values
+ (301,'2026-11-14T09:00:00.000Z','2026-11-14T11:00:00.000Z'),
+ (302,'2026-11-14T18:00:00+09:00','2026-11-14T20:00:00+09:00'),
+ (303,'2026-11-14T15:30:00Z','2026-11-14T16:00:00Z'),
+ (304,'2026-11-14T00:30:00+09:00','2026-11-14T01:00:00+09:00')) slots(n,a,b);
+set constraints all immediate;
+create temp table seoul_read_before as select
+ (select jsonb_agg(to_jsonb(r) order by id) from public.makeup_requests r where id between pg_temp.mid(301) and pg_temp.mid(304)) requests,
+ (select count(*) from dashboard_private.notification_events) events,
+ (select count(*) from dashboard_private.notification_event_fanout_jobs) jobs,
+ (select count(*) from dashboard_private.notification_deliveries) deliveries,
+ (select count(*) from public.makeup_request_events) request_events;
+set local role authenticated;
+select is((pg_temp.page('{"filterColumn":"makeupAt","search":"2026-11-14 18:00 - 2026-11-14 20:00"}')->>'totalCount')::integer,2,'equivalent UTC/Seoul requests searchable by the requested 18:00-20:00');
+select is((pg_temp.page('{"filterColumn":"makeupAt","search":"2026-11-14 09:00"}')->>'totalCount')::integer,0,'UTC clock digits are not a false 09:00 search match');
+select is((pg_temp.page('{"period":"custom","dateFrom":"2026-11-15","dateTo":"2026-11-15"}')->>'totalCount')::integer,1,'date filter includes next Seoul day after UTC rollover');
+select is((pg_temp.page('{"period":"custom","dateFrom":"2026-11-14","dateTo":"2026-11-14"}')->>'totalCount')::integer,3,'date filter excludes next Seoul day and retains earlier Seoul midnight');
+select is((select jsonb_agg(r->>'id' order by ordinal) from jsonb_array_elements(pg_temp.page('{"filterColumn":"className","search":"TZ241","sortColumn":"makeupAt","sortDirection":"asc"}')->'rows') with ordinality a(r,ordinal)),
+ jsonb_build_array(pg_temp.mid(304),pg_temp.mid(302),pg_temp.mid(301),pg_temp.mid(303)), 'full-set time sorting uses Seoul dates with deterministic ID ties');
+select is(public.get_makeup_detail_v1(pg_temp.mid(301))#>>'{makeupSlots,0,startAt}','2026-11-14T09:00:00.000Z','detail keeps original UTC slot bytes');
+select is(public.get_makeup_detail_v1(pg_temp.mid(302))#>>'{makeupSlots,0,startAt}','2026-11-14T18:00:00+09:00','detail keeps equivalent original Seoul slot bytes');
+select is(public.get_makeup_detail_v1(pg_temp.mid(301))->>'makeupStartAt','2026-11-14T09:00:00+00:00','stored scalar remains the same instant on UTC wire');
+select is((select count(*)::integer from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-11-14T09:30:00Z","endAt":"2026-11-14T10:30:00Z"}]','{}')->'reservations') r where r->>'id' in(pg_temp.mid(301)::text,pg_temp.mid(302)::text)),2,'real 18:30-19:30 overlap still selects both equivalent instants');
+select is((select count(*)::integer from jsonb_array_elements(public.get_makeup_reservation_context_v1('[{"startAt":"2026-11-14T00:30:00Z","endAt":"2026-11-14T01:30:00Z"}]','{}')->'reservations') r where r->>'id' in(pg_temp.mid(301)::text,pg_temp.mid(302)::text)),0,'09:30-10:30 morning does not conflict with the evening request');
+reset role;
+select is((select jsonb_agg(to_jsonb(r) order by id) from public.makeup_requests r where id between pg_temp.mid(301) and pg_temp.mid(304)),(select requests from seoul_read_before),'Seoul projection and collision reads do not rewrite requests');
+select is((select count(*) from dashboard_private.notification_events),(select events from seoul_read_before),'Seoul reads create no notification events');
+select is((select count(*) from dashboard_private.notification_event_fanout_jobs),(select jobs from seoul_read_before),'Seoul reads create no jobs');
+select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from seoul_read_before),'Seoul reads create no deliveries');
+select is((select count(*) from public.makeup_request_events),(select request_events from seoul_read_before),'Seoul reads create no history');
 select * from finish();
 rollback;

@@ -85,6 +85,8 @@ export function buildRoomAvailability(options?: {
   ignoreOrphanedMakeupEvents?: boolean;
   activeEventRequestIds?: string[];
   effectiveSchedule?: MakeupEffectiveSchedule | null;
+  legacyBindings?: import('./makeup-legacy-pair.js').MakeupLegacyBinding[];
+  currentRequest?: unknown;
 }): MakeupRoomAvailability[];
 export function getDefaultMakeupEndAt(startAt: string, classItem?: unknown): string;
 export function applyMakeupRequestToSchedulePlan(
@@ -94,3 +96,6 @@ export function applyMakeupRequestToSchedulePlan(
 ): Record<string, unknown>;
 export function buildMakeupCalendarDrafts(request?: unknown): Array<Record<string, unknown>>;
 export function toDateKey(value: string | Date): string;
+export function toMakeupDateTimeInput(value: string): string;
+export function toMakeupSlotTimestamp(value: string): string;
+export function formatMakeupDateTime(value: string): string;
