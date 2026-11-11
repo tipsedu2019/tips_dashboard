@@ -364,6 +364,6 @@ export type TextbookInventoryCountTransport = Omit<InventoryCountRow, "source" |
   source: TextbookMasterRow;
   daysSinceLatestCount: number | null;
 };
-// Task4 applies the signed-in user's email only when actorLabel is empty and
-// actorId matches that session. Neither value is a database authority argument.
+// History display uses a non-UUID actorLabel or the matching session's existing
+// name, otherwise an unknown-actor label. These are not database authority inputs.
 export type TextbookInventoryHistoryTransport = InventoryHistoryRow & { actorId: string; actorLabel: string };
