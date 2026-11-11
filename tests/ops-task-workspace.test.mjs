@@ -1966,7 +1966,7 @@ test("canonical registration application opens one honest read-only timeline fro
   assert.match(timelineSource, /buildRegistrationSubjectHistory\(detail\)/);
   assert.doesNotMatch(timelineSource, /과목 전체|단계 전체|subjectFilter|stageFilter/);
   assert.match(timelineSource, /알 수 없음/);
-  assert.match(timelineSource, /마이그레이션/);
+  assert.match(timelineSource, /이전 시스템 이관/);
   assert.match(timelineSource, /시간 확인 불가/);
   assert.match(timelineSource, /actorKind/);
   assert.match(timelineSource, /oldScheduledAt/);

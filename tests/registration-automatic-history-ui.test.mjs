@@ -111,14 +111,19 @@ test("automatic history opens one read-only timeline with honest actors and time
   const unknown = rows.find((row) => row.textContent.includes("대기 시작"))
   assert.equal(unknown.querySelector("p").textContent, "알 수 없음 · 시간 확인 불가")
   const migrated = rows.find((row) => row.textContent.includes("등록 흐름 종료"))
-  assert.equal(migrated.querySelector("p").textContent, "마이그레이션 · 시간 확인 불가")
+  assert.equal(migrated.querySelector("p").textContent, "이전 시스템 이관 · 시간 확인 불가")
+  assert.match(timeline.textContent, /시각이 없는 기록은 아래에 모읍니다/u)
+  assert.match(timeline.textContent, /시간 확인 불가 항목의 순서는 발생 순서를 뜻하지 않습니다/u)
+  assert.deepEqual(rows.map(row => row.querySelector("span").textContent), [
+    "대기 시작", "등록 문의 생성", "상담 책임자 자동 배정", "등록 흐름 종료",
+  ], "invalid recorded times and unavailable times retain the existing model order")
   assert.equal(timeline.querySelectorAll("input, textarea, select, a, [contenteditable]").length, 0)
   const details = [...timeline.querySelectorAll("button")]
   assert.deepEqual(details.map((button) => button.textContent), Array(4).fill("상세 보기"))
   const createdDetails = created.querySelector("button")
   await flush(() => createdDetails.click())
   assert.equal(createdDetails.textContent, "상세 닫기")
-  assert.match(created.textContent, /자동 기록의 세부 정보가 보존되어 있습니다/u)
+  assert.match(created.textContent, /표시할 세부 정보가 없습니다/u)
   assert.doesNotMatch(timeline.textContent, /PRIVATE_PROVIDER_RECEIPT|notification_delivery|known-actor/u)
 })
 
@@ -180,3 +185,24 @@ test("safe creation and legacy titles survive repeated details, Escape, and reop
     assert.ok(view.document.activeElement === view.trigger)
   }
 })
+
+test("expanded history localizes structured dates while preserving invalid dates and literal prose", async (t) => {
+  const prose = "요청 시각 2026-10-29T10:00:00Z 는 메모 원문";
+  const detail = { events: [{ id: "dated", eventType: "case_created", payloadVersion: 2,
+    actorKind: "user", actorId: "known-actor", occurredAt: "2026-10-29T01:00:00Z",
+    reason: prose, metadata: { scheduledAt: "2026-10-29T10:00:00+00:00", place: prose } },
+    { id: "invalid", eventType: "track_closed", payloadVersion: 2, actorKind: "migration",
+      occurredAt: "2026-02-30T10:00:00Z", metadata: { scheduledAt: "2026-02-30T10:00:00Z" } }],
+    appointments: [{ id: "fallback", kind: "level_test", scheduledAt: "2026-10-29T20:00:00Z", status: "scheduled" }],
+  };
+  const view = await mount(t, detail);
+  await flush(() => view.trigger.click());
+  const rows = [...view.timeline().querySelectorAll(":scope > ol > li")];
+  for (const row of rows) await flush(() => row.querySelector("button").click());
+  assert.match(rows[0].textContent, /예약 시각: 2026\. 10\. 29\. 오후 07:00/u);
+  assert.ok(rows[0].textContent.includes(`기록 요약: ${prose} · 예약 시각: 2026. 10. 29. 오후 07:00 · 장소: ${prose}`));
+  assert.equal(rows[1].querySelector("p").textContent, "이전 시스템 이관 · 시간 확인 불가");
+  assert.match(rows[1].textContent, /예약 시각: 2026-02-30T10:00:00Z/u);
+  assert.match(rows[2].textContent, /이전 시스템 이관 · 시간 확인 불가/u);
+  assert.match(rows[2].textContent, /기록 요약: 2026\. 10\. 30\. 오전 05:00 · 예약/u);
+});

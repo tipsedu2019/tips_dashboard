@@ -31,3 +31,6 @@ export type RegistrationSubjectHistoryItem = {
 export function buildRegistrationSubjectHistory(
   detail?: Partial<OpsRegistrationCaseDetail>,
 ): RegistrationSubjectHistoryItem[];
+
+/** Format a valid, explicitly zoned ISO instant; preserve all other strings. */
+export function formatRegistrationHistoryDate(value: string): string;
