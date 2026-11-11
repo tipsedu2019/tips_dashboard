@@ -91,7 +91,9 @@ select 'OUTCOME:'||pg_temp.batch_outcome()::text;\n`;
         try {
             first.write(`begin;set local statement_timeout='20s';${invoke(firstBody)}select 'HELD:'||pg_backend_pid();\n`);
             const blockerPid = Number((await lineBefore(first, /^HELD:([1-9][0-9]*)$/mu, deadlineAt))[1]);
-            const original = JSON.parse((await lineBefore(first, /^OUTCOME:(.*)$/mu, deadlineAt))[1]);
+            // stdout chunks need not end at a record boundary. A complete JSON
+            // line is required; buffer-end alone is not a completed response.
+            const original = JSON.parse((await lineBefore(first, /^OUTCOME:([^\r\n]*)\r?\n/mu, deadlineAt))[1]);
             assert.equal(original.sqlstate, '00000', 'first batch must succeed before holding its lock');
             assert.equal(original.message, null);
             second.write(`begin;set local statement_timeout='20s';select 'WRITER:'||pg_backend_pid();${invoke(secondBody)}`);
@@ -100,7 +102,7 @@ select 'OUTCOME:'||pg_temp.batch_outcome()::text;\n`;
                 'the second actual RPC must be observed waiting on the first backend');
             first.end('commit;\n');
             runtime.requireComplete(await first.complete);
-            const waited = JSON.parse((await lineBefore(second, /^OUTCOME:(.*)$/mu, deadlineAt))[1]);
+            const waited = JSON.parse((await lineBefore(second, /^OUTCOME:([^\r\n]*)\r?\n/mu, deadlineAt))[1]);
             assert.equal(waited.sqlstate, expectedState, 'waited batch exact SQLSTATE');
             assert.equal(waited.message, expectedMessage, 'waited batch exact domain message');
             second.end('commit;\n');

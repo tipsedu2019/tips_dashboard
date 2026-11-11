@@ -95,9 +95,9 @@ try {
     page.on("pageerror", error => report.errors.push(error.message));
     try {
       await page.goto(origin, { waitUntil: "domcontentloaded" });
-      const trigger = page.getByRole("button", { name: "자동 이력 보기", exact: true });
+      const trigger = page.getByRole("button", { name: "업무 처리 이력", exact: true });
       await trigger.click();
-      const timeline = page.getByRole("region", { name: "등록 자동 이력", exact: true });
+      const timeline = page.getByRole("region", { name: "등록 업무 처리 이력", exact: true });
       await timeline.waitFor();
       await page.evaluate(() => document.fonts.ready);
       await page.screenshot({ path: path.join(out, `${phase}-${width}-${theme}.png`) });

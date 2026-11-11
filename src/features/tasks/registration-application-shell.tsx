@@ -156,9 +156,9 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
   return (
     <div ref={shellRef} data-registration-application-mode={props.mode} className="group/registration-shell min-w-0 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
       <header ref={headerRef} className="sticky -top-6 z-20 group-data-[registration-compact-viewport=true]/registration-shell:static -mx-6 -mt-6 border-b bg-background px-6 pb-3 pt-4">
-        <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
           <h2 className="min-w-0 break-words text-lg font-semibold [overflow-wrap:anywhere]">{props.studentName}</h2>
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
             {props.historyAction}
             {props.closeAction}
           </div>
