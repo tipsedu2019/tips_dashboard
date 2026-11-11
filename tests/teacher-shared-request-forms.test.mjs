@@ -115,7 +115,9 @@ for(const domain of ['withdrawal','transfer','makeup'])test(`${domain}: existing
  }else{await change(h,document.getElementById('makeup-reason'),'신규 합성 휴강');await h.act(()=>document.getElementById('cancel-date').click());const day=[...document.querySelectorAll('button')].find(el=>el.getAttribute('data-day')==='2026-11-02');
   // Navigate through the real picker to its linked date, independent of today's month.
   const linked=[...document.querySelectorAll('button')].find(el=>el.textContent.includes('11-02')&&el.textContent.includes('회차'));assert.ok(day||linked);await h.act(()=>(day||linked).click());}
- await submit(h);const write=latest(h,rpc.write);assert.ok(write);assert.equal(write.args.p_action,'create');assert.equal(write.args.p_expected_revision,null);assert.deepEqual(Object.keys(write.args.p_input).sort(),Object.keys(inputs[domain]).sort());
+ await submit(h);const write=latest(h,rpc.write);assert.ok(write);assert.equal(write.args.p_action,'create');assert.equal(write.args.p_expected_revision,null);
+ const expectedKeys=Object.keys(inputs[domain]).sort();
+ assert.deepEqual(Object.keys(write.args.p_input).sort(),expectedKeys);
  assert.equal(h.requests.some(r=>r.table),false);
 });
 test('reason-only makeup edit preserves overnight timestamps and precision exactly',async t=>{

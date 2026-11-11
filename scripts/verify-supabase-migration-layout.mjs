@@ -207,11 +207,48 @@ const AI_STATIC_TESTS = Object.freeze([
   "tests/google-chat-transport.test.mjs"
 ])
 
+// Owner-approved supplemental PR checks. These are exact step contracts, not
+// permission for another wrapper or an arbitrary second SQL invocation. Main's
+// single full-AI runner contract remains unchanged.
+const WITHDRAWAL_STATIC_NAME = "Test teacher withdrawal hours and committed boundaries"
+const WITHDRAWAL_STATIC_TESTS = Object.freeze([
+  "tests/teacher-withdrawal-hours.test.mjs",
+  "tests/teacher-withdrawal-migration-prefix.test.mjs",
+  "tests/teacher-withdrawal-hours-prefix-qa.test.mjs",
+])
+const WITHDRAWAL_PREFIX_NAME = "Verify teacher withdrawal committed prefixes and snapshot"
+const WITHDRAWAL_FINAL_NAME = "Verify teacher withdrawal ownership and formula"
+const WITHDRAWAL_PREFIX_COMMAND = 'TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-teacher-withdrawal-hours-prefix-qa.mjs --execute --authorized --request-id "teacher-hours-prefix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --review-base-sha "${BASE_SHA}" --review-head-sha "${HEAD_SHA}"'
+const WITHDRAWAL_FINAL_SQL = Object.freeze([
+  "supabase/tests/teacher_own_request_workflow_test.sql",
+  "supabase/tests/teacher_withdrawal_hours_formula_test.sql",
+])
+const WITHDRAWAL_FINAL_COMMAND = 'TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs --review-head --require-final --execute --authorized --verify-local-ledger --request-id "teacher-hours-final-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --review-base-sha "${BASE_SHA}" --review-head-sha "${HEAD_SHA}"'
+  + WITHDRAWAL_FINAL_SQL.map(path => ` --test ${path}`).join("")
+const WITHDRAWAL_STATIC_STEP = [
+  WITHDRAWAL_STATIC_NAME,
+  "        run: |",
+  `          node --test --experimental-strip-types ${WITHDRAWAL_STATIC_TESTS.join(" ")}`,
+].join("\n")
+const WITHDRAWAL_RUNTIME_STEPS = Object.freeze([
+  [WITHDRAWAL_PREFIX_NAME, WITHDRAWAL_PREFIX_COMMAND],
+  [WITHDRAWAL_FINAL_NAME, WITHDRAWAL_FINAL_COMMAND],
+].map(([name, command]) => [
+  name,
+  "        shell: bash",
+  "        env:",
+  "          BASE_SHA: ${{ github.event.pull_request.base.sha }}",
+  "          HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
+  "        run: |",
+  "          set -euo pipefail",
+  `          ${command}`,
+].join("\n")))
+
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c95097088cd7ed9337f9993f07707dc752ff70a56cc84dc5f040bde73126f49a"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "6b36a398ad935eb2e8b1b50f6a680f7f4161fa3e06aa71a85157e34b57dae994"
+  "42e3fd61192dd5e0f32ec212e98f53b4a9e0ac245f9c4df3656d608b2895ef5e"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -1192,6 +1229,11 @@ function hasExactRun(lines, command) {
   return lines.some((line) => line.trim() === `run: ${command}`)
 }
 
+function workflowNamedSteps(text) {
+  return text.split(/^ {6}- name: /m).slice(1)
+    .map(step => step.trimEnd().split("\n").map(line => line.replace(/(\S) {2,}/g, "$1 ")).join("\n"))
+}
+
 export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   const errors = []
   const lines = workflow.split(/\r?\n/)
@@ -1261,11 +1303,39 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   reject(lines.some((line) => /^\s*(?:if|continue-on-error)\s*:/.test(line)),
     "isolated_ci_conditional_execution_forbidden")
   const runtimeText = isolatedJob.join("\n").replace(/\\\r?\n\s*/g, " ")
+  const supplementalNames = [WITHDRAWAL_STATIC_NAME, WITHDRAWAL_PREFIX_NAME, WITHDRAWAL_FINAL_NAME]
+  if (kind === "pr") {
+    for (const [jobText, expected] of [
+      [staticText, WITHDRAWAL_STATIC_STEP],
+      ...WITHDRAWAL_RUNTIME_STEPS.map(step => [runtimeText, step]),
+    ]) {
+      const name = expected.split("\n")[0]
+      const named = workflowNamedSteps(jobText).filter(step => step.startsWith(name + "\n"))
+      reject(named.length !== 1 || named[0] !== expected
+        || lines.filter(line => line === `      - name: ${name}`).length !== 1,
+      "isolated_ci_withdrawal_step_mismatch")
+    }
+    const staticNames = staticJob.filter(line => /^ {6}- name: /.test(line)).map(line => line.slice(14))
+    const staticIndex = staticNames.indexOf(WITHDRAWAL_STATIC_NAME)
+    reject(staticIndex < 1 || staticNames[staticIndex - 1] !== "Test private AI capture receipt guards"
+      || staticNames[staticIndex + 1] !== "Test cached PostgreSQL fixture guards",
+    "isolated_ci_withdrawal_static_order_mismatch")
+    reject((unfolded.match(/node --test[^\n]*tests\/teacher-withdrawal-/g) || []).length !== 1,
+      "isolated_ci_withdrawal_static_command_count_mismatch")
+    reject(runtimeText.split(/\r?\n/).filter(line => line.trim().replace(/\s+/g, " ") === WITHDRAWAL_PREFIX_COMMAND).length !== 1,
+      "isolated_ci_withdrawal_prefix_command_count_mismatch")
+  } else {
+    reject([...supplementalNames, ...WITHDRAWAL_STATIC_TESTS, ...WITHDRAWAL_FINAL_SQL,
+      "scripts/run-teacher-withdrawal-hours-prefix-qa.mjs"].some(token => workflow.includes(token)),
+    "isolated_ci_withdrawal_pr_only")
+  }
   const expectedJobs = kind === "main" ? ["db-preflight", "db-isolated-validation"] : ["supabase-sql-review", "supabase-schema-contract"]
   reject(!equalJson(lines.slice(lines.indexOf("jobs:")+1).filter((line) => /^ {2}[A-Za-z0-9_-]+:$/.test(line)).map((line) => line.trim().slice(0,-1)), expectedJobs), "isolated_ci_job_inventory_mismatch")
   const runtimeSteps = isolatedJob.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.slice(14))
   const runtimeName = kind === "main" ? "Run isolated migration and schema contracts" : "Run isolated schema contracts"
-  reject(!equalJson(runtimeSteps,["Checkout","Setup Node","Setup Supabase CLI","Install producer parity dependencies","Cache isolated annual RPC HTTP fixture image",runtimeName,"Test cached PostgreSQL fixture contracts"]), "isolated_ci_runtime_step_inventory_mismatch")
+  reject(!equalJson(runtimeSteps,["Checkout","Setup Node","Setup Supabase CLI","Install producer parity dependencies","Cache isolated annual RPC HTTP fixture image",runtimeName,
+    ...(kind === "pr" ? [WITHDRAWAL_PREFIX_NAME, WITHDRAWAL_FINAL_NAME] : []),
+    "Test cached PostgreSQL fixture contracts"]), "isolated_ci_runtime_step_inventory_mismatch")
   const directStep = runtimeText.split(/^ {6}- name: /m).find((step) => step.startsWith(runtimeName + "\n")) || ""
   const directBody = directStep.split(/\n\s*run: \|\n/)[1]?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) || []
   const directPrefix = kind === "pr"
@@ -1274,12 +1344,13 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   reject(directBody.length !== directPrefix.length + 1
     || !equalJson(directBody.slice(0, directPrefix.length), directPrefix)
     || !directBody[directPrefix.length]?.startsWith('TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs '), "isolated_ci_direct_execute_body_mismatch")
-  reject((unfolded.match(/--execute\b/g) || []).length !== 1,
+  reject((unfolded.match(/--execute\b/g) || []).length !== (kind === "pr" ? 3 : 1),
     "isolated_ci_execute_count_mismatch")
   reject(runtimeText.split(/\r?\n/).some((line) =>
     /\b(?:node|bash|sh|zsh|bun|deno)\s+/.test(line)
     && !line.includes('TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs')
-    && line.trim() !== `run: ${CACHED_POSTGRES_FIXTURE_TEST_COMMAND}`),
+    && line.trim() !== `run: ${CACHED_POSTGRES_FIXTURE_TEST_COMMAND}`
+    && !(kind === "pr" && line.trim().replace(/\s+/g, " ") === WITHDRAWAL_PREFIX_COMMAND)),
     "isolated_ci_indirect_execute_forbidden")
   reject(!hasExactRun(staticJob, "node --test tests/helpers/ai-producer-receipt.test.mjs"),
     "isolated_ci_ai_receipt_tests_missing")
@@ -1293,7 +1364,8 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   const runnerLines = unfolded.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, " "))
     .filter((line) => line.includes("node scripts/run-isolated-supabase-db-tests.mjs")
       && line.includes("--execute"))
-  reject(runnerLines.length !== 1, "isolated_ci_runner_command_count_mismatch")
+  reject(runnerLines.length !== (kind === "pr" ? 2 : 1), "isolated_ci_runner_command_count_mismatch")
+  if (kind === "pr") reject(runnerLines[1] !== WITHDRAWAL_FINAL_COMMAND, "isolated_ci_withdrawal_final_command_mismatch")
   const command = runnerLines[0] || ""
   const sqlTests = [...command.matchAll(/--test\s+(\S+)/g)].map((match) => match[1])
   const probes = [...command.matchAll(/--probe\s+(\S+)/g)].map((match) => match[1])
