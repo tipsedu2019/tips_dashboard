@@ -1,4 +1,4 @@
-import {AI_PRODUCERS,AI_CONSUMERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,CURRENT_AI_MIGRATIONS,extractAiCapture,suppressAiCaptures,snapshotAiSource,validateAiReceipt,beginAiCapturePhase} from './lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_CONSUMERS,AI_CREDENTIAL_PREFIX,CURRENT_AI_MIGRATIONS,extractAiCapture,suppressAiCaptures,snapshotAiSource,validateAiReceipt,beginAiCapturePhase,isApprovedAiSqlInventory,approvedAiProbesForSqlInventory} from './lib/ai-producer-receipt.mjs';
 import { spawn } from "node:child_process";
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -77,6 +77,7 @@ const SCHEMA_FINGERPRINT_SQL = `select md5(coalesce(jsonb_agg(to_jsonb(objects) 
 // Only this audited consumer and its timeout helper are needed by the DTO probe.
 // Do not copy the app, dependency tree, or environment into the isolated DB.
 const PROBE_DEPENDENCIES = Object.freeze({
+  "tests/probe-makeup-legacy-adoption-concurrency.mjs": ["supabase/tests/makeup_legacy_pair_adoption_test.sql"],
   "tests/probe-makeup-subject-director-concurrency.mjs": ["supabase/tests/makeup_subject_director_authority_test.sql"],
   "tests/probe-teacher-own-request-concurrency.mjs": ["supabase/tests/teacher_own_request_workflow_test.sql", "supabase/migrations/20261027005334_teacher_own_request_workflow.sql"],
   "tests/probe-ai-agent-http-producer.mjs": ["supabase/tests/ai_agent_personal_owner_test.sql","supabase/tests/agent_personal_dashboard_read_test.sql"],
@@ -93,6 +94,7 @@ const PROBE_DEPENDENCIES = Object.freeze({
   "tests/probe-timetable-nullable-room-concurrency.mjs": ["tests/helpers/ai-personal-probe-runtime.mjs", "scripts/lib/ai-agent-probe-runtime.mjs"],
   "tests/probe-makeup-approval-collision-dto.mjs": [
     "src/features/makeup-requests/makeup-request-model.js", "src/features/academic/records.js",
+    "src/features/makeup-requests/makeup-legacy-pair.js",
     "src/lib/class-status.js", "src/lib/class-schedule-planner.js", "src/lib/academic-director-assignment.js",
   ],
   "tests/probe-registration-visit-cancellation-dto.mjs": [
@@ -871,8 +873,8 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let aiPhase = null;
   if (args.aiProducerParity) {
     if (retainTempRoot || !args.reviewHead || !args.lint || !args.postdeployContract || !args.requireFinal || !args.transactionalPreflight || !args.verifyLocalLedger
-      || canonical(args.tests) !== canonical(AI_SQL_TESTS) || canonical(args.probes) !== canonical(AI_PROBES)) fail("isolated_ai_parity_full_run_required");
-    aiPhase = { runId: secureRandomBytes(16).toString("hex"), nonce: secureRandomBytes(32).toString("hex"), startedAt: Date.now(), captureStartedAt: null, before: await snapshotAiSource(root), captures: {} };
+      || !isApprovedAiSqlInventory(args.tests) || canonical(args.probes) !== canonical(approvedAiProbesForSqlInventory(args.tests))) fail("isolated_ai_parity_full_run_required");
+    aiPhase = { runId: secureRandomBytes(16).toString("hex"), nonce: secureRandomBytes(32).toString("hex"), startedAt: Date.now(), captureStartedAt: null, before: await snapshotAiSource(root), sqlTests: [...args.tests], captures: {} };
   }
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
   const credentialPrefixIndex = migrations.findIndex((migration) => migration.fileName === AI_CREDENTIAL_PREFIX.migration);
@@ -1197,7 +1199,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       const consumers = await executeProcessWithDeadline({ command: process.execPath, timeoutMs: HOST_PROCESS_DEADLINES.aiConsumers,
         args: ["--test", "--test-timeout=60000", "--experimental-strip-types", ...AI_CONSUMERS], cwd: root,
         env: { ...cleanEnvironment, TASK_AI_RECEIPT: receiptPath, TASK_AI_CAPTURE_DIRECTORY: aiDirectory,
-          TASK_AI_RUN_ID: aiPhase.runId, TASK_AI_RUN_NONCE: aiPhase.nonce, TASK_AI_STARTED_AT: String(aiPhase.startedAt), TASK_AI_CAPTURE_STARTED_AT: String(aiPhase.captureStartedAt) } }, { executeProcess });
+          TASK_AI_RUN_ID: aiPhase.runId, TASK_AI_RUN_NONCE: aiPhase.nonce, TASK_AI_STARTED_AT: String(aiPhase.startedAt), TASK_AI_CAPTURE_STARTED_AT: String(aiPhase.captureStartedAt), TASK_AI_SQL_TESTS: JSON.stringify(aiPhase.sqlTests) } }, { executeProcess });
       // Raw producer credentials and private attestation values never enter logs.
       if (consumers.code !== 0 || !/(?:#|ℹ) tests 3(?:\r?\n)/u.test(consumers.stdout)
         || !/(?:#|ℹ) pass 3(?:\r?\n)/u.test(consumers.stdout)

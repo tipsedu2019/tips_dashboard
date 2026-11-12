@@ -10,6 +10,7 @@ import {
   parseDateValue,
 } from "../../lib/class-schedule-planner.js";
 import { resolveAcademicDirector } from "../../lib/academic-director-assignment.js";
+import { matchingLegacyMakeupBinding, excludesLegacyMakeupOccupancy } from './makeup-legacy-pair.js';
 
 export const MAKEUP_REQUEST_STATUSES = [
   "approval_pending",
@@ -85,7 +86,7 @@ function toDate(value) {
     return null;
   }
 
-  const zoneless = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)$/);
+  const zoneless = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/);
   const date = new Date(zoneless
     ? `${zoneless[1]}T${zoneless[2]}+09:00`
     : raw);
@@ -99,6 +100,37 @@ function seoulDateTimeParts(value) {
   }
   const parts = SEOUL_DATE_TIME_FORMATTER.formatToParts(date);
   return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+// Editing uses Seoul wall time; stored/transported timestamps keep their instant.
+export function toMakeupDateTimeInput(value) {
+  const raw = text(value);
+  // A date without a clock is incomplete, and Date would normalize Feb 30.
+  if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(raw)) return "";
+  const day = new Date(`${raw.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== raw.slice(0, 10)) return "";
+  const parts = seoulDateTimeParts(raw);
+  return parts ? `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}` : "";
+}
+
+export function toMakeupSlotTimestamp(value) {
+  const raw = text(value);
+  // Legacy wall times have always meant Seoul, including in a UTC browser.
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(raw)) {
+    return `${raw.replace(" ", "T")}+09:00`;
+  }
+  return raw;
+}
+
+export function formatMakeupDateTime(value) {
+  if (!value) return "-";
+  // Match the numbered SQL label contract. Do not reinterpret legacy free text.
+  if (/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-](0\d|1[0-4]):[0-5]\d)$/.test(value)) {
+    const local = toMakeupDateTimeInput(value);
+    if (local) return local.replace("T", " ");
+  }
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  return match ? `${match[1]} ${match[2]}` : value;
 }
 
 export function toDateKey(value) {
@@ -679,6 +711,8 @@ export function buildRoomAvailability({
   ignoreOrphanedMakeupEvents = false,
   activeEventRequestIds,
   effectiveSchedule,
+  legacyBindings,
+  currentRequest,
 } = {}) {
   const selectedSubject = text(subject);
   const roomNames = buildRoomOptions(classrooms, classes, { subject: selectedSubject });
@@ -692,9 +726,11 @@ export function buildRoomAvailability({
   for (const slot of targetSlots) {
     addRoomName(roomNames, slot.classroom);
   }
+  const legacyBinding = text(currentRequest?.id) === text(currentRequestId)
+    ? matchingLegacyMakeupBinding(currentRequest, targetSlots, legacyBindings) : null;
   const collisions = [
     ...(effectiveSchedule?.version === 1
-      ? buildEffectiveClassCollisions(effectiveSchedule, targetSlots, roomNames)
+      ? buildEffectiveClassCollisions({ ...effectiveSchedule, occupancies: effectiveSchedule.occupancies.filter(row => !excludesLegacyMakeupOccupancy(legacyBinding, row)) }, targetSlots, roomNames)
       : buildRegularClassCollisions(classes, targetSlots)),
     ...buildMakeupRequestCollisions(requests, targetSlots, currentRequestId),
     ...buildAcademicEventCollisions(academicEvents, targetSlots, currentRequestId, activeRequestIds),
