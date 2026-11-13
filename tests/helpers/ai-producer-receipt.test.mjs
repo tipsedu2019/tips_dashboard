@@ -20,6 +20,30 @@ import vm from 'node:vm';
 import {syncBuiltinESMExports} from 'node:module';
 import * as receiptProtocol from '../../scripts/lib/ai-producer-receipt.mjs';
 const hash=v=>createHash('sha256').update(v).digest('hex');
+
+test('makeup snapshot ownership pins the new forward and recovery without changing historical migrations',async()=>{
+ const pin=receiptProtocol.MAKEUP_SNAPSHOT_OWNERSHIP_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261110095800_makeup_legacy_snapshot_ownership.sql',status:'final',sha256:'faa9dbdc9f0e707b2b3bd9ce88156b70d664353f1f2233c35ddcc9d5d8fc13d3'});
+ const current=await snapshotAiSource();
+ for(const folder of ['migrations','rollbacks']){
+  const path=`supabase/${folder}/${pin.fileName}`;
+  assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(x=>x===path).length,1);
+  assert.equal(current.closure.find(x=>x.path===path)?.sha256,hash(await readFile(path)));
+ }
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.deepEqual(manifest.orderedNewMigrations[197],pin);
+ const historical=manifest.orderedNewMigrations.slice(0,197);
+ assert.equal(historical.length,197);
+ assert.equal(hash(JSON.stringify(historical)),'6b02036fccef1870a4e98c4d334eecd2087f7037e6f5ee7c08916bc3098f1172');
+ const before='c892cccbbc7f755e0a2ea3876c5408d8',after='d2864a81d9287b8956ba701b827b64a5';
+ for(const [folder,expected,replacement]of[['migrations',before,after],['rollbacks',after,before]]){
+  const sql=await readFile(`supabase/${folder}/${pin.fileName}`,'utf8');
+  assert.equal(hash(sql),current.closure.find(x=>x.path===`supabase/${folder}/${pin.fileName}`).sha256);
+  assert.equal(createHash('md5').update(sql.split('$body$')[1]).digest('hex'),replacement);
+  assert.ok(sql.includes(`md5(p.prosrc)<>'${expected}'`));
+  assert.ok(sql.includes("(to_jsonb(q)-'prosrc') is distinct from before_metadata"));
+ }
+});
 const registrationPin={fileName:'20261013084134_registration_enrollment_guarded_save.sql',status:'final',sha256:'befb880ae63b997aa71912b1775cf779933758b89c00fcb9440b3698fb9338c3'};
 const calendarMovePin={fileName:'20261019100046_academic_calendar_move_atomic.sql',status:'final',sha256:'4fd992887e81cfb23e9e3585ee4a63eda82de8bb6bdbb21b5392501bcb5e83de'};
 const completedFailedRetestPin={fileName:'20261020001626_word_retest_completed_failed_retry.sql',status:'final',sha256:'7b964368c629ac92e1655513783147a985b9dc659f818c1148e765eb11dfa35b'};
@@ -204,7 +228,7 @@ test('registration final is explicitly pinned in the closure without changing th
  assert.equal(current.closure.find(row=>row.path===path)?.sha256,registrationPin.sha256);
  assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS);
  const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
- assert.equal(manifest.orderedNewMigrations.length,188);
+ assert.equal(manifest.orderedNewMigrations.length,199);
  assert.deepEqual(manifest.orderedNewMigrations.find(row=>row.fileName===registrationPin.fileName),registrationPin);
 });
 test('registration final rejects missing, duplicate, reordered, hash, status and coordinated source drift',async()=>{
@@ -284,16 +308,95 @@ test('registration final plans and copied candidate refusals launch no external 
  assert.deepEqual(await readFile(manifestPath),before);
   await fixture.assertRealSourcesUnchanged();
 });
-test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
+test('isolated workflows retain main108/27 and exact PR115/28 inventories',async()=>{
  assert.equal(AI_SQL_TESTS.length,108);
+ assert.deepEqual(receiptProtocol.PR_AI_SQL_TESTS,[...AI_SQL_TESTS.flatMap(path=>path===legacyOccupancyTest?[path,'supabase/tests/makeup_legacy_pair_adoption_test.sql']:[path]),'supabase/tests/dashboard_audit_predecessor_lookup_test.sql','supabase/tests/timetable_date_override_native_reader_test.sql','supabase/tests/legacy_context_adoption_reuse_test.sql','supabase/tests/legacy_adoption_pair_reuse_test.sql','supabase/tests/timetable_close_validation_proof_test.sql','supabase/tests/timetable_reader_weekly_arrays_test.sql']);
+ assert.equal(receiptProtocol.PR_AI_SQL_TESTS.length,115);
+ assert.equal(receiptProtocol.PR_AI_PROBES.length,28);
+ assert.ok(Object.isFrozen(receiptProtocol.PR_AI_PROBES));
+ assert.deepEqual(receiptProtocol.PR_AI_PROBES,AI_PROBES.flatMap(path=>path==='tests/probe-makeup-approval-collision-dto.mjs'?['tests/probe-makeup-legacy-adoption-concurrency.mjs',path]:[path]));
+ assert.equal(receiptProtocol.approvedAiProbesForSqlInventory(AI_SQL_TESTS),AI_PROBES);
+ assert.equal(receiptProtocol.approvedAiProbesForSqlInventory(receiptProtocol.PR_AI_SQL_TESTS),receiptProtocol.PR_AI_PROBES);
+ for(const value of [null,[],[...AI_SQL_TESTS].reverse(),[...AI_SQL_TESTS,'supabase/tests/unreviewed.sql']])assert.equal(receiptProtocol.approvedAiProbesForSqlInventory(value),null);
+ assert.ok(Object.isFrozen(receiptProtocol.PR_AI_SQL_TESTS));
  assert.equal(AI_PROBES.length,27);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
  for(const name of isolatedWorkflows){
   const parsed=parseIsolatedDbArguments(parityArguments(await workflowInventory(name)));
-  assert.deepEqual(parsed.tests,AI_SQL_TESTS,name+' SQL inventory');
-  assert.deepEqual(parsed.probes,AI_PROBES,name+' probe inventory');
+  assert.deepEqual(parsed.tests,name==='supabase-sql-review.yml'?receiptProtocol.PR_AI_SQL_TESTS:AI_SQL_TESTS,name+' SQL inventory');
+  assert.deepEqual(parsed.probes,name==='supabase-sql-review.yml'?receiptProtocol.PR_AI_PROBES:AI_PROBES,name+' probe inventory');
  }
+});
+test('runner accepts only the two complete approved SQL inventories before isolated process launch',async(t)=>{
+ const fixture=await isolatedFinalSourceFixture(t);
+ const tempDirectory=await mkdtemp(join(tmpdir(),'ai-audit-inventory-boundary-'));
+ t.after(()=>rm(tempDirectory,{recursive:true,force:true}));
+ let launched=0,reachedRuntime=0;
+ const forbidden=async()=>{launched++;throw Error('external process forbidden in inventory regression');};
+ const boundaries={root:fixture.root,tempDirectory,executeProcess:forbidden,executeNetwork:forbidden,executeGit:forbidden,createRelay:forbidden,
+  allocatePort:()=>{reachedRuntime++;throw Error('approved_inventory_runtime_boundary');}};
+ for(const name of isolatedWorkflows){
+  await assert.rejects(fixture.run({...boundaries,argv:parityArguments(await workflowInventory(name))}),/^Error: approved_inventory_runtime_boundary$/);
+ }
+ assert.equal(reachedRuntime,2,'both exact workflow inventories pass registration and source snapshots');
+ const inventory=await workflowInventory('supabase-sql-review.yml'),audit=inventory.tests.at(-1);
+ const swapFirst=list=>[list[1],list[0],...list.slice(2)];
+ for(const changed of [
+  {...inventory,tests:inventory.tests.slice(1)},
+  {...inventory,tests:[...inventory.tests,audit]},
+  {...inventory,tests:[...AI_SQL_TESTS,'supabase/tests/unreviewed_test.sql']},
+  {...inventory,tests:[...inventory.tests,'supabase/tests/unreviewed_test.sql']},
+  {...inventory,tests:[audit,...AI_SQL_TESTS]},
+  {...inventory,tests:swapFirst(inventory.tests)},
+  {...inventory,probes:inventory.probes.slice(1)},
+  {...inventory,probes:[...inventory.probes,inventory.probes[0]]},
+  {...inventory,probes:swapFirst(inventory.probes)},
+  {...inventory,probes:AI_PROBES},
+  {tests:AI_SQL_TESTS,probes:receiptProtocol.PR_AI_PROBES},
+ ])await assert.rejects(fixture.run({...boundaries,argv:parityArguments(changed)}),/^Error: isolated_ai_parity_full_run_required$/);
+ const argv=parityArguments(inventory);
+ for(const flag of ['--lint','--require-final','--postdeploy-contract','--transactional-preflight','--verify-local-ledger']){
+  await assert.rejects(fixture.run({...boundaries,argv:argv.filter(value=>value!==flag)}),/^Error: isolated_ai_parity_full_run_required$/);
+ }
+ await assert.rejects(fixture.run({...boundaries,argv,retainTempRoot:true}),/^Error: isolated_ai_parity_full_run_required$/);
+ assert.equal(reachedRuntime,2,'invalid registrations stop before runtime allocation');
+ assert.equal(launched,0);
+ await fixture.assertRealSourcesUnchanged();
+});
+test('PR audit receipts and consumers bind the exact requested inventory without accepting arbitrary extras',async(t)=>{
+ const source=await snapshotAiSource(),raw=Buffer.from('{"negativeProtocolFixture":true}'),now=Date.now();
+ const identity={runId:'a'.repeat(32),nonce:'b'.repeat(64),startedAt:now-1,captureStartedAt:now-1};
+ const receipt={version:1,...identity,finishedAt:now,before:source,after:source,migrations:CURRENT_AI_MIGRATIONS,
+  credentialPrefix:{...AI_CREDENTIAL_PREFIX,committed:true},probes:AI_PROBES,
+  captures:Object.fromEntries(Object.entries(AI_PRODUCERS).map(([name,p])=>[name,{producer:p.path,file:p.file,sourceSha256:source.closure.find(v=>v.path===p.path).sha256,sha256:hash(raw),bytes:raw.length}]))};
+ const directory=await mkdtemp(join(tmpdir(),'ai-audit-receipt-inventory-'));
+ t.after(()=>rm(directory,{recursive:true,force:true}));
+ const receiptPath=join(directory,'receipt.json');
+ for(const producer of Object.values(AI_PRODUCERS))await writeFile(join(directory,producer.file),raw,{mode:0o600});
+ const env={TASK_AI_RECEIPT:receiptPath,TASK_AI_CAPTURE_DIRECTORY:directory,TASK_AI_RUN_ID:identity.runId,TASK_AI_RUN_NONCE:identity.nonce,
+  TASK_AI_STARTED_AT:String(identity.startedAt),TASK_AI_CAPTURE_STARTED_AT:String(identity.captureStartedAt)};
+ for(const sqlTests of [AI_SQL_TESTS,receiptProtocol.PR_AI_SQL_TESTS]){
+  const current={...receipt,sqlTests,probes:receiptProtocol.approvedAiProbesForSqlInventory(sqlTests)},expected={...identity,sqlTests};
+  assert.equal(validateAiReceipt(current,{expected,source,raw,identity:'http',now}),true);
+  await writeFile(receiptPath,JSON.stringify(current),{mode:0o600});
+  assert.deepEqual(await receiptProtocol.readCurrentAiCapture('http',{...env,TASK_AI_SQL_TESTS:JSON.stringify(sqlTests)}),{negativeProtocolFixture:true});
+  const other=sqlTests===AI_SQL_TESTS?receiptProtocol.PR_AI_SQL_TESTS:AI_SQL_TESTS;
+  assert.throws(()=>validateAiReceipt({...current,probes:receiptProtocol.approvedAiProbesForSqlInventory(other)},{expected,source,raw,identity:'http',now}),/receipt probe inventory/);
+  assert.throws(()=>validateAiReceipt({...current,sqlTests:other},{expected,source,raw,identity:'http',now}),/receipt SQL inventory/);
+  await assert.rejects(receiptProtocol.readCurrentAiCapture('http',{...env,TASK_AI_SQL_TESTS:JSON.stringify(other)}),/receipt SQL inventory/);
+ }
+ await assert.rejects(receiptProtocol.readCurrentAiCapture('http',env),/receipt SQL inventory/,'PR receipts require an explicit exact PR inventory expectation');
+ for(const sqlTests of [
+  [...receiptProtocol.PR_AI_SQL_TESTS,'supabase/tests/unreviewed_test.sql'],
+  [...AI_SQL_TESTS,'supabase/tests/unreviewed_test.sql'],
+  [...receiptProtocol.PR_AI_SQL_TESTS,receiptProtocol.PR_AI_SQL_TESTS.at(-1)],
+  [...receiptProtocol.PR_AI_SQL_TESTS].reverse(),
+  AI_SQL_TESTS.slice(1),null,
+ ])assert.throws(()=>validateAiReceipt({...receipt,sqlTests},{expected:{...identity,sqlTests},source,raw,identity:'http',now}),/receipt expected SQL inventory/);
+ const audit='supabase/tests/dashboard_audit_predecessor_lookup_test.sql';
+ assert.equal(source.closure.filter(row=>row.path===audit).length,1);
+ assert.equal(source.closure.find(row=>row.path===audit).sha256,hash(await readFile(join(repositoryRoot,audit))));
 });
 test('optional classroom final pin preserves all earlier migrations and rejects manifest or source drift',async()=>{
  const pin={fileName:'20261020134458_timetable_optional_classroom_occupancy.sql',status:'final',sha256:'31cd689964a52b5f084a8a167cb41a0b61b12403a88d4dff7b20d9106e29a8b6'};
@@ -309,7 +412,7 @@ test('optional classroom final pin preserves all earlier migrations and rejects 
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,188);
+  assert.equal(original.orderedNewMigrations.length,199);
   assert.deepEqual(original.orderedNewMigrations[176],pin);
   assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,176))),'0e6ea185605f5e3b060459f5c334988d8643b3c42a3b5e59d5a5e067af246b4f');
   for(const mutate of [
@@ -350,7 +453,7 @@ test('class lesson input policy extends the exact final inventory and preserves 
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,188);
+  assert.equal(original.orderedNewMigrations.length,199);
   assert.deepEqual(original.orderedNewMigrations[177],pin);
   assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,177))),'95487023ee3748b68239fd40371a150c56fafc6b5dc20311aa79f4e0dd496d1a');
   for(const [label,mutate] of [
@@ -400,7 +503,7 @@ test('class basic info input policy extends the exact final inventory and preser
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,188);
+  assert.equal(original.orderedNewMigrations.length,199);
   assert.deepEqual(original.orderedNewMigrations[178],pin);
   assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,178))),'63b94d551b020f0118c3612f04acf34bae9057d9979537016479be3ea1b4af90');
   for(const [label,mutate] of [
@@ -446,7 +549,7 @@ test('preset owned placements extend the exact inventory and preserve all earlie
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,188);
+  assert.equal(original.orderedNewMigrations.length,199);
   assert.deepEqual(original.orderedNewMigrations[179],pin);
   assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,179))),'82c0482b0a86781a43a6f64c591e2f452295e7db29f112f8291fa872ef4a1622');
   for(const [label,mutate] of [
@@ -605,7 +708,7 @@ test('atomic calendar move adds one exact final source pin without changing the 
  assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
  assert.equal(CURRENT_AI_MIGRATIONS.length,11);
  const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
- assert.equal(manifest.orderedNewMigrations.length,188);
+ assert.equal(manifest.orderedNewMigrations.length,199);
  assert.deepEqual(manifest.orderedNewMigrations[174],calendarMovePin);
 });
 test('atomic calendar move pin rejects missing, duplicate, reordered, unapproved and coordinated source drift',async()=>{
@@ -657,7 +760,7 @@ test('completed failed word-retest retry adds one exact final pin and preserves 
  assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
  assert.equal(CURRENT_AI_MIGRATIONS.length,11);
  const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
- assert.equal(manifest.orderedNewMigrations.length,188);
+ assert.equal(manifest.orderedNewMigrations.length,199);
  assert.deepEqual(manifest.orderedNewMigrations[175],completedFailedRetestPin);
  assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,175))),'2a20cc18682c7a8c55b9750dee44191adcce33327a64b61d0ebaaecf11fd9cad');
 });
@@ -790,8 +893,8 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,188);
-  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==registrationPin.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName && m.fileName!==calendarMovePin.fileName && m.fileName!==completedFailedRetestPin.fileName && m.fileName!==receiptProtocol.OPTIONAL_CLASSROOM_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_LESSON_INPUT_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_BASIC_INFO_INPUT_MIGRATION.fileName && m.fileName!==receiptProtocol.TIMETABLE_PRESET_OWNED_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_PUBLIC_MEMO_MIGRATION.fileName && m.fileName!==receiptProtocol.MANAGEMENT_CLASS_OWNERSHIP_MIGRATION.fileName && m.fileName!==receiptProtocol.DASHBOARD_ROLE_SCOPE_MIGRATION.fileName && m.fileName!==receiptProtocol.MAKEUP_RENDER_BRIDGE_MIGRATION.fileName && m.fileName!==receiptProtocol.TEACHER_OWN_REQUEST_MIGRATION.fileName && m.fileName!==receiptProtocol.MAKEUP_SUBJECT_DIRECTOR_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_MONTH_SUMMARY_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_CLOSE_OCCUPANCY_MIGRATION.fileName);
+  assert.equal(original.orderedNewMigrations.length,199);
+  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName) && ![...CURRENT_PR126_MIGRATIONS,...TIMETABLE_CLOSE_MIGRATIONS].some(pin=>pin.fileName===m.fileName) && m.fileName!==THREAD_REPLY_MIGRATION.fileName && m.fileName!==NONEXPIRING_CHAT_MIGRATION.fileName && m.fileName!==TIMETABLE_VALIDATION_MIGRATION.fileName && m.fileName!==registrationPin.fileName && m.fileName!==TIMETABLE_BATCH_SAVE_MIGRATION.fileName && m.fileName!==calendarMovePin.fileName && m.fileName!==completedFailedRetestPin.fileName && m.fileName!==receiptProtocol.OPTIONAL_CLASSROOM_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_LESSON_INPUT_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_BASIC_INFO_INPUT_MIGRATION.fileName && m.fileName!==receiptProtocol.TIMETABLE_PRESET_OWNED_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_PUBLIC_MEMO_MIGRATION.fileName && m.fileName!==receiptProtocol.MANAGEMENT_CLASS_OWNERSHIP_MIGRATION.fileName && m.fileName!==receiptProtocol.DASHBOARD_ROLE_SCOPE_MIGRATION.fileName && m.fileName!==receiptProtocol.MAKEUP_RENDER_BRIDGE_MIGRATION.fileName && m.fileName!==receiptProtocol.TEACHER_OWN_REQUEST_MIGRATION.fileName && m.fileName!==receiptProtocol.MAKEUP_SUBJECT_DIRECTOR_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_MONTH_SUMMARY_MIGRATION.fileName && m.fileName!==receiptProtocol.CLASS_CLOSE_OCCUPANCY_MIGRATION.fileName && m.fileName!==receiptProtocol.MAKEUP_SEOUL_TIME_MIGRATION.fileName && m.fileName!==receiptProtocol.TIMETABLE_PER_DATE_INPUTS_MIGRATION.fileName && m.fileName!==receiptProtocol.AUDIT_PREDECESSOR_LOOKUP_MIGRATION.fileName && m.fileName!==receiptProtocol.TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION.fileName && m.fileName!==receiptProtocol.MAKEUP_LEGACY_PAIR_ADOPTION_MIGRATION.fileName && m.fileName!==receiptProtocol.TIMETABLE_DATE_OVERRIDE_NATIVE_READER_MIGRATION.fileName && m.fileName!==receiptProtocol.LEGACY_CONTEXT_ADOPTION_REUSE_MIGRATION.fileName && m.fileName!==receiptProtocol.LEGACY_ADOPTION_PAIR_REUSE_MIGRATION.fileName && m.fileName!==receiptProtocol.TIMETABLE_CLOSE_VALIDATION_PROOF_MIGRATION.fileName && m.fileName!==receiptProtocol.MAKEUP_SNAPSHOT_OWNERSHIP_MIGRATION.fileName && m.fileName!==receiptProtocol.TIMETABLE_READER_WEEKLY_ARRAYS_MIGRATION.fileName);
   assert.equal(reviewedLegacy.length,156);
   const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
   assert.equal(reviewedLegacy.at(-1).fileName,mainFileName);
@@ -1104,7 +1207,7 @@ test('makeup render bridge adds one exact final pin while retaining all183 previ
  assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
  assert.equal(CURRENT_AI_MIGRATIONS.length,11);
  const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
- assert.equal(manifest.orderedNewMigrations.length,188);
+ assert.equal(manifest.orderedNewMigrations.length,199);
  assert.deepEqual(manifest.orderedNewMigrations[183],pin);
  assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,183))),'38cde4a5f817140fc19ac7156d70b7eb5dbb5be0b3bdbf2c62a068c628b69ceb');
 });
@@ -1160,7 +1263,7 @@ test('teacher own request pin appends exactly one entry and rejects coordinated 
    await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json'),original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,188);assert.deepEqual(original.orderedNewMigrations[184],pin);
+  assert.equal(original.orderedNewMigrations.length,199);assert.deepEqual(original.orderedNewMigrations[184],pin);
   assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,184))),'3081116375a7b1f69e8d475415c83d772e4f62391e4720c23589a5894fca87ec');
   for(const [label,mutate] of [
    ['missing',rows=>rows.splice(184,1)],['duplicate',rows=>rows.push({...pin})],
@@ -1185,7 +1288,7 @@ test('subject director pin appends exactly one entry and rejects coordinated man
    await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json'),original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,188);assert.deepEqual(original.orderedNewMigrations[185],pin);
+  assert.equal(original.orderedNewMigrations.length,199);assert.deepEqual(original.orderedNewMigrations[185],pin);
   // Prefix184 is unchanged; entry184 now pins the reviewed bigint/history CHECK
   // cleanup of the companion unpublished migration. Keep an independent hash.
   assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,185))),'5ed9c588fcf68f214bda90c4b9550480449ceb88f6dd2b3deb8b78857af4aee8');
@@ -1213,7 +1316,7 @@ test('class month summary exact pin rejects removal, reordering, duplication and
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,188);
+  assert.equal(original.orderedNewMigrations.length,199);
   assert.deepEqual(original.orderedNewMigrations[186],pin);
   assert.equal(hash(JSON.stringify(original.orderedNewMigrations.slice(0,186))),'ab04f6eeca206a57573ea149193706a04d6b1d223c18253de53acbd348b7e7c5');
   for(const mutate of [rows=>rows.splice(186,1),rows=>rows.push({...pin}),rows=>rows[186].status='candidate',rows=>rows[186].sha256='0'.repeat(64),rows=>{[rows[185],rows[186]]=[rows[186],rows[185]];}]){
@@ -1243,7 +1346,7 @@ test('class close occupancy exact pin admits the approved source and preserves a
  assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
  assert.equal(CURRENT_AI_MIGRATIONS.length,11,'the AI receipt migration protocol is unchanged');
  const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
- assert.equal(manifest.orderedNewMigrations.length,188);
+ assert.equal(manifest.orderedNewMigrations.length,199);
  assert.deepEqual(manifest.orderedNewMigrations[187],pin);
  assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,187))),'5b23210043baa0bc71d6ce9aec955cc8b452a52305ff4390015601d38419924e');
 });
@@ -1293,4 +1396,543 @@ test('class close occupancy pin rejects tampering and unregistered files without
   assert.deepEqual(await snapshotAiSource(root),current,'restoring exact source restores acceptance');
   assert.deepEqual(await snapshotAiSource(),current,'negative fixtures never modify actual source');
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('makeup Seoul time exact pin admits the approved source and preserves all188 previous entries',async()=>{
+ const source=await snapshotAiSource();
+ const pin=receiptProtocol.MAKEUP_SEOUL_TIME_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261103135120_makeup_seoul_time_projection.sql',status:'final',sha256:'f6375de323d3d7bfd1e2e52bec28d1a13437399bf214949c3ecdd5b957c325c4'});
+ assert.ok(Object.isFrozen(pin));
+ const path='supabase/migrations/'+pin.fileName;
+ assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(file=>file===path).length,1);
+ assert.equal(source.closure.find(row=>row.path===path)?.sha256,pin.sha256);
+ assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
+ assert.equal(CURRENT_AI_MIGRATIONS.length,11,'the AI receipt migration protocol is unchanged');
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);
+ assert.deepEqual(manifest.orderedNewMigrations[188],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,188))),'fc43ac24bd166be6ffae6efce42265175a9b81d525e495d31bb4b268950983ae');
+});
+
+test('makeup Seoul time pin rejects tampering and unregistered files without weakening prior guards',async()=>{
+ const current=await snapshotAiSource();
+ const pin=receiptProtocol.MAKEUP_SEOUL_TIME_MIGRATION;
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-makeup-seoul-time-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const originalBytes=await readFile(manifestPath);
+  const original=JSON.parse(originalBytes);
+  const index=original.orderedNewMigrations.findIndex(row=>row.fileName===pin.fileName);
+  assert.equal(index,188);
+  assert.deepEqual(await snapshotAiSource(root),current,'the copied approved source is accepted');
+  const unknown={fileName:'20990101000000_unregistered_makeup_time.sql',status:'final',sha256:hash('select 1;\n')};
+  await writeFile(join(root,'supabase/migrations',unknown.fileName),'select 1;\n');
+  for(const [label,mutate] of [
+   ['missing',rows=>rows.splice(index,1)],
+   ['duplicate',rows=>rows.push({...pin})],
+   ['same-length duplicate',rows=>rows[index]={...rows[index-1]}],
+   ['reordered',rows=>{[rows[index-1],rows[index]]=[rows[index],rows[index-1]];}],
+   ['unapproved',rows=>rows[index].status='candidate'],
+   ['changed hash',rows=>rows[index].sha256='0'.repeat(64)],
+   ['unregistered addition',rows=>rows.push({...unknown})],
+   ['same-length unregistered replacement',rows=>rows[index]={...unknown}],
+  ]){
+   const changed=structuredClone(original);mutate(changed.orderedNewMigrations);
+   await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/canonical manifest inventory|current migration manifest drift/,label);
+  }
+  await writeFile(manifestPath,originalBytes);
+  const sqlPath=join(root,'supabase/migrations',pin.fileName),sql=await readFile(sqlPath);
+  const drift=Buffer.concat([sql,Buffer.from('\n-- unreviewed source drift\n')]);
+  await writeFile(sqlPath,drift);
+  await assert.rejects(snapshotAiSource(root),/makeup Seoul time migration source drift/);
+  const coordinated=structuredClone(original);coordinated.orderedNewMigrations[index].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/,'coordinated source and manifest edits remain rejected');
+  await writeFile(manifestPath,originalBytes);await rm(sqlPath);
+  await assert.rejects(snapshotAiSource(root),/ENOENT/);
+  await writeFile(sqlPath,sql);
+  assert.deepEqual(await snapshotAiSource(root),current,'restoring exact source restores acceptance');
+  assert.deepEqual(await snapshotAiSource(),current,'negative fixtures never modify actual source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('timetable per-date inputs exact pin admits the approved source and preserves all189 previous entries',async()=>{
+ const source=await snapshotAiSource();
+ const pin=receiptProtocol.TIMETABLE_PER_DATE_INPUTS_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261103170744_timetable_validation_per_date_inputs.sql',status:'final',sha256:'e45ca46ee41fafd1cedce8c6bef74c1c14133f2f2534deb9a49e99ab2970d4e4'});
+ assert.ok(Object.isFrozen(pin));
+ const path='supabase/migrations/'+pin.fileName;
+ assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(file=>file===path).length,1);
+ assert.equal(source.closure.find(row=>row.path===path)?.sha256,pin.sha256);
+ assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
+ assert.equal(CURRENT_AI_MIGRATIONS.length,11,'the AI receipt migration protocol is unchanged');
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);
+ assert.deepEqual(manifest.orderedNewMigrations[189],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,188))),'fc43ac24bd166be6ffae6efce42265175a9b81d525e495d31bb4b268950983ae');
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,189))),'986d87749fc5f9e97cee8dff5f834677af18485a656d4947b6a817bbef363d86');
+});
+
+test('timetable per-date inputs pin rejects tampering and unregistered files without weakening prior guards',async()=>{
+ const current=await snapshotAiSource();
+ const pin=receiptProtocol.TIMETABLE_PER_DATE_INPUTS_MIGRATION;
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-timetable-per-date-inputs-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const originalBytes=await readFile(manifestPath);
+  const original=JSON.parse(originalBytes);
+  const index=original.orderedNewMigrations.findIndex(row=>row.fileName===pin.fileName);
+  assert.equal(index,189);
+  assert.deepEqual(await snapshotAiSource(root),current,'the copied approved source is accepted');
+  const unknown={fileName:'20990101000000_unregistered_timetable_per_date.sql',status:'final',sha256:hash('select 1;\n')};
+  await writeFile(join(root,'supabase/migrations',unknown.fileName),'select 1;\n');
+  for(const [label,mutate] of [
+   ['missing',rows=>rows.splice(index,1)],
+   ['duplicate',rows=>rows.push({...pin})],
+   ['same-length duplicate',rows=>rows[index]={...rows[index-1]}],
+   ['reordered',rows=>{[rows[index-1],rows[index]]=[rows[index],rows[index-1]];}],
+   ['unapproved',rows=>rows[index].status='candidate'],
+   ['changed hash',rows=>rows[index].sha256='0'.repeat(64)],
+   ['unregistered addition',rows=>rows.push({...unknown})],
+   ['same-length unregistered replacement',rows=>rows[index]={...unknown}],
+  ]){
+   const changed=structuredClone(original);mutate(changed.orderedNewMigrations);
+   await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/canonical manifest inventory|current migration manifest drift/,label);
+  }
+  await writeFile(manifestPath,originalBytes);
+  const sqlPath=join(root,'supabase/migrations',pin.fileName),sql=await readFile(sqlPath);
+  const drift=Buffer.concat([sql,Buffer.from('\n-- unreviewed source drift\n')]);
+  await writeFile(sqlPath,drift);
+  await assert.rejects(snapshotAiSource(root),/timetable per-date inputs migration source drift/);
+  const coordinated=structuredClone(original);coordinated.orderedNewMigrations[index].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/,'coordinated source and manifest edits remain rejected');
+  await writeFile(manifestPath,originalBytes);await rm(sqlPath);
+  await assert.rejects(snapshotAiSource(root),/ENOENT/);
+  await writeFile(sqlPath,sql);
+  assert.deepEqual(await snapshotAiSource(root),current,'restoring exact source restores acceptance');
+  assert.deepEqual(await snapshotAiSource(),current,'negative fixtures never modify actual source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('audit predecessor lookup exact pin admits the approved source and preserves all 190 previous entries',async()=>{
+ const source=await snapshotAiSource();
+ const pin=receiptProtocol.AUDIT_PREDECESSOR_LOOKUP_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261105073151_dashboard_audit_predecessor_index_lookup.sql',status:'final',sha256:'a1122689f58791337fbc5319d1e5b192bfd640dd96af9367f46924d517ebf069'});
+ assert.ok(Object.isFrozen(pin));
+ const path='supabase/migrations/'+pin.fileName;
+ assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(file=>file===path).length,1);
+ assert.equal(source.closure.find(row=>row.path===path)?.sha256,pin.sha256);
+ assert.deepEqual(source.migrations,CURRENT_AI_MIGRATIONS);
+ assert.equal(CURRENT_AI_MIGRATIONS.length,11,'the AI receipt migration protocol is unchanged');
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);
+ assert.deepEqual(manifest.orderedNewMigrations[190],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,190))),'0540427a10c9506981fa03b49ea6a092585fe790c61b14bc5c205591b8e0f74b');
+});
+
+test('audit predecessor lookup pin rejects tampering and unregistered files without weakening prior guards',async()=>{
+ const current=await snapshotAiSource();
+ const pin=receiptProtocol.AUDIT_PREDECESSOR_LOOKUP_MIGRATION;
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-audit-predecessor-lookup-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const originalBytes=await readFile(manifestPath);
+  const original=JSON.parse(originalBytes);
+  const index=original.orderedNewMigrations.findIndex(row=>row.fileName===pin.fileName);
+  assert.equal(index,190);
+  assert.deepEqual(await snapshotAiSource(root),current,'the copied approved source is accepted');
+  const unknown={fileName:'20990101000000_unregistered_audit_predecessor.sql',status:'final',sha256:hash('select 1;\n')};
+  await writeFile(join(root,'supabase/migrations',unknown.fileName),'select 1;\n');
+  for(const [label,mutate] of [
+   ['missing',rows=>rows.splice(index,1)],
+   ['duplicate',rows=>rows.push({...pin})],
+   ['same-length duplicate',rows=>rows[index]={...rows[index-1]}],
+   ['reordered',rows=>{[rows[index-1],rows[index]]=[rows[index],rows[index-1]];}],
+   ['unapproved',rows=>rows[index].status='candidate'],
+   ['changed hash',rows=>rows[index].sha256='0'.repeat(64)],
+   ['unregistered addition',rows=>rows.push({...unknown})],
+   ['same-length unregistered replacement',rows=>rows[index]={...unknown}],
+  ]){
+   const changed=structuredClone(original);mutate(changed.orderedNewMigrations);
+   await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/canonical manifest inventory|current migration manifest drift/,label);
+  }
+  await writeFile(manifestPath,originalBytes);
+  const sqlPath=join(root,'supabase/migrations',pin.fileName),sql=await readFile(sqlPath);
+  const drift=Buffer.concat([sql,Buffer.from('\n-- unreviewed source drift\n')]);
+  await writeFile(sqlPath,drift);
+  await assert.rejects(snapshotAiSource(root),/audit predecessor lookup migration source drift/);
+  const coordinated=structuredClone(original);coordinated.orderedNewMigrations[index].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/,'coordinated source and manifest edits remain rejected');
+  await writeFile(manifestPath,originalBytes);await rm(sqlPath);
+  await assert.rejects(snapshotAiSource(root),/ENOENT/);
+  await writeFile(sqlPath,sql);
+  assert.deepEqual(await snapshotAiSource(root),current,'restoring exact source restores acceptance');
+  assert.deepEqual(await snapshotAiSource(),current,'negative fixtures never modify actual source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('dated diff projection exact pin preserves the 191 prior migrations and rejects source drift',async()=>{
+ const current=await snapshotAiSource();
+ const pin=receiptProtocol.TIMETABLE_DATED_DIFF_PROJECTION_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261106015549_timetable_dated_diff_projection_reuse.sql',status:'final',sha256:'133044663cec2aa4b3f1bc4ae2dab7bcafb4a57c45d7b7d574baf834639f7ea6'});
+ assert.ok(Object.isFrozen(pin));
+ const sqlPath='supabase/migrations/'+pin.fileName;
+ assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(path=>path===sqlPath).length,1);
+ assert.equal(current.closure.find(row=>row.path===sqlPath)?.sha256,pin.sha256);
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);
+ assert.deepEqual(manifest.orderedNewMigrations[191],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,191))),'ddd04f013ef7f67687decbe57e43a903df29514971e46593f0ccf29f83407b41');
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-dated-diff-projection-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  assert.deepEqual(await snapshotAiSource(root),current);
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const originalManifest=await readFile(manifestPath);
+  const source=await readFile(join(root,sqlPath));
+  const drift=Buffer.concat([source,Buffer.from('\n-- unreviewed projection drift\n')]);
+  await writeFile(join(root,sqlPath),drift);
+  await assert.rejects(snapshotAiSource(root),/timetable dated diff projection migration source drift/);
+  const coordinated=structuredClone(manifest);coordinated.orderedNewMigrations[191].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(join(root,sqlPath),source);
+  const missing=structuredClone(manifest);missing.orderedNewMigrations.splice(191,1);
+  await writeFile(manifestPath,JSON.stringify(missing));
+  await assert.rejects(snapshotAiSource(root),/canonical manifest inventory/);
+  await writeFile(manifestPath,originalManifest);
+  assert.deepEqual(await snapshotAiSource(root),current);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('legacy pair adoption exact final pin preserves all 192 prior entries and rejects drift',async()=>{
+ const current=await snapshotAiSource(),pin=receiptProtocol.MAKEUP_LEGACY_PAIR_ADOPTION_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261106062342_makeup_legacy_pair_adoption.sql',status:'final',sha256:'44227227307e59de2429f7efa5e0a402c1ee9cf676d6ba520ec78fb7c6581909'});
+ assert.ok(Object.isFrozen(pin));
+ const sqlPath='supabase/migrations/'+pin.fileName;
+ assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(path=>path===sqlPath).length,1);
+ assert.equal(current.closure.find(row=>row.path===sqlPath)?.sha256,pin.sha256);
+ assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS);assert.equal(CURRENT_AI_MIGRATIONS.length,11);
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);assert.deepEqual(manifest.orderedNewMigrations[192],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,192))),'fe467a9f5bbc6785529e2f9e6e97dfd07b5d019250008610879916152432c772');
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-legacy-pair-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json'),original=await readFile(manifestPath);
+  assert.deepEqual(await snapshotAiSource(root),current);
+  const unknown={fileName:'20990101000000_unregistered_legacy_pair.sql',status:'final',sha256:hash('select 1;\n')};
+  await writeFile(join(root,'supabase/migrations',unknown.fileName),'select 1;\n');
+  for(const [label,mutate]of[
+   ['missing',rows=>rows.splice(192,1)],['duplicate',rows=>rows.push({...pin})],
+   ['same-length duplicate',rows=>rows[192]={...rows[191]}],
+   ['reorder',rows=>{[rows[191],rows[192]]=[rows[192],rows[191]];}],
+   ['candidate',rows=>rows[192].status='candidate'],['hash',rows=>rows[192].sha256='0'.repeat(64)],
+   ['unknown addition',rows=>rows.push({...unknown})],['unknown replacement',rows=>rows[192]={...unknown}],
+  ]){
+   const changed=structuredClone(manifest);mutate(changed.orderedNewMigrations);await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/canonical manifest inventory|current migration manifest drift/,label);
+  }
+  await writeFile(manifestPath,original);
+  const sql=await readFile(join(root,sqlPath)),drift=Buffer.concat([sql,Buffer.from('\n-- unreviewed legacy adoption drift\n')]);
+  await writeFile(join(root,sqlPath),drift);
+  await assert.rejects(snapshotAiSource(root),/makeup legacy pair adoption migration source drift/);
+  const coordinated=structuredClone(manifest);coordinated.orderedNewMigrations[192].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(manifestPath,original);await rm(join(root,sqlPath));await assert.rejects(snapshotAiSource(root),/ENOENT/);
+  await writeFile(join(root,sqlPath),sql);assert.deepEqual(await snapshotAiSource(root),current);
+  assert.deepEqual(await snapshotAiSource(),current,'negative fixtures never mutate actual source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('date override native reader exact final pin preserves all 193 prior entries and rejects drift',async()=>{
+ const current=await snapshotAiSource(),pin=receiptProtocol.TIMETABLE_DATE_OVERRIDE_NATIVE_READER_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261109015335_timetable_date_override_native_reader.sql',status:'final',sha256:'1344006e60eac96354b9547c11fec52d6b484ac808450b43124834799678fd44'});
+ assert.ok(Object.isFrozen(pin));
+ const sqlPath='supabase/migrations/'+pin.fileName;
+ for(const path of [sqlPath,'supabase/rollbacks/'+pin.fileName,'supabase/tests/timetable_date_override_native_reader_test.sql']){
+  assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(item=>item===path).length,1);
+  assert.equal(current.closure.find(row=>row.path===path)?.sha256,hash(await readFile(path)));
+ }
+ assert.equal(current.closure.find(row=>row.path===sqlPath)?.sha256,pin.sha256);
+ assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS);assert.equal(CURRENT_AI_MIGRATIONS.length,11);
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);assert.deepEqual(manifest.orderedNewMigrations[193],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,193))),'01d5b8a522c2dc84b5f6d16d7c6ca314e1dd6b7cbc58b8b75cca4acd3549b24c');
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-date-override-native-reader-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json'),original=await readFile(manifestPath);
+  assert.deepEqual(await snapshotAiSource(root),current);
+  const unknown={fileName:'20990101000000_unregistered_date_override_reader.sql',status:'final',sha256:hash('select 1;\n')};
+  await writeFile(join(root,'supabase/migrations',unknown.fileName),'select 1;\n');
+  for(const [label,mutate]of[
+   ['missing',rows=>rows.splice(193,1)],['duplicate',rows=>rows.push({...pin})],
+   ['same-length duplicate',rows=>rows[193]={...rows[192]}],
+   ['reorder',rows=>{[rows[192],rows[193]]=[rows[193],rows[192]];}],
+   ['candidate',rows=>rows[193].status='candidate'],['hash',rows=>rows[193].sha256='0'.repeat(64)],
+   ['unknown addition',rows=>rows.push({...unknown})],['unknown replacement',rows=>rows[193]={...unknown}],
+  ]){
+   const changed=structuredClone(manifest);mutate(changed.orderedNewMigrations);await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/canonical manifest inventory|current migration manifest drift/,label);
+  }
+  await writeFile(manifestPath,original);
+  const sql=await readFile(join(root,sqlPath)),drift=Buffer.concat([sql,Buffer.from('\n-- unreviewed native reader drift\n')]);
+  await writeFile(join(root,sqlPath),drift);
+  await assert.rejects(snapshotAiSource(root),/timetable date override native reader migration source drift/);
+  const coordinated=structuredClone(manifest);coordinated.orderedNewMigrations[193].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(manifestPath,original);await rm(join(root,sqlPath));await assert.rejects(snapshotAiSource(root),/ENOENT/);
+  await writeFile(join(root,sqlPath),sql);assert.deepEqual(await snapshotAiSource(root),current);
+  assert.deepEqual(await snapshotAiSource(),current,'negative fixtures never mutate actual source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('context pgTAP embeds the exact published DO blocks and verified lifecycle core',async()=>{
+ const name=receiptProtocol.LEGACY_CONTEXT_ADOPTION_REUSE_MIGRATION.fileName;
+ const [sql,forward,recovery]=await Promise.all([
+  readFile('supabase/tests/legacy_context_adoption_reuse_test.sql','utf8'),
+  readFile('supabase/migrations/'+name,'utf8'),
+  readFile('supabase/rollbacks/'+name,'utf8'),
+ ]);
+ const migrationDo=source=>{
+  const start=source.indexOf('do $'),end=source.lastIndexOf('\ncommit;');
+  assert.ok(start>=0&&end>start,'published artifact contains one transaction-scoped DO block');
+  return source.slice(start,end).trim();
+ };
+ for(const [tag,artifact]of[['$forward$',forward],['$rollback$',recovery]]){
+  const fragments=sql.split(tag);
+  assert.equal(fragments.length,3,'one embedded '+tag+' literal');
+  assert.equal(fragments[1],migrationDo(artifact));
+ }
+ const start=sql.indexOf('create function pg_temp.context_migration_sql(');
+ const end=sql.indexOf('create temporary table context_lifecycle_results',start);
+ assert.ok(start>=0&&end>start,'the lifecycle core precedes its pgTAP execution');
+ // Same source as the completed 19-check isolated lifecycle, with one final LF.
+ // The CI test uses only committed files; no private workspace artifact is read.
+ assert.equal(hash(sql.slice(start,end).trimEnd()+'\n'),'f47d04db47001e9d4ba5e4de320f2cfd4dea134fbb813e5db965efe5983e3f1f');
+ assert.ok(sql.includes('create temporary table context_lifecycle_results on commit drop as select * from pg_temp.context_lifecycle_checks();'));
+ assert.ok(sql.includes("select is((select count(*) from context_lifecycle_results),19::bigint,'all nineteen context lifecycle checks execute');"));
+ assert.ok(sql.includes('select ok(passed,label) from context_lifecycle_results;'));
+ assert.ok(!sql.includes('LIFECYCLE_CHECKS_INSERT_HERE'));
+});
+
+test('legacy context adoption reuse exact final pin preserves all 194 prior entries and rejects drift',async()=>{
+ const current=await snapshotAiSource(),pin=receiptProtocol.LEGACY_CONTEXT_ADOPTION_REUSE_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261109122711_legacy_context_adoption_reuse.sql',status:'final',sha256:'8608efe5e2f2220021933beb68f9459960ae5313ca0c2b2490e1a7c5a833fbe4'});
+ assert.ok(Object.isFrozen(pin));
+ const sqlPath='supabase/migrations/'+pin.fileName;
+ for(const path of [sqlPath,'supabase/rollbacks/'+pin.fileName,'supabase/tests/legacy_context_adoption_reuse_test.sql']){
+  assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(item=>item===path).length,1);
+  assert.equal(current.closure.find(row=>row.path===path)?.sha256,hash(await readFile(path)));
+ }
+ assert.equal(current.closure.find(row=>row.path===sqlPath)?.sha256,pin.sha256);
+ assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS);assert.equal(CURRENT_AI_MIGRATIONS.length,11);
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);assert.deepEqual(manifest.orderedNewMigrations[194],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,194))),'1fcd7cc631ab371e7de7a9a5eb2bd875c81a3555ada3f95eb1aecbff069f4491');
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-legacy-context-adoption-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json'),original=await readFile(manifestPath);
+  assert.deepEqual(await snapshotAiSource(root),current);
+  const unknown={fileName:'20990101000000_unregistered_legacy_context_adoption.sql',status:'final',sha256:hash('select 1;\n')};
+  await writeFile(join(root,'supabase/migrations',unknown.fileName),'select 1;\n');
+  for(const [label,mutate]of[
+   ['missing',rows=>rows.splice(194,1)],['duplicate',rows=>rows.push({...pin})],
+   ['same-length duplicate',rows=>rows[194]={...rows[193]}],
+   ['reorder',rows=>{[rows[193],rows[194]]=[rows[194],rows[193]];}],
+   ['candidate',rows=>rows[194].status='candidate'],['hash',rows=>rows[194].sha256='0'.repeat(64)],
+   ['unknown addition',rows=>rows.push({...unknown})],['unknown replacement',rows=>rows[194]={...unknown}],
+  ]){
+   const changed=structuredClone(manifest);mutate(changed.orderedNewMigrations);await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/canonical manifest inventory|current migration manifest drift/,label);
+  }
+  await writeFile(manifestPath,original);
+  const sql=await readFile(join(root,sqlPath)),drift=Buffer.concat([sql,Buffer.from('\n-- unreviewed legacy context adoption drift\n')]);
+  await writeFile(join(root,sqlPath),drift);
+  await assert.rejects(snapshotAiSource(root),/legacy context adoption reuse migration source drift/);
+  const coordinated=structuredClone(manifest);coordinated.orderedNewMigrations[194].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(manifestPath,original);await rm(join(root,sqlPath));await assert.rejects(snapshotAiSource(root),/ENOENT/);
+  await writeFile(join(root,sqlPath),sql);assert.deepEqual(await snapshotAiSource(root),current);
+  assert.deepEqual(await snapshotAiSource(),current,'negative fixtures never mutate actual source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('pair pgTAP binds exact recovery artifacts, body pins and nonbody guards',async()=>{
+ const name=receiptProtocol.LEGACY_ADOPTION_PAIR_REUSE_MIGRATION.fileName;
+ const [sql,forward,recovery]=await Promise.all([
+  readFile('supabase/tests/legacy_adoption_pair_reuse_test.sql','utf8'),
+  readFile('supabase/migrations/'+name,'utf8'),
+  readFile('supabase/rollbacks/'+name,'utf8'),
+ ]);
+ const migrationDo=source=>{
+  const start=source.indexOf('do $'),end=source.lastIndexOf('\ncommit;');
+  assert.ok(start>=0&&end>start,'published artifact contains one transaction-scoped DO block');
+  return source.slice(start,end).trim();
+ };
+ for(const [tag,artifact,fromMd5,toMd5]of[
+  ['$forward$',forward,'16e95d3286be2806078c30c254bcf2b8','6566ec0f52e38ecea8aa4d63fd4cc7e9'],
+  ['$rollback$',recovery,'6566ec0f52e38ecea8aa4d63fd4cc7e9','16e95d3286be2806078c30c254bcf2b8'],
+ ]){
+  const embedded=sql.split(tag);
+  assert.equal(embedded.length,3,'one embedded '+tag+' literal');
+  assert.equal(embedded[1],migrationDo(artifact));
+  const body=artifact.split('$candidate_body$');
+  assert.equal(body.length,3,'one replacement body literal');
+  assert.equal(createHash('md5').update(body[1]).digest('hex'),toMd5,'pin binds actual replacement bytes');
+  const apply=artifact.indexOf('execute replace(definition, c.prosrc, candidate_body);');
+  assert.ok(apply>=0,'reuse the installed function header');
+  for(const guard of[
+   `md5(c.prosrc) is distinct from '${fromMd5}'`,
+   "md5(s.prosrc) is distinct from '1d686cc9db164e9d43fe350f5d79c18a'",
+   "is distinct from 'c73f03d09adb2972604eb5fb558a611f'",
+   "is distinct from 'b9d10c2c5e9de854f44ce8a3d4061e35'",
+   `md5(candidate_body) is distinct from '${toMd5}'`,
+   'c.proowner is distinct from s.proowner or c.proacl is distinct from s.proacl',
+   "pg_catalog.aclexplode(coalesce(c.proacl, pg_catalog.acldefault('f', c.proowner))) a where a.grantee <> c.proowner",
+   "c.provolatile <> 's' or s.provolatile <> 's' or c.prosecdef or s.prosecdef",
+   'or s.proisstrict',
+   'c.proconfig is distinct from s.proconfig',
+   'c.proconfig is null or cardinality(c.proconfig) <> 1',
+   "not (c.proconfig[1] = any(array['search_path=', 'search_path=\"\"']))",
+   "metadata_before := to_jsonb(c) - 'prosrc' - 'prosqlbody';",
+   "length(definition) - length(replace(definition, c.prosrc, '')) <> length(c.prosrc)",
+  ]){
+   const at=artifact.indexOf(guard);
+   assert.ok(at>=0&&at<apply,'guard precedes replacement: '+guard);
+  }
+  const after=artifact.slice(apply);
+  assert.ok(after.includes("select p.prosrc, to_jsonb(p) - 'prosrc' - 'prosqlbody'"));
+  assert.ok(after.includes(`md5(applied_body) is distinct from '${toMd5}'`));
+  assert.ok(after.includes('metadata_after is distinct from metadata_before'));
+  assert.ok(after.includes("using errcode = '55000'"),'post-apply mismatch aborts the transaction');
+ }
+ assert.ok(sql.includes('create function pg_temp.pair_migration_sql('));
+ assert.ok(sql.includes('create function pg_temp.pair_lifecycle_checks('));
+ assert.match(sql,/create (?:temp|temporary) table pair_lifecycle_results on commit drop as select \* from pg_temp\.pair_lifecycle_checks\(\);/u);
+ assert.ok(sql.includes('select ok(passed,label) from pair_lifecycle_results;'));
+ assert.match(sql,/select \* from finish\(\);\s*rollback;\s*$/u,'the complete pgTAP emits its plan and rolls back the fixture');
+ assert.ok(!sql.includes('LIFECYCLE_CHECKS_INSERT_HERE'));
+});
+
+test('legacy adoption pair reuse exact final pin preserves all 195 prior entries and rejects drift',async()=>{
+ const current=await snapshotAiSource(),pin=receiptProtocol.LEGACY_ADOPTION_PAIR_REUSE_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261110022947_legacy_adoption_pair_reuse.sql',status:'final',sha256:'cc7864eb84265b3c6d57fbdfba627ddc82dc06252331ac8c1ba601010c21101f'});
+ assert.ok(Object.isFrozen(pin));
+ const sqlPath='supabase/migrations/'+pin.fileName;
+ for(const path of [sqlPath,'supabase/rollbacks/'+pin.fileName,'supabase/tests/legacy_adoption_pair_reuse_test.sql']){
+  assert.equal(receiptProtocol.AI_SOURCE_CLOSURE.filter(item=>item===path).length,1);
+  assert.equal(current.closure.find(row=>row.path===path)?.sha256,hash(await readFile(path)));
+ }
+ assert.equal(current.closure.find(row=>row.path===sqlPath)?.sha256,pin.sha256);
+ assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS);assert.equal(CURRENT_AI_MIGRATIONS.length,11);
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);assert.deepEqual(manifest.orderedNewMigrations[195],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,195))),'2f8f56a09eb7ddcaf0f1eb4c16bb287802e25a42df4186de7acdec325c434949');
+ const parent=join(repositoryRoot,'.codex-temp');await mkdir(parent,{recursive:true});
+ const root=await mkdtemp(join(parent,'ai-receipt-legacy-adoption-pair-'));
+ try{
+  for(const file of [...receiptProtocol.AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,file,'..'),{recursive:true});await writeFile(join(root,file),await readFile(file));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json'),original=await readFile(manifestPath);
+  assert.deepEqual(await snapshotAiSource(root),current);
+  const unknown={fileName:'20990101000000_unregistered_legacy_adoption_pair.sql',status:'final',sha256:hash('select 1;\n')};
+  await writeFile(join(root,'supabase/migrations',unknown.fileName),'select 1;\n');
+  for(const [label,mutate]of[
+   ['missing',rows=>rows.splice(195,1)],['duplicate',rows=>rows.push({...pin})],
+   ['same-length duplicate',rows=>rows[195]={...rows[194]}],
+   ['reorder',rows=>{[rows[194],rows[195]]=[rows[195],rows[194]];}],
+   ['candidate',rows=>rows[195].status='candidate'],['hash',rows=>rows[195].sha256='0'.repeat(64)],
+   ['unknown addition',rows=>rows.push({...unknown})],['unknown replacement',rows=>rows[195]={...unknown}],
+  ]){
+   const changed=structuredClone(manifest);mutate(changed.orderedNewMigrations);await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/canonical manifest inventory|current migration manifest drift/,label);
+  }
+  await writeFile(manifestPath,original);
+  const sql=await readFile(join(root,sqlPath)),drift=Buffer.concat([sql,Buffer.from('\n-- unreviewed legacy adoption pair drift\n')]);
+  await writeFile(join(root,sqlPath),drift);
+  await assert.rejects(snapshotAiSource(root),/legacy adoption pair reuse migration source drift/);
+  const coordinated=structuredClone(manifest);coordinated.orderedNewMigrations[195].sha256=hash(drift);
+  await writeFile(manifestPath,JSON.stringify(coordinated));
+  await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(manifestPath,original);await rm(join(root,sqlPath));await assert.rejects(snapshotAiSource(root),/ENOENT/);
+  await writeFile(join(root,sqlPath),sql);assert.deepEqual(await snapshotAiSource(root),current);
+  assert.deepEqual(await snapshotAiSource(),current,'negative fixtures never mutate actual source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('close validation proof pins its migration and exact executed lifecycle artifacts',async()=>{
+ const source=await snapshotAiSource(),pin=receiptProtocol.TIMETABLE_CLOSE_VALIDATION_PROOF_MIGRATION;
+ assert.deepEqual(pin,{fileName:'20261110071000_timetable_close_validation_proof.sql',status:'final',sha256:'124aae9782ae3434724f354209ab520d8990e756a3496298cc90cdfbb8d3fc1e'});
+ assert.ok(Object.isFrozen(pin));
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);assert.deepEqual(manifest.orderedNewMigrations[196],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,196))),'5317a84c8aa670e11d2ecbc3549dc4c0bb1cb78de8c73a8e67dd22f79d2c710e');
+ const regression=await readFile('supabase/tests/timetable_close_validation_proof_test.sql','utf8');
+ for(const [directory,delimiter] of [['migrations','$proof_forward$'],['rollbacks','$proof_rollback$']]){
+  const path='supabase/'+directory+'/'+pin.fileName,sql=await readFile(path,'utf8');
+  assert.equal(source.closure.find(row=>row.path===path)?.sha256,hash(Buffer.from(sql)));
+  const executable=sql.slice(sql.indexOf('do $'),sql.lastIndexOf('commit;')).trim();
+  assert.equal(regression.split(delimiter).length,3,'one unmodified lifecycle artifact literal');
+  assert.equal(regression.split(delimiter)[1],executable,'full-schema lifecycle executes the exact artifact body');
+ }
+ assert.equal(receiptProtocol.PR_AI_SQL_TESTS.filter(path=>path==='supabase/tests/timetable_close_validation_proof_test.sql').length,1);
+});
+
+test('weekly arrays pin historical artifacts, dependency rebind and exact lifecycle literals',async()=>{
+ const source=await snapshotAiSource(),pin=receiptProtocol.TIMETABLE_READER_WEEKLY_ARRAYS_MIGRATION;
+ assert.deepEqual(pin,{"fileName":"20261110140429_timetable_reader_weekly_arrays.sql","status":"final","sha256":"615db840b31c7653182893d159374b4d91a550940472a1fe1c152fd3c6c1ecac"});
+ const manifest=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-v1.manifest.json'));
+ assert.equal(manifest.orderedNewMigrations.length,199);assert.deepEqual(manifest.orderedNewMigrations[198],pin);
+ assert.equal(hash(JSON.stringify(manifest.orderedNewMigrations.slice(0,198))),'6c0fec00f766e8e5ab40fae1bb07673ad09cf2645c4efb3dce660fa58a89e5ed');
+ const tests=['timetable_reader_weekly_arrays_test.sql','timetable_date_override_native_reader_test.sql','timetable_close_validation_proof_test.sql'];
+ for(const [directory,delimiter]of[['migrations','$weekly_arrays_forward$'],['rollbacks','$weekly_arrays_recovery$']]){
+  const path='supabase/'+directory+'/'+pin.fileName,sql=await readFile(path,'utf8');
+  assert.equal(source.closure.find(row=>row.path===path)?.sha256,hash(sql));
+  const executable=sql.slice(sql.indexOf('do $'),sql.lastIndexOf('commit;')).trim();
+  for(const test of tests){
+   const body=await readFile('supabase/tests/'+test,'utf8');
+   assert.equal(body.split(delimiter).length,3,test+' has one exact artifact');
+   assert.equal(body.split(delimiter)[1],executable,test+' executes published artifact bytes');
+  }
+  assert.ok(sql.includes("(to_jsonb(p)-'prosrc') is distinct from before_metadata"));
+  assert.ok(sql.includes("c.fingerprint=old_fingerprint"));
+ }
+ assert.equal(receiptProtocol.PR_AI_SQL_TESTS.filter(x=>x==='supabase/tests/timetable_reader_weekly_arrays_test.sql').length,1);
 });

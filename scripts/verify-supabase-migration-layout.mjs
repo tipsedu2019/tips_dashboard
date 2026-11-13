@@ -25,8 +25,8 @@ const POSTDEPLOY_READONLY_SQL =
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "0f2a932ee2d471b0fc889915a424a09b905c1d18180ef29824afdb24a69f2343"
 const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
-// Independent fixed inventories preserve every SQL/probe from the reviewed PR
-// schema job; main must execute the same permission, mutation and DTO contracts.
+// Independent fixed inventories preserve every existing SQL/probe in both jobs.
+// PR-only additions do not alter the separately reviewed main workflow.
 const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/agent_api_scoped_schedule_test.sql",
   "supabase/tests/agent_api_class_changes_test.sql",
@@ -137,6 +137,16 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_thread_replies_test.sql",
   "supabase/tests/ai_agent_nonexpiring_chat_test.sql",
 ])
+const PR_ISOLATED_SQL_TESTS = Object.freeze([
+  ...ISOLATED_SQL_TESTS.flatMap(path => path === "supabase/tests/makeup_legacy_approval_occupancy_test.sql"
+    ? [path, "supabase/tests/makeup_legacy_pair_adoption_test.sql"] : [path]),
+  "supabase/tests/dashboard_audit_predecessor_lookup_test.sql",
+  "supabase/tests/timetable_date_override_native_reader_test.sql",
+  "supabase/tests/legacy_context_adoption_reuse_test.sql",
+  "supabase/tests/legacy_adoption_pair_reuse_test.sql",
+  "supabase/tests/timetable_close_validation_proof_test.sql",
+  "supabase/tests/timetable_reader_weekly_arrays_test.sql",
+])
 const ISOLATED_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
@@ -166,6 +176,10 @@ const ISOLATED_PROBES = Object.freeze([
   "tests/probe-ai-agent-thread-replies-concurrency.mjs",
   "tests/probe-timetable-nullable-room-concurrency.mjs",
 ])
+
+const PR_ISOLATED_PROBES = Object.freeze(ISOLATED_PROBES.flatMap(path =>
+  path === "tests/probe-makeup-approval-collision-dto.mjs"
+    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]))
 
 const AI_STATIC_TESTS = Object.freeze([
   "tests/ai-agent-personal-credential-service.test.mjs",
@@ -197,7 +211,7 @@ const AI_STATIC_TESTS = Object.freeze([
 // step reordering cannot expand the isolated CI execution boundary.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c95097088cd7ed9337f9993f07707dc752ff70a56cc84dc5f040bde73126f49a"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "7fe2131a1be003a6dd56ec7c8fe62316886ea2846def85d85a2beaa024b0aae2"
+  "6b36a398ad935eb2e8b1b50f6a680f7f4161fa3e06aa71a85157e34b57dae994"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -209,7 +223,7 @@ const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-pr
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
   "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "01c8eeda3b944091f42487a53ce44d6f60b3336a85ce7fe86d4144795d9fcc35"],
+  ["free-tier-guardrails.yml", "b7eaa1de3620b7f486bb9fcf17ce9e8fd91820d4dfc491d21ab3a3fe38a0f923"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
   [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
@@ -1254,7 +1268,12 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   reject(!equalJson(runtimeSteps,["Checkout","Setup Node","Setup Supabase CLI","Install producer parity dependencies","Cache isolated annual RPC HTTP fixture image",runtimeName,"Test cached PostgreSQL fixture contracts"]), "isolated_ci_runtime_step_inventory_mismatch")
   const directStep = runtimeText.split(/^ {6}- name: /m).find((step) => step.startsWith(runtimeName + "\n")) || ""
   const directBody = directStep.split(/\n\s*run: \|\n/)[1]?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) || []
-  reject(directBody.length !== 2 || directBody[0] !== "set -euo pipefail" || !directBody[1].startsWith('TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs '), "isolated_ci_direct_execute_body_mismatch")
+  const directPrefix = kind === "pr"
+    ? ["set -euo pipefail", "git rev-parse HEAD HEAD^{tree}"]
+    : ["set -euo pipefail"]
+  reject(directBody.length !== directPrefix.length + 1
+    || !equalJson(directBody.slice(0, directPrefix.length), directPrefix)
+    || !directBody[directPrefix.length]?.startsWith('TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs '), "isolated_ci_direct_execute_body_mismatch")
   reject((unfolded.match(/--execute\b/g) || []).length !== 1,
     "isolated_ci_execute_count_mismatch")
   reject(runtimeText.split(/\r?\n/).some((line) =>
@@ -1278,8 +1297,8 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   const command = runnerLines[0] || ""
   const sqlTests = [...command.matchAll(/--test\s+(\S+)/g)].map((match) => match[1])
   const probes = [...command.matchAll(/--probe\s+(\S+)/g)].map((match) => match[1])
-  reject(!equalJson(sqlTests, ISOLATED_SQL_TESTS), "isolated_ci_sql_inventory_mismatch")
-  reject(!equalJson(probes, ISOLATED_PROBES), "isolated_ci_probe_inventory_mismatch")
+  reject(!equalJson(sqlTests, kind === "pr" ? PR_ISOLATED_SQL_TESTS : ISOLATED_SQL_TESTS), "isolated_ci_sql_inventory_mismatch")
+  reject(!equalJson(probes, kind === "pr" ? PR_ISOLATED_PROBES : ISOLATED_PROBES), "isolated_ci_probe_inventory_mismatch")
   for (const flag of ["--review-head", "--lint", "--require-final", "--execute", "--authorized",
     "--postdeploy-contract", "--transactional-preflight", "--verify-local-ledger", "--ai-producer-parity"]) {
     reject(command.split(/\s+/).filter((part) => part === flag).length !== 1,

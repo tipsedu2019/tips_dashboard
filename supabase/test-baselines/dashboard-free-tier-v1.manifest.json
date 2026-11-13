@@ -944,6 +944,61 @@
       "fileName": "20261031120000_class_close_occupancy_release.sql",
       "status": "final",
       "sha256": "1872ae421e86e383e1c06ee9cc9df7a86c4c462ea6f9f2433cc254735f55fe63"
+    },
+    {
+      "fileName": "20261103135120_makeup_seoul_time_projection.sql",
+      "status": "final",
+      "sha256": "f6375de323d3d7bfd1e2e52bec28d1a13437399bf214949c3ecdd5b957c325c4"
+    },
+    {
+      "fileName": "20261103170744_timetable_validation_per_date_inputs.sql",
+      "status": "final",
+      "sha256": "e45ca46ee41fafd1cedce8c6bef74c1c14133f2f2534deb9a49e99ab2970d4e4"
+    },
+    {
+      "fileName": "20261105073151_dashboard_audit_predecessor_index_lookup.sql",
+      "status": "final",
+      "sha256": "a1122689f58791337fbc5319d1e5b192bfd640dd96af9367f46924d517ebf069"
+    },
+    {
+      "fileName": "20261106015549_timetable_dated_diff_projection_reuse.sql",
+      "status": "final",
+      "sha256": "133044663cec2aa4b3f1bc4ae2dab7bcafb4a57c45d7b7d574baf834639f7ea6"
+    },
+    {
+      "fileName": "20261106062342_makeup_legacy_pair_adoption.sql",
+      "status": "final",
+      "sha256": "44227227307e59de2429f7efa5e0a402c1ee9cf676d6ba520ec78fb7c6581909"
+    },
+    {
+      "fileName": "20261109015335_timetable_date_override_native_reader.sql",
+      "status": "final",
+      "sha256": "1344006e60eac96354b9547c11fec52d6b484ac808450b43124834799678fd44"
+    },
+    {
+      "fileName": "20261109122711_legacy_context_adoption_reuse.sql",
+      "status": "final",
+      "sha256": "8608efe5e2f2220021933beb68f9459960ae5313ca0c2b2490e1a7c5a833fbe4"
+    },
+    {
+      "fileName": "20261110022947_legacy_adoption_pair_reuse.sql",
+      "status": "final",
+      "sha256": "cc7864eb84265b3c6d57fbdfba627ddc82dc06252331ac8c1ba601010c21101f"
+    },
+    {
+      "fileName": "20261110071000_timetable_close_validation_proof.sql",
+      "status": "final",
+      "sha256": "124aae9782ae3434724f354209ab520d8990e756a3496298cc90cdfbb8d3fc1e"
+    },
+    {
+      "fileName": "20261110095800_makeup_legacy_snapshot_ownership.sql",
+      "status": "final",
+      "sha256": "faa9dbdc9f0e707b2b3bd9ce88156b70d664353f1f2233c35ddcc9d5d8fc13d3"
+    },
+    {
+      "fileName": "20261110140429_timetable_reader_weekly_arrays.sql",
+      "status": "final",
+      "sha256": "615db840b31c7653182893d159374b4d91a550940472a1fe1c152fd3c6c1ecac"
     }
   ]
 }
