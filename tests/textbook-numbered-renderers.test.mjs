@@ -496,6 +496,45 @@ test("mounted inventory waits for the real default location and renders prepared
   assert.equal(document.querySelector('[aria-label="재고 이력 페이지 탐색"]') !== null, true)
 })
 
+test("inventory merges interleaved normalized subjects into one page group without changing row identity", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=inventory&textbookPageSize=10" })
+  const locationId = id(900)
+  await h.resolve(h.requests.find(request => request.name === "list_textbook_location_reference_page_v1"), {
+    rows: [{ value: locationId, label: "본관", searchText: "본관 main" }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: locationId, code: "main", name: "본관" },
+  })
+  const subjects = ["math", "english", "수학", " MATH ", ...Array(6).fill("math")]
+  const rows = subjects.map((subject, index) => {
+    const source = masterRow(320 + index, { subject })
+    return { source, id: source.id, title: source.title, publisher: source.publisher, locationId, locationName: "본관",
+      currentQuantity: index, latestCountAt: "", daysSinceLatestCount: null, isCountedThisCycle: false,
+      isRecommended: true, status: "recommended", reason: "실사 필요", dueLabel: "지금" }
+  })
+  await h.resolve(h.requests.find(request => request.name === "list_textbook_inventory_page_v1"), { rows, page: 1, pageSize: 10, totalCount: 19 })
+  await h.resolve(h.requests.find(request => request.name === "get_textbook_inventory_summary_v1"), masterSummary(19, {
+    subjectTotals: [{ subject: "math", totalCount: 18, totalQuantity: 0, salePriceTotal: 0, stockValue: 0 }],
+    locations: [{ id: locationId, code: "main", name: "본관", sortOrder: 1 }], auditCounts: { all: 19, recommended: 19, pending: 0, done: 0 },
+  }))
+  const mathIds = rows.filter((_, index) => index !== 1).map(row => row.id)
+  const groupButtons = () => [...document.querySelectorAll('[aria-label="재고 실사 목록"] button[aria-expanded]')]
+  assert.deepEqual(groupButtons().map(node => node.textContent.trim()), ["수학 · 9종", "영어 · 1종"], "group counts cover this page, not all 19 results")
+  assert.deepEqual(preparedRowIds("inventory-desktop"), [...mathIds, rows[1].id], "first-seen subjects and within-subject server order are stable")
+  assert.deepEqual(preparedRowIds("inventory-mobile"), rows.map(row => row.id), "ungrouped mobile order is unchanged")
+  const targetRow = () => document.querySelector(`[data-prepared-surface="inventory-desktop"][data-prepared-row-id="${rows[2].id}"]`)
+  const input = targetRow().querySelector('[aria-label$="실사 수량"]')
+  await h.act(() => input[Object.keys(input).find(key => key.startsWith("__reactProps$"))].onChange({ target: { value: "0" } }))
+  await h.act(() => targetRow().querySelector('[aria-label$="재고 선택"]').click())
+  const requestsBeforeCollapse = h.requests.length
+  await h.act(() => button("수학 그룹 접기").click())
+  assert.deepEqual(preparedRowIds("inventory-desktop"), [rows[1].id], "one collapse hides all nine math rows")
+  await h.act(() => button("수학 그룹 펼치기").click())
+  assert.deepEqual(preparedRowIds("inventory-desktop"), [...mathIds, rows[1].id])
+  assert.equal(targetRow().querySelector('[aria-label$="실사 수량"]').value, "0", "zero draft remains tied to the same textbook/location")
+  assert.equal(targetRow().getAttribute("data-state"), "selected")
+  assert.equal(h.requests.length, requestsBeforeCollapse, "grouping and collapse perform no reads or writes")
+  await h.assertNoLegacyReads()
+})
+
 test("inventory keeps prepared reads paused when the default-location reference fails and exposes retry", async (t) => {
   const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
   const location = h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1")
