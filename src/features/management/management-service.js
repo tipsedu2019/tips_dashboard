@@ -1773,7 +1773,12 @@ export function createManagementService(options = {}) {
         operationalRequestKeys.set(body, requestKey);
         const action = createTimetableOperationalMutation({ requestKey,
           rpc: (_name, args) => client.rpc("update_class_operational_v1", args)
-            .abortSignal(AbortSignal.timeout(8_000)).retry(false), refresh: () => refreshPublicClassesCache("class") });
+            .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+          // A verified close receipt must also settle when cache token lookup
+          // stalls before its HTTP deadline starts. Keep the cache result pending.
+          refresh: () => patch.status === ARCHIVED_CLASS_STATUS
+            ? withReadDeadline(() => refreshPublicClassesCache("class"), { deadline: AbortSignal.timeout(3_000) })
+            : refreshPublicClassesCache("class") });
         let outcome;
         try {
           outcome = await action.save({ classId: payload.id, patch });

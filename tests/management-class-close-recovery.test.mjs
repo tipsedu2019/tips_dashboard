@@ -364,3 +364,55 @@ test("confirmed state does not wait indefinitely for cache session or transport 
     assert.equal(f.reads.length, 1);
   } finally { AbortSignal.timeout = timeout; }
 });
+
+test("a verified close receipt finishes while the default cache session lookup is still pending", async t => {
+  const session = Promise.withResolvers();
+  const sessionStarted = Promise.withResolvers();
+  const cacheDeadline = new AbortController();
+  const deadlines = [];
+  let deliveries = 0;
+  let settled = false;
+  t.mock.method(AbortSignal, "timeout", ms => {
+    deadlines.push(ms);
+    return ms === 3000 ? cacheDeadline.signal : new AbortController().signal;
+  });
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(url, "/api/public-classes/cache/invalidate");
+    assert.equal(options.method, "POST");
+    deliveries++;
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  // Use the real default cache invalidator, including its getSession boundary.
+  const f = fixture(() => ({ data: receipt, error: null }), null);
+  f.client.auth = { getSession() { sessionStarted.resolve(); return session.promise; } };
+  const draft = structuredClone(record);
+  const saving = f.service.updateClass(draft, confirmOptions()).then(value => {
+    settled = true;
+    return value;
+  });
+  try {
+    await sessionStarted.promise;
+    assert.equal(settled, false);
+    assert.equal(deliveries, 0);
+    cacheDeadline.abort(new DOMException("synthetic cache deadline", "TimeoutError"));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, true, "verified business success must not wait for cache authentication");
+    const result = await saving;
+    assert.equal(result.id, id);
+    assert.equal(result.status, "종강");
+    assert.equal(result.publicClassesCacheRefresh.status, "pending");
+    assert.equal(Object.hasOwn(result, "closeConfirmation"), false, "a receipt remains a receipt");
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.reads.length, 0);
+    assert.deepEqual(deadlines, [8000, 3000]);
+    assert.deepEqual(draft, record);
+  } finally {
+    // Drain the original cache operation; no auth cancellation or second writer.
+    session.resolve({ data: { session: null } });
+    await saving;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(deliveries, 1, "late cache completion is the original delivery only");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.reads.length, 0);
+});
