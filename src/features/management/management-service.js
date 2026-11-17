@@ -1,6 +1,7 @@
 import { withReadDeadline } from "../../lib/read-deadline.ts";
 import { createTimetableOperationalMutation } from "../academic/timetable-operational-service.ts";
 import { createClassCloseConfirmation, isUncertainClassWrite } from "./class-close-confirmation.ts";
+import { withClassCloseWriteDeadline } from "./class-close-write-deadline.ts";
 import { buildClassTextbookUsage } from "./class-textbook-usage.ts";
 import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supabase.ts";
 import {
@@ -1772,8 +1773,13 @@ export function createManagementService(options = {}) {
         const requestKey = options.requestKey || operationalRequestKeys.get(body) || generateId();
         operationalRequestKeys.set(body, requestKey);
         const action = createTimetableOperationalMutation({ requestKey,
-          rpc: (_name, args) => client.rpc("update_class_operational_v1", args)
-            .abortSignal(AbortSignal.timeout(8_000)).retry(false), refresh: () => refreshPublicClassesCache("class") });
+          rpc: (_name, args) => {
+            const write = (signal) => client.rpc("update_class_operational_v1", args)
+              .abortSignal(signal).retry(false);
+            return patch.status === ARCHIVED_CLASS_STATUS
+              ? withClassCloseWriteDeadline(write)
+              : write(AbortSignal.timeout(8_000));
+          }, refresh: () => refreshPublicClassesCache("class") });
         let outcome;
         try {
           outcome = await action.save({ classId: payload.id, patch });
