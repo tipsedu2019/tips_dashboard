@@ -250,10 +250,12 @@ test("dashboard omits introductory briefing copy and redundant workspace heading
   assert.doesNotMatch(source, /운영 워크스페이스 바로가기/);
 });
 
-test("dashboard renders only the daily brief path instead of live statistics sources", async () => {
+test("dashboard renders a static role-aware hub instead of live statistics sources", async () => {
   const pageSource = await readSource("src/app/admin/dashboard/page.tsx");
 
-  assert.match(pageSource, /DashboardDailyBrief/);
+  assert.match(pageSource, /buildAdminNavGroups\(auth\)/);
+  assert.match(pageSource, /prefetch=\{false\}/);
+  assert.doesNotMatch(pageSource, /DashboardDailyBrief|DashboardWorkload/);
   assert.doesNotMatch(pageSource, /useTipsDashboardMetrics/);
   assert.doesNotMatch(pageSource, /SectionCards/);
   assert.doesNotMatch(pageSource, /get_dashboard_summary_sources_v1/);
@@ -518,28 +520,15 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /bucket\.classBreakdowns\?\.byGrade \|\| \[\]\)\.slice\(0, 5\)/);
 });
 
-test("dashboard metrics renders a cached summary before independently loading conflicts", async () => {
-  const source = await readSource("src/hooks/use-tips-dashboard-metrics.ts");
-
-  assert.match(source, /const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 8_000/);
-  assert.match(source, /rpc\("get_dashboard_summary_sources_v1"\)/);
-  assert.match(source, /rpc\("get_dashboard_conflict_sources_v1",/);
-  assert.equal((source.match(/\.retry\(false\)/g) || []).length, 2);
-  assert.match(source, /DASHBOARD_SNAPSHOT_VERSION/);
-  assert.match(source, /const cacheScope = userId && role/);
-  assert.match(source, /dashboardSnapshotCache\s*\.load\(\s*cacheScope,\s*"summary"/);
-  assert.match(source, /dashboardSnapshotCache\s*\.load\(\s*cacheScope,\s*"conflict"/);
-  assert.match(source, /buildMetrics\(\{ classes: summary\.classes, students: summary\.students \}\)/);
-  assert.match(source, /attachDashboardClassSessionDates\(sourceData\.classes, conflict\.sessionDates\)/);
-  assert.match(source, /type ConflictSourceStatus = "loading" \| "ready" \| "error"/);
-  assert.match(source, /schedule: \{ status: "loading", error: "" \}/);
-  assert.match(source, /exam: \{ status: "loading", error: "" \}/);
-  assert.match(source, /retryCoreSources/);
-  assert.match(source, /retryConflictSources/);
-  assert.match(source, /setSummarySourceRevision\(\(current\) => current \+ 1\)/);
-  assert.match(source, /setConflictSourceRevision\(\(current\) => current \+ 1\)/);
-  assert.match(source, /setMetrics\(\(current\) => \(\{[\s\S]*\.\.\.current,[\s\S]*schedule: \{ status: "error"/);
-  assert.doesNotMatch(source, /\.from\(|readTable\(|academic_events: "\*"/);
+test("retired dashboard readers cannot be imported by the application", async () => {
+  for (const path of [
+    "src/hooks/use-tips-dashboard-metrics.ts",
+    "src/features/dashboard/dashboard-workload.tsx",
+    "src/features/dashboard/dashboard-daily-brief.tsx",
+    "src/features/dashboard/metrics.js",
+    "src/features/dashboard/snapshot-cache.js",
+    "src/features/dashboard/snapshot-sources.js",
+  ]) assert.equal(await pathExists(path), false, path);
 });
 
 test("dashboard renders academy-wide actionable conflict state before filters and metrics", async () => {

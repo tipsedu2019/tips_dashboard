@@ -6,10 +6,6 @@ import {
   normalizeWorkloadPage,
   workloadDays,
 } from "../src/features/dashboard/workload-contract.ts"
-import {
-  readWorkloadPage,
-  readWorkloadSummary,
-} from "../src/features/dashboard/workload-service.ts"
 
 const now = "2026-09-22T01:00:00Z"
 const group = (extra = {}) => ({
@@ -119,50 +115,5 @@ test("detail contracts keep actual workflow destinations and reject external, mi
     )
   assert.throws(() =>
     normalizeWorkloadPage({ ...page, totalCount: 2, rows: [item, item] }),
-  )
-})
-function client(data, error = null) {
-  const calls = []
-  return {
-    calls,
-    rpc(name, args) {
-      calls.push({ name, args })
-      return {
-        abortSignal(signal) {
-          assert.ok(signal instanceof AbortSignal)
-          return {
-            retry(enabled) {
-              assert.equal(enabled, false)
-              return Promise.resolve({ data, error })
-            },
-          }
-        },
-      }
-    },
-  }
-}
-test("summary/detail are bounded RPC reads and detail scope/page cannot silently mismatch", async () => {
-  const summaryClient = client({ generatedAt: now, groups: [group()] })
-  assert.equal((await readWorkloadSummary(summaryClient)).groups[0].total, 3)
-  assert.equal(summaryClient.calls[0].name, "get_dashboard_workload_v1")
-  const detailClient = client(page)
-  await readWorkloadPage(
-    detailClient,
-    { team: "영어팀", ownerKey: "owner-a", workflow: "registration" },
-    1,
-    10,
-  )
-  assert.equal(detailClient.calls[0].args.p_owner_key, "owner-a")
-  await assert.rejects(
-    readWorkloadPage(client(page), { team: "수학팀" }, 1, 10),
-    /scope_mismatch/,
-  )
-  await assert.rejects(
-    readWorkloadPage(client(page), { team: "영어팀" }, 2, 10),
-    /scope_mismatch/,
-  )
-  await assert.rejects(
-    readWorkloadSummary(client(null, new Error("offline"))),
-    /offline/,
   )
 })
