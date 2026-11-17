@@ -1774,11 +1774,12 @@ export function createManagementService(options = {}) {
         operationalRequestKeys.set(body, requestKey);
         const action = createTimetableOperationalMutation({ requestKey,
           rpc: (_name, args) => {
-            const write = (signal) => client.rpc("update_class_operational_v1", args)
-              .abortSignal(signal).retry(false);
+            const deadline = AbortSignal.timeout(8_000);
+            const write = () => client.rpc("update_class_operational_v1", args)
+              .abortSignal(deadline).retry(false);
             return patch.status === ARCHIVED_CLASS_STATUS
-              ? withClassCloseWriteDeadline(write)
-              : write(AbortSignal.timeout(8_000));
+              ? withClassCloseWriteDeadline(write, deadline)
+              : write();
           }, refresh: () => refreshPublicClassesCache("class") });
         let outcome;
         try {
