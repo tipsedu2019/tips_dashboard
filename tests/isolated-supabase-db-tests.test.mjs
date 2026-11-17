@@ -1587,6 +1587,47 @@ test("preset-owned probes stage their real entrypoints and full import closure b
   assert.equal(result.status, "passed"); assert.deepEqual(launched, probes);
 });
 
+test("public memo probe imports its staged real consumers before the owned SQL boundary", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const { AI_SOURCE_CLOSURE } = await import("../scripts/lib/ai-producer-receipt.mjs");
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const probe = "tests/probe-public-class-memo-dto.mjs";
+  for (const path of [probe, "supabase/tests/class_public_memo_test.sql", ...AI_SOURCE_CLOSURE.filter(path => path.startsWith("src/"))]) {
+    await mkdir(dirname(join(root, path)), { recursive: true });
+    await writeFile(join(root, path), await readFile(new URL("../" + path, import.meta.url)));
+  }
+  let reachedSqlBoundary = 0;
+  const result = await runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
+    root, argv: ["--execute", "--authorized", "--request-id", "public-memo-staging", "--probe", probe],
+    allocatePort: (() => { let port = 55600; return () => ++port; })(),
+    executeProcess: async (invocation) => {
+      if (invocation.command === process.execPath) {
+        // Execute the real probe's imports, but never start Docker, SQL or fetch.
+        const child = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", `
+          import assert from "node:assert/strict";
+          import { registerHooks } from "node:module";
+          import { pathToFileURL } from "node:url";
+          globalThis.fetch = () => { throw new Error("unexpected_network"); };
+          const stop = "data:text/javascript," + encodeURIComponent('export function spawn() { throw new Error("public_memo_owned_db_boundary"); }');
+          registerHooks({ resolve(specifier, context, next) {
+            return specifier === "node:child_process" ? { url: stop, shortCircuit: true } : next(specifier, context);
+          } });
+          await assert.rejects(import(pathToFileURL(process.argv[1]).href), /^Error: public_memo_owned_db_boundary$/);
+        `, invocation.args[0]], { cwd: invocation.cwd, env: invocation.env, encoding: "utf8", timeout: 10_000 });
+        assert.equal(child.status, 0, child.stderr || child.error?.message);
+        const helper = "src/features/management/class-close-write-deadline.ts";
+        assert.deepEqual(await readFile(join(invocation.cwd, helper)), await readFile(join(root, helper)));
+        reachedSqlBoundary += 1;
+      }
+      if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:55602/postgres" }), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(result.status, "passed");
+  assert.equal(reachedSqlBoundary, 1);
+});
+
 test("runner stages each requested SQL file after init and before target pgtap", async (t) => {
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t);
