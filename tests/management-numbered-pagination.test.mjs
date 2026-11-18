@@ -38,13 +38,15 @@ function loadHook(supabase, entry = "src/features/management/use-management-reco
   return load(path.join(rootPath, entry));
 }
 function transport() {
-  const requests = [];
+  const requests = [], allCalls = [];
+  let detail = null;
   const supabase = { rpc(name, args) {
+    allCalls.push({ name, args });
     let signal;
     return { abortSignal(value) { signal = value; return this; }, retry() {
       if (name === "get_management_stats_v1") return Promise.resolve({ data: { total: 260 }, error: null });
       if (name === "list_management_filter_options_v1") return Promise.resolve({ data: {}, error: null });
-      if (name === "get_management_detail_v1") return Promise.resolve({ data: { kind: args.p_kind, record: { id: args.p_id, name: "Independent detail", status: "재원", storedStatus: "재원", registeredCount: 1, waitlistCount: 0 } }, error: null });
+      if (name === "get_management_detail_v1") return Promise.resolve({ data: detail ?? { kind: args.p_kind, record: { id: args.p_id, name: "Independent detail", status: "재원", storedStatus: "재원", registeredCount: 1, waitlistCount: 0 } }, error: null });
       if (name === "get_management_default_class_period_v1") return Promise.resolve({ data: { periodId: "period-default" }, error: null });
       return new Promise((resolve, reject) => requests.push({ name, args, signal, resolve, reject }));
     } };
@@ -58,7 +60,7 @@ function transport() {
       ...rowOverrides[i],
     })) } });
   }
-  return { supabase, requests, finish };
+  return { supabase, requests, finish, allCalls, setDetail(value) { detail = value; } };
 }
 const filters = { kind: "students", search: "", status: null, schoolCategory: null, school: null, grade: null };
 
@@ -156,7 +158,7 @@ async function mountClassConsumer(t, { renderTable = false, deferDefault = false
     });
     useEffect(() => { state = result; query = page; }, [result, page]);
     return renderTable ? createElement(ManagementDataTable, { ...result, kind: "classes", displayedScope: result.scope,
-      actions: {}, badgeLabel: "과목", statusLabel: "상태", emptyLabel: "수업", onPageChange: result.goToPage, onSortChange: result.setSort }) : null;
+      actions: { onLoadClassRoster: result.loadClassRosterPreview }, badgeLabel: "과목", statusLabel: "상태", emptyLabel: "수업", onPageChange: result.goToPage, onSortChange: result.setSort }) : null;
   }
   const root = createRoot(document.getElementById("root"));
   t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
@@ -1227,3 +1229,73 @@ for (const kind of ["students", "classes"]) {
     assert.equal(page.writes, 0);
   });
 }
+
+// Producer-shaped fixtures from the final SQL projection, never a database call.
+const listClass = {kind:'classes',id:'90000000-0000-4000-8000-000000000233',name:'합성 대기반',subject:'영어',grade:'중1',
+  schedule:'월 16:00-18:00',teacherName:'합성 교사',classroom:'합성 강의실',capacity:40,weeklyMinutes:null,fee:100,
+  status:'수강',studentCount:0,sortKey:'합성 대기반',updatedAt:'2099-01-01T00:00:00Z'};
+const students = count => Array.from({length:count},(_,i)=>({id:`synthetic-student-${i}`,name:`합성 대기 ${String(i).padStart(3,'0')}`,grade:'중1',school:'합성중',status:'퇴원'}));
+const detailFor = (total=35) => ({kind:'classes',record:{...listClass,classType:'정규',teacher:'합성 교사',textbookIds:[]},
+  registeredCount:0,waitlistCount:total,registeredStudents:{rows:[],hasMore:false,nextCursor:null},
+  waitlistedStudents:{rows:students(30),hasMore:true,nextCursor:'opaque-next'}});
+const finishCurrentList = (page, patch={}) => act(async()=>page.requests[0].resolve({error:null,data:{
+  rows:[{...listClass,...patch}],page:11,pageSize:10,totalCount:101}}));
+
+test('#233: old producer omission is unknown without extra reads; detail total35 differs from30loaded',async t=>{
+  const page=await mountClassConsumer(t,{renderTable:true});
+  assert.equal(Object.hasOwn(listClass,'waitlistCount'),false);
+  await finishCurrentList(page);
+  assert.equal(page.state.rows[0].metrics.waitlistCount,undefined);
+  assert.match(document.body.textContent,/대기 인원 확인 불가/);
+  assert.equal(document.querySelector('[aria-label="대기 학생 0명 보기"]'),null);
+  assert.equal(page.allCalls.filter(x=>x.name==='list_management_detail_relation_page_v1').length,0,'unknown is display-only');
+  page.setDetail(detailFor());
+  let detail;await act(async()=>{detail=await page.state.loadDetail(listClass.id);});
+  assert.equal(detail.metrics.waitlistCount,35);
+  assert.equal(detail.raw.waitlist_ids.length,30);
+  assert.equal(detail.raw.waitlisted_students_relation_page.hasMore,true);
+  assert.equal(page.state.totalCount,101,'class count is unrelated to student total');
+  assert.equal(page.state.page,11);
+});
+
+test('#233: absent class list total must remain unknown instead of actual zero',async t=>{
+  const page=await mountClassConsumer(t);
+  await finishCurrentList(page);
+  assert.equal(page.state.rows[0].metrics.waitlistCount,undefined);
+});
+
+test('#233: explicit numeric0 and35 are preserved separately from class page size',async t=>{
+  const page=await mountClassConsumer(t);
+  await finishCurrentList(page,{waitlistCount:0});
+  assert.equal(page.state.rows[0].metrics.waitlistCount,0);
+  await act(async()=>{void page.state.refresh();});
+  await act(async()=>page.requests[1].resolve({error:null,data:{rows:[{...listClass,waitlistCount:35}],page:11,pageSize:10,totalCount:101}}));
+  assert.equal(page.state.rows[0].metrics.waitlistCount,35);
+  assert.equal(page.state.rows.length,1);
+  assert.equal(page.state.totalCount,101);
+});
+
+test('#233: detail missingtotal stays unknown despite30loaded rows in normalization and cell',async t=>{
+  const page=await mountClassConsumer(t);
+  await finishCurrentList(page);
+  const payload=detailFor();delete payload.waitlistCount;page.setDetail(payload);
+  let detail;await act(async()=>{detail=await page.state.loadDetail(listClass.id);});
+  assert.equal(detail.metrics.waitlistCount,undefined,'paged detail does not infer total from30rows');
+  const {ClassEnrollmentStatusCell}=loadHook(page.supabase,'src/features/management/class-enrollment-status-cell.tsx');
+  const holder=document.createElement('div');document.body.append(holder);const root=createRoot(holder);
+  t.after(async()=>{await act(async()=>root.unmount());holder.remove();});
+  await act(async()=>root.render(createElement(ClassEnrollmentStatusCell,{row:detail,onLoadRoster:page.state.loadClassRosterPreview})));
+  assert.match(holder.textContent,/대기 인원 확인 불가/);
+  assert.equal(holder.querySelector('[aria-label="대기 학생 0명 보기"]'),null);
+});
+
+test('#233: complete legacy arrays retain counts; missing or malformed totals never become zero',async()=>{
+  const {normalizeClassManagementRecord:normalize}=await import('../src/features/management/records.js');
+  for(const [input,expected] of [
+    [{},undefined],[{waitlist_ids:[]},0],[{waitlist_ids:['a','b']},2],
+    [{waitlistCount:0},0],[{waitlistCount:35},35],[{waitlistCount:'0'},0],[{waitlistCount:'35'},35],
+    ...[null,'', ' ', -1,1.5,NaN,Infinity,'bad',false,{}].map(waitlistCount=>[{waitlistCount},undefined]),
+    [{waitlist_ids:['a','b'],waitlisted_students_relation_page:{},waitlistCount:35},35],
+    [{waitlist_ids:['a','b'],waitlisted_students_relation_page:{}},undefined],
+  ]) assert.equal(normalize({id:'synthetic',...input}).metrics.waitlistCount,expected,JSON.stringify(input));
+});

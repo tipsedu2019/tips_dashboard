@@ -199,3 +199,21 @@ test("student DTO fails closed for missing, partial or contradictory enrollment 
     await assert.rejects(createManagementNumberedReadService({ supabase: wire.client }).readPage(req), { code: "management_numbered_response_invalid" });
   }
 });
+
+
+test('#233: class waiting totals accept old omission and new numeric counts without changing requests', async () => {
+  for (const extra of [{}, {waitlistCount:0}, {waitlistCount:35}]) {
+    const req=request('classes'), row={...classRow,...extra};
+    const wire=transport(rpcArgs(req),{error:null,data:{page:11,pageSize:10,totalCount:101,rows:[row]}});
+    const result=await createManagementNumberedReadService({supabase:wire.client}).readPage(req);
+    assert.deepEqual(result.rows,[row]);wire.assertCalled();
+  }
+});
+test('#233: an explicitly malformed new waiting total rejects the page instead of claiming zero', async () => {
+  for (const waitlistCount of [null, '', '0', '35', -1, 1.5, Infinity, NaN, false, {}]) {
+    const req=request('classes');
+    const wire=transport(rpcArgs(req),{error:null,data:{page:11,pageSize:10,totalCount:101,rows:[{...classRow,waitlistCount}]}});
+    await assert.rejects(createManagementNumberedReadService({supabase:wire.client}).readPage(req),{code:'management_numbered_response_invalid'});
+    wire.assertCalled();
+  }
+});
