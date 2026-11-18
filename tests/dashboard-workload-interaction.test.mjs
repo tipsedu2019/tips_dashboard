@@ -1,166 +1,79 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { JSDOM } from "jsdom"
-import { act, createElement, useLayoutEffect } from "react"
+import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 import { loadNotificationComponent as load } from "./helpers/notification-component-loader.mjs"
 
+// Preserve the existing CI entry point when replacing the workload widget.
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
-function dom(t) {
-  const instance = new JSDOM(
-    '<!doctype html><html><body><div id="root"></div></body></html>',
-    { url: "https://example.test/admin/dashboard", pretendToBeVisual: true },
-  )
-  for (const key of [
-    "window",
-    "document",
-    "navigator",
-    "HTMLElement",
-    "Element",
-    "Node",
-    "Event",
-  ])
+const expected = [
+  ["등록", "/admin/registration"], ["전반", "/admin/transfer"],
+  ["퇴원", "/admin/withdrawal"], ["휴보강", "/admin/makeup-requests"],
+  ["수업관리", "/admin/classes"], ["교재관리", "/admin/textbooks"],
+  ["학사일정", "/admin/academic-calendar"], ["통계", "/admin/statistics"],
+]
+async function fixture(t) {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+    url: "https://example.test/admin/dashboard", pretendToBeVisual: true,
+  })
+  for (const key of ["window", "document", "navigator", "HTMLElement", "Element", "Node", "Event"])
     Object.defineProperty(globalThis, key, {
-      configurable: true,
-      value: key === "window" ? instance.window : instance.window[key],
+      configurable: true, value: key === "window" ? dom.window : dom.window[key],
     })
   const root = createRoot(document.getElementById("root"))
-  t.after(async () => {
-    await act(async () => root.unmount())
-    instance.window.close()
-  })
-  return { root, window: instance.window }
+  const calls = []
+  const deny = (name) => (...args) => { calls.push([name, ...args]); throw new Error(`unexpected ${name}`) }
+  t.mock.method(globalThis, "fetch", deny("fetch"))
+  t.mock.method(window, "setInterval", deny("interval"))
+  let role = "admin"
+  const { getRoleCapabilities } = load("src/lib/auth-utils.ts")
+  const { default: Page } = load("src/app/admin/dashboard/page.tsx", new Map([
+    ["@/providers/auth-provider", { useAuth: () => ({
+      ...getRoleCapabilities(role), role, loading: false, isAdmin: role === "admin",
+      user: { id: "synthetic-user" }, session: { user: { id: "synthetic-user" }, access_token: "synthetic" },
+    }) }],
+    ["@/lib/supabase", { supabase: { rpc: deny("rpc"), from: deny("from") } }],
+    ["next/link", { __esModule: true, default: ({ prefetch, children, ...props }) =>
+      createElement("a", { ...props, "data-prefetch": String(prefetch) }, children) }],
+  ]))
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close() })
+  const render = async (nextRole = role) => { role = nextRole; await act(async () => root.render(createElement(Page))) }
+  const links = () => [...document.querySelectorAll('nav[aria-label="업무 바로가기"] a')]
+  return { render, links, calls }
 }
-function deferred() {
-  let resolve, reject
-  const promise = new Promise((a, b) => {
-    resolve = a
-    reject = b
-  })
-  return { promise, resolve, reject }
-}
-const auth = (id = "a", role = "admin") => ({
-  user: { id },
-  session: { user: { id }, access_token: `token-${id}` },
-  role,
-  loading: false,
-  canAccessDashboard: true,
+test("static dashboard renders eight real manager destinations without fetching", async (t) => {
+  const f = await fixture(t)
+  await f.render()
+  assert.deepEqual(f.links().map((a) => [a.textContent, a.getAttribute("href")]), expected)
+  assert.ok(f.links().every((a) => a.dataset.prefetch === "false" && a.tabIndex === 0))
+  assert.equal(document.querySelectorAll("button").length, 0)
+  assert.deepEqual(f.calls, [])
 })
-const summary = { generatedAt: "2026-09-22T01:00:00Z", groups: [] }
-test("workload refresh retains accepted data on error, isolates identity/filter and ignores old requests", async (t) => {
-  const { root } = dom(t)
-  let identity = auth(),
-    request,
-    state
-  const reads = []
-  const enqueue = () => {
-    const value = deferred()
-    reads.push(value)
-    return value.promise
+test("static dashboard follows existing roles and removes stale privileged links", async (t) => {
+  const f = await fixture(t)
+  const { getRoleCapabilities } = load("src/lib/auth-utils.ts")
+  const { buildAdminNavGroups } = load("src/lib/navigation.ts")
+  for (const role of ["admin", "teacher", "staff", "viewer", "assistant", "admin"]) {
+    await f.render(role)
+    const allowed = new Set(buildAdminNavGroups({ ...getRoleCapabilities(role), isAdmin: role === "admin" })
+      .flatMap((g) => g.items.map((item) => item.url)))
+    assert.deepEqual(f.links().map((a) => a.getAttribute("href")), expected.map(([, href]) => href).filter((href) => allowed.has(href)), role)
   }
-  const { useDashboardWorkload } = load(
-    "src/features/dashboard/use-dashboard-workload.ts",
-    new Map([
-      ["@/lib/supabase", { supabase: {} }],
-      ["@/providers/auth-provider", { useAuth: () => identity }],
-      [
-        "./workload-service.ts",
-        { readWorkloadSummary: enqueue, readWorkloadPage: enqueue },
-      ],
-    ]),
-  )
-  function Probe() {
-    const value = useDashboardWorkload(request)
-    useLayoutEffect(() => {
-      state = value
-    })
-    return null
-  }
-  const render = () => act(async () => root.render(createElement(Probe)))
-  await render()
-  assert.equal(state.loading, true)
-  await act(async () => reads[0].resolve(summary))
-  assert.equal(state.data, summary)
-  await act(async () => state.refresh())
-  await act(async () => reads[1].reject(new Error("offline")))
-  assert.equal(state.data, summary)
-  assert.match(state.error, /불러오지/)
-  await act(async () => state.refresh())
-  identity = auth("b")
-  await render()
-  assert.equal(state.data, null)
-  await act(async () => reads[2].resolve(summary))
-  assert.equal(state.data, null)
-  await act(async () => reads[3].resolve(summary))
-  assert.equal(state.data, summary)
-  request = { filter: { team: "영어팀" }, page: 1, pageSize: 10 }
-  await render()
-  assert.equal(state.data, null)
-  identity = auth("b", "teacher")
-  await render()
-  assert.equal(state.data, null)
-  await act(async () => reads[4].resolve({ rows: [{ title: "stale" }] }))
-  assert.equal(state.data, null)
+  assert.deepEqual(f.calls, [])
 })
-test("automatic reads are throttled, paused in background and never overlap", async (t) => {
-  const { root, window } = dom(t)
-  let tick, state
-  let now = 100000
-  const originalNow = Date.now
-  Date.now = () => now
-  t.after(() => {
-    Date.now = originalNow
-  })
-  window.setInterval = (callback) => {
-    tick = callback
-    return 1
+test("static hub focus, visibility and rerenders do not start reads or polling", async (t) => {
+  const f = await fixture(t)
+  await f.render()
+  for (const a of f.links()) {
+    await act(async () => { a.focus(); a.dispatchEvent(new Event("pointerenter")) })
+    assert.equal(document.activeElement, a)
   }
-  window.clearInterval = () => {}
-  let visible = "visible"
-  Object.defineProperty(document, "visibilityState", {
-    get: () => visible,
-    configurable: true,
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"))
+    window.dispatchEvent(new Event("focus"))
+    window.dispatchEvent(new Event("resize"))
   })
-  const reads = []
-  const { useDashboardWorkload } = load(
-    "src/features/dashboard/use-dashboard-workload.ts",
-    new Map([
-      ["@/lib/supabase", { supabase: {} }],
-      ["@/providers/auth-provider", { useAuth: () => auth() }],
-      [
-        "./workload-service.ts",
-        {
-          readWorkloadSummary: () => {
-            const r = deferred()
-            reads.push(r)
-            return r.promise
-          },
-        },
-      ],
-    ]),
-  )
-  function Probe() {
-    const value = useDashboardWorkload()
-    useLayoutEffect(() => {
-      state = value
-    })
-    return null
-  }
-  await act(async () => root.render(createElement(Probe)))
-  assert.equal(reads.length, 1)
-  now += 60000
-  await act(async () => tick())
-  assert.equal(reads.length, 1)
-  await act(async () => reads[0].resolve(summary))
-  visible = "hidden"
-  now += 60000
-  await act(async () => tick())
-  assert.equal(reads.length, 1)
-  visible = "visible"
-  await act(async () => window.dispatchEvent(new Event("focus")))
-  assert.equal(reads.length, 2)
-  await act(async () => reads[1].resolve(summary))
-  await act(async () => window.dispatchEvent(new Event("focus")))
-  assert.equal(reads.length, 2)
-  assert.equal(state.loading, false)
+  await f.render()
+  assert.deepEqual(f.calls, [])
 })
