@@ -1691,6 +1691,7 @@ export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
     saving: disabled, selectedSubject, selectedTeacherKey, input, selectedClass,
     subjectOptions: [...new Set([...context.subjects, selectedSubject].filter(Boolean))], teacherOptions: [...new Set([...context.teachers, selectedTeacherKey].filter(Boolean))].map(name => ({ value: name, label: name })),
     availableClasses: context.options.map(toClass),
+    classOptionsReady: !context.loading && !context.error,
     handleSubjectChange: value => { if (!editing) { setSubject(value); setTeacher(""); context.setPage(1); patchInput(resetClass()) } },
     handleTeacherChange: value => { if (!editing) { setTeacher(value); context.setPage(1); patchInput(resetClass()) } },
     handleClassChange: classId => { if (!editing) patchInput({ classId, cancelDate: "", originalLessonSessionId: "" }) }, patchInput,
@@ -1730,6 +1731,7 @@ type MakeupRequestFormBindings = {
  input: MakeupRequestInput
  handleClassChange: (value: string) => void
  availableClasses: MakeupClassOption[]
+ classOptionsReady: boolean
  patchInput: (patch: Partial<MakeupRequestInput>) => void
  selectedClass: MakeupClassOption | null | undefined
  selectedClassScheduleDateOptions: Array<{ value: string; label?: string }>
@@ -1779,6 +1781,11 @@ function MakeupRequestFormFields({ bindings, owner }: { bindings: MakeupRequestF
 	                    <SelectValue placeholder={selectedTeacherKey ? "수업 선택" : "선생님 먼저"} />
 	                  </SelectTrigger>
                   <SelectContent>
+                    {bindings.classOptionsReady && availableClasses.length === 0 && (
+                      <div className="px-2.5 py-3 text-sm text-muted-foreground" role="status">
+                        검색 결과 없음
+                      </div>
+                    )}
                     {availableClasses.map((classItem) => (
                       <SelectItem key={classItem.id} value={classItem.id}>
                         {classItem.name}
@@ -2912,7 +2919,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
               </div>
             </>}
           >
-            <MakeupRequestFormFields bindings={{ saving, selectedSubject, handleSubjectChange, subjectOptions, selectedTeacherKey, handleTeacherChange, teacherOptions, input, handleClassChange, availableClasses, patchInput, selectedClass, selectedClassScheduleDateOptions, selectedClassSchedulePlanReady, normalizedCancelSessions, addMakeupSlot, canEditMakeupSlots, patchMakeupSlot, removeMakeupSlot, approverOptions, roomAvailability: slot => getSlotRoomAvailability(slot, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role)) }} />
+            <MakeupRequestFormFields bindings={{ saving, selectedSubject, handleSubjectChange, subjectOptions, selectedTeacherKey, handleTeacherChange, teacherOptions, input, handleClassChange, availableClasses, classOptionsReady: formCatalogReady && formCatalogGeneration.current === catalogGeneration, patchInput, selectedClass, selectedClassScheduleDateOptions, selectedClassSchedulePlanReady, normalizedCancelSessions, addMakeupSlot, canEditMakeupSlots, patchMakeupSlot, removeMakeupSlot, approverOptions, roomAvailability: slot => getSlotRoomAvailability(slot, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role)) }} />
           </ScrollableDialogContent>
         </Dialog>
 
