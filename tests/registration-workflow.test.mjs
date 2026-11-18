@@ -598,13 +598,75 @@ test("R41 text fields emit one state update per browser input event", async () =
   assert.doesNotMatch(source.slice(start, end), /onInput=/);
 });
 
+function assertRegistrationCreateFooterLayout(source, sharedDialogSource) {
+  const branchStart = source.indexOf('{registrationApplicationHost.kind === "create" ? (');
+  assert.ok(branchStart >= 0, "canonical registration create branch must exist");
+  const branchEnd = source.indexOf(') : registrationApplicationHost.kind === "loading_detail"', branchStart);
+  assert.ok(branchEnd > branchStart, "registration create branch must have a finite boundary");
+  const createSource = source.slice(branchStart, branchEnd);
+  const formStart = createSource.indexOf("<form ");
+  const formEnd = createSource.indexOf("</form>", formStart);
+  assert.ok(formStart >= 0 && formEnd > formStart, "native registration form must exist");
+  const formSource = createSource.slice(formStart, formEnd);
+  const formOpening = formSource.slice(0, formSource.indexOf(">") + 1);
+  assert.match(formOpening, /onSubmit=\{submitForm\}/);
+  const formClasses = formOpening.match(/className="([^"]+)"/)?.[1].split(/\s+/);
+  for (const token of ["flex", "min-h-0", "min-w-0", "flex-1", "flex-col"]) {
+    assert.ok(formClasses?.includes(token), "native form must retain " + token);
+  }
+  const bodyStart = formSource.indexOf("<ScrollableDialogBody ");
+  const bodyEnd = formSource.indexOf("</ScrollableDialogBody>", bodyStart);
+  const footerStart = formSource.indexOf("<ScrollableDialogFooter ");
+  const footerEnd = formSource.indexOf("</ScrollableDialogFooter>", footerStart);
+  assert.ok(bodyStart >= 0 && bodyEnd > bodyStart, "scrollable body must exist");
+  assert.ok(footerStart > bodyEnd && footerEnd > footerStart, "footer must follow the body inside the same form");
+  const footerSource = formSource.slice(footerStart, footerEnd);
+  assert.match(footerSource, /<Button type="submit" disabled=\{saving\}/);
+  const bodyClasses = sharedDialogSource.match(/const dialogBodyClassName = "([^"]+)"/)?.[1];
+  const footerClasses = sharedDialogSource.match(/const dialogActionsClassName = "([^"]+)"/)?.[1];
+  assert.equal(typeof bodyClasses, "string", "shared body classes must exist");
+  assert.equal(typeof footerClasses, "string", "shared footer classes must exist");
+  for (const token of ["min-h-0", "flex-1", "overflow-y-auto"]) {
+    assert.ok(bodyClasses.split(/\s+/).includes(token), "body must retain " + token);
+  }
+  assert.ok(footerClasses.split(/\s+/).includes("shrink-0"), "footer must retain its own layout space");
+  assert.match(sharedDialogSource, /data-slot="scrollable-dialog-body" \{\.\.\.props\} className=\{cn\(dialogBodyClassName, className\)\}/);
+  assert.match(sharedDialogSource, /data-slot="scrollable-dialog-footer" \{\.\.\.props\} className=\{cn\(dialogActionsClassName, className\)\}/);
+  assert.doesNotMatch(footerSource + "\n" + footerClasses, /\b(?:sticky|fixed|absolute|backdrop-blur)\b/);
+}
+
 test("R42 the long one-page registration form action bar does not float over fields", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const start = source.indexOf('"-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4');
-  const end = source.indexOf("</form>", start);
-  const actionBarSource = source.slice(start, end);
-  assert.match(actionBarSource, /-mx-6 -mb-6/);
-  assert.doesNotMatch(actionBarSource, /sticky bottom-0|backdrop-blur/);
+  const [source, sharedDialogSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/components/ui/form-dialog.tsx"),
+  ]);
+  assertRegistrationCreateFooterLayout(source, sharedDialogSource);
+});
+
+test("R42 footer contract rejects missing locators and overlapping synthetic layouts", async (t) => {
+  const [source, sharedDialogSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/components/ui/form-dialog.tsx"),
+  ]);
+  const mutations = [
+    ["create branch missing despite other dialogs", source.replace('{registrationApplicationHost.kind === "create" ? (', "{false ? ("), sharedDialogSource],
+    ["canonical footer missing", source.replace("<ScrollableDialogFooter ", "<div ").replace("</ScrollableDialogFooter>", "</div>"), sharedDialogSource],
+    ["footer nested inside scroll body", source.replace("</ScrollableDialogBody>", "").replace("</ScrollableDialogFooter>", "</ScrollableDialogFooter></ScrollableDialogBody>"), sharedDialogSource],
+    ["footer outside native form", source.replace("<ScrollableDialogFooter ", "</form><ScrollableDialogFooter ").replace("</ScrollableDialogFooter>\n            </form>", "</ScrollableDialogFooter>"), sharedDialogSource],
+    ["caller sticky footer", source.replace('<ScrollableDialogFooter className="', '<ScrollableDialogFooter className="sticky bottom-0 '), sharedDialogSource],
+    ["caller backdrop overlay", source.replace('<ScrollableDialogFooter className="', '<ScrollableDialogFooter className="backdrop-blur '), sharedDialogSource],
+    ["shared fixed footer", source, sharedDialogSource.replace('const dialogActionsClassName = "', 'const dialogActionsClassName = "fixed bottom-0 ')],
+    ["shared absolute footer", source, sharedDialogSource.replace('const dialogActionsClassName = "', 'const dialogActionsClassName = "absolute bottom-0 ')],
+    ["footer loses layout space", source, sharedDialogSource.replace('const dialogActionsClassName = "shrink-0 ', 'const dialogActionsClassName = "')],
+    ["body loses scrolling", source, sharedDialogSource.replace("flex-1 overflow-y-auto", "flex-1 overflow-hidden")],
+    ["footer loses shared class wiring", source, sharedDialogSource.replace("cn(dialogActionsClassName, className)", "cn(className)")],
+  ];
+  for (const [name, mutatedSource, mutatedDialog] of mutations) {
+    await t.test(name, () => {
+      assert.ok(mutatedSource !== source || mutatedDialog !== sharedDialogSource, "negative fixture must change its input");
+      assert.throws(() => assertRegistrationCreateFooterLayout(mutatedSource, mutatedDialog), { code: "ERR_ASSERTION" });
+    });
+  }
 });
 
 test("R43 checklist labels wrap instead of hiding important words", async () => {

@@ -3536,6 +3536,15 @@ test("provider dispatch attempt ledger enumerates every provider-producing fixtu
   assert.equal(adapter.debugSnapshot().counts.externalCalls, providerDispatchActions.length)
 })
 
+function assertWorkspaceCreateVisibilityGuards(source) {
+  const emptyCreate = source.match(/^\s*const showEmptyCreate = (.+)$/m)?.[1]
+  const toolbarCreate = source.match(/^\s*const showToolbarCreate = (.+)$/m)?.[1]
+  assert.equal(typeof emptyCreate, "string", "empty-create declaration must exist")
+  assert.equal(typeof toolbarCreate, "string", "toolbar-create declaration must exist")
+  assert.match(emptyCreate, /^!operationalReadOnly && !numberedPage\.error && \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\) && !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0$/)
+  assert.match(toolbarCreate, /^!operationalReadOnly && \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\) && !isTodoWorkspace && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace \|\| !showEmptyCreate\)$/)
+}
+
 test("workspace mounts the real list/editor and exposes create only to fixture management roles", async () => {
   const source = await readFile(workspaceUrl, "utf8")
 
@@ -3559,11 +3568,30 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationApplication/)
   assert.doesNotMatch(source, /legacyNotificationEnabled/)
   assert.doesNotMatch(source, /RegistrationNotificationSettingsDialog/)
-  assert.match(source, /showEmptyCreate = !numberedPage\.error && \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\) && !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0/)
-  assert.match(source, /showToolbarCreate = \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/)
+  assertWorkspaceCreateVisibilityGuards(source)
   assert.match(source, /canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/)
   assert.match(source, /resolveRegistrationSubjectTrackFixtureViewer/)
   assert.doesNotMatch(source, /NODE_ENV === "production"[\s\S]*registration-subject-tracks/)
+})
+
+test("workspace create visibility contract rejects missing or bypassed refusal guards", async (t) => {
+  const source = await readFile(workspaceUrl, "utf8")
+  for (const declaration of ["showEmptyCreate", "showToolbarCreate"]) {
+    const line = source.match(new RegExp("^\\s*const " + declaration + " = .+$", "m"))?.[0]
+    assert.ok(line, declaration + " fixture must exist")
+    for (const [name, replacement] of [
+      ["readonly guard removed", line.replace("!operationalReadOnly && ", "")],
+      ["management guard removed", line.replace("(!isRegistrationWorkspace || canManageRegistrationWorkflow) && ", "")],
+      ["guards bypassed", line + " || true"],
+      ["declaration missing", ""],
+    ]) {
+      await t.test(declaration + ": " + name, () => {
+        const mutated = source.replace(line, replacement)
+        assert.notEqual(mutated, source, "negative fixture must change the actual declaration")
+        assert.throws(() => assertWorkspaceCreateVisibilityGuards(mutated), { code: "ERR_ASSERTION" })
+      })
+    }
+  }
 })
 
 test("all registration service, exact class detail, notification, and customer-message paths consult the in-memory adapter first", async () => {
