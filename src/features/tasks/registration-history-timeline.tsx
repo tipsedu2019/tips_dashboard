@@ -12,6 +12,7 @@ import {
 import type { OpsProfileOption } from "./ops-task-service"
 import {
   buildRegistrationSubjectHistory,
+  formatRegistrationHistoryDate,
   type RegistrationSubjectHistoryItem,
 } from "./registration-track-history.js"
 import type { OpsRegistrationCaseDetail } from "./registration-track-service"
@@ -21,15 +22,6 @@ export type RegistrationHistoryTimelineProps = {
   profiles: OpsProfileOption[]
   embedded?: boolean
 }
-
-const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
-  timeZone: "Asia/Seoul",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-})
 
 const SYSTEM_SOURCE_LABELS: Record<string, string> = {
   registration_director_defaults: "상담 책임자 자동 배정",
@@ -43,14 +35,14 @@ function record(value: unknown): Record<string, unknown> {
 
 function historyTimeLabel(item: RegistrationSubjectHistoryItem) {
   if (item.timeKind !== "exact" || !item.occurredAt) return "시간 확인 불가"
-  const occurredAt = new Date(item.occurredAt)
-  return Number.isNaN(occurredAt.getTime())
+  const occurredAt = formatRegistrationHistoryDate(item.occurredAt)
+  return occurredAt === item.occurredAt
     ? "시간 확인 불가"
-    : HISTORY_DATE_FORMATTER.format(occurredAt)
+    : occurredAt
 }
 
 function historyActorLabel(item: RegistrationSubjectHistoryItem, profileById: Map<string, string>) {
-  if (item.actorKind === "migration") return "마이그레이션"
+  if (item.actorKind === "migration") return "이전 시스템 이관"
   if (item.actorKind === "system") {
     return item.systemSource
       ? `시스템 · ${SYSTEM_SOURCE_LABELS[item.systemSource] || "자동 처리"}`
@@ -72,8 +64,7 @@ const APPOINTMENT_CHANGE_LABELS: Record<string, string> = {
 function historyDetailValue(value: unknown, date = false) {
   if (typeof value !== "string" || !value) return ""
   if (!date) return value
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? value : HISTORY_DATE_FORMATTER.format(parsed)
+  return formatRegistrationHistoryDate(value)
 }
 
 function appointmentChangeLine(value: unknown) {
@@ -114,12 +105,11 @@ function historyDetailLines(item: RegistrationSubjectHistoryItem) {
   }
   if (subjectTransitions.length > 1) lines.push(`과목별 단계 기록 ${subjectTransitions.length}건`)
   if (typeof metadata.scheduledAt === "string" && metadata.scheduledAt) {
-    const scheduledAt = new Date(metadata.scheduledAt)
-    lines.push(`예약 시각: ${Number.isNaN(scheduledAt.getTime()) ? metadata.scheduledAt : HISTORY_DATE_FORMATTER.format(scheduledAt)}`)
+    lines.push(`예약 시각: ${formatRegistrationHistoryDate(metadata.scheduledAt)}`)
   }
   if (typeof metadata.place === "string" && metadata.place) lines.push(`장소: ${metadata.place}`)
   if (item.description) lines.push(`기록 요약: ${item.description}`)
-  if (lines.length === 0) lines.push("자동 기록의 세부 정보가 보존되어 있습니다.")
+  if (lines.length === 0) lines.push("표시할 세부 정보가 없습니다.")
   return lines
 }
 
@@ -155,7 +145,10 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
     >
       <div>
         <h3 className="text-sm font-semibold">자동 이력</h3>
-        <p className="text-xs text-muted-foreground">누가 · 언제 · 무엇을 · 어떻게 처리했는지 시간순으로 보여 줍니다.</p>
+        <p className="text-xs text-muted-foreground">
+          기록된 시각을 기준으로 표시하며, 시각이 없는 기록은 아래에 모읍니다.
+          {" "}시간 확인 불가 항목의 순서는 발생 순서를 뜻하지 않습니다.
+        </p>
       </div>
       {history.length === 0 ? (
         <p className="rounded-md bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">

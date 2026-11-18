@@ -201,7 +201,7 @@ test("retake schedule events replace their scheduled attempt snapshot", () => {
   const history = buildRegistrationSubjectHistory(detail);
   assert.equal(history.length, 1);
   assert.equal(history[0].title, "레벨테스트 재응시 예약");
-  assert.match(history[0].description, /예약 시각: 2026-07-14T01:00:00Z/);
+  assert.match(history[0].description, /예약 시각: 2026\. 07\. 14\. 오전 10:00/);
   assert.match(history[0].description, /장소: 본관/);
   assert.equal(history.some((item) => item.id === "level-test:test-eng"), false);
 });
@@ -997,4 +997,61 @@ test("migration fallback is explicitly unavailable and never borrows mutable sna
   assert.equal(fallback.actorKind, "migration");
   assert.equal(fallback.actorId, null);
   assert.doesNotMatch(JSON.stringify(fallback), /current-owner|2026-07-31T23:59:59Z/);
+});
+
+test("history summaries format only structured ISO instants in Seoul without changing source facts", () => {
+  const instant = "2026-10-29T20:00:00.123456+00:00";
+  const dateKeys = ["scheduledAt", "oldScheduledAt", "startedAt", "completedAt", "invoiceSentAt", "paymentConfirmedAt"];
+  const metadata = Object.fromEntries(dateKeys.map(key => [key, instant]));
+  const detail = { events: [{ id: "dated", eventType: "case_created", payloadVersion: 2,
+    occurredAt: "2026-10-29T01:00:00Z", metadata }] };
+  const original = structuredClone(detail);
+  const [item] = buildRegistrationSubjectHistory(detail);
+  assert.equal(item.description.split("2026. 10. 30. 오전 05:00").length - 1, dateKeys.length);
+  assert.doesNotMatch(item.description, /T20:00/);
+  assert.deepEqual(detail, original);
+  assert.deepEqual(item.metadata, metadata);
+  assert.equal(item.occurredAt, detail.events[0].occurredAt);
+});
+
+test("history summaries preserve malformed or ambiguous dates and all date-like free text", () => {
+  const invalid = ["not-a-date", "2026-02-30T10:00:00Z", "2025-02-29T10:00:00Z",
+    "2026-13-01T00:00:00Z", "2026-10-29T24:00:00Z", "2026-10-29T10:00:00",
+    "2026-10-29", "prefix-2026-10-29T10:00:00Z", "2026-10-29T10:00:00Z-suffix"];
+  for (const value of invalid) {
+    const [item] = buildRegistrationSubjectHistory({ events: [{ id: "invalid", eventType: "case_created",
+      payloadVersion: 2, metadata: { scheduledAt: value } }] });
+    assert.equal(item.description, `예약 시각: ${value}`);
+  }
+  const prose = "메모 2026-10-29T10:00:00+00:00 원문 그대로";
+  const isoId = "2026-10-29T10:00:00Z";
+  const [item] = buildRegistrationSubjectHistory({ events: [{ id: "text", eventType: "case_created",
+    payloadVersion: 2, reason: prose, metadata: { place: prose, oldPlace: isoId,
+      materialLink: `https://example.invalid/${isoId}`, classId: isoId, appointmentId: isoId,
+      rows: [{ classId: isoId, classStartDate: "2026-10-29", classStartSession: prose }],
+      enrollmentSnapshot: { classId: isoId, classStartDate: "2026-10-29" },
+    } }] });
+  assert.ok(item.description.startsWith(prose));
+  for (const expected of [`장소: ${prose}`, `이전 장소: ${isoId}`, `수업: ${isoId}`,
+    `예약: ${isoId}`, `결과 자료: https://example.invalid/${isoId}`, "수업 시작일: 2026-10-29", `회차: ${prose}`]) {
+    assert.ok(item.description.includes(expected), expected);
+  }
+});
+
+test("migrated appointment summaries format the reservation without inventing an action time", () => {
+  for (const [scheduledAt, expected] of [
+    ["2026-10-29T10:00:00Z", "2026. 10. 29. 오후 07:00"],
+    ["2024-02-29T15:00:00+00:00", "2024. 03. 01. 오전 12:00"],
+    ["2026-10-29T19:00:00+09:00", "2026. 10. 29. 오후 07:00"],
+    ["2026-02-30T10:00:00Z", "2026-02-30T10:00:00Z"],
+  ]) {
+    const [item] = buildRegistrationSubjectHistory({ appointments: [{ id: "migrated",
+      kind: "level_test", scheduledAt, place: "장소 2026-10-29T10:00:00Z", status: "scheduled" }] });
+    assert.equal(item.description, `${expected} · 장소 2026-10-29T10:00:00Z · 예약`);
+    assert.equal(item.metadata.scheduledAt, scheduledAt);
+    assert.equal(item.actorKind, "migration");
+    assert.equal(item.actorId, null);
+    assert.equal(item.occurredAt, null);
+    assert.equal(item.timeKind, "unavailable");
+  }
 });
