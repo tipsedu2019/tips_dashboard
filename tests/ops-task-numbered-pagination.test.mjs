@@ -21,7 +21,7 @@ function modules(supabase, overrides = {}) {
     const runtime = { exports: {} }; cache.set(file, runtime);
     // Observe private production consumers without adding production exports or replacing them.
     const testExports = file.endsWith('/ops-task-workspace.tsx')
-      ? '\nexport { WithdrawalDetailPanel, WithdrawalDataTable, TransferDataTable, mergeOpsTaskWorkspaceOptionData, getWithdrawalClassOptions };' : '';
+      ? '\nexport { WithdrawalDetailPanel, WithdrawalDataTable, TransferDataTable, mergeOpsTaskWorkspaceOptionData, getWithdrawalClassOptions, getWithdrawalProgressLabel, getWithdrawalTableValue };' : '';
     const source = ts.transpileModule(readFileSync(file, 'utf8') + testExports, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
@@ -2964,4 +2964,76 @@ for (const selectedId of ['', 'ended']) test(`management transfer/withdrawal cho
   assert.deepEqual(getWithdrawalClassOptions(classes, '영어', '가상 교사', selectedId).map(item => item.id), selectedId ? ['ended', 'active'] : ['active']);
   assert.deepEqual(getWithdrawalClassOptions(classes, '수학', '다른 교사', selectedId).map(item => item.id), selectedId ? ['ended', 'other'] : ['other']);
   assert.deepEqual(classes, before);
+});
+
+test('saved withdrawal metric presentation distinguishes missing, explicit zero and invalid values without writes', async (t) => {
+  const { root } = await setup(t);
+  const { WithdrawalDetailPanel } = modules(null, { '@/providers/auth-provider': {} })('src/features/tasks/ops-task-workspace.tsx');
+  const fetch = t.mock.method(globalThis, 'fetch', () => assert.fail('saved metric presentation must not fetch or write'));
+  const missing = '계산된 값 없음';
+  const cases = [
+    ['both missing', undefined, undefined, [missing, missing, missing]],
+    ['missing completed', '', '16', [missing, '16', missing]],
+    ['missing denominator', '4', '', ['4', missing, missing]],
+    ['explicit zero', '0', '16', ['0', '16', '0%']],
+    ['normal', '4', '16', ['4', '16', '25%']],
+    ['decimal', '1.5', '6', ['1.5', '6', '25%']],
+    ['zero denominator', '4', '0', ['4', '0', missing]],
+    ['both explicit zero', '0', '0', ['0', '0', missing]],
+    ['invalid completed', 'not-a-number', '16', [missing, '16', missing]],
+    ['nonfinite denominator', '4', 'Infinity', ['4', missing, missing]],
+    ['NaN', 'NaN', '16', [missing, '16', missing]],
+    ['negative completed', '-1', '16', [missing, '16', missing]],
+    ['negative denominator', '4', '-16', ['4', missing, missing]],
+    ['hexadecimal is not a stored decimal', '0x10', '16', [missing, '16', missing]],
+    ['whitespace missing', '   ', '16', [missing, '16', missing]],
+    ['existing percentage cap', '20', '16', ['20', '16', '100%']],
+  ];
+  for (const [name, completedLessonHours, fourWeekLessonHours, expected] of cases) await t.test(name, async () => {
+    const task = row(1, { type: 'withdrawal', withdrawal: { completedLessonHours, fourWeekLessonHours } });
+    const before = structuredClone(task);
+    await act(async () => root.render(createElement(WithdrawalDetailPanel, { task })));
+    const actual = ['진행 수업시수', '4주 기준 수업시수', '수업진행률'].map(label =>
+      [...document.querySelectorAll('dt')].find(element => element.textContent === label)?.nextElementSibling?.textContent);
+    assert.deepEqual(actual, expected);
+    assert.deepEqual(task, before);
+  });
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
+test('saved withdrawal progress retains table unknown sentinel and server redaction precedence', () => {
+  const { getWithdrawalProgressLabel, getWithdrawalTableValue } = modules(null, { '@/providers/auth-provider': {} })('src/features/tasks/ops-task-workspace.tsx');
+  const task = row(1, { type: 'withdrawal', withdrawal: { completedLessonHours: '', fourWeekLessonHours: '16' } });
+  assert.equal(getWithdrawalProgressLabel(task), '-', 'a missing numerator is not a measured zero');
+  assert.equal(getWithdrawalTableValue(task, 'progress'), '-', 'table fallback/filter semantics keep the unknown sentinel');
+  task.withdrawal.completedLessonHours = '4';
+  task.displayValues = { completedLessonHours: '', fourWeekLessonHours: '', progress: '' };
+  for (const key of ['completedLessonHours', 'fourWeekLessonHours', 'progress']) {
+    assert.equal(getWithdrawalTableValue(task, key), '', 'an explicit server-redacted blank must not be filled from other values');
+  }
+});
+
+test('numbered withdrawal numeric DTOs retain measured values through the real mapper and detail', async (t) => {
+  const { root } = await setup(t);
+  const load = modules(null, { '@/providers/auth-provider': {} });
+  const { mapOpsTaskPageRow } = load('src/features/tasks/ops-task-service.ts');
+  const { WithdrawalDetailPanel } = load('src/features/tasks/ops-task-workspace.tsx');
+  const missing = '계산된 값 없음';
+  for (const [completedLessonHours, fourWeekLessonHours, expected] of [
+    [4, 16, ['4', '16', '25%']], [0, 16, ['0', '16', '0%']], [1.5, 6, ['1.5', '6', '25%']],
+    [null, 16, [missing, '16', missing]], [4, null, ['4', missing, missing]],
+    [4, 0, ['4', '0', missing]], [-1, 16, [missing, '16', missing]],
+  ]) await t.test(`${completedLessonHours}/${fourWeekLessonHours}`, async () => {
+    const patch = operationPatch('withdrawal');
+    const dto = row(1, { ...patch, inlineState: { ...patch.inlineState, completedLessonHours, fourWeekLessonHours } });
+    const before = structuredClone(dto);
+    const task = mapOpsTaskPageRow(dto);
+    assert.equal(task.withdrawal.completedLessonHours, completedLessonHours);
+    assert.equal(task.withdrawal.fourWeekLessonHours, fourWeekLessonHours);
+    await act(async () => root.render(createElement(WithdrawalDetailPanel, { task })));
+    const actual = ['진행 수업시수', '4주 기준 수업시수', '수업진행률'].map(label =>
+      [...document.querySelectorAll('dt')].find(element => element.textContent === label)?.nextElementSibling?.textContent);
+    assert.deepEqual(actual, expected);
+    assert.deepEqual(dto, before);
+  });
 });

@@ -5680,10 +5680,23 @@ function getTransferToTeacherLabel(task: OpsTask) {
   return task.transfer?.toTeacherName || "미지정"
 }
 
+function getWithdrawalSavedLessonHours(value: unknown) {
+  // Detail reads use decimal strings; numbered-page inline state keeps numbers.
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null
+  // Missing or malformed input is not a measured zero.
+  if (typeof value !== "string" || !/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim())) return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function getWithdrawalSavedLessonHoursLabel(value: unknown) {
+  return getWithdrawalSavedLessonHours(value) === null ? "계산된 값 없음" : String(value).trim()
+}
+
 function getWithdrawalProgressLabel(task: OpsTask) {
-  const completed = Number(task.withdrawal?.completedLessonHours || 0)
-  const total = Number(task.withdrawal?.fourWeekLessonHours || 0)
-  if (!Number.isFinite(completed) || !Number.isFinite(total) || total <= 0) return "-"
+  const completed = getWithdrawalSavedLessonHours(task.withdrawal?.completedLessonHours)
+  const total = getWithdrawalSavedLessonHours(task.withdrawal?.fourWeekLessonHours)
+  if (completed === null || total === null || total <= 0) return "-"
   return `${Math.min(100, Math.round((completed / total) * 100))}%`
 }
 
@@ -6424,11 +6437,11 @@ function WithdrawalDataTable({
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-md bg-muted/35 px-2 py-1.5">
                     <dt className="text-muted-foreground">진행 수업시수</dt>
-                    <dd className="mt-0.5 truncate font-medium">{withdrawal.completedLessonHours || "자동 계산"}</dd>
+                    <dd className="mt-0.5 truncate font-medium">{getWithdrawalSavedLessonHoursLabel(withdrawal.completedLessonHours)}</dd>
                   </div>
                   <div className="rounded-md bg-muted/35 px-2 py-1.5">
                     <dt className="text-muted-foreground">수업진행률</dt>
-                    <dd className="mt-0.5 truncate font-medium">{progress === "-" ? "자동 계산" : progress}</dd>
+                    <dd className="mt-0.5 truncate font-medium">{progress === "-" ? "계산된 값 없음" : progress}</dd>
                   </div>
                 </div>
                 <div className="rounded-md bg-muted/35 px-2 py-1.5">
@@ -17542,9 +17555,9 @@ function WithdrawalDetailPanel({ task }: { task: OpsTask }) {
           <Info label="미배부 교재" value={withdrawal.undistributedTextbooks || "-"} />
           <Info label="퇴원일" value={dateInputValue(withdrawal.withdrawalDate) || "미정"} />
           <Info label="퇴원회차" value={withdrawal.withdrawalSession || "미정"} />
-          <Info label="진행 수업시수" value={withdrawal.completedLessonHours || "자동 계산"} />
-          <Info label="4주 기준 수업시수" value={withdrawal.fourWeekLessonHours || "자동 계산"} />
-          <Info label="수업진행률" value={progress === "-" ? "자동 계산" : progress} />
+          <Info label="진행 수업시수" value={getWithdrawalSavedLessonHoursLabel(withdrawal.completedLessonHours)} />
+          <Info label="4주 기준 수업시수" value={getWithdrawalSavedLessonHoursLabel(withdrawal.fourWeekLessonHours)} />
+          <Info label="수업진행률" value={progress === "-" ? "계산된 값 없음" : progress} />
           <div className="md:col-span-2">
             <dt className="text-xs text-muted-foreground">처리 확인</dt>
             <dd className="mt-1">
