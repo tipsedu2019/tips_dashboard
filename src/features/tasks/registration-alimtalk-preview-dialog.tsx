@@ -172,8 +172,16 @@ export function RegistrationAlimtalkPreviewDialog({
   const canCheckPending = currentStatus === "pending" && canCheck
   const duplicateLocked = preview?.readiness.blockers.includes("duplicate_locked") || false
   const expired = !expiryTime || expiryTime <= now
+  // Booking readiness is scoped to the current reservation revision, while
+  // latestMessage may describe an earlier request. A result from this dialog
+  // remains authoritative and must never reopen its own send action.
+  const hasReadyBookingPreview = !result && currentStatus === "accepted"
+    && (viewerRole === "admin" || viewerRole === "staff")
+    && (targetMessageKind === "level_test_booking" || targetMessageKind === "visit_consultation_booking")
+    && preview?.messageKind === targetMessageKind && Boolean(preview.previewId)
+    && preview.readiness.sendAllowed && !duplicateLocked
   const confirmDisabled = loading || sending || confirmationLockedRef.current || !preview?.previewId || expired
-    || !preview.readiness.sendAllowed || duplicateLocked || currentStatus === "pending" || currentStatus === "accepted" || currentStatus === "unknown" || currentStatus === "failed_hold"
+    || !preview.readiness.sendAllowed || duplicateLocked || currentStatus === "pending" || (currentStatus === "accepted" && !hasReadyBookingPreview) || currentStatus === "unknown" || currentStatus === "failed_hold"
   const canReconcile = viewerRole === "admin" && currentStatus === "unknown"
   const releasePreSendEligible = canReleasePreSend ?? false
   const activeMessageId = result?.messageId || latestMessage?.messageId || ""
@@ -197,10 +205,11 @@ export function RegistrationAlimtalkPreviewDialog({
   function applyResult(next: RegistrationCustomerMessageSendResult) {
     setResult(next)
     setLatestMessage(toHistory(next))
+    setDeliveryResult(null)
   }
 
   async function confirm() {
-    if (confirmationLockedRef.current || confirmDisabled || !preview?.previewId || !target) return
+    if (confirmationLockedRef.current || deliveryAbortRef.current || confirmDisabled || !preview?.previewId || !target) return
     const generation = generationRef.current
     const confirmedTarget = target
     requestKeyRef.current ??= createRequestKey()
@@ -301,7 +310,8 @@ export function RegistrationAlimtalkPreviewDialog({
     : null
   async function checkDelivery() {
     const messageId = result?.messageId || latestMessage?.messageId
-    if (!messageId || currentStatus !== "accepted" || !client.checkDelivery || deliveryAbortRef.current) return
+    if (!messageId || currentStatus !== "accepted" || !client.checkDelivery || deliveryAbortRef.current
+      || (confirmationLockedRef.current && !result)) return
     const generation = generationRef.current
     const controller = new AbortController()
     deliveryAbortRef.current = controller
@@ -322,7 +332,7 @@ export function RegistrationAlimtalkPreviewDialog({
 
   const confirmLabel = sending
     ? "처리 중"
-    : duplicateLocked || Boolean(currentStatus)
+    : duplicateLocked || (Boolean(currentStatus) && !hasReadyBookingPreview)
       ? "이미 발송 요청됨"
       : "확인 후 발송"
 
@@ -338,7 +348,7 @@ export function RegistrationAlimtalkPreviewDialog({
           <div className="flex items-start justify-between gap-3">
             <div>
               <DialogTitle>알림톡 미리보기</DialogTitle>
-            <DialogDescription>{currentStatus === "accepted"
+            <DialogDescription>{currentStatus === "accepted" && !hasReadyBookingPreview
               ? "접수한 알림톡의 전달 결과를 확인할 수 있습니다."
               : "내용과 수신자 끝자리를 확인한 뒤 발송합니다."}</DialogDescription>
             </div>
@@ -351,11 +361,14 @@ export function RegistrationAlimtalkPreviewDialog({
         {error ? <p role="alert" className="rounded-md border border-destructive/40 px-3 py-2 text-sm">{error}</p> : null}
         {refreshWarning ? <p role="status" className="rounded-md border border-amber-300 px-3 py-2 text-sm">{refreshWarning}</p> : null}
         {currentStatus === "accepted" ? <p role="status" className="text-sm">
+          {hasReadyBookingPreview ? "최근 발송 요청 · " : null}
           {deliveryResult?.deliveryStatus === "delivered" ? "알림톡 전달 완료"
             : deliveryResult?.deliveryStatus === "failed" ? "알림톡 전달 실패 · 재발송 전 수신 정보를 확인해 주세요"
             : deliveryResult?.deliveryStatus === "pending" ? "SOLAPI 접수 완료 · 전달 처리 중"
             : deliveryResult?.deliveryStatus === "unavailable" ? "SOLAPI 접수 완료 · 전달 결과 확인 불가"
-            : "SOLAPI 접수 완료"} · 학부모 전화 끝 {last4}
+            : "SOLAPI 접수 완료"}{hasReadyBookingPreview
+              ? latestMessage?.recipientLast4 ? ` · 학부모 전화 끝 ${latestMessage.recipientLast4}` : " · 수신자 끝자리 확인 불가"
+              : ` · 학부모 전화 끝 ${last4}`}
           {deliveryResult ? <span className="block text-xs text-muted-foreground">조회 시각 · {formatAuditTimestamp(deliveryResult.checkedAt)}</span> : null}
         </p> : null}
         {currentStatus === "unknown" ? <p role="alert" className="text-sm">발송 결과 확인 필요</p> : null}
@@ -429,7 +442,10 @@ export function RegistrationAlimtalkPreviewDialog({
 
         <DialogFooter>
           <Button type="button" className="min-h-11" variant="outline" onClick={() => handleOpenChange(false)}>돌아가기</Button>
-          {currentStatus === "accepted" && client.checkDelivery && (viewerRole === "admin" || viewerRole === "staff") ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void checkDelivery()}>{sending ? "확인 중" : "전달 결과 확인"}</Button> : (currentStatus === "unknown" && canCheck) || canCheckPending ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void check()}>상태 확인</Button> : (
+          {currentStatus === "accepted" && client.checkDelivery && (viewerRole === "admin" || viewerRole === "staff") ? <>
+            <Button type="button" className="min-h-11" variant={hasReadyBookingPreview ? "outline" : "default"} disabled={sending} onClick={() => void checkDelivery()}>{sending ? "확인 중" : "전달 결과 확인"}</Button>
+            {hasReadyBookingPreview ? <Button type="button" className="min-h-11" disabled={confirmDisabled} onClick={() => void confirm()}>{confirmLabel}</Button> : null}
+          </> : (currentStatus === "unknown" && canCheck) || canCheckPending ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void check()}>상태 확인</Button> : (
             <Button type="button" className="min-h-11" disabled={confirmDisabled} onClick={() => void confirm()}>{confirmLabel}</Button>
           )}
         </DialogFooter>
