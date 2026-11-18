@@ -10,7 +10,7 @@ import { DataTablePagination } from "@/components/data-table/data-table-paginati
 import { isoToSeoulDateTimeInput } from "@/features/tasks/ops-task-service"
 import { TeacherRequestFields, blankRequestInput, type TeacherRequestFieldProps } from "./teacher-request-fields"
 import { useRequestNavigation } from "./use-request-navigation"
-import { actionLabels, domainLabels, failureCode, isDefinitiveRequestFailure, mutateOwnRequest, readOwnRequest, readOwnRequests, readRequestReferences, requestFailureMessage, requestStatusLabel,
+import { actionLabels, domainLabels, failureCode, isDefinitiveRequestFailure, mutateOwnRequest, readOwnRequest, readOwnRequests, readRequestReferences, requestFailureMessage, requestStatusLabel, teacherWithdrawalHoursDisplay,
   type MakeupSlot, type OwnRequest, type OwnRequestDetail, type RequestAction, type RequestAttempt, type RequestDomain, type RequestInput, type RequestPage, type RequestReferences } from "./teacher-request-service"
 
 function currentMonth() { return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit" }).format(new Date()) }
@@ -156,12 +156,14 @@ export function TeacherOwnRequests({ domain, actorId, onChanged, includeCreate =
 }
 
 const inputLabels: Record<string, string> = { title: "교재명", memo: "메모", student_id: "학생", class_id: "수업", classId: "수업", from_class_id: "전 수업", to_class_id: "후 수업", textbookId: "등록 교재", locationId: "위치", studentQuantity: "학생용 수량", teacherQuantity: "교사용 수량", transfer_reason: "전반 사유", from_class_end_date: "전 수업 종료일", from_class_end_session: "전 수업 종료 회차", to_class_start_date: "후 수업 시작일", to_class_start_session: "후 수업 시작 회차", from_undistributed_textbooks: "전 수업 미배부 교재", to_undistributed_textbooks: "후 수업 미배부 교재", withdrawal_date: "퇴원일", withdrawal_session: "퇴원 회차", customer_reason: "고객 사유", teacher_opinion: "선생님 의견", undistributed_textbooks: "미배부 교재", request_kind: "종류", reason: "휴보강 사유", cancel_date: "휴강일" }
-function RequestInputSummary({ input, labels }: { domain: RequestDomain; input: RequestInput; labels: OwnRequestDetail["referenceLabels"] }) {
+function RequestInputSummary({ domain, input, labels }: { domain: RequestDomain; input: RequestInput; labels: OwnRequestDetail["referenceLabels"] }) {
   const references: Record<string, string | undefined> = { student_id: labels.student, class_id: labels.class, classId: labels.class, from_class_id: labels.fromClass, to_class_id: labels.toClass, textbookId: labels.textbook, locationId: labels.location }
+  const hours = teacherWithdrawalHoursDisplay(input)
   return <dl className="grid grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">{Object.entries(input).flatMap(([key, value]) => {
+    if (domain === "withdrawal" && (key === "completed_lesson_hours" || key === "four_week_lesson_hours")) return []
     if (key === "original_lesson_session_id") return []
     if (key === "makeup_slots") return (value as MakeupSlot[]).map((slot, index) => <div key={`${key}-${index}`} className="col-span-2 grid gap-1"><dt>보강 {index + 1}</dt><dd className="break-words">{isoToSeoulDateTimeInput(slot.startAt).replace("T", " ")} – {isoToSeoulDateTimeInput(slot.endAt).replace("T", " ")} · {slot.classroom}</dd></div>)
     const display = key in references ? references[key] || (value ? "기존 선택 항목" : "—") : key === "request_kind" ? ({ cancel_makeup: "휴강 및 보강", cancel_only: "휴강", makeup_only: "보강" } as Record<string, string>)[String(value)] : value === null || value === "" ? "—" : String(value)
     return [<div key={key} className="contents"><dt className="text-muted-foreground">{inputLabels[key] || "신청 항목"}</dt><dd className="whitespace-pre-wrap break-words">{display}</dd></div>]
-  })}</dl>
+  })}{domain === "withdrawal" && [["진행 수업시수", hours.completed], ["4주 기준 수업시수", hours.total], ["수업진행률", hours.progress]].map(([label, value]) => <div key={label} className="contents"><dt className="text-muted-foreground">{label}</dt><dd className="break-words">{value}</dd></div>)}</dl>
 }

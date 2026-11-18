@@ -15,6 +15,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
 import { useTeacherFormClass, TeacherFormClassPager } from "@/features/teacher-requests/teacher-form-context"
 import type { TeacherRequestFieldProps } from "@/features/teacher-requests/teacher-request-fields"
+import { teacherWithdrawalHoursDisplay } from "@/features/teacher-requests/teacher-request-service"
 import { TeacherRequestActions } from "@/features/teacher-requests/teacher-request-actions"
 import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
@@ -4625,8 +4626,8 @@ function getWithdrawalScheduleMetrics(items: WithdrawalClassScheduleItem[], sele
     selectedItem,
     withdrawalDate: selectedItem?.dateKey || "",
     withdrawalSession: getWithdrawalScheduleSessionLabel(selectedItem),
-    completedLessonHours: completedLessonHours ? formatWithdrawalLessonHours(completedLessonHours) : "",
-    fourWeekLessonHours: fourWeekLessonHours ? formatWithdrawalLessonHours(fourWeekLessonHours) : "",
+    completedLessonHours: selectedItem ? formatWithdrawalLessonHours(completedLessonHours) : "",
+    fourWeekLessonHours: fourWeekLessonHours > 0 || selectedItem ? formatWithdrawalLessonHours(fourWeekLessonHours) : "",
     progressPercent,
   }
 }
@@ -5057,7 +5058,7 @@ function WithdrawalScheduleCalendarField({
   onScheduleSelect,
   ownerSchedule,
 }: {
-  ownerSchedule?: { month: string; onMonthChange: (month: string) => void; loading?: boolean }
+  ownerSchedule?: { month: string; onMonthChange: (month: string) => void; loading?: boolean; calculationClass?: OpsClassOption }
   classItem?: OpsClassOption
   withdrawal: NonNullable<OpsTaskInput["withdrawal"]>
   onScheduleSelect: (metrics: ReturnType<typeof getWithdrawalScheduleMetrics>) => void
@@ -5076,7 +5077,8 @@ function WithdrawalScheduleCalendarField({
   const freeDateSelection = Boolean(ownerSchedule && !ownerSchedule.loading && classItem && classItem.scheduleStorageMode !== "normalized" && scheduleItems.length === 0)
   const itemsByDate = useMemo(() => getWithdrawalScheduleItemsByDate(scheduleItems), [scheduleItems])
   const metrics = getWithdrawalScheduleMetrics(scheduleItems, selectedDateKey, classItem)
-  const progressLabel = metrics.fourWeekLessonHours
+  const savedHours = teacherWithdrawalHoursDisplay({ completed_lesson_hours: withdrawal.completedLessonHours, four_week_lesson_hours: withdrawal.fourWeekLessonHours })
+  const progressLabel = metrics.completedLessonHours !== "" && Number(metrics.fourWeekLessonHours) > 0
     ? `${metrics.progressPercent}%`
     : "자동 계산"
   const calendarDays = useMemo<ClassScheduleCalendarDay[]>(() => (
@@ -5137,9 +5139,9 @@ function WithdrawalScheduleCalendarField({
         <ScheduleSelectionDependencyState fieldId={fieldId} />
         <div className="grid gap-2 md:grid-cols-4">
           <ReadonlyInfoField label="퇴원회차" value={withdrawal.withdrawalSession || "자동 계산"} />
-          {!ownerSchedule && <ReadonlyInfoField label="진행 수업시수" value={withdrawal.completedLessonHours || "자동 계산"} />}
-          {!ownerSchedule && <ReadonlyInfoField label="4주 기준 수업시수" value={withdrawal.fourWeekLessonHours || "자동 계산"} />}
-          {!ownerSchedule && <ReadonlyInfoField label="수업진행률" value={progressLabel} />}
+          <ReadonlyInfoField label="진행 수업시수" value={ownerSchedule ? savedHours.completed : withdrawal.completedLessonHours || "자동 계산"} />
+          <ReadonlyInfoField label="4주 기준 수업시수" value={ownerSchedule ? savedHours.total : withdrawal.fourWeekLessonHours || "자동 계산"} />
+          <ReadonlyInfoField label="수업진행률" value={ownerSchedule ? savedHours.progress : progressLabel} />
         </div>
       </section>
     )
@@ -5148,7 +5150,11 @@ function WithdrawalScheduleCalendarField({
   function handleScheduleSelect(item: WithdrawalClassScheduleItem) {
     if (!isWithdrawalScheduleSelectable(item)) return
     setCalendarMonth(getCalendarMonthDate(item.dateKey))
-    onScheduleSelect(getWithdrawalScheduleMetrics(scheduleItems, item.dateKey, classItem))
+    const selected = getWithdrawalScheduleMetrics(scheduleItems, item.dateKey, classItem)
+    if (!ownerSchedule) return onScheduleSelect(selected)
+    const calculationClass = ownerSchedule.calculationClass
+    const snapshot = getWithdrawalScheduleMetrics(getWithdrawalClassScheduleItems(calculationClass, true), item.dateKey, calculationClass)
+    onScheduleSelect({ ...selected, completedLessonHours: snapshot.completedLessonHours, fourWeekLessonHours: snapshot.fourWeekLessonHours, progressPercent: snapshot.progressPercent })
   }
 
   return (
@@ -5180,9 +5186,9 @@ function WithdrawalScheduleCalendarField({
       </div>
       <div className="grid gap-2 md:grid-cols-4">
         <ReadonlyInfoField label="퇴원회차" value={metrics.withdrawalSession || withdrawal.withdrawalSession || "자동 계산"} />
-        {!ownerSchedule && <ReadonlyInfoField label="진행 수업시수" value={metrics.completedLessonHours || withdrawal.completedLessonHours || "자동 계산"} />}
-        {!ownerSchedule && <ReadonlyInfoField label="4주 기준 수업시수" value={metrics.fourWeekLessonHours || withdrawal.fourWeekLessonHours || "자동 계산"} />}
-        {!ownerSchedule && <ReadonlyInfoField label="수업진행률" value={progressLabel} />}
+        <ReadonlyInfoField label="진행 수업시수" value={ownerSchedule ? savedHours.completed : metrics.completedLessonHours || withdrawal.completedLessonHours || "자동 계산"} />
+        <ReadonlyInfoField label="4주 기준 수업시수" value={ownerSchedule ? savedHours.total : metrics.fourWeekLessonHours || withdrawal.fourWeekLessonHours || "자동 계산"} />
+        <ReadonlyInfoField label="수업진행률" value={ownerSchedule ? savedHours.progress : progressLabel} />
       </div>
     </section>
   )
@@ -14417,19 +14423,19 @@ export function TeacherTransitionRequestFields(props: TeacherRequestFieldProps) 
   const subjectOptions = [...new Set([...source.subjects, subject].filter(Boolean))].map(value => ({ value, label: value }))
   const students: OpsStudentOption[] = (references?.students || []).map(student => ({ id: student.id, label: student.name, grade: "", school: "", contact: "", parentContact: "", status: student.status, classIds: [sourceId], waitlistClassIds: [] }))
   if (editing && value("student_id") && !students.some(student => student.id === value("student_id"))) students.push({ id: value("student_id"), label: labels.student || "기존 학생", grade: "", school: "", contact: "", parentContact: "", status: "", classIds: [sourceId], waitlistClassIds: [] })
-  const withdrawal: NonNullable<OpsTaskInput["withdrawal"]> = { teacherName: sourceTeacher, withdrawalDate: value("withdrawal_date"), withdrawalSession: value("withdrawal_session"), customerReason: value("customer_reason"), teacherOpinion: value("teacher_opinion"), undistributedTextbooks: value("undistributed_textbooks") }
+  const withdrawal: NonNullable<OpsTaskInput["withdrawal"]> = { teacherName: sourceTeacher, withdrawalDate: value("withdrawal_date"), withdrawalSession: value("withdrawal_session"), completedLessonHours: value("completed_lesson_hours"), fourWeekLessonHours: value("four_week_lesson_hours"), customerReason: value("customer_reason"), teacherOpinion: value("teacher_opinion"), undistributedTextbooks: value("undistributed_textbooks") }
   const transfer: NonNullable<OpsTaskInput["transfer"]> = { fromTeacherName: sourceTeacher, toTeacherName: targetTeacher, fromClassId: value("from_class_id"), toClassId: value("to_class_id"), transferReason: value("transfer_reason"), fromClassEndDate: value("from_class_end_date"), fromClassEndSession: value("from_class_end_session"), toClassStartDate: value("to_class_start_date"), toClassStartSession: value("to_class_start_session"), fromUndistributedTextbooks: value("from_undistributed_textbooks"), toUndistributedTextbooks: value("to_undistributed_textbooks") }
   const form: OpsTaskInput = { type: domain === "transfer" ? "transfer" : "withdrawal", title: "", subject, classId: domain === "transfer" ? value("to_class_id") : sourceId, studentId: value("student_id"), withdrawal, transfer }
   const ready = canSubmitOpsTaskForm(form, editing) && !source.detailLoading && !source.error && !target.detailLoading && !target.error
   const onReadyChange = props.onReadyChange
   useEffect(() => { onReadyChange?.(ready) }, [ready, onReadyChange])
-  const sourceReset = domain === "withdrawal" ? { class_id: "", student_id: "", withdrawal_date: null, withdrawal_session: "" } : { from_class_id: "", student_id: "", from_class_end_date: null, from_class_end_session: "" }
-  const withdrawalKeys: Partial<Record<keyof typeof withdrawal, string>> = { withdrawalDate: "withdrawal_date", withdrawalSession: "withdrawal_session", customerReason: "customer_reason", teacherOpinion: "teacher_opinion", undistributedTextbooks: "undistributed_textbooks" }
+  const sourceReset = domain === "withdrawal" ? { class_id: "", student_id: "", withdrawal_date: null, withdrawal_session: "", completed_lesson_hours: "", four_week_lesson_hours: "" } : { from_class_id: "", student_id: "", from_class_end_date: null, from_class_end_session: "" }
+  const withdrawalKeys: Partial<Record<keyof typeof withdrawal, string>> = { withdrawalDate: "withdrawal_date", withdrawalSession: "withdrawal_session", completedLessonHours: "completed_lesson_hours", fourWeekLessonHours: "four_week_lesson_hours", customerReason: "customer_reason", teacherOpinion: "teacher_opinion", undistributedTextbooks: "undistributed_textbooks" }
   const transferKeys: Partial<Record<keyof typeof transfer, string>> = { transferReason: "transfer_reason", fromUndistributedTextbooks: "from_undistributed_textbooks", toUndistributedTextbooks: "to_undistributed_textbooks" }
   return <fieldset disabled={disabled} className="grid min-w-0 gap-4">
     {(source.detailLoading || target.detailLoading) && <p role="status">수업일정을 불러오는 중…</p>}
     {(source.error || target.error) && <p role="alert" className="text-sm text-destructive">수업일정 조회에 실패했습니다. <Button type="button" variant="outline" onClick={() => { source.retry(); if (domain === "transfer") target.retry() }}>일정 다시 조회</Button></p>}
-    <TransitionRequestFormFields owner={{ editing, sourcePager: <TeacherFormClassPager context={source} label="수업" />, targetPager: <TeacherFormClassPager context={target} label="후 수업" />, sourceSchedule: { month: sourceMonth, onMonthChange: setSourceMonth, loading: source.detailLoading || source.error }, targetSchedule: { month: targetMonth, onMonthChange: setTargetMonth, loading: target.detailLoading || target.error } }} bindings={{
+    <TransitionRequestFormFields owner={{ editing, sourcePager: <TeacherFormClassPager context={source} label="수업" />, targetPager: <TeacherFormClassPager context={target} label="후 수업" />, sourceSchedule: { month: sourceMonth, onMonthChange: setSourceMonth, loading: source.detailLoading || source.error, calculationClass: source.calculationClass }, targetSchedule: { month: targetMonth, onMonthChange: setTargetMonth, loading: target.detailLoading || target.error } }} bindings={{
       form, withdrawal, transfer, selectedWithdrawalTeacherId: sourceTeacher, selectedTransferFromTeacherId: sourceTeacher, selectedTransferToTeacherId: targetTeacher,
       withdrawalSubjectOptions: subjectOptions, transferSubjectOptions: subjectOptions,
       withdrawalTeacherOptions: teacherOptions(source.teachers, sourceTeacher), transferFromTeacherOptions: teacherOptions(source.teachers, sourceTeacher), transferToTeacherOptions: teacherOptions(target.teachers, targetTeacher),
@@ -14446,7 +14452,7 @@ export function TeacherTransitionRequestFields(props: TeacherRequestFieldProps) 
       selectWithdrawalTeacher: value => { if (!editing) { setFromTeacher(value); source.setPage(1); patch(sourceReset) } },
       selectTransferFromTeacher: value => { if (!editing) { setFromTeacher(value); source.setPage(1); patch(sourceReset) } },
       selectTransferToTeacher: value => { setToTeacher(value); target.setPage(1); patch({ to_class_id: "", to_class_start_date: null, to_class_start_session: "" }) },
-      syncWithdrawalScheduleSelection: metrics => patch({ withdrawal_date: metrics.withdrawalDate || null, withdrawal_session: metrics.withdrawalSession }),
+      syncWithdrawalScheduleSelection: metrics => patch({ withdrawal_date: metrics.withdrawalDate || null, withdrawal_session: metrics.withdrawalSession, completed_lesson_hours: metrics.completedLessonHours, four_week_lesson_hours: metrics.fourWeekLessonHours }),
       syncTransferFromScheduleSelection: metrics => patch({ from_class_end_date: metrics.transferDate || null, from_class_end_session: metrics.transferSession }),
       syncTransferToScheduleSelection: metrics => patch({ to_class_start_date: metrics.transferDate || null, to_class_start_session: metrics.transferSession }),
     }} />
@@ -14491,7 +14497,7 @@ type TransitionRequestFormBindings = {
   selectTransferToTeacher: (value: string) => void
   openManualField: (value: string) => void
 }
-function TransitionRequestFormFields({ bindings, owner }: { bindings: TransitionRequestFormBindings; owner?: { editing: boolean; sourcePager: ReactNode; targetPager: ReactNode; sourceSchedule: { month: string; onMonthChange: (month: string) => void; loading?: boolean }; targetSchedule: { month: string; onMonthChange: (month: string) => void; loading?: boolean } } }) {
+function TransitionRequestFormFields({ bindings, owner }: { bindings: TransitionRequestFormBindings; owner?: { editing: boolean; sourcePager: ReactNode; targetPager: ReactNode; sourceSchedule: { month: string; onMonthChange: (month: string) => void; loading?: boolean; calculationClass?: OpsClassOption }; targetSchedule: { month: string; onMonthChange: (month: string) => void; loading?: boolean } } }) {
   const { form, withdrawal, transfer, selectedWithdrawalTeacherId, selectedTransferFromTeacherId, selectedTransferToTeacherId, withdrawalSubjectOptions, transferSubjectOptions, withdrawalTeacherOptions, transferFromTeacherOptions, transferToTeacherOptions, withdrawalClassOptions, transferFromClassOptions, transferToClassOptions, withdrawalStudentOptions, transferStudentOptions, selectedWithdrawalClass, selectedTransferFromClass, selectedTransferToClass, findStudent, updateWithdrawal, updateTransfer, updateForm, selectClass, selectStudent, shouldShowManualField, syncWithdrawalScheduleSelection, syncTransferFromScheduleSelection, syncTransferToScheduleSelection, selectWithdrawalSubject, selectWithdrawalTeacher, selectTransferSubject, selectTransferFromTeacher, selectTransferToTeacher, openManualField } = bindings
 	  if (form.type === "withdrawal") {
       const canSelectWithdrawalTeacher = Boolean(form.subject)

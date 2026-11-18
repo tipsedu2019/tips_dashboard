@@ -25,10 +25,10 @@ export function teacherFormMonthRange(month: string) {
 }
 
 // This adapter is display-only. Session UUIDs remain separate from derived labels.
-export function teacherFormClass(row: Row, schedule?: Row, month?: string): OpsClassOption {
+export function teacherFormClass(row: Row, schedule?: Row, month?: string, calculationSnapshot = false): OpsClassOption {
   const legacy = row.schedulePlan && typeof row.schedulePlan === "object" ? row.schedulePlan as Row : {}
   let schedulePlan = legacy
-  if (row.scheduleStorageMode === "normalized") {
+  if (row.scheduleStorageMode === "normalized" && !calculationSnapshot) {
     if (!schedule || !Array.isArray(schedule.sessions) || !month) throw new Error("schedule_missing")
     const sessions = (schedule.sessions as Row[]).map(session => ({
       id: text(session.id), sessionKey: text(session.session_key) || text(session.id),
@@ -56,7 +56,7 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
   const searchInput = useCommittedSearch("")
   const search = searchInput.committed
   const [pageState, setPageState] = useState<{ key: string; data?: Awaited<ReturnType<typeof service.readClassScheduleNumberedPage>>; error?: boolean }>()
-  const [detailState, setDetailState] = useState<{ key: string; scope: string; data?: OpsClassOption; error?: boolean }>()
+  const [detailState, setDetailState] = useState<{ key: string; scope: string; data?: OpsClassOption; calculationClass?: OpsClassOption; error?: boolean }>()
   const pageKey = JSON.stringify([actor, subject, teacher, search, page, retry])
   const teacherKey = JSON.stringify([actor, subject, retry])
   useEffect(() => {
@@ -105,7 +105,11 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
       const schedule = row.scheduleStorageMode === "normalized"
         ? await service.loadClassScheduleDetail({ classId: id, ...teacherFormMonthRange(month) }) : undefined
       const data = teacherFormClass(row, schedule, month)
-      if (current) setDetailState({ key: detailKey, scope: detailScope, data })
+      // Management calculates from the complete saved projection. The monthly
+      // calendar's display ordinals and sessions are not a billing-cycle snapshot.
+      const calculationClass = (row.schedulePlan as Row | null)?.withdrawalHoursUnavailable === true
+        ? undefined : teacherFormClass(row, undefined, undefined, true)
+      if (current) setDetailState({ key: detailKey, scope: detailScope, data, calculationClass })
     }).catch(error => { if (current) { if (error?.code === "42501") onPermissionDenied(); else setDetailState({ key: detailKey, scope: detailScope, error: true }) } })
     return () => { current = false }
   }, [service, enabled, detailKey, detailScope, id, month, onPermissionDenied])
@@ -116,7 +120,7 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
   // A current page is never presented as the entire catalog.
   const options = requestClassOptions((result?.data?.rows || []).map(row => teacherFormClass(row)), id)
   if (selected && !options.some(row => row.id === selected.id)) options.unshift(selected)
-  return { options, selected, subjects: result?.data?.filterOptions.subjects || [], teachers: subject ? teacherResult?.names || [] : [],
+  return { options, selected, calculationClass: detail?.calculationClass, subjects: result?.data?.filterOptions.subjects || [], teachers: subject ? teacherResult?.names || [] : [],
     page, search: searchInput.value, searchInput, totalCount: result?.data?.totalCount ?? null, loading: enabled && (!result || Boolean(subject && !teacherResult)), detailLoading: Boolean(id && !detail), error: Boolean(result?.error || detail?.error || teacherResult?.error),
     setPage, setSearch: (value: string) => { searchInput.onChange(value); setPage(1) }, retry: () => { invalidateOperationsCatalogCache(actor); setRetry(value => value + 1) } }
 }
