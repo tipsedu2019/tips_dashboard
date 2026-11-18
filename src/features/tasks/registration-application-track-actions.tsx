@@ -815,7 +815,21 @@ export function RegistrationWaitingDetailsEditor({
 
   return (
     <section ref={sectionRef} data-registration-action-owner={`${track.subject}:waiting-close`} className="grid min-w-0 gap-3" aria-label={`${track.subject} 대기 처리`}>
-      <h3 className="text-sm font-semibold">{track.subject} 대기 정보</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">{track.subject} 대기 정보</h3>
+        {permissions.canManage && !refreshPending ? (
+            <Button
+              type="button"
+              data-registration-message-entry="waiting_notice"
+              size="form"
+              variant="outline"
+              disabled={customerMessageBlocked}
+              onClick={() => onOpenCustomerMessage?.({ messageKind: "waiting_notice", sourceId: track.id })}
+            >
+              대기 안내 알림톡
+            </Button>
+        ) : null}
+      </div>
       <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} ownerLabel={track.subject} />
       {permissions.canManage && !refreshPending ? (
         <>
@@ -853,15 +867,6 @@ export function RegistrationWaitingDetailsEditor({
                 입력 지우기
               </Button>
             ) : null}
-            <Button
-              type="button"
-              size="form"
-              variant="outline"
-              disabled={customerMessageBlocked}
-              onClick={() => onOpenCustomerMessage?.({ messageKind: "waiting_notice", sourceId: track.id })}
-            >
-              대기 안내 알림톡
-            </Button>
           </div>
           {customerMessageBlocked ? <p className="text-right text-xs text-muted-foreground">대기 정보를 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
         </>

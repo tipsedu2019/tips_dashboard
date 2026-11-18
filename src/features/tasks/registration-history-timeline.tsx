@@ -151,15 +151,15 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
       className={embedded
         ? "grid min-w-0 gap-3 p-3"
         : "grid min-w-0 gap-3 rounded-md border p-3"}
-      aria-label="등록 자동 이력"
+      aria-label="등록 업무 처리 이력"
     >
       <div>
-        <h3 className="text-sm font-semibold">자동 이력</h3>
+        <h3 className="text-sm font-semibold">업무 처리 이력</h3>
         <p className="text-xs text-muted-foreground">누가 · 언제 · 무엇을 · 어떻게 처리했는지 시간순으로 보여 줍니다.</p>
       </div>
       {history.length === 0 ? (
         <p className="rounded-md bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
-          아직 자동 이력이 없습니다.
+          아직 업무 처리 이력이 없습니다.
         </p>
       ) : (
         <ol className="grid gap-2">

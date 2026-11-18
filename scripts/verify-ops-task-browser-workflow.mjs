@@ -3149,7 +3149,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       await assertPrecedes(approvedRows[index], approvedRows[index + 1], "shared inquiry fields")
     }
 
-    const historyTriggerCount = await applicationHost.getByRole("button", { name: "자동 이력 보기" }).count()
+    const historyTriggerCount = await applicationHost.getByRole("button", { name: "업무 처리 이력" }).count()
     if (historyTriggerCount !== expectedHistoryTriggerCount) {
       throw new Error(`registration application has ${historyTriggerCount} history triggers, expected ${expectedHistoryTriggerCount}.`)
     }
@@ -3320,13 +3320,13 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   }
 
   async function verifyHistoryPopover(applicationHost) {
-    const historyButton = applicationHost.getByRole("button", { name: "자동 이력 보기" })
+    const historyButton = applicationHost.getByRole("button", { name: "업무 처리 이력" })
     if (await historyButton.count() !== 1) throw new Error("saved registration application must have one history trigger.")
 
     await historyButton.click()
-    const historyPanel = page.getByLabel("등록 자동 이력")
+    const historyPanel = page.getByLabel("등록 업무 처리 이력")
     await historyPanel.waitFor({ state: "visible", timeout: 5000 })
-    await historyPanel.getByText("자동 이력", { exact: true }).waitFor({ state: "visible", timeout: 5000 })
+    await historyPanel.getByText("업무 처리 이력", { exact: true }).waitFor({ state: "visible", timeout: 5000 })
     await historyPanel.getByRole("list").waitFor({ state: "visible", timeout: 5000 })
     await historyPanel.getByRole("listitem").first().waitFor({ state: "visible", timeout: 5000 })
     const historyText = await historyPanel.innerText()

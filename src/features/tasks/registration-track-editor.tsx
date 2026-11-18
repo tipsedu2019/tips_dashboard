@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase"
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
 import { RegistrationAlimtalkPreviewDialog } from "./registration-alimtalk-preview-dialog"
 import { RegistrationCustomerMessageCaseHistory } from "./registration-customer-message-case-history"
+import { RegistrationCustomerMessageNavigation } from "./registration-customer-message-navigation"
 import { RegistrationVisitCancellationActions } from "./registration-visit-cancellation-actions"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
 import {
@@ -350,6 +351,9 @@ export function RegistrationApplication({
     initialFocusRequestRef.current = { taskId: detail.task.id, trackId: focusTrackId }
   }
   const canManageCase = canManageRegistrationCase(viewerRole)
+  useEffect(() => {
+    setCustomerMessageTarget(null)
+  }, [detail.task.id, viewerId, viewerRole])
   useEffect(() => {
     if (canManageCase) return
     setConsultationSwitchTarget(null)
@@ -1468,8 +1472,11 @@ export function RegistrationApplication({
       studentName={detail.task.studentName || detail.task.title}
       closeAction={closeAction}
       historyAction={<>
+        {canManageCase ? <RegistrationCustomerMessageNavigation
+          key={`${detail.task.id}:${viewerId || ""}:${viewerRole}`} includeObservation={observationWorkspaceAvailable} /> : null}
         {canManageCase && customerMessageClient ? <RegistrationCustomerMessageCaseHistory
           taskId={detail.task.id} client={customerMessageClient} viewerKey={`${viewerId || ""}:${viewerRole}`}
+          onOpenPreview={admissionEditable ? openCustomerMessage : undefined}
           refreshKey={`${detail.commonRevision}:${detail.task.updatedAt}`} /> : null}
         <RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />
       </>}

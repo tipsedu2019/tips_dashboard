@@ -848,6 +848,26 @@ export function RegistrationAppointmentEditor({
         data-registration-appointment-subjects={appointmentParticipantSubjects.join("|")}
         className="grid gap-3"
       >
+        <div className="flex flex-wrap justify-end gap-2">
+          {canOpenCustomerMessage ? (
+              <Button
+                type="button"
+                data-registration-message-entry={kind === "level_test" ? "level_test_booking" : "visit_consultation_booking"}
+                size="form"
+                variant="outline"
+                disabled={customerMessageBlocked}
+                onClick={() => {
+                  if (!appointment || customerMessageBlocked) return
+                  onOpenCustomerMessage?.({
+                    messageKind: kind === "level_test" ? "level_test_booking" : "visit_consultation_booking",
+                    sourceId: appointment.id,
+                  })
+                }}
+              >
+                예약 안내 알림톡
+              </Button>
+          ) : null}
+        </div>
         <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)]">
           <Label data-appointment-field="scheduled-at" className="grid min-w-0 gap-1.5">
             <span>예약 일시 <span aria-hidden="true" className="text-destructive">*</span></span>
@@ -935,25 +955,6 @@ export function RegistrationAppointmentEditor({
                   ? "방문상담 관리 알림 보냄"
                   : "방문상담 관리 알림 보내기"}
             </Button>
-          ) : null}
-          {canOpenCustomerMessage ? (
-            <>
-              <Button
-                type="button"
-                size="form"
-                variant="outline"
-                disabled={customerMessageBlocked}
-                onClick={() => {
-                  if (!appointment || customerMessageBlocked) return
-                  onOpenCustomerMessage?.({
-                    messageKind: kind === "level_test" ? "level_test_booking" : "visit_consultation_booking",
-                    sourceId: appointment.id,
-                  })
-                }}
-              >
-                예약 안내 알림톡
-              </Button>
-            </>
           ) : null}
         </div>
         {customerReminderHistoryLabel ? (
