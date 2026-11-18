@@ -2610,3 +2610,213 @@ test("class textbook candidate recovery: stale next-page success and failure can
     await ui.unmount();
   }
 });
+
+
+// Render the actual page and service with isolated synthetic RPC outcomes; no SQL runs.
+import { createManagementService } from '../src/features/management/management-service.js';
+import { parseTimetableOperationalConflictDetails } from '../src/features/academic/timetable-operational-conflict-details.ts';
+
+const publicConflict = {
+  code: '23P01', message: 'timetable_resource_conflict',
+  details: JSON.stringify({version: 1, confirmedCount: 1, unresolvedCount: 0, truncated: false,
+    confirmed: [{className: '합성 충돌 상대반', date: '2099-11-02', startMinute: 570, endMinute: 630,
+      overlapStartMinute: 570, overlapEndMinute: 600, teacherName: '합성 충돌 교사'}], unresolved: []}),
+  hint: 'synthetic-private-canary',
+};
+
+for (const ownership of ['legacy', 'normalized']) {
+  test(`${ownership}: status-only user action reaches actual service with explicit rejection and no readback`, async t => {
+    const writes = [], reads = [], refreshes = [];
+    const ui = await setup(t, {configureFixture(fixture) {
+      fixture.rows[0].raw.schedule_storage_mode = ownership;
+      const real = createManagementService({
+        supabase: {rpc(name, args) {
+          (name === 'get_management_detail_v1' ? reads : writes).push({name, args: structuredClone(args)});
+          return {abortSignal() {return this;}, retry(value) {assert.equal(value, false);return this;},
+            then(resolve, reject) {return Promise.resolve({data: null, error: publicConflict}).then(resolve, reject);}};
+        }},
+        generateId: () => '20000000-0000-4000-8000-000000000234',
+        probeRegistrationRuntime: async () => ({mode:'ready'}),
+        refreshPublicClassesCache: async () => {refreshes.push('refresh');},
+      });
+      fixture.service.updateClass = real.updateClass;
+    }});
+    await ui.click('A 영어반');
+    if (ownership === 'normalized') await ui.resolve(0, defaultsFor());
+    await selectClassFormOption('classes-detail-status', '종강');
+    await ui.click('저장');
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].name, 'update_class_operational_v1');
+    assert.equal(writes[0].args.p_patch.status, '종강');
+    if (ownership === 'legacy') {
+      assert.equal(writes[0].args.p_patch.schedule, '월 16:00-18:00');
+      assert.equal(writes[0].args.p_patch.teacher, '영어교사');
+      assert.equal(writes[0].args.p_patch.room, '본관 2강');
+    } else {
+      for (const key of ['teacher','schedule','room']) assert.equal(Object.hasOwn(writes[0].args.p_patch,key), false);
+    }
+    assert.equal(reads.length, 0, 'explicit rejection must not become uncertain readback');
+    assert.equal(refreshes.length, 0);
+    assert.match(ui.text(), /겹치는 일정이 있어 저장하지 못했습니다/);
+    assert.doesNotMatch(ui.text(), /저장 완료|종강 상태 확인됨|synthetic-private-canary/);
+    assert.ok(parseTimetableOperationalConflictDetails(publicConflict), 'producer-shaped DETAIL is accepted');
+    assert.equal(document.getElementById('classes-detail-status').textContent, '종강', 'draft retained');
+  });
+}
+
+test('class detail should display already authorized conflict evidence', async t => {
+  const ui = await setup(t, {configureFixture(fixture) {
+    fixture.service.updateClass = async () => {throw publicConflict;};
+  }});
+  await ui.click('A 영어반');
+  await ui.resolve(0, defaultsFor());
+  await selectClassFormOption('classes-detail-status', '종강');
+  await ui.click('저장');
+  assert.match(ui.text(), /겹치는 일정이 있어 저장하지 못했습니다/);
+  assert.ok(parseTimetableOperationalConflictDetails(publicConflict));
+  assert.match(ui.text(), /합성 충돌 상대반/, 'valid confirmed DETAIL is lost between catch and footer');
+  assert.match(ui.text(), /2099-11-02.*09:30–10:30/);
+  assert.match(ui.text(), /겹친 시간 09:30–10:00.*같은 선생님 합성 충돌 교사/);
+  assert.equal(document.querySelectorAll('[role="alert"]').length, 1);
+  assert.equal(document.querySelector('[role="alert"]').tabIndex, 0);
+  assert.doesNotMatch(ui.text(), /synthetic-private-canary|timetable_resource_conflict/);
+});
+
+async function openFailure(t, failure = publicConflict) {
+  const ui = await setup(t, {configureFixture(fixture) {
+    fixture.service.updateClass = async () => {throw failure;};
+  }});
+  await ui.click('A 영어반');
+  await ui.resolve(0, defaultsFor());
+  await selectClassFormOption('classes-detail-status', '종강');
+  await ui.click('저장');
+  return ui;
+}
+
+test('mixed bounded details retain unknowns, total counts and safe labels only', async t => {
+  const details = JSON.parse(publicConflict.details);
+  details.confirmed[0].classId = 'private-id-canary';
+  details.confirmed[0].classroomName = '합성 강의실';
+  details.confirmedCount = 52;
+  details.unresolved = [{className:'합성 정보 누락반',weekday:2,missingFields:['time','classroom']}];
+  details.unresolvedCount = 7;
+  const ui = await openFailure(t, {...publicConflict, details:JSON.stringify(details)});
+  assert.match(ui.text(), /확인된 일정 충돌 52건/);
+  assert.match(ui.text(), /전체 52건 중 1건 표시/);
+  assert.match(ui.text(), /정보 확인 필요 7건/);
+  assert.match(ui.text(), /합성 정보 누락반.*매주 화요일.*시간·강의실 정보 확인 필요/);
+  assert.match(ui.text(), /충돌이 확인된 일정은 아닙니다/);
+  assert.doesNotMatch(ui.text(), /private-id-canary|synthetic-private-canary/);
+});
+
+test('unknown-only details never invent confirmed collision or exact date', async t => {
+  const ui = await openFailure(t, {...publicConflict,details:JSON.stringify({version:1,
+    confirmed:[],confirmedCount:0,unresolved:[{missingFields:['date','time']}],unresolvedCount:1})});
+  assert.match(ui.text(), /날짜 확인 필요.*날짜·시간 정보 확인 필요/);
+  assert.doesNotMatch(ui.text(), /확인된 일정 충돌|2099-11-02/);
+});
+
+for (const [label, failure] of [
+  ['malformed',{...publicConflict, details:'raw-secret-canary'}],
+  ['future version',{...publicConflict,details:JSON.stringify({...JSON.parse(publicConflict.details),version:2})}],
+  ['explicit cancellation',{code:'57014',message:'query canceled',details:publicConflict.details}],
+]) test(`${label} preserves summary fallback without rendering untrusted details`, async t => {
+  const ui = await openFailure(t, failure);
+  assert.doesNotMatch(ui.text(), /합성 충돌 상대반|합성 충돌 교사|raw-secret-canary/);
+  assert.doesNotMatch(ui.text(), /저장 완료|종강 상태 확인됨/);
+});
+
+test('editing then restoring the draft cannot resurrect previous diagnostics', async t => {
+  const ui = await openFailure(t);
+  assert.match(ui.text(), /합성 충돌 상대반/);
+  await ui.editField('classes-detail-name','새 초안');
+  assert.doesNotMatch(ui.text(), /합성 충돌 상대반/);
+  await ui.editField('classes-detail-name','A 영어반');
+  assert.doesNotMatch(ui.text(), /합성 충돌 상대반/);
+});
+
+test('retry clears diagnostic details before its response and does not carry them into a different error', async t => {
+  let attempts = 0, reject;
+  const ui = await setup(t, {configureFixture(fixture) {
+    fixture.service.updateClass = () => ++attempts === 1 ? Promise.reject(publicConflict)
+      : new Promise((_resolve, fail) => {reject = fail;});
+  }});
+  await ui.click('A 영어반');
+  await ui.resolve(0, defaultsFor());
+  await selectClassFormOption('classes-detail-status','종강');
+  await ui.click('저장');
+  assert.match(ui.text(), /합성 충돌 상대반/);
+  await ui.click('저장');
+  assert.doesNotMatch(ui.text(), /합성 충돌 상대반/);
+  await act(async () => reject({code:'23P01',message:'timetable_resource_conflict',details:'malformed'}));
+  assert.doesNotMatch(ui.text(), /합성 충돌 상대반/);
+  assert.match(ui.text(), /일정 확인을 통과하지 못해/);
+  assert.equal(attempts,2);
+});
+
+test('closing and reopening the same detail clears diagnostics', async t => {
+  const ui = await openFailure(t);
+  assert.match(ui.text(), /합성 충돌 상대반/);
+  await ui.click('닫기');
+  await ui.click('변경사항 버리기');
+  await ui.click('A 영어반');
+  assert.doesNotMatch(ui.text(), /합성 충돌 상대반/);
+});
+
+for (const owner of ['row','actor']) test(`late rejection after ${owner} change cannot expose previous diagnostic`, async t => {
+  let reject;
+  const ui = await setup(t,{configureFixture(fixture) {
+    fixture.service.updateClass = () => new Promise((_resolve, fail)=>{reject=fail;});
+  }});
+  await ui.click('A 영어반');
+  await ui.resolve(0,defaultsFor());
+  await selectClassFormOption('classes-detail-status','종강');
+  await ui.click('저장');
+  if (owner === 'actor') await ui.actor('staff-b');
+  else {
+    await ui.click('수업 상세 닫기');
+    await ui.click('B 영어반');
+    await ui.resolve(1,defaultsFor());
+  }
+  await act(async()=>reject(publicConflict));
+  assert.doesNotMatch(ui.text(),/합성 충돌 상대반/);
+});
+
+test('close status cancellation before save performs no writer and restores saved status on reopen', async t => {
+  let writes = 0;
+  const ui = await setup(t, {configureFixture(fixture) {
+    fixture.service.updateClass = async () => {writes++; assert.fail('cancel must not write');};
+  }});
+  await ui.click('A 영어반');
+  await ui.resolve(0, defaultsFor());
+  await selectClassFormOption('classes-detail-status', '종강');
+  await ui.click('닫기');
+  assert.ok(document.querySelector('[data-testid="management-discard-confirm-dialog"]'));
+  await ui.click('변경사항 버리기');
+  assert.equal(writes, 0);
+  await ui.click('A 영어반');
+  assert.equal(document.getElementById('classes-detail-status').textContent, '수강');
+  assert.equal(writes, 0);
+});
+
+test('close duplicate clicks call one synthetic service and receipt success remains explicit', async t => {
+  const calls = [];
+  let resolve;
+  const ui = await setup(t, {configureFixture(fixture) {
+    fixture.service.updateClass = input => {
+      calls.push(structuredClone(input));
+      return new Promise(done => {resolve = done;});
+    };
+  }});
+  await ui.click('A 영어반');
+  await ui.resolve(0, defaultsFor());
+  await selectClassFormOption('classes-detail-status', '종강');
+  await ui.clickTogether('저장', '저장');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].status, '종강');
+  assert.doesNotMatch(ui.text(), /저장 완료|종강 상태 확인됨/);
+  await act(async () => resolve({id:'a',classId:'a',status:'종강'}));
+  assert.equal(calls.length, 1);
+  assert.match(ui.text(), /저장 완료/);
+  assert.doesNotMatch(ui.text(), /종강 상태 확인됨/);
+});
