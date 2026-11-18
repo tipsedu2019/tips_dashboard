@@ -99,6 +99,7 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'src/features/academic/timetable-operational-conflict-details.ts',
  'src/features/academic/timetable-operational-service.ts',
  'src/features/management/class-close-confirmation.ts',
+ 'src/features/management/class-close-write-deadline.ts',
  'src/features/management/class-textbook-usage.ts',
  'src/features/tasks/registration-runtime-probe.ts',
  'src/lib/academic-subject-registry.ts',

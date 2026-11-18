@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createClient } from "@supabase/supabase-js";
+import { withClassCloseWriteDeadline } from "../src/features/management/class-close-write-deadline.ts";
 import { createManagementService } from "../src/features/management/management-service.js";
 import { timetableOperationalErrorMessage } from "../src/features/academic/timetable-operational-service.ts";
 
@@ -138,4 +139,106 @@ test("a client deadline hides any later server response and checks current state
       AbortSignal.timeout = originalTimeout;
     }
   }
+});
+
+// Authentication before HTTP dispatch is distinct from response cancellation.
+const tick = () => new Promise(resolve => setImmediate(resolve));
+const expired = () => new DOMException("Synthetic eight-second deadline", "TimeoutError");
+for (const { detailConfirmation, lateAuthFailure } of [
+  { detailConfirmation: false, lateAuthFailure: false },
+  { detailConfirmation: true, lateAuthFailure: false },
+  { detailConfirmation: false, lateAuthFailure: true },
+  { detailConfirmation: true, lateAuthFailure: true },
+]) {
+  test(`${detailConfirmation ? "detail" : "bulk"} close bounds pre-fetch auth wait with late auth ${lateAuthFailure ? "failure" : "success"}`, async t => {
+    const token = Promise.withResolvers();
+    const authStarted = Promise.withResolvers();
+    const deadlines = [];
+    const attempts = [];
+    let externalRequests = 0, transportWork = 0, checking = 0, settled = false;
+    t.mock.method(globalThis, "fetch", async () => {
+      externalRequests++;
+      assert.fail("external requests are forbidden in this synthetic fixture");
+    });
+    t.mock.method(AbortSignal, "timeout", ms => {
+      assert.equal(ms, 8000);
+      const controller = new AbortController();
+      deadlines.push(controller);
+      return controller.signal;
+    });
+    const client = createClient("https://synthetic.invalid", "fixture-only", {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: async (url, init) => {
+        const path = new URL(url).pathname;
+        attempts.push({ path, aborted: init.signal.aborted });
+        // Native fetch rejects an already-aborted request before HTTP dispatch.
+        init.signal.throwIfAborted();
+        transportWork++;
+        assert.equal(path, "/rest/v1/rpc/get_management_detail_v1");
+        return jsonResponse({ kind: "classes", record: { id: classId, status: "수강" } });
+      } },
+    });
+    t.mock.method(client.auth, "getSession", () => {
+      authStarted.resolve();
+      return token.promise;
+    });
+    const service = createManagementService({ supabase: client, generateId: () => requestKey,
+      probeRegistrationRuntime: async () => ({ mode: "ready" }),
+      refreshPublicClassesCache: async () => assert.fail("unconfirmed close must not refresh") });
+    const draft = structuredClone(input);
+    const pending = service.updateClass(draft, detailConfirmation ? {
+      confirmCloseResult: { isCurrent: () => true, onChecking: () => checking++ },
+    } : {}).then(value => { settled = true; return { value }; }, error => { settled = true; return { error }; });
+    await authStarted.promise;
+    assert.equal(attempts.length, 0);
+    deadlines[0].abort(expired());
+    await tick();
+    const afterWriteDeadline = { settled, checking, deadlineCount: deadlines.length };
+    // Detail confirmation is a separate bounded read, not an extra writer.
+    if (detailConfirmation && deadlines[1]) {
+      deadlines[1].abort(expired());
+      await tick();
+    }
+    const settledBeforeAuth = settled;
+    // Drain the original SDK operation, including on the failing baseline.
+    if (lateAuthFailure) token.reject(new Error("Synthetic late authentication failure"));
+    else token.resolve({ data: { session: { access_token: "synthetic-token" } }, error: null });
+    const result = await pending;
+    await tick(); await tick();
+    t.diagnostic(JSON.stringify({ afterWriteDeadline, settledBeforeAuth, attempts, transportWork, externalRequests }));
+    assert.equal(externalRequests, 0);
+    assert.equal(attempts.filter(x => x.path.endsWith("update_class_operational_v1")).length, lateAuthFailure ? 0 : 1);
+    assert.ok(attempts.every(x => x.aborted));
+    assert.deepEqual(draft, input);
+    assert.deepEqual(afterWriteDeadline, detailConfirmation
+      ? { settled: false, checking: 1, deadlineCount: 2 }
+      : { settled: true, checking: 0, deadlineCount: 1 });
+    assert.equal(settledBeforeAuth, true, "auth must not extend the writer or confirmation deadline");
+    assert.equal(transportWork, 0, "late token completion must not dispatch an expired write or read");
+    if (detailConfirmation) assert.equal(result.error.code, "CLASS_CLOSE_RESULT_UNCERTAIN");
+    else {
+      assert.equal(result.error.name, "TimeoutError");
+      assert.equal(result.error.code, undefined, "a browser deadline must not look like a SQLSTATE rejection");
+    }
+  });
+}
+
+test("a close deadline expired before startup never calls the RPC factory", async () => {
+  const controller = new AbortController();
+  controller.abort(expired());
+  await assert.rejects(withClassCloseWriteDeadline(() => assert.fail("expired writer started"), controller.signal), error => {
+    assert.equal(error.name, "TimeoutError");
+    assert.equal(error.code, undefined);
+    return true;
+  });
+});
+
+test("close deadline preserves explicit errors and a receipt already delivered before expiry", async () => {
+  const controller = new AbortController();
+  const failure = { code: "57014", message: "Synthetic explicit server rejection" };
+  await assert.rejects(withClassCloseWriteDeadline(() => { throw failure; }, controller.signal), error => error === failure);
+  const receipt = { closeResult: { id: classId, classId, status: "종강" } };
+  assert.equal(await withClassCloseWriteDeadline(() => Promise.resolve(receipt), controller.signal), receipt);
+  controller.abort(expired());
+  await tick();
 });
