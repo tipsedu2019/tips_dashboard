@@ -177,9 +177,12 @@ const ISOLATED_PROBES = Object.freeze([
   "tests/probe-timetable-nullable-room-concurrency.mjs",
 ])
 
-const PR_ISOLATED_PROBES = Object.freeze(ISOLATED_PROBES.flatMap(path =>
-  path === "tests/probe-makeup-approval-collision-dto.mjs"
-    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]))
+const PR_ISOLATED_PROBES = Object.freeze([
+  "tests/probe-timetable-close-proof-phases.mjs",
+  ...ISOLATED_PROBES.flatMap(path =>
+    path === "tests/probe-makeup-approval-collision-dto.mjs"
+      ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]),
+])
 
 const AI_STATIC_TESTS = Object.freeze([
   "tests/ai-agent-personal-credential-service.test.mjs",
@@ -211,7 +214,7 @@ const AI_STATIC_TESTS = Object.freeze([
 // step reordering cannot expand the isolated CI execution boundary.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c95097088cd7ed9337f9993f07707dc752ff70a56cc84dc5f040bde73126f49a"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "6b36a398ad935eb2e8b1b50f6a680f7f4161fa3e06aa71a85157e34b57dae994"
+  "acad64414ff47c6a77e7a41e3bf38cd69948be973dd3987d5a756035f1cb03d9"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
