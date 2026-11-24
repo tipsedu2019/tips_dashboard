@@ -351,7 +351,7 @@ async function mountManagementPage(t, { kind = "students", preference = 10, hold
     navigate: (search) => window.history.replaceState(null, "", `/admin/${kind}${search}`) };
 }
 
-async function beginClassStatusTransition(t, { start = "개강 준비", target = "종강", previousQuery } = {}) {
+async function beginClassStatusTransition(t, { start = "개강 준비", target = "종강", previousQuery, beforeSelect } = {}) {
   const page = await mountManagementPage(t, {
     kind: "classes",
     initialQuery: new URLSearchParams({ status: start }).toString(),
@@ -398,6 +398,7 @@ async function beginClassStatusTransition(t, { start = "개강 준비", target =
   checkRows(["synthetic-ready"]);
   await act(async () => { page.table.onRetryRead(); });
   assert.equal(page.requests[1].args.p_filters.status, start);
+  await beforeSelect?.();
   const trigger = document.getElementById("status-filter");
   await act(async () => trigger.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
   const option = [...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === target);
@@ -486,16 +487,19 @@ for (const outcome of ["success", "failure"]) {
   });
 }
 
+function traverseManagementHistory(direction) {
+  return act(async () => {
+    const moved = new Promise(resolve => window.addEventListener("popstate", resolve, { once: true }));
+    window.history[direction]();
+    await moved;
+  });
+}
+
 for (const firstRead of ["success", "failure"]) {
   test(`class history after selecting the default status restores the filter on ${firstRead}`, { timeout: 15000 }, async t => {
     const active = "수강", ready = "개강 준비";
     const { page, settle, fail, retry, checkRows, checkUnknown } = await beginClassStatusTransition(t, {
       start: "종강", target: active, previousQuery: new URLSearchParams({ status: ready }).toString(),
-    });
-    const traverse = direction => act(async () => {
-      const moved = new Promise(resolve => window.addEventListener("popstate", resolve, { once: true }));
-      window.history[direction]();
-      await moved;
     });
     await act(async () => page.releaseNavigation());
     assert.equal(page.requests[2].args.p_filters.status, active);
@@ -504,7 +508,7 @@ for (const firstRead of ["success", "failure"]) {
     await act(async () => page.table.onRetryRead());
     assert.equal(page.requests[3].args.p_filters.status, active);
 
-    await traverse("back");
+    await traverseManagementHistory("back");
     assert.equal(new URLSearchParams(window.location.search).get("status"), ready);
     assert.equal(page.requests[4].args.p_filters.status, ready);
     if (firstRead === "failure") {
@@ -526,7 +530,7 @@ for (const firstRead of ["success", "failure"]) {
     assert.ok(!document.querySelector('[role="alert"]'));
 
     const next = page.requests.length;
-    await traverse("forward");
+    await traverseManagementHistory("forward");
     assert.equal(new URLSearchParams(window.location.search).has("status"), false);
     assert.equal(page.requests[next].args.p_filters.status, active);
     await settle(next, "synthetic-forward", active);
@@ -534,6 +538,139 @@ for (const firstRead of ["success", "failure"]) {
     assert.equal(document.getElementById("status-filter").textContent.trim(), active);
     checkRows(["synthetic-forward"]);
     assert.ok(!document.querySelector('[role="alert"]'));
+  });
+}
+
+async function beginClassStatusChangeWithSearch(t, search, previousQuery) {
+  let clock;
+  const transition = await beginClassStatusTransition(t, {
+    previousQuery,
+    async beforeSelect() {
+      clock = installManagementDebounceClock(t);
+      const input = document.querySelector('input[aria-label="수업 검색"]');
+      const props = input[Object.keys(input).find(key => key.startsWith("__reactProps"))];
+      await act(async () => props.onChange({ target: { value: search }, nativeEvent: {} }));
+      await act(async () => clock.advance(299));
+    },
+  });
+  return { ...transition, clock };
+}
+
+test("debounced class search during a status change allows subsequent status navigation", { timeout: 15000 }, async t => {
+  const search = "합성검색";
+  const previousQuery = new URLSearchParams({ status: "수강", q: search }).toString();
+  const { page, settle, clock, checkRows, checkUnknown } = await beginClassStatusChangeWithSearch(t, search, previousQuery);
+  assert.equal(new URLSearchParams(window.location.search).get("q"), null);
+  await act(async () => clock.advance(1));
+  const combined = new URLSearchParams(window.location.search);
+  assert.equal(combined.get("q"), search);
+  assert.equal(combined.get("status"), "종강");
+  assert.equal(document.getElementById("status-filter").textContent.trim(), "종강");
+  assert.equal(page.requests.length, 2);
+  checkUnknown();
+  await act(async () => page.releaseNavigation());
+  assert.equal(page.requests[2].args.p_filters.status, "종강");
+  assert.equal(page.requests[2].args.p_filters.search, search);
+  await settle(2, "synthetic-closed-match", "종강");
+  checkRows(["synthetic-closed-match"]);
+
+  await traverseManagementHistory("back");
+  assert.equal(new URLSearchParams(window.location.search).get("status"), "수강");
+  assert.equal(page.requests[3].args.p_filters.status, "수강");
+  assert.equal(page.requests[3].args.p_filters.search, search);
+  await settle(3, "synthetic-active-match", "수강");
+  assert.equal(document.getElementById("status-filter").textContent.trim(), "수강");
+  checkRows(["synthetic-active-match"]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+});
+
+test("a pending class search changes only q on a newer external URL", async t => {
+  const search = "합성검색";
+  const external = { status: "수강", grade: "G", keep: "1" };
+  const { page, settle, clock, checkRows } = await beginClassStatusChangeWithSearch(t, search);
+  await act(async () => page.navigate("?" + new URLSearchParams(external).toString()));
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), external);
+  await act(async () => clock.advance(1));
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), { ...external, q: search });
+  assert.equal(page.requests.length, 2);
+  await act(async () => page.releaseNavigation());
+  const filters = page.requests[2].args.p_filters;
+  assert.deepEqual([filters.status, filters.grade, filters.search], [external.status, external.grade, search]);
+  await settle(2, "synthetic-active-grade-match", external.status);
+  assert.equal(document.getElementById("status-filter").textContent.trim(), external.status);
+  checkRows(["synthetic-active-grade-match"]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+});
+
+test("a class search already written to the URL yields to a newer external search", async t => {
+  const typed = "입력검색", external = { status: "수강", q: "외부검색" };
+  const { page, settle, clock, checkRows } = await beginClassStatusChangeWithSearch(t, typed);
+  await act(async () => clock.advance(1));
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), { status: "종강", q: typed });
+  assert.equal(page.requests.length, 2);
+  const replace = t.mock.method(window.history, "replaceState");
+  await act(async () => page.navigate("?" + new URLSearchParams(external).toString()));
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), external);
+  await act(async () => page.releaseNavigation());
+  await act(async () => clock.advance(300));
+  const writtenSearches = replace.mock.calls.map(call =>
+    new URL(call.arguments[2], window.location.href).searchParams.get("q")
+  );
+  assert.ok(!writtenSearches.includes(typed), "a completed search must not be written again after external navigation");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), external);
+  assert.deepEqual(page.requests.slice(2).map(request => {
+    const { status, search } = request.args.p_filters;
+    return [status, search];
+  }), [[external.status, external.q]]);
+  await settle(2, external.q, external.status);
+  assert.equal(document.querySelector('input[aria-label="수업 검색"]').value, external.q);
+  assert.equal(document.getElementById("status-filter").textContent.trim(), external.status);
+  checkRows([external.q]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+});
+
+test("history can supersede a local class status before the URL subscriber receives it", { timeout: 15000 }, async t => {
+  const { page, settle, checkRows, checkUnknown } = await beginClassStatusTransition(t, {
+    previousQuery: new URLSearchParams({ status: "수강" }).toString(),
+  });
+  await settle(1, "old-ready-response", "개강 준비");
+  assert.equal(document.getElementById("status-filter").textContent.trim(), "종강");
+  checkUnknown();
+  await traverseManagementHistory("back");
+  assert.equal(new URLSearchParams(window.location.search).get("status"), "수강");
+  assert.equal(page.requests.length, 2, "the held subscriber has not requested either navigation yet");
+  await act(async () => page.releaseNavigation());
+  assert.equal(page.requests.length, 3);
+  assert.equal(page.requests[2].args.p_filters.status, "수강");
+  await settle(2, "synthetic-external-active", "수강");
+  assert.equal(document.getElementById("status-filter").textContent.trim(), "수강");
+  checkRows(["synthetic-external-active"]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+});
+
+for (const navigation of ["back", "replace"]) {
+  test(`${navigation} restores the identical subscribed class URL after an unobserved status selection`, { timeout: 15000 }, async t => {
+    const ready = "개강 준비";
+    const initialQuery = new URLSearchParams({ status: ready }).toString();
+    const { page, settle, checkRows, checkUnknown } = await beginClassStatusTransition(t, { previousQuery: initialQuery });
+    await settle(1, "latest-ready", ready);
+    checkUnknown();
+    if (navigation === "back") {
+      await traverseManagementHistory("back");
+    } else {
+      await act(async () => page.navigate(`?${initialQuery}`));
+    }
+    assert.equal(window.location.search, `?${initialQuery}`);
+    await act(async () => page.releaseNavigation());
+    assert.deepEqual(page.requests.map(request => request.args.p_filters.status), [ready, ready]);
+    assert.equal(document.getElementById("status-filter").textContent.trim(), ready);
+    checkRows(["latest-ready"]);
+    assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+    assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
   });
 }
 
