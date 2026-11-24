@@ -2170,6 +2170,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const catalogReady = catalogLoadedGeneration === catalogGeneration
   const [formCatalogReady, setFormCatalogReady] = useState(false)
   const formCatalogGeneration = useRef(-1)
+  const [offerListReservationRetry, setOfferListReservationRetry] = useState(false)
+  const [contextAttempt, setContextAttempt] = useState(0)
   const [contextState, setContextState] = useState<{ scope: string; context?: MakeupReservationContext; error?: string }>({ scope: "" })
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
@@ -2242,7 +2244,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       .map(request => JSON.stringify([request.id, request.updatedAt, request.status])))].sort()
     return { slots: uniqueSlots, eventRequestIds, requestIds, requestGenerations, invalidTargets }
   }, [pageState.rows, selectedDetailRequest, editingRequest, approvalRequest, requestDialogOpen, input, catalogData.academicEvents])
-  const contextScope = JSON.stringify([actorScope, catalogGeneration, contextRequest])
+  const contextScope = JSON.stringify([actorScope, catalogGeneration, contextRequest, contextAttempt])
+  const contextError = contextState.scope === contextScope ? contextState.error : undefined
   const matchingContext = contextState.scope === contextScope ? contextState.context : undefined
   const data: MakeupRequestWorkspaceData = useMemo(() => ({ ...catalogData, requests: pageState.rows, reservationContext: matchingContext, collisionContextReady: catalogReady && Boolean(matchingContext) }), [catalogData, pageState.rows, matchingContext, catalogReady])
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
@@ -2283,6 +2286,10 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     return () => { lifetime.current = false; createAbort.abort(); controller.dispose(); schedulePlanLoadCacheRef.current?.reset() }
   }, [role])
   useEffect(() => {
+    if (requestDialogOpen || contextError || pageState.error) setOfferListReservationRetry(false)
+  }, [requestDialogOpen, contextError, pageState.error])
+  useEffect(() => {
+    setOfferListReservationRetry(false)
     if (pageSize.ready) void controllerRef.current?.load({ scope: JSON.stringify({ actorScope, filters: navigation.filters }), page: navigation.page, pageSize: pageSize.pageSize })
   }, [actorScope, navigation, pageSize.ready, pageSize.pageSize])
   useEffect(() => {
@@ -2579,10 +2586,11 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const closeRequestDialog = useCallback(() => {
     if (savingRef.current) return
     requestLocalAction(() => {
+      setOfferListReservationRetry(requestHasMakeupSlots && Boolean(contextError))
       setRequestDialogOpen(false)
       resetForm()
     })
-  }, [requestLocalAction, resetForm])
+  }, [contextError, requestHasMakeupSlots, requestLocalAction, resetForm])
 
   const handleSubmit = useCallback(async () => {
     if (!canProcessRequest) return
@@ -2844,6 +2852,26 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setRequestDialogOpen(true)
   }, [canProcessRequest, closeDetailRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
 
+  const showListReservationRetry = offerListReservationRetry && !requestDialogOpen && !loading && !pageState.error && data.collisionContextReady
+  const reservationFeedback = role !== "teacher" && (
+    contextError || showListReservationRetry ? (
+      <div role={contextError ? "alert" : "status"} className={cn("flex flex-wrap items-center gap-2 text-sm", contextError ? "text-destructive" : "text-muted-foreground")}>
+        <span>{contextError || "현재 목록의 예약 정보를 다시 확인할 수 있습니다."}</span>
+        <Button type="button" variant="outline" onClick={() => {
+          if (requestDialogOpen) setContextAttempt((attempt) => attempt + 1)
+          else {
+            setOfferListReservationRetry(false)
+            setCatalogGeneration((generation) => generation + 1)
+          }
+        }}>
+          예약 다시 확인
+        </Button>
+      </div>
+    ) : !data.collisionContextReady ? (
+      <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div>
+    ) : null
+  )
+
   return (
     <WorkspaceTabs ref={workspaceRef} value={view} onValueChange={(value) => setView(value as MakeupRequestView)} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
       <div className="grid min-w-0 gap-2">
@@ -2864,7 +2892,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
 
       <WorkspaceTabsPanel className="flex flex-col gap-4">
       {message ? notificationWarning ? <Alert variant="destructive"><AlertDescription>{message} {notificationWarning}</AlertDescription></Alert> : <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
-      {role !== "teacher" && (contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null)}
+      {!requestDialogOpen && reservationFeedback}
       {error ? (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           <span>{error}</span>
@@ -2900,6 +2928,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
             }}
             onCloseButtonClick={closeRequestDialog}
             footer={<>
+              {reservationFeedback}
               {dialogError || error ? <div id="makeup-submit-feedback" role="alert" tabIndex={0} className="max-h-20 overflow-y-auto break-words text-sm text-destructive">{dialogError || error}</div> : null}
               <div className="flex flex-wrap justify-end gap-2" aria-busy={saving}>
                 <Button type="button" variant="outline" className="h-11 sm:h-9" onClick={closeRequestDialog} disabled={saving}>
