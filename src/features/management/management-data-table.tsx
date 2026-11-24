@@ -90,7 +90,7 @@ import { MANAGEMENT_NUMBERED_SORT_COLUMNS, type ManagementNumberedSort } from ".
 import { MANAGEMENT_TABLE_STORAGE_VERSION, managementTableStorageKey, resetManagementPageForFilters } from "./management-numbered-state";
 import { STUDENT_ENROLLMENT_STATUS_OPTIONS, DEFAULT_STUDENT_STATUS_FILTER, normalizeStudentStatusFilter } from "./student-enrollment-status.js";
 import { StudentEnrollmentStatusCell, type LoadStudentEnrollments } from "./student-enrollment-status-cell";
-import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
+import type { ClassListStatus, ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
 import {
   getManagementListViewportHeight,
   type ManagementListPageSize,
@@ -158,6 +158,7 @@ const CLASS_FILTERS = [
 
 type ClassFilterColumnId = (typeof CLASS_FILTERS)[number]["id"];
 
+const EMPTY_ROWS: ManagementRow[] = [];
 const DEFAULT_CLASS_STATUS_FILTER = "수강";
 const CLASS_STATUS_FILTER_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 
@@ -1004,6 +1005,7 @@ type ManagementDataTableProps = {
   totalCount: number | null;
   sort: ManagementNumberedSort;
   displayedScope: string;
+  classListStatus?: ClassListStatus;
   onPageChange: (page: number) => void;
   onSortChange: (sort: ManagementNumberedSort) => void;
   filterOptions?: Record<string, unknown>;
@@ -1025,16 +1027,17 @@ export function ManagementDataTable(props: ManagementDataTableProps) {
 
 const ManagementDataTableContent = memo(function ManagementDataTableContent({
   kind,
-  rows,
+  rows: acceptedRows,
   stats,
-  loading,
+  loading: readLoading,
   readError = null,
   readErrorSource = null,
   onRetryRead,
-  page,
-  totalCount,
+  page: acceptedPage,
+  totalCount: acceptedTotal,
   sort,
   displayedScope,
+  classListStatus,
   onPageChange,
   onSortChange,
   filterOptions = {},
@@ -1071,6 +1074,15 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   const storageKey = managementTableStorageKey(kind);
   const sorting = useMemo(() => [...sort], [sort]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const selectedClassStatus = kind === "classes"
+    ? String(columnFilters.find((filter) => filter.id === "status")?.value || DEFAULT_CLASS_STATUS_FILTER)
+    : undefined;
+  // The status control can change before the URL subscriber starts its read.
+  const hideClassResult = classListStatus && classListStatus.accepted !== selectedClassStatus;
+  const rows = hideClassResult ? EMPTY_ROWS : acceptedRows;
+  const totalCount = hideClassResult ? null : acceptedTotal;
+  const page = hideClassResult ? 1 : acceptedPage;
+  const loading = readLoading || Boolean(classListStatus && classListStatus.requested !== selectedClassStatus);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>([]);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
@@ -1669,7 +1681,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         value: "",
       }));
   const activeClassFilters = kind === "classes" ? classFilterValues.filter((filter) => filter.value) : [];
-  const normalizedClassStatusFilter = kind === "classes" ? statusFilter || DEFAULT_CLASS_STATUS_FILTER : statusFilter;
+  const normalizedClassStatusFilter = selectedClassStatus ?? statusFilter;
   const hasNonDefaultStatusFilter = kind === "classes" && normalizedClassStatusFilter !== DEFAULT_CLASS_STATUS_FILTER;
   const normalizedStudentStatusFilter = normalizeStudentStatusFilter(statusFilter);
   const hasActiveStudentFilters = kind === "students" && Boolean(normalizedStudentStatusFilter !== DEFAULT_STUDENT_STATUS_FILTER || studentSchoolCategoryFilter || studentSchoolFilter || studentGradeFilter);
