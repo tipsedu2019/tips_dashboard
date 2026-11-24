@@ -502,7 +502,7 @@ function normalizeScalar(value: unknown): string {
 function getClassListQueryState(params: URLSearchParams): ClassListQueryState {
   return {
     q: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.q)),
-    status: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.status)),
+    status: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.status)) || DEFAULT_CLASS_STATUS_FILTER,
     subject: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.subject)),
     grade: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.grade)),
     teacher: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.teacher)),
