@@ -1587,6 +1587,76 @@ test("preset-owned probes stage their real entrypoints and full import closure b
   assert.equal(result.status, "passed"); assert.deepEqual(launched, probes);
 });
 
+test("close proof phase probe stages its exact SQL fixture and runtime closure", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t);
+  await configureEmptyReviewedRunnerRepo(root);
+  const probe = "tests/probe-timetable-close-proof-phases.mjs";
+  const paths = [probe, "scripts/fixtures/timetable-close-gateway-phases.sql",
+    "tests/helpers/ai-personal-probe-runtime.mjs", "scripts/lib/ai-agent-probe-runtime.mjs"];
+  const original = new Map();
+  for (const path of paths) {
+    const bytes = await readFile(new URL("../" + path, import.meta.url));
+    original.set(path, bytes);
+    await mkdir(dirname(join(root, path)), { recursive: true });
+    await writeFile(join(root, path), bytes);
+  }
+  let launched = 0;
+  const result = await runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
+    root, argv: ["--execute", "--authorized", "--request-id", "close-proof-phase-staging", "--probe", probe],
+    allocatePort: (() => { let port = 55700; return () => ++port; })(),
+    executeProcess: async (invocation) => {
+      if (invocation.args[0] === "init") {
+        for (const path of paths) await writeFile(join(root, path), "-- changed after captured input\n");
+      }
+      if (invocation.command === process.execPath) {
+        launched++;
+        assert.ok(invocation.args[0].endsWith("/" + probe));
+        for (const [path, bytes] of original) assert.deepEqual(await readFile(join(invocation.cwd, path)), bytes, path);
+      }
+      if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:55702/postgres" }), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(result.status, "passed");
+  assert.equal(launched, 1);
+});
+
+test("close proof phase guard fails on snapshot drift or an uncontrolled backend without skipping", async () => {
+  const { verifyCloseProofPhases } = await import("./probe-timetable-close-proof-phases.mjs");
+  const before = { readCommitted: true, otherClientOrWriterAbsent: true, status: "종강", receiptStatus: "종강",
+    savedStatus: "종강", closedInTransaction: true, rosterAndWaitlistEmpty: true, receipts: 2,
+    proofExists: true, baselineExists: true, baselineHashMatches: true, storedProofUnchanged: true,
+    snapshotStable: true, snapshotMatchesProof: true, reads: 2, validations: 2, assertions: 2 };
+  for (const [field, message] of [["snapshotMatchesProof", /gateway token snapshot already drifted/u],
+    ["otherClientOrWriterAbsent", /uncontrolled backend observed/u]]) {
+    const commands = [], writes = [];
+    let sessions = 0, closed = 0;
+    const runtime = {
+      async query(sql) {
+        commands.push(sql);
+        if (sql.includes("'paused'")) return JSON.stringify({ paused: 1, allInactive: true });
+        if (sql.startsWith("select not exists(") || sql.startsWith("select to_regnamespace(")) return "t";
+        return "";
+      },
+      session() {
+        sessions++;
+        return { write(sql) { writes.push(sql); }, end(sql) { writes.push(sql); },
+          async line(pattern) { return pattern.exec("BEFORE:" + JSON.stringify({ ...before, [field]: false })); },
+          complete: Promise.resolve({ code: 0, signal: null }) };
+      },
+      async closeSessions() { closed++; },
+      requireComplete() { assert.fail("failed guard must not reach successful completion"); },
+    };
+    await assert.rejects(verifyCloseProofPhases(runtime), message);
+    assert.equal(sessions, 1); assert.equal(closed, 1);
+    assert.ok(writes.includes("rollback;\n"));
+    assert.ok(!writes.some(sql => sql.includes("set constraints all immediate")));
+    assert.ok(commands.some(sql => sql.includes("active:=j.active")), "restore jobs after guard failure");
+    assert.ok(commands.some(sql => sql.startsWith("drop schema ")), "discard fixture after guard failure");
+  }
+});
+
 test("public memo probe imports its staged real consumers before the owned SQL boundary", async (t) => {
   const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
   const { AI_SOURCE_CLOSURE } = await import("../scripts/lib/ai-producer-receipt.mjs");

@@ -23,6 +23,8 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'scripts/isolated-db-loopback-relay.mjs',
  'scripts/generate-ai-agent-probe-runtime.mjs',
  'scripts/lib/ai-agent-probe-runtime.mjs',
+ 'scripts/fixtures/timetable-close-gateway-phases.sql',
+ 'tests/probe-timetable-close-proof-phases.mjs',
  AI_CREDENTIAL_PREFIX.test,
  'src/features/academic/timetable-conflicts.ts',
  'src/features/academic/timetable-placement-adapter.ts',
@@ -545,9 +547,9 @@ export const AI_PROBES = Object.freeze([
 
 // The SQL and probe lists form one exact approved run. Mixing the main SQL
 // inventory with PR probes (or the inverse) is not an approved full run.
-export const PR_AI_PROBES = Object.freeze(AI_PROBES.flatMap(path =>
+export const PR_AI_PROBES = Object.freeze(['tests/probe-timetable-close-proof-phases.mjs', ...AI_PROBES.flatMap(path =>
   path === "tests/probe-makeup-approval-collision-dto.mjs"
-    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]));
+    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path])]);
 export function approvedAiProbesForSqlInventory(tests){
  if(!Array.isArray(tests))return null;
  for(const [sql,probes] of [[AI_SQL_TESTS,AI_PROBES],[PR_AI_SQL_TESTS,PR_AI_PROBES]]){

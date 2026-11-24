@@ -77,6 +77,7 @@ const SCHEMA_FINGERPRINT_SQL = `select md5(coalesce(jsonb_agg(to_jsonb(objects) 
 // Only this audited consumer and its timeout helper are needed by the DTO probe.
 // Do not copy the app, dependency tree, or environment into the isolated DB.
 const PROBE_DEPENDENCIES = Object.freeze({
+  "tests/probe-timetable-close-proof-phases.mjs": ["scripts/fixtures/timetable-close-gateway-phases.sql", "tests/helpers/ai-personal-probe-runtime.mjs", "scripts/lib/ai-agent-probe-runtime.mjs"],
   "tests/probe-makeup-legacy-adoption-concurrency.mjs": ["supabase/tests/makeup_legacy_pair_adoption_test.sql"],
   "tests/probe-makeup-subject-director-concurrency.mjs": ["supabase/tests/makeup_subject_director_authority_test.sql"],
   "tests/probe-teacher-own-request-concurrency.mjs": ["supabase/tests/teacher_own_request_workflow_test.sql", "supabase/migrations/20261027005334_teacher_own_request_workflow.sql"],
