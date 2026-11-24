@@ -674,6 +674,47 @@ for (const navigation of ["back", "replace"]) {
   });
 }
 
+for (const field of ["status", "q"]) {
+  test(`a class ${field} edit matching a held external URL releases on return to the subscribed URL`, async t => {
+    const ready = "개강 준비", closed = "종강", search = "합성검색";
+    const original = new URLSearchParams({ status: ready });
+    const external = new URLSearchParams(original);
+    external.set(field, field === "status" ? closed : search);
+    const page = await mountManagementPage(t, {
+      kind: "classes", initialQuery: original.toString(), holdNavigation: true, renderTable: true,
+    });
+    await act(async () => page.finish(0, 1, [{ id: "ready-row", name: "Ready row", status: ready, storedStatus: ready }]));
+    await act(async () => page.navigate(`?${external}#detail-anchor`));
+    const liveHref = window.location.href;
+    const status = document.getElementById("status-filter");
+    const input = document.querySelector('input[aria-label="수업 검색"]');
+    if (field === "status") {
+      await act(async () => status.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+      const option = [...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === closed);
+      await act(async () => option.click());
+      assert.equal(status.textContent.trim(), closed);
+    } else {
+      const clock = installManagementDebounceClock(t);
+      const props = input[Object.keys(input).find(key => key.startsWith("__reactProps"))];
+      await act(async () => props.onChange({ target: { value: search }, nativeEvent: {} }));
+      await act(async () => clock.advance(300));
+      assert.equal(input.value, search);
+    }
+    assert.equal(window.location.href, liveHref, "matching the live URL preserves its query and hash");
+    await act(async () => page.navigate(`?${original}`));
+    await act(async () => page.releaseNavigation());
+    assert.equal(window.location.search, `?${original}`);
+    assert.deepEqual(page.requests.map(request => [request.args.p_filters.status, request.args.p_filters.search]), [[ready, ""]]);
+    assert.equal(status.textContent.trim(), ready);
+    assert.equal(input.value, "");
+    for (const area of ["tbody", '[aria-label="수업 모바일 목록"]']) {
+      assert.deepEqual([...document.querySelector(area).querySelectorAll("[data-class-detail-trigger]")].map(el => el.textContent), ["Ready row"]);
+    }
+    assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+    assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+  });
+}
+
 test("actual manual size handler never requests old page with the new size during transition URL reset", async (t) => {
   const page = await mountManagementPage(t, { holdNavigation: true });
   await act(async () => page.finish(0));
