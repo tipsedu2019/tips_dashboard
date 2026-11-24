@@ -273,8 +273,9 @@ for (const transition of [
   });
 }
 
-async function mountManagementPage(t, { kind = "students", preference = 10, holdNavigation = false, mutationError = null, renderTable = false, initialQuery = "page=11", columnPreferences = null } = {}) {
-  const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?${initialQuery}` });
+async function mountManagementPage(t, { kind = "students", preference = 10, holdNavigation = false, mutationError = null, renderTable = false, initialQuery = "page=11", previousQuery, columnPreferences = null } = {}) {
+  const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?${previousQuery ?? initialQuery}` });
+  if (previousQuery !== undefined) dom.window.history.pushState(null, "", `?${initialQuery}`);
   globalThis.window = dom.window; globalThis.document = dom.window.document;
   for (const key of ["HTMLElement", "Element", "NodeFilter", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
@@ -329,7 +330,12 @@ async function mountManagementPage(t, { kind = "students", preference = 10, hold
   });
   function Probe() {
     const [search, updateSearch] = useState(window.location.search);
-    useEffect(() => { setSearch = updateSearch; }, []);
+    useEffect(() => {
+      setSearch = updateSearch;
+      const onPopState = () => startTransition(() => updateSearch(dom.window.location.search));
+      dom.window.addEventListener("popstate", onPopState);
+      return () => dom.window.removeEventListener("popstate", onPopState);
+    }, []);
     return createElement(Suspense, { fallback: null }, createElement(navigation.Provider, { value: search },
       createElement(NavigationDelay, { search }), createElement(ManagementPage, { kind })));
   }
@@ -345,11 +351,11 @@ async function mountManagementPage(t, { kind = "students", preference = 10, hold
     navigate: (search) => window.history.replaceState(null, "", `/admin/${kind}${search}`) };
 }
 
-async function beginClassStatusTransition(t) {
-  const start = "개강 준비";
+async function beginClassStatusTransition(t, { start = "개강 준비", target = "종강", previousQuery } = {}) {
   const page = await mountManagementPage(t, {
     kind: "classes",
     initialQuery: new URLSearchParams({ status: start }).toString(),
+    previousQuery,
     holdNavigation: true,
     renderTable: true,
   });
@@ -360,12 +366,12 @@ async function beginClassStatusTransition(t) {
     page.finish(index, 1, [{ id: name, name, status, storedStatus: status }]);
   });
   const fail = (index, message) => act(async () => page.requests[index].reject(new Error(message)));
-  const retry = async () => {
+  const retry = async (expectedStatus = target) => {
     const previous = page.requests.length;
     await act(async () => document.querySelector('[role="alert"] button').click());
     assert.equal(page.requests.length, previous + 1);
     assert.equal(page.requests[previous].name, "list_management_numbered_page_v1");
-    assert.equal(page.requests[previous].args.p_filters.status, "종강");
+    assert.equal(page.requests[previous].args.p_filters.status, expectedStatus);
     return previous;
   };
   function checkRows(names) {
@@ -394,11 +400,11 @@ async function beginClassStatusTransition(t) {
   assert.equal(page.requests[1].args.p_filters.status, start);
   const trigger = document.getElementById("status-filter");
   await act(async () => trigger.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
-  const closed = [...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === "종강");
-  assert.ok(closed);
-  await act(async () => closed.click());
-  assert.equal(trigger.textContent.trim(), "종강");
-  assert.equal(new URLSearchParams(window.location.search).get("status"), "종강");
+  const option = [...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === target);
+  assert.ok(option);
+  await act(async () => option.click());
+  assert.equal(trigger.textContent.trim(), target);
+  assert.equal(new URLSearchParams(window.location.search).get("status"), target === "수강" ? null : target);
   assert.equal(page.requests.length, 2, "URL subscriber has not started the new request yet");
   return { page, settle, fail, retry, checkUnknown, checkRows };
 }
@@ -476,6 +482,57 @@ for (const outcome of ["success", "failure"]) {
     }
     checkRows(["synthetic-closed"]);
     assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+    assert.ok(!document.querySelector('[role="alert"]'));
+  });
+}
+
+for (const firstRead of ["success", "failure"]) {
+  test(`class history after selecting the default status restores the filter on ${firstRead}`, { timeout: 15000 }, async t => {
+    const active = "수강", ready = "개강 준비";
+    const { page, settle, fail, retry, checkRows, checkUnknown } = await beginClassStatusTransition(t, {
+      start: "종강", target: active, previousQuery: new URLSearchParams({ status: ready }).toString(),
+    });
+    const traverse = direction => act(async () => {
+      const moved = new Promise(resolve => window.addEventListener("popstate", resolve, { once: true }));
+      window.history[direction]();
+      await moved;
+    });
+    await act(async () => page.releaseNavigation());
+    assert.equal(page.requests[2].args.p_filters.status, active);
+    await settle(2, "synthetic-active", active);
+    checkRows(["synthetic-active"]);
+    await act(async () => page.table.onRetryRead());
+    assert.equal(page.requests[3].args.p_filters.status, active);
+
+    await traverse("back");
+    assert.equal(new URLSearchParams(window.location.search).get("status"), ready);
+    assert.equal(page.requests[4].args.p_filters.status, ready);
+    if (firstRead === "failure") {
+      await fail(4, "restored class read failed");
+      await settle(3, "obsolete-active", active);
+      assert.equal(document.getElementById("status-filter").textContent.trim(), ready);
+      checkUnknown();
+      assert.match(document.querySelector('[role="alert"]').textContent, /restored class read failed/);
+      const next = await retry(ready);
+      await settle(next, "synthetic-restored", ready);
+    } else {
+      await settle(4, "synthetic-restored", ready);
+      await fail(3, "obsolete active read failed");
+    }
+    assert.equal(document.getElementById("status-filter").textContent.trim(), ready);
+    checkRows(["synthetic-restored"]);
+    assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+    assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+    assert.ok(!document.querySelector('[role="alert"]'));
+
+    const next = page.requests.length;
+    await traverse("forward");
+    assert.equal(new URLSearchParams(window.location.search).has("status"), false);
+    assert.equal(page.requests[next].args.p_filters.status, active);
+    await settle(next, "synthetic-forward", active);
+    await settle(1, "obsolete-closed", "종강");
+    assert.equal(document.getElementById("status-filter").textContent.trim(), active);
+    checkRows(["synthetic-forward"]);
     assert.ok(!document.querySelector('[role="alert"]'));
   });
 }
