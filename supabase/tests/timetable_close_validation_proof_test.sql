@@ -1529,10 +1529,21 @@ set local role authenticated;
 select set_config('test.proof_gateway_result',public.update_class_operational_v1(
  'fe101234-0000-4000-8000-000000000001',current_setting('test.proof_gateway_patch')::jsonb,
  'fe101234-0000-4000-8000-000000000801',null)::text,true);
+-- One silent boundary observation; no private proof read or role change.
+-- Boundary snapshots do not establish the token compared inside validation.
+do $gateway_phase$
+begin
+ perform set_config('test.proof_gateway_pre_finalizer',(select jsonb_build_object(
+  'snapshotHash',encode(sha256(convert_to(pg_current_snapshot()::text,'UTF8')),'hex'),
+  'reads',coalesce(sum(calls) filter(where funcid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),0),
+  'validations',coalesce(sum(calls) filter(where funcid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),0),
+  'assertions',coalesce(sum(calls) filter(where funcid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure),0))
+  from pg_stat_xact_user_functions)::text,true);
+end $gateway_phase$;
 set constraints all immediate;
 reset role;
 do $gateway$
-declare evidence jsonb;answer jsonb:=current_setting('test.proof_gateway_result')::jsonb;
+declare evidence jsonb;phases jsonb;before_finalizer jsonb;answer jsonb:=current_setting('test.proof_gateway_result')::jsonb;
 begin
  select jsonb_build_object('reads',pg_temp.proof_calls()-b.reader_calls,
   'validations',(select coalesce(sum(calls),0)-b.validator_calls from pg_stat_xact_user_functions where funcid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),
@@ -1541,7 +1552,18 @@ begin
   'proofs',(select count(*) from dashboard_private.timetable_validation_reuse_proofs where transaction_id=txid_current()))
  into evidence from pg_temp.proof_gateway_before b;
  if evidence is distinct from '{"reads":2,"validations":3,"assertions":2,"status":"종강","receiptStatus":"종강","proofs":0}'::jsonb
- then raise exception 'direct authenticated gateway boundary mismatch: %',evidence;end if;
+ then
+  before_finalizer:=current_setting('test.proof_gateway_pre_finalizer')::jsonb;
+  select jsonb_build_object('boundarySnapshotChanged',(before_finalizer->>'snapshotHash') is distinct from encode(sha256(convert_to(pg_current_snapshot()::text,'UTF8')),'hex'),
+   'gatewayReads',(before_finalizer->>'reads')::bigint-b.reader_calls,
+   'finalizerReads',(evidence->>'reads')::bigint-((before_finalizer->>'reads')::bigint-b.reader_calls),
+   'gatewayValidations',(before_finalizer->>'validations')::bigint-b.validator_calls,
+   'finalizerValidations',(evidence->>'validations')::bigint-((before_finalizer->>'validations')::bigint-b.validator_calls),
+   'gatewayAssertions',(before_finalizer->>'assertions')::bigint-b.assertion_calls,
+   'finalizerAssertions',(evidence->>'assertions')::bigint-((before_finalizer->>'assertions')::bigint-b.assertion_calls))
+  into phases from pg_temp.proof_gateway_before b;
+  raise exception using message=format('direct authenticated gateway boundary mismatch: %s',evidence),detail=phases::text;
+ end if;
  perform pg_temp.proof_check('direct authenticated gateway retains assertions and deferred validation',true,evidence);
 end $gateway$;
 
