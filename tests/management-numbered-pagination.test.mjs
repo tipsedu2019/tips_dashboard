@@ -273,8 +273,9 @@ for (const transition of [
   });
 }
 
-async function mountManagementPage(t, { kind = "students", preference = 10, holdNavigation = false, mutationError = null, renderTable = false, initialQuery = "page=11", columnPreferences = null } = {}) {
-  const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?${initialQuery}` });
+async function mountManagementPage(t, { kind = "students", preference = 10, holdNavigation = false, mutationError = null, renderTable = false, initialQuery = "page=11", previousQuery, columnPreferences = null } = {}) {
+  const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?${previousQuery ?? initialQuery}` });
+  if (previousQuery !== undefined) dom.window.history.pushState(null, "", `?${initialQuery}`);
   globalThis.window = dom.window; globalThis.document = dom.window.document;
   for (const key of ["HTMLElement", "Element", "NodeFilter", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
@@ -329,7 +330,12 @@ async function mountManagementPage(t, { kind = "students", preference = 10, hold
   });
   function Probe() {
     const [search, updateSearch] = useState(window.location.search);
-    useEffect(() => { setSearch = updateSearch; }, []);
+    useEffect(() => {
+      setSearch = updateSearch;
+      const onPopState = () => startTransition(() => updateSearch(dom.window.location.search));
+      dom.window.addEventListener("popstate", onPopState);
+      return () => dom.window.removeEventListener("popstate", onPopState);
+    }, []);
     return createElement(Suspense, { fallback: null }, createElement(navigation.Provider, { value: search },
       createElement(NavigationDelay, { search }), createElement(ManagementPage, { kind })));
   }
@@ -343,6 +349,370 @@ async function mountManagementPage(t, { kind = "students", preference = 10, hold
   return { requests, finish, mutations, get table() { return table; },
     releaseNavigation() { navigationHeld = false; navigationGate.resolve(); },
     navigate: (search) => window.history.replaceState(null, "", `/admin/${kind}${search}`) };
+}
+
+async function beginClassStatusTransition(t, { start = "개강 준비", target = "종강", previousQuery, beforeSelect } = {}) {
+  const page = await mountManagementPage(t, {
+    kind: "classes",
+    initialQuery: new URLSearchParams({ status: start }).toString(),
+    previousQuery,
+    holdNavigation: true,
+    renderTable: true,
+  });
+  // React DOM initialized before JSDOM and uses its legacy events on retry focus.
+  window.HTMLElement.prototype.attachEvent = () => {};
+  window.HTMLElement.prototype.detachEvent = () => {};
+  const settle = (index, name, status) => act(async () => {
+    page.finish(index, 1, [{ id: name, name, status, storedStatus: status }]);
+  });
+  const fail = (index, message) => act(async () => page.requests[index].reject(new Error(message)));
+  const retry = async (expectedStatus = target) => {
+    const previous = page.requests.length;
+    await act(async () => document.querySelector('[role="alert"] button').click());
+    assert.equal(page.requests.length, previous + 1);
+    assert.equal(page.requests[previous].name, "list_management_numbered_page_v1");
+    assert.equal(page.requests[previous].args.p_filters.status, expectedStatus);
+    return previous;
+  };
+  function checkRows(names) {
+    for (const area of ["tbody", '[aria-label="수업 모바일 목록"]']) {
+      const root = document.querySelector(area);
+      assert.ok(root, area);
+      const titles = [...root.querySelectorAll("[data-class-detail-trigger]")].map(button => button.textContent.trim());
+      assert.deepEqual(titles, names, area);
+    }
+  }
+  function checkUnknown() {
+    checkRows([]);
+    assert.match(document.querySelector("caption").textContent, /건수 확인 중/);
+    assert.doesNotMatch(document.body.textContent, /수업 (결과 )?없음|0건 ·|기존 목록은 유지됩니다/);
+    assert.ok([...document.querySelectorAll('p[aria-live="polite"]')].some(el => el.textContent === "건수 확인 중"));
+    const pager = document.querySelector('[aria-label="수업 목록 페이지 탐색"]');
+    assert.ok(!pager.querySelector('[aria-current="page"]'));
+    for (const label of ["첫 페이지", "이전 페이지", "다음 페이지", "마지막 페이지"]) {
+      assert.ok(pager.querySelector('button[aria-label="' + label + '"]').disabled, label);
+    }
+  }
+  assert.equal(page.requests[0].args.p_filters.status, start);
+  await settle(0, "synthetic-ready", start);
+  checkRows(["synthetic-ready"]);
+  await act(async () => { page.table.onRetryRead(); });
+  assert.equal(page.requests[1].args.p_filters.status, start);
+  await beforeSelect?.();
+  const trigger = document.getElementById("status-filter");
+  await act(async () => trigger.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+  const option = [...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === target);
+  assert.ok(option);
+  await act(async () => option.click());
+  assert.equal(trigger.textContent.trim(), target);
+  assert.equal(new URLSearchParams(window.location.search).get("status"), target === "수강" ? null : target);
+  assert.equal(page.requests.length, 2, "URL subscriber has not started the new request yet");
+  return { page, settle, fail, retry, checkUnknown, checkRows };
+}
+
+test("class status switch keeps counts unknown through late data, failure and failed retry", async t => {
+  const { page, settle, fail, retry, checkUnknown, checkRows } = await beginClassStatusTransition(t);
+  checkUnknown();
+  await settle(1, "synthetic-late-ready", "개강 준비");
+  checkUnknown();
+  await act(async () => page.releaseNavigation());
+  assert.equal(page.requests[2].args.p_filters.status, "종강");
+  checkUnknown();
+  await fail(2, "first closed read failed");
+  checkUnknown();
+  assert.match(document.querySelector('[role="alert"]').textContent, /first closed read failed/);
+  const second = await retry();
+  checkUnknown();
+  await fail(second, "closed retry failed");
+  checkUnknown();
+  assert.match(document.querySelector('[role="alert"]').textContent, /closed retry failed/);
+  const third = await retry();
+  await settle(third, "synthetic-closed", "종강");
+  checkRows(["synthetic-closed"]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.ok(!document.querySelector('[role="alert"]'));
+
+  await act(async () => { page.table.onRetryRead(); });
+  await fail(third + 1, "same closed refresh failed");
+  checkRows(["synthetic-closed"]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  const last = await retry();
+  const firstPageRows = Array.from({ length: 10 }, (_, i) => ({
+    id: `closed-${i}`, name: `Closed ${i}`, status: "종강", storedStatus: "종강",
+  }));
+  await act(async () => page.finish(last, 11, firstPageRows));
+  await act(async () => document.querySelector('button[aria-label="다음 페이지"]').click());
+  const next = last + 1;
+  assert.equal(page.requests[next].args.p_page, 2);
+  assert.equal(page.requests[next].args.p_filters.status, "종강");
+  checkRows(firstPageRows.map(row => row.name));
+  await act(async () => page.finish(next, 0));
+  assert.equal(page.requests[next + 1].args.p_page, 1, "a genuinely empty result returns to page one");
+  assert.equal(page.requests[next + 1].args.p_filters.status, "종강");
+  await act(async () => page.finish(next + 1, 0));
+  checkRows([]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 0개/);
+  assert.match(document.body.textContent, /0건 · 0–0번째/);
+  assert.match(document.querySelector("tbody").textContent, /수업 결과 없음/);
+  assert.ok(!document.querySelector('[role="alert"]'));
+});
+
+test("previous class read failing before the URL subscriber runs does not offer a stale retry", async t => {
+  const { page, settle, fail, checkRows, checkUnknown } = await beginClassStatusTransition(t);
+  await fail(1, "obsolete ready request failed before navigation");
+  assert.equal(page.requests.length, 2);
+  assert.ok(!document.querySelector('[role="alert"]'), "the selected status has not failed");
+  assert.ok(!document.querySelector('button[aria-label="수업 목록 다시 시도"]'));
+  checkUnknown();
+  await act(async () => page.releaseNavigation());
+  assert.equal(page.requests[2].args.p_filters.status, "종강");
+  await settle(2, "synthetic-closed", "종강");
+  checkRows(["synthetic-closed"]);
+});
+
+for (const outcome of ["success", "failure"]) {
+  test(`successful new class status survives an earlier request settling late with ${outcome}`, async t => {
+    const { page, settle, fail, checkRows } = await beginClassStatusTransition(t);
+    await act(async () => page.releaseNavigation());
+    assert.equal(page.requests[2].args.p_filters.status, "종강");
+    await settle(2, "synthetic-closed", "종강");
+    if (outcome === "success") {
+      await settle(1, "synthetic-late-ready", "개강 준비");
+    } else {
+      await fail(1, "obsolete ready request failed");
+    }
+    checkRows(["synthetic-closed"]);
+    assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+    assert.ok(!document.querySelector('[role="alert"]'));
+  });
+}
+
+function traverseManagementHistory(direction) {
+  return act(async () => {
+    const moved = new Promise(resolve => window.addEventListener("popstate", resolve, { once: true }));
+    window.history[direction]();
+    await moved;
+  });
+}
+
+for (const firstRead of ["success", "failure"]) {
+  test(`class history after selecting the default status restores the filter on ${firstRead}`, { timeout: 15000 }, async t => {
+    const active = "수강", ready = "개강 준비";
+    const { page, settle, fail, retry, checkRows, checkUnknown } = await beginClassStatusTransition(t, {
+      start: "종강", target: active, previousQuery: new URLSearchParams({ status: ready }).toString(),
+    });
+    await act(async () => page.releaseNavigation());
+    assert.equal(page.requests[2].args.p_filters.status, active);
+    await settle(2, "synthetic-active", active);
+    checkRows(["synthetic-active"]);
+    await act(async () => page.table.onRetryRead());
+    assert.equal(page.requests[3].args.p_filters.status, active);
+
+    await traverseManagementHistory("back");
+    assert.equal(new URLSearchParams(window.location.search).get("status"), ready);
+    assert.equal(page.requests[4].args.p_filters.status, ready);
+    if (firstRead === "failure") {
+      await fail(4, "restored class read failed");
+      await settle(3, "obsolete-active", active);
+      assert.equal(document.getElementById("status-filter").textContent.trim(), ready);
+      checkUnknown();
+      assert.match(document.querySelector('[role="alert"]').textContent, /restored class read failed/);
+      const next = await retry(ready);
+      await settle(next, "synthetic-restored", ready);
+    } else {
+      await settle(4, "synthetic-restored", ready);
+      await fail(3, "obsolete active read failed");
+    }
+    assert.equal(document.getElementById("status-filter").textContent.trim(), ready);
+    checkRows(["synthetic-restored"]);
+    assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+    assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+    assert.ok(!document.querySelector('[role="alert"]'));
+
+    const next = page.requests.length;
+    await traverseManagementHistory("forward");
+    assert.equal(new URLSearchParams(window.location.search).has("status"), false);
+    assert.equal(page.requests[next].args.p_filters.status, active);
+    await settle(next, "synthetic-forward", active);
+    await settle(1, "obsolete-closed", "종강");
+    assert.equal(document.getElementById("status-filter").textContent.trim(), active);
+    checkRows(["synthetic-forward"]);
+    assert.ok(!document.querySelector('[role="alert"]'));
+  });
+}
+
+async function beginClassStatusChangeWithSearch(t, search, previousQuery) {
+  let clock;
+  const transition = await beginClassStatusTransition(t, {
+    previousQuery,
+    async beforeSelect() {
+      clock = installManagementDebounceClock(t);
+      const input = document.querySelector('input[aria-label="수업 검색"]');
+      const props = input[Object.keys(input).find(key => key.startsWith("__reactProps"))];
+      await act(async () => props.onChange({ target: { value: search }, nativeEvent: {} }));
+      await act(async () => clock.advance(299));
+    },
+  });
+  return { ...transition, clock };
+}
+
+test("debounced class search during a status change allows subsequent status navigation", { timeout: 15000 }, async t => {
+  const search = "합성검색";
+  const previousQuery = new URLSearchParams({ status: "수강", q: search }).toString();
+  const { page, settle, clock, checkRows, checkUnknown } = await beginClassStatusChangeWithSearch(t, search, previousQuery);
+  assert.equal(new URLSearchParams(window.location.search).get("q"), null);
+  await act(async () => clock.advance(1));
+  const combined = new URLSearchParams(window.location.search);
+  assert.equal(combined.get("q"), search);
+  assert.equal(combined.get("status"), "종강");
+  assert.equal(document.getElementById("status-filter").textContent.trim(), "종강");
+  assert.equal(page.requests.length, 2);
+  checkUnknown();
+  await act(async () => page.releaseNavigation());
+  assert.equal(page.requests[2].args.p_filters.status, "종강");
+  assert.equal(page.requests[2].args.p_filters.search, search);
+  await settle(2, "synthetic-closed-match", "종강");
+  checkRows(["synthetic-closed-match"]);
+
+  await traverseManagementHistory("back");
+  assert.equal(new URLSearchParams(window.location.search).get("status"), "수강");
+  assert.equal(page.requests[3].args.p_filters.status, "수강");
+  assert.equal(page.requests[3].args.p_filters.search, search);
+  await settle(3, "synthetic-active-match", "수강");
+  assert.equal(document.getElementById("status-filter").textContent.trim(), "수강");
+  checkRows(["synthetic-active-match"]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+});
+
+test("a pending class search changes only q on a newer external URL", async t => {
+  const search = "합성검색";
+  const external = { status: "수강", grade: "G", keep: "1" };
+  const { page, settle, clock, checkRows } = await beginClassStatusChangeWithSearch(t, search);
+  await act(async () => page.navigate("?" + new URLSearchParams(external).toString()));
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), external);
+  await act(async () => clock.advance(1));
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), { ...external, q: search });
+  assert.equal(page.requests.length, 2);
+  await act(async () => page.releaseNavigation());
+  const filters = page.requests[2].args.p_filters;
+  assert.deepEqual([filters.status, filters.grade, filters.search], [external.status, external.grade, search]);
+  await settle(2, "synthetic-active-grade-match", external.status);
+  assert.equal(document.getElementById("status-filter").textContent.trim(), external.status);
+  checkRows(["synthetic-active-grade-match"]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+});
+
+test("a class search already written to the URL yields to a newer external search", async t => {
+  const typed = "입력검색", external = { status: "수강", q: "외부검색" };
+  const { page, settle, clock, checkRows } = await beginClassStatusChangeWithSearch(t, typed);
+  await act(async () => clock.advance(1));
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), { status: "종강", q: typed });
+  assert.equal(page.requests.length, 2);
+  const replace = t.mock.method(window.history, "replaceState");
+  await act(async () => page.navigate("?" + new URLSearchParams(external).toString()));
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), external);
+  await act(async () => page.releaseNavigation());
+  await act(async () => clock.advance(300));
+  const writtenSearches = replace.mock.calls.map(call =>
+    new URL(call.arguments[2], window.location.href).searchParams.get("q")
+  );
+  assert.ok(!writtenSearches.includes(typed), "a completed search must not be written again after external navigation");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(window.location.search)), external);
+  assert.deepEqual(page.requests.slice(2).map(request => {
+    const { status, search } = request.args.p_filters;
+    return [status, search];
+  }), [[external.status, external.q]]);
+  await settle(2, external.q, external.status);
+  assert.equal(document.querySelector('input[aria-label="수업 검색"]').value, external.q);
+  assert.equal(document.getElementById("status-filter").textContent.trim(), external.status);
+  checkRows([external.q]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+});
+
+test("history can supersede a local class status before the URL subscriber receives it", { timeout: 15000 }, async t => {
+  const { page, settle, checkRows, checkUnknown } = await beginClassStatusTransition(t, {
+    previousQuery: new URLSearchParams({ status: "수강" }).toString(),
+  });
+  await settle(1, "old-ready-response", "개강 준비");
+  assert.equal(document.getElementById("status-filter").textContent.trim(), "종강");
+  checkUnknown();
+  await traverseManagementHistory("back");
+  assert.equal(new URLSearchParams(window.location.search).get("status"), "수강");
+  assert.equal(page.requests.length, 2, "the held subscriber has not requested either navigation yet");
+  await act(async () => page.releaseNavigation());
+  assert.equal(page.requests.length, 3);
+  assert.equal(page.requests[2].args.p_filters.status, "수강");
+  await settle(2, "synthetic-external-active", "수강");
+  assert.equal(document.getElementById("status-filter").textContent.trim(), "수강");
+  checkRows(["synthetic-external-active"]);
+  assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+  assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+});
+
+for (const navigation of ["back", "replace"]) {
+  test(`${navigation} restores the identical subscribed class URL after an unobserved status selection`, { timeout: 15000 }, async t => {
+    const ready = "개강 준비";
+    const initialQuery = new URLSearchParams({ status: ready }).toString();
+    const { page, settle, checkRows, checkUnknown } = await beginClassStatusTransition(t, { previousQuery: initialQuery });
+    await settle(1, "latest-ready", ready);
+    checkUnknown();
+    if (navigation === "back") {
+      await traverseManagementHistory("back");
+    } else {
+      await act(async () => page.navigate(`?${initialQuery}`));
+    }
+    assert.equal(window.location.search, `?${initialQuery}`);
+    await act(async () => page.releaseNavigation());
+    assert.deepEqual(page.requests.map(request => request.args.p_filters.status), [ready, ready]);
+    assert.equal(document.getElementById("status-filter").textContent.trim(), ready);
+    checkRows(["latest-ready"]);
+    assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+    assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+  });
+}
+
+for (const field of ["status", "q"]) {
+  test(`a class ${field} edit matching a held external URL releases on return to the subscribed URL`, async t => {
+    const ready = "개강 준비", closed = "종강", search = "합성검색";
+    const original = new URLSearchParams({ status: ready });
+    const external = new URLSearchParams(original);
+    external.set(field, field === "status" ? closed : search);
+    const page = await mountManagementPage(t, {
+      kind: "classes", initialQuery: original.toString(), holdNavigation: true, renderTable: true,
+    });
+    await act(async () => page.finish(0, 1, [{ id: "ready-row", name: "Ready row", status: ready, storedStatus: ready }]));
+    await act(async () => page.navigate(`?${external}#detail-anchor`));
+    const liveHref = window.location.href;
+    const status = document.getElementById("status-filter");
+    const input = document.querySelector('input[aria-label="수업 검색"]');
+    if (field === "status") {
+      await act(async () => status.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+      const option = [...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === closed);
+      await act(async () => option.click());
+      assert.equal(status.textContent.trim(), closed);
+    } else {
+      const clock = installManagementDebounceClock(t);
+      const props = input[Object.keys(input).find(key => key.startsWith("__reactProps"))];
+      await act(async () => props.onChange({ target: { value: search }, nativeEvent: {} }));
+      await act(async () => clock.advance(300));
+      assert.equal(input.value, search);
+    }
+    assert.equal(window.location.href, liveHref, "matching the live URL preserves its query and hash");
+    await act(async () => page.navigate(`?${original}`));
+    await act(async () => page.releaseNavigation());
+    assert.equal(window.location.search, `?${original}`);
+    assert.deepEqual(page.requests.map(request => [request.args.p_filters.status, request.args.p_filters.search]), [[ready, ""]]);
+    assert.equal(status.textContent.trim(), ready);
+    assert.equal(input.value, "");
+    for (const area of ["tbody", '[aria-label="수업 모바일 목록"]']) {
+      assert.deepEqual([...document.querySelector(area).querySelectorAll("[data-class-detail-trigger]")].map(el => el.textContent), ["Ready row"]);
+    }
+    assert.match(document.querySelector("caption").textContent, /전체 수업 1개/);
+    assert.equal(document.querySelector('[aria-label="수업 목록 스크롤"]').getAttribute("aria-busy"), "false");
+  });
 }
 
 test("actual manual size handler never requests old page with the new size during transition URL reset", async (t) => {

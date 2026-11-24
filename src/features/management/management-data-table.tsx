@@ -12,6 +12,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -90,7 +91,7 @@ import { MANAGEMENT_NUMBERED_SORT_COLUMNS, type ManagementNumberedSort } from ".
 import { MANAGEMENT_TABLE_STORAGE_VERSION, managementTableStorageKey, resetManagementPageForFilters } from "./management-numbered-state";
 import { STUDENT_ENROLLMENT_STATUS_OPTIONS, DEFAULT_STUDENT_STATUS_FILTER, normalizeStudentStatusFilter } from "./student-enrollment-status.js";
 import { StudentEnrollmentStatusCell, type LoadStudentEnrollments } from "./student-enrollment-status-cell";
-import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
+import type { ClassListStatus, ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
 import {
   getManagementListViewportHeight,
   type ManagementListPageSize,
@@ -158,6 +159,7 @@ const CLASS_FILTERS = [
 
 type ClassFilterColumnId = (typeof CLASS_FILTERS)[number]["id"];
 
+const EMPTY_ROWS: ManagementRow[] = [];
 const DEFAULT_CLASS_STATUS_FILTER = "수강";
 const CLASS_STATUS_FILTER_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 
@@ -501,7 +503,7 @@ function normalizeScalar(value: unknown): string {
 function getClassListQueryState(params: URLSearchParams): ClassListQueryState {
   return {
     q: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.q)),
-    status: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.status)),
+    status: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.status)) || DEFAULT_CLASS_STATUS_FILTER,
     subject: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.subject)),
     grade: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.grade)),
     teacher: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.teacher)),
@@ -519,17 +521,18 @@ function setClassListQueryParam(params: URLSearchParams, key: string, value: str
   params.set(key, normalized);
 }
 
-function buildClassListHref(pathname: string, searchParamString: string, state: ClassListQueryState) {
+function buildClassListHref(pathname: string, searchParamString: string, changes: Partial<ClassListQueryState>) {
   const params = new URLSearchParams(searchParamString);
   params.delete("period");
   const previousSearch = params.toString();
 
-  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.q, state.q);
-  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.status, state.status, DEFAULT_CLASS_STATUS_FILTER);
-  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.subject, state.subject);
-  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.grade, state.grade);
-  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.teacher, state.teacher);
-  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.classroom, state.classroom);
+  // Patch only this control's fields; another write may already have changed the URL.
+  for (const key of Object.values(CLASS_LIST_QUERY_PARAM_KEYS)) {
+    const value = changes[key];
+    if (value !== undefined) {
+      setClassListQueryParam(params, key, value, key === "status" ? DEFAULT_CLASS_STATUS_FILTER : "");
+    }
+  }
   resetManagementPageForFilters("classes", previousSearch, params);
 
   const nextQuery = params.toString();
@@ -591,6 +594,10 @@ function getManagementListQueryString(searchParamString: string) {
   params.sort();
 
   return params.toString();
+}
+
+function isCurrentManagementListUrl(pathname: string, query: string) {
+  return window.location.pathname === pathname && getManagementListQueryString(window.location.search) === query;
 }
 
 function getManagementListScrollStorageKey(kind: ManagementKind, pathname: string, searchParamString: string) {
@@ -1004,6 +1011,7 @@ type ManagementDataTableProps = {
   totalCount: number | null;
   sort: ManagementNumberedSort;
   displayedScope: string;
+  classListStatus?: ClassListStatus;
   onPageChange: (page: number) => void;
   onSortChange: (sort: ManagementNumberedSort) => void;
   filterOptions?: Record<string, unknown>;
@@ -1025,16 +1033,17 @@ export function ManagementDataTable(props: ManagementDataTableProps) {
 
 const ManagementDataTableContent = memo(function ManagementDataTableContent({
   kind,
-  rows,
+  rows: acceptedRows,
   stats,
-  loading,
+  loading: readLoading,
   readError = null,
   readErrorSource = null,
   onRetryRead,
-  page,
-  totalCount,
+  page: acceptedPage,
+  totalCount: acceptedTotal,
   sort,
   displayedScope,
+  classListStatus,
   onPageChange,
   onSortChange,
   filterOptions = {},
@@ -1071,6 +1080,15 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   const storageKey = managementTableStorageKey(kind);
   const sorting = useMemo(() => [...sort], [sort]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const selectedClassStatus = kind === "classes"
+    ? String(columnFilters.find((filter) => filter.id === "status")?.value || DEFAULT_CLASS_STATUS_FILTER)
+    : undefined;
+  // The status control can change before the URL subscriber starts its read.
+  const hideClassResult = classListStatus && classListStatus.accepted !== selectedClassStatus;
+  const rows = hideClassResult ? EMPTY_ROWS : acceptedRows;
+  const totalCount = hideClassResult ? null : acceptedTotal;
+  const page = hideClassResult ? 1 : acceptedPage;
+  const loading = readLoading || Boolean(classListStatus && classListStatus.requested !== selectedClassStatus);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>([]);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
@@ -1089,7 +1107,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState(() => requestedStudentListQueryState.schoolCategory);
   const [studentSchoolFilter, setStudentSchoolFilter] = useState(() => requestedStudentListQueryState.school);
   const [studentGradeFilter, setStudentGradeFilter] = useState(() => requestedStudentListQueryState.grade);
-  const pendingClassListQueryStateRef = useRef<ClassListQueryState | null>(null);
+  const [classNavigationPending, startClassNavigation] = useTransition();
   const pendingStudentListQueryStateRef = useRef<StudentListQueryState | null>(null);
   const [grouping, setGrouping] = useState<GroupingState>([]);
   const [expanded, setExpanded] = useState<ExpandedState>({});
@@ -1616,9 +1634,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   const subjectColumn =
     kind === "classes" && allColumnIds.includes("subject") ? table.getColumn("subject") : undefined;
   const selectedSubjectFilter = (subjectColumn?.getFilterValue() as string) || "";
-  const selectedGradeFilter = kind === "classes" ? ((table.getColumn("grade")?.getFilterValue() as string) || "") : "";
-  const selectedTeacherFilter = kind === "classes" ? ((table.getColumn("teacher")?.getFilterValue() as string) || "") : "";
-  const selectedClassroomFilter = kind === "classes" ? ((table.getColumn("classroom")?.getFilterValue() as string) || "") : "";
 
   const classFilterOptions = useMemo(() => {
     const emptyOptions: Record<ClassFilterColumnId, string[]> = {
@@ -1669,7 +1684,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         value: "",
       }));
   const activeClassFilters = kind === "classes" ? classFilterValues.filter((filter) => filter.value) : [];
-  const normalizedClassStatusFilter = kind === "classes" ? statusFilter || DEFAULT_CLASS_STATUS_FILTER : statusFilter;
+  const normalizedClassStatusFilter = selectedClassStatus ?? statusFilter;
   const hasNonDefaultStatusFilter = kind === "classes" && normalizedClassStatusFilter !== DEFAULT_CLASS_STATUS_FILTER;
   const normalizedStudentStatusFilter = normalizeStudentStatusFilter(statusFilter);
   const hasActiveStudentFilters = kind === "students" && Boolean(normalizedStudentStatusFilter !== DEFAULT_STUDENT_STATUS_FILTER || studentSchoolCategoryFilter || studentSchoolFilter || studentGradeFilter);
@@ -1755,44 +1770,20 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
 
     return () => window.cancelAnimationFrame(firstFrame);
   }, [filteredRowCount, loading, managementScrollStorageKey, searchParamString]);
-  const currentClassListQueryState = useMemo<ClassListQueryState>(
-    () => ({
-      q: debouncedGlobalFilter,
-      status: normalizedClassStatusFilter,
-      subject: selectedSubjectFilter,
-      grade: selectedGradeFilter,
-      teacher: selectedTeacherFilter,
-      classroom: selectedClassroomFilter,
-    }),
-    [
-      normalizedClassStatusFilter,
-      debouncedGlobalFilter,
-      selectedClassroomFilter,
-      selectedGradeFilter,
-      selectedSubjectFilter,
-      selectedTeacherFilter,
-    ],
-  );
   const syncClassListQueryState = useCallback(
-    (nextState: Partial<ClassListQueryState>, preserveLocalUntilUrl = false) => {
-      if (kind !== "classes") {
-        return;
-      }
-
-      const mergedState = { ...currentClassListQueryState, ...nextState };
+    (changes: Partial<ClassListQueryState>) => {
+      if (kind !== "classes" || window.location.pathname !== pathname) return;
       const liveQuery = window.location.search.slice(1);
-      const nextHref = buildClassListHref(pathname, liveQuery, mergedState);
+      let nextHref = buildClassListHref(pathname, liveQuery, changes);
       const currentHref = liveQuery ? `${pathname}?${liveQuery}` : pathname;
-      if (nextHref !== currentHref) {
-        if (preserveLocalUntilUrl) {
-          pendingClassListQueryStateRef.current = mergedState;
-        }
-        replaceManagementListUrl(window.history, nextHref);
-      } else if (preserveLocalUntilUrl) {
-        pendingClassListQueryStateRef.current = null;
+      if (nextHref === currentHref) {
+        if (isCurrentManagementListUrl(pathname, searchParamString)) return;
+        // Join the outstanding router transition for this already-visible URL, including its fragment.
+        nextHref = window.location.href;
       }
+      startClassNavigation(() => replaceManagementListUrl(window.history, nextHref));
     },
-    [currentClassListQueryState, kind, pathname],
+    [kind, pathname, searchParamString, startClassNavigation],
   );
   const currentStudentListQueryState = useMemo<StudentListQueryState>(
     () => ({
@@ -1844,8 +1835,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   }, [currentTextbookListQueryState, kind, pathname, router]);
 
   useEffect(() => {
+    if (pendingSearchValueRef.current === null) return;
     const requestedSearch = kind === "classes"
-      ? requestedClassListQueryState.q
+      ? normalizeScalar(new URLSearchParams(window.location.search).get(CLASS_LIST_QUERY_PARAM_KEYS.q))
       : kind === "students"
         ? requestedStudentListQueryState.q
         : requestedTextbookListQueryState.q;
@@ -1857,15 +1849,20 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
       composing: searchComposing,
     });
     pendingSearchValueRef.current = reconciliation.pendingSearch;
+    if (kind === "classes") {
+      if (!reconciliation.shouldSyncUrl && reconciliation.pendingSearch !== null) return;
+      syncClassListQueryState({ q: debouncedGlobalFilter });
+      // Once written, the URL owns this search even if the subscriber skips this value.
+      pendingSearchValueRef.current = null;
+      return;
+    }
     if (!reconciliation.shouldSyncUrl) return;
-    syncClassListQueryState({ q: debouncedGlobalFilter });
     syncStudentListQueryState({ q: debouncedGlobalFilter });
     syncTextbookListQueryState({ q: debouncedGlobalFilter });
   }, [
     debouncedGlobalFilter,
     globalFilter,
     kind,
-    requestedClassListQueryState.q,
     requestedStudentListQueryState.q,
     requestedTextbookListQueryState.q,
     searchComposing,
@@ -1891,6 +1888,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   }, [kind, pathname, searchParamString]);
 
   useEffect(() => {
+    if (kind === "classes" && !isCurrentManagementListUrl(pathname, searchParamString)) return;
     const requestedSearch = kind === "classes"
       ? requestedClassListQueryState.q
       : kind === "students"
@@ -1907,7 +1905,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
     if (reconciliation.pendingSearch === null && !searchComposing && globalFilter !== requestedSearch) {
       setGlobalFilter(requestedSearch);
     }
-  }, [debouncedGlobalFilter, globalFilter, kind, requestedClassListQueryState.q, requestedStudentListQueryState.q, requestedTextbookListQueryState.q, searchComposing]);
+  }, [classNavigationPending, debouncedGlobalFilter, globalFilter, kind, pathname, requestedClassListQueryState.q, requestedStudentListQueryState.q, requestedTextbookListQueryState.q, searchComposing, searchParamString]);
 
   useEffect(() => {
     if (kind !== "classes" || !statusColumn) {
@@ -1925,33 +1923,25 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   }, [kind, normalizedClassStatusFilter, statusColumn, statusFilter]);
 
   useEffect(() => {
-    if (kind !== "classes") {
-      return;
-    }
-
-    const reconciliation = reconcilePendingManagementFilters({
-      current: currentClassListQueryState,
-      requested: requestedClassListQueryState,
-      pending: pendingClassListQueryStateRef.current,
-    });
-    pendingClassListQueryStateRef.current = reconciliation.pending;
-    const nextFilters = reconciliation.filters;
-
-    const requestedStatusFilter = nextFilters.status || DEFAULT_CLASS_STATUS_FILTER;
+    if (kind !== "classes" || !isCurrentManagementListUrl(pathname, searchParamString)) return;
+    const requestedStatusFilter = requestedClassListQueryState.status || DEFAULT_CLASS_STATUS_FILTER;
     if (statusColumn && statusFilter !== requestedStatusFilter) {
       statusColumn.setFilterValue(requestedStatusFilter);
     }
 
     for (const filter of CLASS_FILTERS) {
       const column = table.getColumn(filter.id);
-      const requestedFilterValue = nextFilters[filter.id] || "";
+      const requestedFilterValue = requestedClassListQueryState[filter.id] || "";
       if (column && ((column.getFilterValue() as string) || "") !== requestedFilterValue) {
         column.setFilterValue(requestedFilterValue);
       }
     }
   }, [
-    currentClassListQueryState,
+    // A superseded navigation can settle on the same query the subscriber already had.
+    classNavigationPending,
     kind,
+    pathname,
+    searchParamString,
     requestedClassListQueryState,
     statusColumn,
     statusFilter,
@@ -2250,7 +2240,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             })),
             onChange: (value) => {
               statusColumn?.setFilterValue(value);
-              syncClassListQueryState({ status: value }, true);
+              syncClassListQueryState({ status: value });
               setRowSelection({});
             },
           },
@@ -2274,9 +2264,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 if (filter.id === "subject") {
                   table.getColumn("teacher")?.setFilterValue("");
                   table.getColumn("classroom")?.setFilterValue("");
-                  syncClassListQueryState({ [filter.id]: nextFilterValue, teacher: "", classroom: "" }, true);
+                  syncClassListQueryState({ [filter.id]: nextFilterValue, teacher: "", classroom: "" });
                 } else {
-                  syncClassListQueryState({ [filter.id]: nextFilterValue }, true);
+                  syncClassListQueryState({ [filter.id]: nextFilterValue });
                 }
                 setRowSelection({});
               },
