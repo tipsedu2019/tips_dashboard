@@ -301,6 +301,49 @@ test("registered completes all progress while closed outcomes terminate only the
   )
 })
 
+test("manual progress follows the selected subject workflow even when legacy pipeline differs", () => {
+  const stages = [
+    ["inquiry", "inquiry"],
+    ["level_test_requested", "level_test"],
+    ["consultation_requested", "consultation"],
+    ["consultation_completed", "consultation"],
+    ["waiting_current_class", "waiting"],
+    ["waiting_new_class", "waiting"],
+    ["waiting_next_opening", "waiting"],
+    ["observation_requested", "observation"],
+    ["enrollment_requested", "registration"],
+    ["payment_in_progress", "admission"],
+  ]
+  for (const pipeline of ["inquiry", "migration_review", "registered", "inquiry_closed"]) {
+    for (const [workflow, expected] of stages) {
+      const steps = getRegistrationApplicationProgress(pipeline, "", workflow)
+      assert.deepEqual(steps.filter(step => step.state === "current").map(step => step.key), [expected], `${pipeline}/${workflow}`)
+      assert.ok(steps.every(step => step.state !== "complete" && step.state !== "terminal"), `${pipeline}/${workflow} must not inherit a legacy outcome`)
+    }
+  }
+})
+
+test("manual progress terminal outcomes take precedence over stale legacy outcomes", () => {
+  for (const pipeline of ["inquiry", "migration_review", "registered"]) {
+    for (const [workflow, expected] of [["not_registered", "registration"], ["inquiry_only", "inquiry"]]) {
+      const steps = getRegistrationApplicationProgress(pipeline, "", workflow)
+      assert.deepEqual(steps.filter(step => step.state === "terminal").map(step => step.key), [expected])
+      assert.ok(steps.every(step => step.state !== "complete" && step.state !== "current"))
+    }
+    assert.deepEqual(getRegistrationApplicationProgress(pipeline, "", "registered").map(step => step.state),
+      ["complete", "complete", "complete", "skipped", "skipped", "complete", "complete"])
+  }
+})
+
+test("manual progress preserves legacy fallback and independently saved waiting facts", () => {
+  assert.deepEqual(getRegistrationApplicationProgress("migration_review", "", ""), getRegistrationApplicationProgress("inquiry"))
+  assert.deepEqual(getRegistrationApplicationProgress("waiting", "current_class", undefined), getRegistrationApplicationProgress("waiting", "current_class"))
+  const steps = getRegistrationApplicationProgress("inquiry", "current_class", "payment_in_progress")
+  assert.equal(steps.find(step => step.key === "waiting").state, "reached")
+  assert.equal(steps.find(step => step.key === "observation").state, "skipped")
+  assert.equal(steps.find(step => step.key === "admission").state, "current")
+})
+
 test("active registration track keeps a valid request and falls back after subject removal", () => {
   const tracks = [{ id: "english" }, { id: "math" }]
   assert.equal(application.resolveRegistrationActiveTrackId(tracks, "math"), "math")

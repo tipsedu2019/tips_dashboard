@@ -350,12 +350,36 @@ const REGISTRATION_APPLICATION_PROGRESS_LABELS: Record<
   admission: "입학",
 }
 
+const PROGRESS_KEY_BY_WORKFLOW_STATUS: Record<
+  OpsRegistrationObservationTrackSummary["workflowStatus"],
+  RegistrationApplicationProgressKey
+> = {
+  inquiry: "inquiry",
+  level_test_requested: "level_test",
+  consultation_requested: "consultation",
+  consultation_completed: "consultation",
+  waiting_current_class: "waiting",
+  waiting_new_class: "waiting",
+  waiting_next_opening: "waiting",
+  observation_requested: "observation",
+  observation_feedback_pending: "observation",
+  observation_completed: "observation",
+  enrollment_requested: "registration",
+  payment_in_progress: "admission",
+  registered: "admission",
+  not_registered: "registration",
+  inquiry_only: "inquiry",
+}
+
 export function getRegistrationApplicationProgress(
   status: OpsRegistrationObservationTrackSummary["status"],
   waitingKind: OpsRegistrationObservationTrackSummary["waitingKind"] = "",
   workflowStatus?: OpsRegistrationObservationTrackSummary["workflowStatus"],
 ): RegistrationApplicationProgressStep[] {
-  if (status === "registered") {
+  // The manual workflow property owns progress; saved activity facts and the
+  // legacy pipeline can intentionally differ from it.
+  const progressStatus = workflowStatus || getRegistrationWorkflowStatusFromLegacyTrack({ status, waitingKind })
+  if (progressStatus === "registered") {
     return REGISTRATION_APPLICATION_PROGRESS_ORDER.map((key) => ({
       key,
       label: REGISTRATION_APPLICATION_PROGRESS_LABELS[key],
@@ -363,23 +387,15 @@ export function getRegistrationApplicationProgress(
     }))
   }
 
-  const currentSection: RegistrationApplicationProgressKey = workflowStatus?.startsWith("observation_")
-    ? "observation"
-    : status === "waiting"
-    ? "waiting"
-    : ["enrollment_decided", "not_registered"].includes(status)
-      ? "registration"
-      : status === "enrollment_processing"
-        ? "admission"
-        : CURRENT_SECTION_BY_STATUS[status] as Exclude<RegistrationApplicationProgressKey, "waiting" | "registration">
+  const currentSection = PROGRESS_KEY_BY_WORKFLOW_STATUS[progressStatus]
   const currentIndex = REGISTRATION_APPLICATION_PROGRESS_ORDER.indexOf(currentSection)
-  const terminal = status === "not_registered" || status === "inquiry_closed"
+  const terminal = progressStatus === "not_registered" || progressStatus === "inquiry_only"
 
   return REGISTRATION_APPLICATION_PROGRESS_ORDER.map((key, index) => ({
     key,
     label: REGISTRATION_APPLICATION_PROGRESS_LABELS[key],
     state: (key === "waiting" && index < currentIndex && !waitingKind)
-      || (key === "observation" && index < currentIndex && !workflowStatus?.startsWith("observation_"))
+      || (key === "observation" && index < currentIndex && !progressStatus.startsWith("observation_"))
       ? "skipped"
       : index === currentIndex
       ? terminal ? "terminal" : "current"
