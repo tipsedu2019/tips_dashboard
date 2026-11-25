@@ -1587,6 +1587,15 @@ test("withdrawn requests retain their reason in the existing closed view without
   assert.equal(getMakeupRequestTableValue(approvalCanceled,"canceledNote"), "기존 승인 취소 사유");
 });
 
+async function pickMakeupField(field, value) {
+  const trigger = document.getElementById('makeup-' + field);
+  assert.ok(trigger, field);
+  await act(async () => trigger.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  const option = [...document.querySelectorAll('[role="option"]')].find(node => node.textContent.trim() === value);
+  assert.ok(option, value);
+  await act(async () => option.click());
+}
+
 test('management makeup new choices exclude ended classes but retain the catalog for existing requests', async t => {
   const p = await setup(t);
   await act(async () => p.finish(p.numbered()[0], 0));
@@ -1597,16 +1606,61 @@ test('management makeup new choices exclude ended classes but retain the catalog
       { id: id(902), name: '가상 종강 수업', status: '종강', subject: '영어', teacher: '가상 교사' },
     ] : [] });
   });
-  async function pick(field, value) {
-    const trigger = document.getElementById('makeup-' + field); assert.ok(trigger, field);
-    await act(async () => trigger.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    const option = [...document.querySelectorAll('[role="option"]')].find(node => node.textContent.trim() === value); assert.ok(option, value);
-    await act(async () => option.click());
-  }
-  await pick('subject', '영어'); await pick('teacher', '가상 교사');
+  await pickMakeupField('subject', '영어'); await pickMakeupField('teacher', '가상 교사');
   await act(async () => document.getElementById('makeup-class').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   const names = [...document.querySelectorAll('[role="option"]')].map(node => node.textContent.trim());
   assert.ok(names.includes('가상 진행 수업')); assert.equal(names.includes('가상 종강 수업'), false);
   assert.ok(p.observed.catalogs.classes.some(item => item.id === id(902)), 'history catalog is not pruned');
   assert.equal(p.requests.some(r => /create_makeup|transition_makeup/.test(r.name || '')), false);
+});
+
+async function loadSubjectChoices(workspace) {
+  const classes = [
+    { id: id(901), name: '가상 영어반', subject: '영어', teacher: '가상 교사', status: '수강' },
+    { id: id(902), name: '가상 수학반', subject: '수학', teacher: '가상 교사', status: '수강' },
+  ];
+  await act(async () => {
+    for (const request of workspace.requests.filter(request => request.table)) {
+      request.resolve({ data: request.table === 'classes' ? classes : [], error: null });
+    }
+  });
+}
+
+test('management makeup creation clears the reason only when switching subjects', async t => {
+  const p = await setup(t);
+  await act(async () => p.finish(p.numbered()[0], 0));
+  await act(async () => button('휴보강 신청').click());
+  const reason = document.getElementById('makeup-reason');
+  await act(async () => {
+    reason.focus();
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(reason, '가상 신청 사유');
+    reason.dispatchEvent(new window.Event('input', { bubbles: true }));
+    reason.dispatchEvent(new window.KeyboardEvent('keyup', { key: '유', bubbles: true }));
+  });
+  await loadSubjectChoices(p);
+  await pickMakeupField('subject', '영어');
+  await pickMakeupField('teacher', '가상 교사');
+  await pickMakeupField('class', '가상 영어반');
+  await pickMakeupField('subject', '영어');
+  assert.equal(reason.value, '가상 신청 사유');
+  assert.equal(document.getElementById('makeup-class').textContent.trim(), '가상 영어반');
+  await pickMakeupField('subject', '수학');
+  assert.equal(reason.value, '');
+  assert.equal(document.getElementById('makeup-subject').textContent.trim(), '수학');
+  assert.equal(document.querySelector('[role="alertdialog"]'), null);
+});
+
+test('management makeup revision retains the saved reason when switching subjects', async t => {
+  const p = await setup(t, { search: `?view=approvalPending&requestId=${id(999)}` });
+  await act(async () => p.finish(p.numbered()[0]));
+  await loadSubjectChoices(p);
+  const detail = await p.waitFor('get_makeup_detail_v1');
+  const request = row(999, { requesterId: id(804), status: 'revision_requested', classId: id(901), reason: '기존 신청 사유' });
+  await act(async () => detail.resolve({ data: request, error: null }));
+  await act(async () => button('보완').click());
+  await loadSubjectChoices(p);
+  assert.equal(document.getElementById('makeup-subject').textContent.trim(), '영어');
+  assert.equal(document.getElementById('makeup-reason').value, request.reason);
+  await pickMakeupField('subject', '수학');
+  assert.equal(document.getElementById('makeup-reason').value, request.reason);
 });

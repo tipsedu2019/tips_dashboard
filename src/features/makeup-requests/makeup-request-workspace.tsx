@@ -2471,6 +2471,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setSelectedTeacherKey("")
     setInput((current) => ({
       ...current,
+      reason: !editingRequestId && selectedSubject && subject !== selectedSubject ? "" : current.reason,
       classId: "",
       cancelDate: "",
       originalLessonSessionId: "",
@@ -2478,7 +2479,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, date: "", startTime: "", endTime: "", classroom: "" })),
       approverTeacherCatalogId: "",
     }))
-  }, [])
+  }, [editingRequestId, selectedSubject])
 
   const handleTeacherChange = useCallback((teacherKey: string) => {
     setSelectedTeacherKey(teacherKey)
