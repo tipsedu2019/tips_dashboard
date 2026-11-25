@@ -51,14 +51,18 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
   const actor = `${user?.id || ""}:${role}`
   const service = useMemo(() => createOperationsReadService({ supabase, actorScope: actor }), [actor])
   const academic = useMemo(() => createAcademicReadService({ supabase, actorScope: actor }), [actor])
-  const [teacherState, setTeacherState] = useState<{ key: string; names?: string[]; error?: boolean }>()
+  const [teacherState, setTeacherState] = useState<{ key: object; names?: string[]; error?: boolean }>()
   const [page, setPage] = useState(1), [retry, setRetry] = useState(0)
   const searchInput = useCommittedSearch("")
   const search = searchInput.committed
-  const [pageState, setPageState] = useState<{ key: string; data?: Awaited<ReturnType<typeof service.readClassScheduleNumberedPage>>; error?: boolean }>()
+  const [pageState, setPageState] = useState<{ key: object; data?: Awaited<ReturnType<typeof service.readClassScheduleNumberedPage>>; error?: boolean }>()
   const [detailState, setDetailState] = useState<{ key: string; scope: string; data?: OpsClassOption; error?: boolean }>()
   const pageKey = JSON.stringify([actor, subject, teacher, search, page, retry])
   const teacherKey = JSON.stringify([actor, subject, retry])
+  // A -> B -> A must wait for the new A read, even if the last completed result was A.
+  // Losing a memo only starts a fresh read; it cannot make an older result current.
+  const pageRequest = useMemo(() => ({ pageKey, enabled, service, onPermissionDenied }), [pageKey, enabled, service, onPermissionDenied])
+  const teacherRequest = useMemo(() => ({ teacherKey, enabled, service, academic, onPermissionDenied }), [teacherKey, enabled, service, academic, onPermissionDenied])
   useEffect(() => {
     if (!enabled || !subject) return
     const controller = new AbortController()
@@ -67,15 +71,15 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
       academic.readCurriculumNumberedPage({ filters: { periodId: null, search: "", status: null, subject, grade: null, teacher: null, classroom: null, viewMode: "all" }, page: 1, pageSize: 15, signal: controller.signal }),
     ]).then(([catalog, scope]) => {
       const names = teacherSubjectNames(catalog, subject, scope.filterOptions?.teachers || [])
-      if (!controller.signal.aborted) setTeacherState({ key: teacherKey, names })
+      if (!controller.signal.aborted) setTeacherState({ key: teacherRequest, names })
     }).catch(error => {
       if (!controller.signal.aborted) {
         if (error?.code === "42501") onPermissionDenied()
-        else setTeacherState({ key: teacherKey, error: true })
+        else setTeacherState({ key: teacherRequest, error: true })
       }
     })
     return () => controller.abort()
-  }, [service, academic, enabled, teacherKey, subject, onPermissionDenied])
+  }, [service, academic, enabled, teacherRequest, subject, onPermissionDenied])
   const detailScope = JSON.stringify([actor, id])
   const detailKey = JSON.stringify([actor, id, month, retry])
   useEffect(() => {
@@ -92,11 +96,11 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
           controller.signal.throwIfAborted()
           return { ...row, status: computeClassStatus(detail.classItem) }
         }))
-        if (!controller.signal.aborted) setPageState({ key: pageKey, data: { ...data, rows } })
+        if (!controller.signal.aborted) setPageState({ key: pageRequest, data: { ...data, rows } })
       })
-      .catch(error => { if (!controller.signal.aborted) { if (error?.code === "42501") onPermissionDenied(); else setPageState({ key: pageKey, error: true }) } })
+      .catch(error => { if (!controller.signal.aborted) { if (error?.code === "42501") onPermissionDenied(); else setPageState({ key: pageRequest, error: true }) } })
     return () => controller.abort()
-  }, [service, enabled, pageKey, subject, teacher, search, page, onPermissionDenied])
+  }, [service, enabled, pageRequest, subject, teacher, search, page, onPermissionDenied])
   useEffect(() => {
     if (!id || !enabled) return
     let current = true
@@ -109,10 +113,10 @@ export function useTeacherFormClass({ id, month, subject, teacher, onPermissionD
     }).catch(error => { if (current) { if (error?.code === "42501") onPermissionDenied(); else setDetailState({ key: detailKey, scope: detailScope, error: true }) } })
     return () => { current = false }
   }, [service, enabled, detailKey, detailScope, id, month, onPermissionDenied])
-  const result = pageState?.key === pageKey ? pageState : undefined
+  const result = pageState?.key === pageRequest ? pageState : undefined
   const detail = detailState?.key === detailKey ? detailState : undefined
   const selected = detail?.data || (detailState?.scope === detailScope && detailState.data ? { ...detailState.data, schedulePlan: { ...detailState.data.schedulePlan, sessions: [] } } : undefined)
-  const teacherResult = teacherState?.key === teacherKey ? teacherState : undefined
+  const teacherResult = teacherState?.key === teacherRequest ? teacherState : undefined
   // A current page is never presented as the entire catalog.
   const options = requestClassOptions((result?.data?.rows || []).map(row => teacherFormClass(row)), id)
   if (selected && !options.some(row => row.id === selected.id)) options.unshift(selected)
