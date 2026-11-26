@@ -295,7 +295,7 @@ async function workspace(t, initial = {}) {
   let previousSearch = '', params = new URLSearchParams();
   const load = modules(io.supabase, {
     '@/providers/auth-provider': { useAuth: () => ({ user: props.viewerId ? { id: props.viewerId, role: props.viewerRole, name: 'Actor' } : null,
-      session: null, loading: props.loading, role: props.viewerRole, canManageAll: ['staff', 'admin'].includes(props.viewerRole),
+      session: props.session ?? null, loading: props.loading, role: props.viewerRole, canManageAll: ['staff', 'admin'].includes(props.viewerRole),
       isAdmin: props.viewerRole === 'admin', isStaff: props.viewerRole === 'staff', isTeacher: props.viewerRole === 'teacher', isAssistant: props.viewerRole === 'assistant' }) },
     'next/navigation': { useRouter: () => router, usePathname: () => window.location.pathname, useSearchParams: () => {
       if (previousSearch !== window.location.search) { previousSearch = window.location.search; params = new URLSearchParams(previousSearch); }
@@ -322,9 +322,15 @@ async function workspace(t, initial = {}) {
     fixture.createRegistrationSubjectTrackFixtureState = () => structuredClone(fixtureState);
     load("src/features/tasks/registration-track-service.ts").toObservationAwareCaseDetail(fixtureState.caseDetails["20000000-0000-4000-8000-000000000002"]);
   }
-  const { OpsTaskWorkspace } = load('src/features/tasks/ops-task-workspace.tsx');
+  const Page = initial.registrationPage
+    ? load('src/app/admin/registration/page.tsx').default
+    : load('src/features/tasks/ops-task-workspace.tsx').OpsTaskWorkspace;
   let mountKey = 0;
-  const render = async (next = {}) => { props = { ...props, ...next }; await act(async () => root.render(createElement(OpsTaskWorkspace, { workspace: props.workspace, key: mountKey }))); };
+  const render = async (next = {}) => {
+    props = { ...props, ...next };
+    const pageProps = initial.registrationPage ? { key: mountKey } : { workspace: props.workspace, key: mountKey };
+    await act(async () => root.render(createElement(Page, pageProps)));
+  };
   await render();
   return { ...io, queries, tableRequests, render, load, remount: async () => { mountKey++; await render(); }, get props() { return props; } };
 }
@@ -2019,6 +2025,33 @@ function supportRegistrationRetryFocus() {
   window.HTMLElement.prototype.attachEvent = function (name, listener) { this.addEventListener(name.replace(/^on/, ''), listener); };
   window.HTMLElement.prototype.detachEvent = function (name, listener) { this.removeEventListener(name.replace(/^on/, ''), listener); };
 }
+
+test('the registration page reads its own list and never starts retired dashboard work after one minute', async t => {
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async request => {
+    urls.push(typeof request === 'string' ? request : request.url ?? String(request));
+    return Response.json({});
+  });
+  const retired = /dashboard[-_/](?:workload|daily[-_]brief|duties)/;
+  const startedAt = Date.now();
+  t.mock.timers.enable({ apis: ['Date', 'setInterval', 'setTimeout'], now: startedAt });
+  try {
+    const page = await workspace(t, { workspace: 'registration', registrationPage: true,
+      viewerId: id(800), viewerRole: 'staff', session: { access_token: 'synthetic' } });
+    const first = registrationReads(page)[0];
+    assert.ok(first, 'the authenticated registration page actually requests its task list');
+    assert.equal(first.args.p_filters.taskType, 'registration');
+    await act(async () => page.finish(page.requests.indexOf(first), 0));
+    assert.ok(document.querySelector('input[aria-label="등록 검색"]'));
+    const retiredCalls = () => [...page.requests.map(request => request.name), ...page.queries, ...urls].filter(value => retired.test(value));
+    assert.deepEqual(retiredCalls(), []);
+    await act(async () => t.mock.timers.tick(61_000));
+    assert.equal(Date.now() - startedAt, 61_000);
+    assert.deepEqual(retiredCalls(), []);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
 
 test('registration shared search preserves deferred page resets and guards composing Escape without a new submit policy', async t => {
   const page = await workspace(t, { workspace: 'registration', search: '?taskPage=2&taskPageType=registration' });

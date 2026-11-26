@@ -15,29 +15,17 @@ function functionBlock(name, nextName) {
   return verifier.slice(start, end)
 }
 
-test("dashboard browser verifier is read-only and covers the requested hierarchy", () => {
-  assert.match(verifier, /path:\s*"\/admin\/dashboard"[\s\S]*?interaction:\s*"dashboard-read-only"/)
-
-  const block = functionBlock(
-    "verifyDashboardReadOnlyInteraction",
-    "chooseLinkedFixtureOption",
-  )
+test("the management browser smoke follows the dashboard bookmark to registration", () => {
+  assert.match(verifier, /path:\s*"\/admin\/dashboard",\s*name:\s*"dashboard-bookmark",\s*expectedTexts:\s*\["등록"\],\s*interaction:\s*"registration-landing"/)
+  const block = functionBlock("verifyRegistrationLanding", "chooseLinkedFixtureOption")
   for (const marker of [
-    'getByRole("alert", { name: "일정 충돌" })',
-    'getByRole("region", { name: "대시보드 작업 기준" })',
-    'getByRole("group", { name: "과목", exact: true })',
-    'getByRole("button", { name: "과학", exact: true })',
-    "outerFilterBorderRemoved: true",
-    "global conflict warning changed when the science filter changed",
-    'button[aria-label$=" 수업 펼치기"]',
-    'button[aria-label$="학생 명단 보기"]',
-    "classRosterPopoverChecked",
-    "distributionRosterPopoverChecked",
-    "taskActionClicked: false",
+    'url.pathname === "/admin/registration"',
+    'getByRole("heading", { level: 1, name: "등록", exact: true })',
+    'getByTestId("admin-nav-link-admin-registration")',
+    'getByTestId("admin-nav-link-admin-dashboard")',
   ]) {
-    assert.ok(block.includes(marker), `missing dashboard verifier contract: ${marker}`)
+    assert.ok(block.includes(marker), `missing landing verification: ${marker}`)
   }
-  assert.doesNotMatch(block, /taskAction\.click\(/)
 })
 
 test("word-retest expected schedule verifier has three exact read-only role fixtures", () => {

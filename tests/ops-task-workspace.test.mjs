@@ -739,10 +739,9 @@ test("navigation removes todo queues for every role and preserves operation menu
   const source = await readSource("src/lib/navigation.ts");
   const fullOverviewBlock = source.slice(source.indexOf("const fullOverviewItems"), source.indexOf("const overview: NavGroup"));
   const assistantOverviewBlock = source.slice(
-    source.indexOf("const assistantOverviewItems"),
+    source.indexOf("if (canUseAssistantOperations)"),
     source.indexOf("const fullOverviewItems"),
   );
-  const dashboardIndex = fullOverviewBlock.indexOf('title: "대시보드"');
 
   assertIncludesAll(source, [
     'items: [',
@@ -753,15 +752,10 @@ test("navigation removes todo queues for every role and preserves operation menu
     'match: "/admin/tasks"',
   ]);
 
-  assert.notEqual(dashboardIndex, -1);
-  assert.doesNotMatch(fullOverviewBlock, /url: "\/admin\/tasks/);
-  assert.doesNotMatch(assistantOverviewBlock, /url: "\/admin\/tasks/);
-  assert.match(
-    fullOverviewBlock,
-    /const fullOverviewItems: NavItem\[\] = \[\s*\{ title: "대시보드", url: "\/admin\/dashboard"/,
-  );
-  assert.doesNotMatch(assistantOverviewBlock, /title: "대시보드"/);
-  assert.ok(fullOverviewBlock.indexOf(`title: "${ko.wordRetest}"`) < fullOverviewBlock.indexOf(`title: "${ko.registration}"`));
+  assert.match(fullOverviewBlock, /const fullOverviewItems: NavItem\[\] = \[\s*\{ title: "등록", url: "\/admin\/registration"/);
+  assert.doesNotMatch(fullOverviewBlock, /url: "\/admin\/(?:tasks|dashboard)"/);
+  assert.doesNotMatch(assistantOverviewBlock, /url: "\/admin\/(?:tasks|dashboard|registration)"/);
+  assert.match(assistantOverviewBlock, /url: "\/admin\/word-retests"/);
   assert.doesNotMatch(source, new RegExp(`title: "${ko.taskbox}"`));
 });
 
@@ -4622,7 +4616,7 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "/admin/settings/classrooms",
     "/admin/settings/textbook-suppliers",
     "management-students",
-    "dashboard",
+    "dashboard-bookmark",
     "management-classes",
     "management-textbooks",
     "curriculum-planning",
@@ -4714,7 +4708,7 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "ADMIN_ALIAS_PUBLIC_SMOKE_ROUTES",
     "runPublicSmoke",
     'authMode: "public-smoke"',
-    "landing-alias-redirect",
+    "home-alias-redirect",
     "next=%2Fadmin%2Fdashboard",
     "admin-root-redirect",
     "admin-calendar-alias-redirect",

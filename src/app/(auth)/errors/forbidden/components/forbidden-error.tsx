@@ -10,7 +10,7 @@ export function ForbiddenError() {
       message="현재 계정으로 열 수 없는 운영 화면입니다."
       icon={ShieldAlert}
       actions={[
-        { href: "/admin/dashboard", label: "대시보드" },
+        { href: "/admin", label: "첫 화면" },
         { href: "/sign-in", label: "다른 계정", variant: "outline" },
       ]}
     />

@@ -1,5 +1,9 @@
-import { redirect } from "next/navigation";
+"use client"
+
+import { redirect } from "next/navigation"
+import { useAuth } from "@/providers/auth-provider"
 
 export default function AdminIndexPage() {
-  redirect("/admin/dashboard");
+  const { defaultAdminPath } = useAuth()
+  redirect(defaultAdminPath)
 }

@@ -197,7 +197,7 @@ test("legacy admin redirect routes do not keep template implementation files", a
     const pageSource = await readSource(`${pathname}/page.tsx`);
     const files = await listFiles(pathname);
 
-    assert.match(pageSource, /redirect\("\/admin\/dashboard"\)/);
+    assert.match(pageSource, /redirect\("\/admin"\)/);
     assert.deepEqual(files, [`${pathname}/page.tsx`]);
   }
 });
@@ -250,11 +250,14 @@ test("dashboard omits introductory briefing copy and redundant workspace heading
   assert.doesNotMatch(source, /운영 워크스페이스 바로가기/);
 });
 
-test("dashboard renders a static role-aware hub instead of live statistics sources", async () => {
+test("the retired dashboard redirects without mounting statistics sources", async () => {
   const pageSource = await readSource("src/app/admin/dashboard/page.tsx");
+  for (const path of ["/admin", "/admin/dashboard"]) {
+    const { section, title } = resolveAdminWorkspaceMeta(path);
+    assert.deepEqual([section, title], ["운영 포털", "운영 포털"]);
+  }
 
-  assert.match(pageSource, /buildAdminNavGroups\(auth\)/);
-  assert.match(pageSource, /prefetch=\{false\}/);
+  assert.match(pageSource, /redirect\("\/admin"\)/);
   assert.doesNotMatch(pageSource, /DashboardDailyBrief|DashboardWorkload/);
   assert.doesNotMatch(pageSource, /useTipsDashboardMetrics/);
   assert.doesNotMatch(pageSource, /SectionCards/);
@@ -575,10 +578,7 @@ test("dashboard renders academy-wide actionable conflict state before filters an
 });
 
 test("dashboard keeps dense cards readable on mobile widths", async () => {
-  const [source, pageSource] = await Promise.all([
-    readSource("src/app/admin/dashboard/components/section-cards.tsx"),
-    readSource("src/app/admin/dashboard/page.tsx"),
-  ]);
+  const source = await readSource("src/app/admin/dashboard/components/section-cards.tsx");
 
   assert.match(source, /DISTRIBUTION_ROW_CLASS/);
   assert.match(source, /grid-cols-\[minmax\(3\.75rem,5\.25rem\)_minmax\(0,1fr\)_3\.25rem\]/);
@@ -598,7 +598,6 @@ test("dashboard keeps dense cards readable on mobile widths", async () => {
   assert.match(source, /min-w-0 max-w-full text-sm font-semibold leading-5/);
   assert.match(source, /grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center/);
   assert.doesNotMatch(source, /DashboardFilterMenu/);
-  assert.match(pageSource, /px-4 pb-5 sm:px-5 sm:pb-6 lg:px-6/);
 });
 
 test("lesson-design routes resolve to the actual design workspace title", async () => {
@@ -686,7 +685,7 @@ test("global shell controls use Korean action labels", async () => {
   assert.doesNotMatch(modeToggleSource, /Switch to/);
 
   assert.match(navUserSource, /계정 메뉴 열기/);
-  assert.match(appSidebarSource, /aria-label="대시보드 홈으로 이동"/);
+  assert.match(appSidebarSource, /aria-label="첫 화면으로 이동"/);
 });
 
 test("assistant navigation only exposes allowed operation surfaces", async () => {

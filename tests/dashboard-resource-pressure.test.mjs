@@ -62,11 +62,12 @@ test("dashboard session dates preserve legacy and normalized metric shapes", () 
   assert.deepEqual(result[2].schedule_plan, { sessions: [] })
 })
 
-test("dashboard hub owns no DB, fetch, cache or polling path", async () => {
-  const source = await readFile(pageUrl, "utf8")
-  assert.match(source, /buildAdminNavGroups/)
-  assert.match(source, /prefetch=\{false\}/)
-  assert.doesNotMatch(source, /supabase|\.rpc\(|\.from\(|fetch\(|setInterval|setTimeout|useEffect|DashboardWorkload|DashboardDailyBrief/)
+test("the old bookmark and role-aware index redirect without DB, fetch, cache or polling", async () => {
+  const bookmark = await readFile(pageUrl, "utf8")
+  const index = await readFile(new URL("../src/app/admin/page.tsx", import.meta.url), "utf8")
+  assert.match(bookmark, /redirect\("\/admin"\)/)
+  assert.match(index, /redirect\(defaultAdminPath\)/)
+  assert.doesNotMatch(bookmark + index, /supabase|\.rpc\(|\.from\(|fetch\(|setInterval|setTimeout|useEffect|DashboardWorkload|DashboardDailyBrief/)
 })
 
 test("dashboard session RPC returns only active dates inside a guarded range", async () => {
