@@ -101,20 +101,21 @@ async function renderLogin(t, { next = null, signedIn = false, loginError = null
 }
 
 const returnCases = [
-  [null, "/admin/dashboard"],
+  [null, "/admin"],
+  ["/admin/dashboard", "/admin/dashboard"],
   ["/admin/registration?flow=level_test&taskPage=2&taskId=fixture-task#history", "/admin/registration?flow=level_test&taskPage=2&taskId=fixture-task#history"],
   ["/admin/students?search=%ED%99%8D%EA%B8%B8%EB%8F%99", "/admin/students?search=%ED%99%8D%EA%B8%B8%EB%8F%99"],
   ["/admin/classes?returnTo=https%3A%2F%2Foutside.example", "/admin/classes?returnTo=https%3A%2F%2Foutside.example"],
   ["/admin/students/../classes?status=active#list", "/admin/classes?status=active#list"],
-  ["javascript:void(0)", "/admin/dashboard"],
-  ["JaVaScRiPt:void(0)", "/admin/dashboard"],
-  ["data:text/html,unsafe", "/admin/dashboard"],
-  ["https://outside.example/login", "/admin/dashboard"],
-  ["//outside.example/login", "/admin/dashboard"],
-  ["/\\outside.example/login", "/admin/dashboard"],
-  ["/\t/outside.example/login", "/admin/dashboard"],
-  ["/admin/..//outside.example/login", "/admin/dashboard"],
-  ["/admin/%2e%2e//outside.example/login", "/admin/dashboard"],
+  ["javascript:void(0)", "/admin"],
+  ["JaVaScRiPt:void(0)", "/admin"],
+  ["data:text/html,unsafe", "/admin"],
+  ["https://outside.example/login", "/admin"],
+  ["//outside.example/login", "/admin"],
+  ["/\\outside.example/login", "/admin"],
+  ["/\t/outside.example/login", "/admin"],
+  ["/admin/..//outside.example/login", "/admin"],
+  ["/admin/%2e%2e//outside.example/login", "/admin"],
 ];
 
 for (const [next, expected] of returnCases) {

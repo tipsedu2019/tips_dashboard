@@ -10,7 +10,7 @@ export function UnderMaintenanceError() {
       message="운영 화면을 다시 열 수 있도록 잠시 후 새로고침해 주세요."
       icon={Clock3}
       actions={[
-        { href: "/admin/dashboard", label: "대시보드" },
+        { href: "/admin", label: "첫 화면" },
         { href: "/inquiry", label: "문의", variant: "outline" },
       ]}
     />

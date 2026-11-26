@@ -74,7 +74,9 @@ export function getRoleCapabilities(role: string | null | undefined) {
     canEditClassSchedulePlanning,
     canEditClassSchedule: canManageAll,
     canUseAssistantOperations,
-    defaultAdminPath: canUseAssistantOperations ? "/admin/word-retests" : "/admin/dashboard",
+    defaultAdminPath: canManageAll
+      ? "/admin/registration"
+      : canUseAssistantOperations ? "/admin/word-retests" : "/admin/academic-calendar",
   };
 }
 

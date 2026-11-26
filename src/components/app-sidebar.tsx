@@ -32,7 +32,7 @@ function pickFirstString(...values: unknown[]) {
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { isMobile, setOpenMobile } = useSidebar()
   const [userMenuContainer, setUserMenuContainer] = React.useState<HTMLDivElement | null>(null)
-  const { user, isAdmin, canManageAll, canReadOperations, canUseAssistantOperations, canUseAiAgentRequests } = useAuth()
+  const { user, defaultAdminPath, isAdmin, canManageAll, canReadOperations, canUseAssistantOperations, canUseAiAgentRequests } = useAuth()
   const navGroups = React.useMemo(
     () => buildAdminNavGroups({ canManageAll, canReadOperations, canUseAssistantOperations, isAdmin, canUseAiAgentRequests }),
     [canReadOperations, canManageAll, canUseAssistantOperations, isAdmin, canUseAiAgentRequests],
@@ -66,11 +66,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 className="group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center"
               >
                 <Link
-                  href={sidebarBrand.href}
+                  href={defaultAdminPath}
                   prefetch={false}
-                  onClick={(event) => { if (isMobile && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && window.location.pathname === sidebarBrand.href) setOpenMobile(false) }}
-                  aria-label="대시보드 홈으로 이동"
-                  title="대시보드"
+                  onClick={(event) => { if (isMobile && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && window.location.pathname === defaultAdminPath) setOpenMobile(false) }}
+                  aria-label="첫 화면으로 이동"
+                  title="첫 화면"
                   data-testid="admin-sidebar-brand"
                 >
                   <div className="flex aspect-square size-[var(--shell-logo-size)] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white">
@@ -84,7 +84,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     />
                   </div>
                   <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate text-base font-semibold tracking-tight">TIPS <span className="text-sm font-normal tracking-normal text-muted-foreground">Dashboard</span></span>
+                    <span className="truncate text-base font-semibold tracking-tight">TIPS</span>
                     <span className="mt-0.5 truncate text-xs text-muted-foreground">운영 포털</span>
                   </div>
                 </Link>
