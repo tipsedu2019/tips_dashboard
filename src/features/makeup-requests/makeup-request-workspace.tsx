@@ -1691,7 +1691,13 @@ export function TeacherMakeupRequestFields(props: TeacherRequestFieldProps) {
     saving: disabled, selectedSubject, selectedTeacherKey, input, selectedClass,
     subjectOptions: [...new Set([...context.subjects, selectedSubject].filter(Boolean))], teacherOptions: [...new Set([...context.teachers, selectedTeacherKey].filter(Boolean))].map(name => ({ value: name, label: name })),
     availableClasses: context.options.map(toClass),
-    handleSubjectChange: value => { if (!editing) { setSubject(value); setTeacher(""); context.setPage(1); patchInput(resetClass()) } },
+    handleSubjectChange: subject => {
+      if (editing) return
+      setSubject(subject)
+      setTeacher("")
+      context.setPage(1)
+      patchInput({ ...resetClass(), reason: selectedSubject && subject !== selectedSubject ? "" : input.reason })
+    },
     handleTeacherChange: value => { if (!editing) { setTeacher(value); context.setPage(1); patchInput(resetClass()) } },
     handleClassChange: classId => { if (!editing) patchInput({ classId, cancelDate: "", originalLessonSessionId: "" }) }, patchInput,
     selectedClassScheduleDateOptions: scheduleDates, selectedClassSchedulePlanReady: Boolean(selectedClass && !context.detailLoading && !context.error && references),
@@ -2471,6 +2477,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setSelectedTeacherKey("")
     setInput((current) => ({
       ...current,
+      reason: !editingRequestId && selectedSubject && subject !== selectedSubject ? "" : current.reason,
       classId: "",
       cancelDate: "",
       originalLessonSessionId: "",
@@ -2478,7 +2485,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, date: "", startTime: "", endTime: "", classroom: "" })),
       approverTeacherCatalogId: "",
     }))
-  }, [])
+  }, [editingRequestId, selectedSubject])
 
   const handleTeacherChange = useCallback((teacherKey: string) => {
     setSelectedTeacherKey(teacherKey)
