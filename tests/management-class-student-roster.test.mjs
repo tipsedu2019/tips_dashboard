@@ -563,13 +563,13 @@ test("class management database keeps list filters in the URL for cross-view ret
   assert.match(tableSource, /status: normalizeScalar\(params\.get\(CLASS_LIST_QUERY_PARAM_KEYS\.status\)\)/);
   assert.doesNotMatch(tableSource, /classType: normalizeScalar\(params\.get\(CLASS_LIST_QUERY_PARAM_KEYS\.classType\)\)/);
   assert.match(tableSource, /function buildClassListHref/);
-  assert.match(tableSource, /const pendingClassListQueryStateRef = useRef<ClassListQueryState \| null>\(null\)/);
+  assert.match(tableSource, /startClassNavigation\(\(\) => replaceManagementListUrl/);
   assert.match(tableSource, /replaceManagementListUrl\(window\.history, nextHref\)/);
-  assert.match(tableSource, /current: currentClassListQueryState,[\s\S]*?pending: pendingClassListQueryStateRef\.current/);
+  assert.match(tableSource, /isCurrentManagementListUrl\(pathname, searchParamString\)/);
   assert.match(tableSource, /syncClassListQueryState\(\{ q: debouncedGlobalFilter \}\)/);
   assert.match(tableSource, /params\.delete\("period"\)/);
-  assert.match(tableSource, /syncClassListQueryState\(\{ status: value \}, true\)/);
-  assert.match(tableSource, /syncClassListQueryState\(\{ \[filter\.id\]: nextFilterValue \}, true\)/);
+  assert.match(tableSource, /syncClassListQueryState\(\{ status: value \}\)/);
+  assert.match(tableSource, /syncClassListQueryState\(\{ \[filter\.id\]: nextFilterValue \}\)/);
 });
 
 test("class official summary removes redundant identity and state badges", async () => {

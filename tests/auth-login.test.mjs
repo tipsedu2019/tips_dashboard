@@ -368,7 +368,7 @@ test("assistant role cannot navigate search or directly access makeup while full
 
   assert.match(authUtilsSource, /normalizedRole === "assistant"/);
   assert.match(authUtilsSource, /canUseAssistantOperations/);
-  assert.match(authUtilsSource, /defaultAdminPath: canUseAssistantOperations \? "\/admin\/word-retests" : "\/admin\/dashboard"/);
+  assert.equal(getRoleCapabilities("assistant").defaultAdminPath, "/admin/word-retests");
   assert.match(authGuardSource, /ASSISTANT_ALLOWED_ADMIN_PATHS/);
   assert.deepEqual([...assistantAllowedPathsSource.matchAll(/"(\/admin\/[^"]+)"/g)].map(match => match[1]), ["/admin/word-retests"]);
   assert.deepEqual(assistantUrls, ["/admin/word-retests"]);

@@ -308,13 +308,13 @@ test('registration final plans and copied candidate refusals launch no external 
  assert.deepEqual(await readFile(manifestPath),before);
   await fixture.assertRealSourcesUnchanged();
 });
-test('isolated workflows retain main108/27 and exact PR115/28 inventories',async()=>{
+test('isolated workflows retain main108/27 and exact PR115/29 inventories',async()=>{
  assert.equal(AI_SQL_TESTS.length,108);
  assert.deepEqual(receiptProtocol.PR_AI_SQL_TESTS,[...AI_SQL_TESTS.flatMap(path=>path===legacyOccupancyTest?[path,'supabase/tests/makeup_legacy_pair_adoption_test.sql']:[path]),'supabase/tests/dashboard_audit_predecessor_lookup_test.sql','supabase/tests/timetable_date_override_native_reader_test.sql','supabase/tests/legacy_context_adoption_reuse_test.sql','supabase/tests/legacy_adoption_pair_reuse_test.sql','supabase/tests/timetable_close_validation_proof_test.sql','supabase/tests/timetable_reader_weekly_arrays_test.sql']);
  assert.equal(receiptProtocol.PR_AI_SQL_TESTS.length,115);
- assert.equal(receiptProtocol.PR_AI_PROBES.length,28);
+ assert.equal(receiptProtocol.PR_AI_PROBES.length,29);
  assert.ok(Object.isFrozen(receiptProtocol.PR_AI_PROBES));
- assert.deepEqual(receiptProtocol.PR_AI_PROBES,AI_PROBES.flatMap(path=>path==='tests/probe-makeup-approval-collision-dto.mjs'?['tests/probe-makeup-legacy-adoption-concurrency.mjs',path]:[path]));
+ assert.deepEqual(receiptProtocol.PR_AI_PROBES,['tests/probe-timetable-close-proof-phases.mjs',...AI_PROBES.flatMap(path=>path==='tests/probe-makeup-approval-collision-dto.mjs'?['tests/probe-makeup-legacy-adoption-concurrency.mjs',path]:[path])]);
  assert.equal(receiptProtocol.approvedAiProbesForSqlInventory(AI_SQL_TESTS),AI_PROBES);
  assert.equal(receiptProtocol.approvedAiProbesForSqlInventory(receiptProtocol.PR_AI_SQL_TESTS),receiptProtocol.PR_AI_PROBES);
  for(const value of [null,[],[...AI_SQL_TESTS].reverse(),[...AI_SQL_TESTS,'supabase/tests/unreviewed.sql']])assert.equal(receiptProtocol.approvedAiProbesForSqlInventory(value),null);

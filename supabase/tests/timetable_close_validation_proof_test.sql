@@ -1525,25 +1525,8 @@ set local role anon;
 select throws_ok($$select public.update_class_operational_v1('fe101234-0000-4000-8000-000000000001',current_setting('test.proof_gateway_patch')::jsonb,'fe101234-0000-4000-8000-000000000801',null)$$,
  '42501','permission denied for function update_class_operational_v1','anonymous role cannot call closing gateway directly');
 reset role;
-set local role authenticated;
-select set_config('test.proof_gateway_result',public.update_class_operational_v1(
- 'fe101234-0000-4000-8000-000000000001',current_setting('test.proof_gateway_patch')::jsonb,
- 'fe101234-0000-4000-8000-000000000801',null)::text,true);
-set constraints all immediate;
-reset role;
-do $gateway$
-declare evidence jsonb;answer jsonb:=current_setting('test.proof_gateway_result')::jsonb;
-begin
- select jsonb_build_object('reads',pg_temp.proof_calls()-b.reader_calls,
-  'validations',(select coalesce(sum(calls),0)-b.validator_calls from pg_stat_xact_user_functions where funcid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),
-  'assertions',(select coalesce(sum(calls),0)-b.assertion_calls from pg_stat_xact_user_functions where funcid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure),
-  'status',answer#>>'{classRow,status}','receiptStatus',answer#>>'{closeResult,status}',
-  'proofs',(select count(*) from dashboard_private.timetable_validation_reuse_proofs where transaction_id=txid_current()))
- into evidence from pg_temp.proof_gateway_before b;
- if evidence is distinct from '{"reads":2,"validations":3,"assertions":2,"status":"종강","receiptStatus":"종강","proofs":0}'::jsonb
- then raise exception 'direct authenticated gateway boundary mismatch: %',evidence;end if;
- perform pg_temp.proof_check('direct authenticated gateway retains assertions and deferred validation',true,evidence);
-end $gateway$;
+-- Authenticated gateway + deferred finalizer coverage is mandatory in
+-- tests/probe-timetable-close-proof-phases.mjs (stable and committed-drift cases).
 
 select ok(passed,label) from pg_temp.proof_results order by label;
 select is(evidence->>'sqlstate',evidence->>'expectedState',label||': exact SQLSTATE') from pg_temp.proof_results where evidence ? 'expectedState' order by label;

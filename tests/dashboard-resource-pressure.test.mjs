@@ -7,7 +7,7 @@ import {
   buildDashboardSessionDateWindow,
 } from "../src/features/dashboard/session-dates.js"
 
-const hookUrl = new URL("../src/hooks/use-tips-dashboard-metrics.ts", import.meta.url)
+const pageUrl = new URL("../src/app/admin/dashboard/page.tsx", import.meta.url)
 const migrationUrl = new URL(
   "../supabase/migrations/20260808172543_dashboard_class_session_dates.sql",
   import.meta.url,
@@ -62,19 +62,12 @@ test("dashboard session dates preserve legacy and normalized metric shapes", () 
   assert.deepEqual(result[2].schedule_plan, { sessions: [] })
 })
 
-test("dashboard reads two bounded no-retry snapshot RPCs without direct table fan-out", async () => {
-  const source = await readFile(hookUrl, "utf8")
-
-  assert.match(source, /rpc\("get_dashboard_summary_sources_v1"\)/)
-  assert.match(source, /rpc\("get_dashboard_conflict_sources_v1",/)
-  assert.equal(
-    (source.match(/\.abortSignal\(AbortSignal\.timeout\(DASHBOARD_SNAPSHOT_TIMEOUT_MS\)\)\s*\.retry\(false\)/gu) || []).length,
-    2,
-  )
-  assert.match(source, /const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 8_000/)
-  assert.match(source, /attachDashboardClassSessionDates\(/)
-  assert.doesNotMatch(source, /\.from\(/)
-  assert.doesNotMatch(source, /list_dashboard_class_session_dates_v1/)
+test("the old bookmark and role-aware index redirect without DB, fetch, cache or polling", async () => {
+  const bookmark = await readFile(pageUrl, "utf8")
+  const index = await readFile(new URL("../src/app/admin/page.tsx", import.meta.url), "utf8")
+  assert.match(bookmark, /redirect\("\/admin"\)/)
+  assert.match(index, /redirect\(defaultAdminPath\)/)
+  assert.doesNotMatch(bookmark + index, /supabase|\.rpc\(|\.from\(|fetch\(|setInterval|setTimeout|useEffect|DashboardWorkload|DashboardDailyBrief/)
 })
 
 test("dashboard session RPC returns only active dates inside a guarded range", async () => {

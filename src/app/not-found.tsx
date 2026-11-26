@@ -21,7 +21,7 @@ export default function NotFound() {
           <p className="text-sm leading-6 text-muted-foreground">주소가 바뀌었거나 운영 범위에서 제외된 화면입니다.</p>
         </div>
         <Button asChild className="mt-8 w-full cursor-pointer">
-          <Link href="/admin/dashboard">대시보드</Link>
+          <Link href="/admin">첫 화면</Link>
         </Button>
       </section>
     </main>

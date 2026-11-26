@@ -10,7 +10,7 @@ export function InternalServerError() {
       message="잠시 후 다시 시도해 주세요. 같은 문제가 반복되면 문의 화면으로 이동하세요."
       icon={TriangleAlert}
       actions={[
-        { href: "/admin/dashboard", label: "대시보드" },
+        { href: "/admin", label: "첫 화면" },
         { href: "/inquiry", label: "문의", variant: "outline" },
       ]}
     />

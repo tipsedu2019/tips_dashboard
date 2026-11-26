@@ -61,6 +61,42 @@ import * as fs from 'node:fs';
 function awaitImportFs(){return fs;}
 function catalog(request, {total=2, rows=[20,21]}={}) { return {page:request.args.p_page,pageSize:15,totalCount:total,rows:rows.map(n=>({id:id(n),name:classRow(n).name,subject:'영어',grade:'중2',schedule:'월수',status:'수강',teacherName:'가상 교사',termId:null,termName:null,syncGroupId:null,syncGroupName:null,updatedAt:null})),stats:{total,active:total,draft:0},filterOptions:{terms:[],subjects:['영어'],grades:['중2'],teachers:['가상 교사'],syncGroups:[]},syncGroupCounts:[]}; }
 async function catalogs(h){ h.finished ||= new Set();for(const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))){h.finished.add(r);await h.resolve(r,catalog(r));}await subjectMetadata(h);}
+test('teacher makeup creation clears the reason only when switching between authorized subjects', async t => {
+  const h = await mount(t, 'makeup');
+  await click(h, '추가');
+  const reason = document.getElementById('makeup-reason');
+  const draft = '두 과목 중 선택 전 작성한 사유';
+  async function finishClassRead() {
+    const request = latest(h, rpc.list);
+    const data = catalog(request, { rows: [20], total: 1 });
+    data.filterOptions.subjects = ['영어', '수학'];
+    await h.resolve(request, data);
+    await subjectMetadata(h);
+  }
+
+  await change(h, reason, draft);
+  await finishClassRead();
+  await pick(h, 'subject', '영어');
+  assert.equal(reason.value, draft);
+  await h.reject(latest(h, rpc.list), { code: '57014', message: '합성 조회 실패' });
+  await click(h, '다시 조회');
+  await finishClassRead();
+  assert.equal(reason.value, draft);
+  await pick(h, 'subject', '영어');
+  assert.equal(reason.value, draft);
+  await pick(h, 'subject', '수학');
+  assert.equal(document.getElementById('makeup-subject').textContent.trim(), '수학');
+  assert.equal(reason.value, '');
+  assert.equal(calls(h, rpc.write).length, 0);
+});
+
+test('teacher makeup edit keeps the saved reason and locks the subject', async t => {
+  const { h, record } = await edit(t, 'makeup');
+  assert.equal(document.getElementById('makeup-subject').disabled, true);
+  assert.equal(document.getElementById('makeup-reason').value, record.input.reason);
+  assert.equal(calls(h, rpc.write).length, 0);
+});
+
 async function mixedStatusCatalogs(h) {
  h.finished ||= new Set();
  for (const r of calls(h,rpc.list).filter(r=>!h.finished.has(r))) {

@@ -60,7 +60,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/home',
-        destination: '/admin/dashboard',
+        destination: '/admin',
         permanent: true,
       },
       ...['classes', 'reviews', 'results'].map((page) => ({

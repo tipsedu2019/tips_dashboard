@@ -123,7 +123,7 @@ const CORE_ADMIN_PUBLIC_SMOKE_ROUTES = [
     name: "protected-dashboard-redirect",
     expectedTexts: SIGN_IN_EXPECTED_TEXTS,
     expectedPath: "/sign-in",
-    expectedSearchIncludes: "next=%2Fadmin%2Fdashboard",
+    expectedReturnPath: "/admin/dashboard",
   },
   {
     path: "/admin/tasks?taskId=missing-task-for-smoke",
@@ -326,11 +326,11 @@ const LEGACY_ADMIN_PUBLIC_SMOKE_ROUTES = [
 ]
 const PUBLIC_SMOKE_ROUTES = [
   {
-    path: "/landing",
-    name: "landing-alias-redirect",
+    path: "/home",
+    name: "home-alias-redirect",
     expectedTexts: SIGN_IN_EXPECTED_TEXTS,
     expectedPath: "/sign-in",
-    expectedSearchIncludes: "next=%2Fadmin%2Fdashboard",
+    expectedReturnPath: "/admin",
   },
   {
     path: "/sign-in",
@@ -347,9 +347,9 @@ const PUBLIC_SMOKE_ROUTES = [
 const AUTHENTICATED_CORE_SMOKE_ROUTES = [
   {
     path: "/admin/dashboard",
-    name: "dashboard",
-    expectedTexts: ["대시보드"],
-    interaction: "dashboard-read-only",
+    name: "dashboard-bookmark",
+    expectedTexts: ["등록"],
+    interaction: "registration-landing",
   },
   {
     path: "/admin/students",
@@ -2446,131 +2446,18 @@ async function verifyWordRetestManualInteraction(page) {
   if (!focusReturned) throw new Error("Word retest manual did not return focus to its toolbar launcher.")
 }
 
-async function verifyDashboardReadOnlyInteraction(page) {
-  const subjectFilter = page.getByRole("group", { name: "과목", exact: true }).first()
-  const divisionFilter = page.getByRole("group", { name: "부서", exact: true }).first()
-  const filterSurface = page.getByRole("region", { name: "대시보드 작업 기준" }).first()
-  for (const [label, locator] of [
-    ["dashboard subject filter", subjectFilter],
-    ["dashboard division filter", divisionFilter],
-    ["dashboard filter surface", filterSurface],
-  ]) {
-    if (!(await locator.count().catch(() => 0))) throw new Error(`${label} was not found.`)
+async function verifyRegistrationLanding(page) {
+  await page.waitForURL((url) => url.pathname === "/admin/registration")
+  await page.getByRole("heading", { level: 1, name: "등록", exact: true }).waitFor()
+  const openMenu = page.getByRole("button", { name: "사이드바 열기", exact: true })
+  const mobileMenu = await openMenu.isVisible()
+  if (mobileMenu) await openMenu.click()
+  await page.getByTestId("admin-nav-link-admin-registration").waitFor()
+  if (await page.getByTestId("admin-nav-link-admin-dashboard").count()) {
+    throw new Error("The retired dashboard is still in the navigation.")
   }
-
-  const filterBorders = await filterSurface.evaluate((surface) => {
-    const outer = window.getComputedStyle(surface)
-    const subjectGroup = surface.querySelector('[role="group"][aria-label="과목"]')
-    const inner = subjectGroup ? window.getComputedStyle(subjectGroup) : null
-    return {
-      outer: [outer.borderTopWidth, outer.borderRightWidth, outer.borderBottomWidth, outer.borderLeftWidth],
-      inner: inner
-        ? [inner.borderTopWidth, inner.borderRightWidth, inner.borderBottomWidth, inner.borderLeftWidth]
-        : [],
-    }
-  })
-  if (filterBorders.outer.some((width) => Number.parseFloat(width) > 0)) {
-    throw new Error(`dashboard filter surface still has an outer border: ${filterBorders.outer.join(", ")}.`)
-  }
-  if (!filterBorders.inner.some((width) => Number.parseFloat(width) > 0)) {
-    throw new Error("dashboard subject segmented control lost its inner border.")
-  }
-
-  const scienceButton = subjectFilter.getByRole("button", { name: "과학", exact: true })
-  if (!(await scienceButton.count().catch(() => 0))) throw new Error("dashboard science subject filter was not found.")
-
-  const conflictWarning = page.getByRole("alert", { name: "일정 충돌" }).first()
-  const conflictWarningVisible = await conflictWarning.isVisible().catch(() => false)
-  const warningTextBefore = conflictWarningVisible
-    ? await conflictWarning.innerText({ timeout: 5000 })
-    : ""
-  const conflictIdentityBefore = conflictWarningVisible
-    ? await conflictWarning.locator("#dashboard-conflict-rows > div").evaluateAll((rows) => (
-        rows.map((row) => Array.from(row.children).slice(0, 4).map((cell) => cell.textContent?.trim() || "").join("|"))
-      ))
-    : []
-  if (conflictWarningVisible) {
-    const warningBeforeFilters = await conflictWarning.evaluate((warning, filter) => (
-      Boolean(warning.compareDocumentPosition(filter) & Node.DOCUMENT_POSITION_FOLLOWING)
-    ), await filterSurface.elementHandle())
-    if (!warningBeforeFilters) throw new Error("dashboard schedule conflict warning is not above the filters.")
-
-    for (const label of ["문제", "담당", "처리"]) {
-      if (!warningTextBefore.includes(label)) throw new Error(`dashboard conflict warning is missing ${label}.`)
-    }
-    const taskAction = conflictWarning
-      .getByRole("button", { name: /할 일 등록|확인 중|등록 중|관리팀 등록 필요|등록 실패/ })
-      .or(conflictWarning.getByRole("link", { name: "등록됨 · 할 일 보기" }))
-      .or(conflictWarning.getByRole("button", { name: "등록됨 · 담당자가 처리 중" }))
-      .or(conflictWarning.getByText("관리팀 등록 필요", { exact: true }))
-      .first()
-    if (await taskAction.count()) {
-      throw new Error("dashboard conflict monitoring still exposes a retired task action.")
-    }
-  }
-
-  await scienceButton.click()
-  if ((await scienceButton.getAttribute("aria-pressed").catch(() => "")) !== "true") {
-    throw new Error("dashboard science subject filter did not become selected.")
-  }
-  if (conflictWarningVisible) {
-    const conflictIdentityAfter = await conflictWarning.locator("#dashboard-conflict-rows > div").evaluateAll((rows) => (
-      rows.map((row) => Array.from(row.children).slice(0, 4).map((cell) => cell.textContent?.trim() || "").join("|"))
-    ))
-    if (JSON.stringify(conflictIdentityAfter) !== JSON.stringify(conflictIdentityBefore)) {
-      throw new Error("dashboard global conflict warning changed when the science filter changed.")
-    }
-  }
-  await subjectFilter.getByRole("button", { name: "전체", exact: true }).click()
-
-  const classGroupButtons = page.locator('button[aria-label$=" 수업 펼치기"]')
-  const classGroupCount = await classGroupButtons.count().catch(() => 0)
-  for (let index = 0; index < classGroupCount; index += 1) {
-    if ((await classGroupButtons.nth(index).getAttribute("aria-expanded")) !== "false") {
-      throw new Error("dashboard class-operation groups are not all collapsed by default.")
-    }
-  }
-
-  let classRosterPopoverChecked = false
-  if (classGroupCount > 0) {
-    await classGroupButtons.first().click()
-    const classOperationsList = page.getByRole("list", { name: /별 수업 운영$/ }).first()
-    const classRosterButton = await firstUsable(classOperationsList.locator('button[aria-label$="학생 명단 보기"]'))
-    if (await classRosterButton.count().catch(() => 0)) {
-      await classRosterButton.click()
-      const classRosterPopover = page.locator('[role="dialog"][aria-label$="명단"]').last()
-      await classRosterPopover.waitFor({ state: "visible", timeout: 5000 })
-      classRosterPopoverChecked = true
-      await page.keyboard.press("Escape")
-    }
-  }
-
-  let distributionRosterPopoverChecked = false
-  const distributionExpandButton = await firstUsable(page.locator('button[aria-label$="분포 펼치기"]'))
-  if (await distributionExpandButton.count().catch(() => 0)) {
-    await distributionExpandButton.click()
-    const distributionRosterButton = await firstUsable(
-      page.locator('section[aria-label$="학생 분포"] button[aria-label$="학생 명단 보기"]'),
-    )
-    if (await distributionRosterButton.count().catch(() => 0)) {
-      await distributionRosterButton.click()
-      const distributionRosterPopover = page.locator('[role="dialog"][aria-label$="명단"]').last()
-      await distributionRosterPopover.waitFor({ state: "visible", timeout: 5000 })
-      distributionRosterPopoverChecked = true
-      await page.keyboard.press("Escape")
-    }
-  }
-
-  return {
-    readOnly: true,
-    scienceFilter: true,
-    outerFilterBorderRemoved: true,
-    conflictWarningChecked: conflictWarningVisible,
-    classGroupsInitiallyCollapsed: classGroupCount,
-    classRosterPopoverChecked,
-    distributionRosterPopoverChecked,
-    taskActionClicked: false,
-  }
+  if (mobileMenu) await page.keyboard.press("Escape")
+  return { readOnly: true, landingPath: new URL(page.url()).pathname }
 }
 
 const WORD_RETEST_EXPECTED_SCHEDULE_COLUMNS = [
@@ -2864,7 +2751,7 @@ async function verifyRouteInteraction(page, route, options = {}) {
     await verifyWordRetestManualInteraction(page)
     await verifyWordRetestModeInteraction(page)
   }
-  if (route.interaction === "dashboard-read-only") return verifyDashboardReadOnlyInteraction(page)
+  if (route.interaction === "registration-landing") return verifyRegistrationLanding(page)
   if (route.interaction === "makeup-request") return verifyMakeupRequestInteraction(page)
   if (route.interaction === "quick-add") return verifyQuickAddInteraction(page, options.quickAddSampleCount)
   if (route.interaction === "open-create") return verifyCreateDialogInteraction(page, route, options.operationSampleCount)
@@ -3887,6 +3774,9 @@ async function inspectPublicSmokeRoute(page, baseUrl, route) {
 
     if (url.pathname !== route.expectedPath) {
       throw new Error(`${route.name} expected ${route.expectedPath} but reached ${url.pathname}.`)
+    }
+    if (route.expectedReturnPath && url.searchParams.get("next") !== route.expectedReturnPath) {
+      throw new Error(`${route.name} returned with the wrong sign-in destination: ${url.search}`)
     }
     if (route.expectedSearchIncludes && !url.search.includes(route.expectedSearchIncludes)) {
       throw new Error(`${route.name} search did not include ${route.expectedSearchIncludes}. Reached ${url.pathname}${url.search}.`)
