@@ -6,7 +6,6 @@ import {
   ExternalLink,
   GraduationCap,
   ChartNoAxesCombined,
-  LayoutDashboard,
   LayoutGrid,
   NotebookPen,
   PanelsTopLeft,
@@ -45,8 +44,8 @@ export type AdminWorkspaceMeta = {
 
 const defaultWorkspaceMeta: AdminWorkspaceMeta = {
   section: "운영 포털",
-  title: "대시보드",
-  summary: "오늘 운영 흐름과 핵심 워크스페이스 상태를 빠르게 점검합니다.",
+  title: "운영 포털",
+  summary: "",
 }
 
 const workspaceMetaEntries: Array<{
@@ -290,10 +289,6 @@ const workspaceMetaEntries: Array<{
       summary: "받은함, 보낸함, 완료 큐로 팀 할 일의 다음 액션을 정리합니다.",
     },
   },
-  {
-    match: "/admin/dashboard",
-    meta: defaultWorkspaceMeta,
-  },
 ]
 
 export function resolveAdminWorkspaceMeta(pathname: string): AdminWorkspaceMeta {
@@ -320,7 +315,6 @@ export function buildAdminNavGroups({
     }]
   }
   const fullOverviewItems: NavItem[] = [
-    { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
     { title: "등록", url: "/admin/registration", icon: UserPlus },
     { title: "전반", url: "/admin/transfer", icon: Repeat2 },
     { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },

@@ -1,166 +1,85 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { JSDOM } from "jsdom"
-import { act, createElement, useLayoutEffect } from "react"
+import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 import { loadNotificationComponent as load } from "./helpers/notification-component-loader.mjs"
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
-function dom(t) {
-  const instance = new JSDOM(
-    '<!doctype html><html><body><div id="root"></div></body></html>',
-    { url: "https://example.test/admin/dashboard", pretendToBeVisual: true },
-  )
-  for (const key of [
-    "window",
-    "document",
-    "navigator",
-    "HTMLElement",
-    "Element",
-    "Node",
-    "Event",
-  ])
-    Object.defineProperty(globalThis, key, {
-      configurable: true,
-      value: key === "window" ? instance.window : instance.window[key],
-    })
+const { getRoleCapabilities } = load("src/lib/auth-utils.ts")
+const { buildAdminNavGroups } = load("src/lib/navigation.ts")
+
+function fixture(t, role) {
+  const dom = new JSDOM('<div id="root"></div>', { url: "https://example.test/admin" })
+  const { window } = dom
+  for (const name of ["window", "document", "navigator", "HTMLElement", "Element", "Node", "Event"]) {
+    Object.defineProperty(globalThis, name, { configurable: true, value: name === "window" ? window : window[name] })
+  }
   const root = createRoot(document.getElementById("root"))
-  t.after(async () => {
-    await act(async () => root.unmount())
-    instance.window.close()
-  })
-  return { root, window: instance.window }
+  t.after(async () => { await act(async () => root.unmount()); window.close() })
+  const destinations = []
+  const redirect = (destination) => { destinations.push(destination); return null }
+  const auth = {
+    ...getRoleCapabilities(role), role, loading: false, isAdmin: role === "admin",
+    isTeacher: role === "teacher", user: role ? { id: "synthetic", role } : null,
+  }
+  const router = { replace: redirect }
+  const boundaries = new Map([
+    ["next/navigation", { redirect, useRouter: () => router, usePathname: () => window.location.pathname,
+      useSearchParams: () => new URLSearchParams(window.location.search) }],
+    ["@/providers/auth-provider", { useAuth: () => auth }],
+    ["@/features/operations/academic-calendar-workspace", { AcademicCalendarWorkspace: () =>
+      createElement("main", { "data-workspace": "academic-calendar" }) }],
+    ["@/features/tasks/ops-task-workspace", { OpsTaskWorkspace: ({ workspace }) =>
+      createElement("main", { "data-workspace": workspace }) }],
+  ])
+  const { AuthGuard } = load("src/components/auth/auth-guard.tsx", boundaries)
+  async function visit(path) {
+    destinations.length = 0
+    window.history.replaceState(null, "", path)
+    const { default: Page } = load(`src/app${window.location.pathname}/page.tsx`, boundaries)
+    await act(async () => root.render(createElement(AuthGuard, null, createElement(Page))))
+    return [...destinations]
+  }
+  return { visit, workspace: () => document.querySelector("main[data-workspace]")?.dataset.workspace }
 }
-function deferred() {
-  let resolve, reject
-  const promise = new Promise((a, b) => {
-    resolve = a
-    reject = b
+
+const homes = [
+  ["admin", "/admin/registration", "registration"],
+  ["staff", "/admin/registration", "registration"],
+  ["assistant", "/admin/word-retests", "word_retest"],
+  ["teacher", "/admin/academic-calendar", "academic-calendar"],
+  ["viewer", "/admin/academic-calendar", "academic-calendar"],
+  ["unknown", "/admin/academic-calendar", "academic-calendar"],
+]
+for (const [role, target, workspace] of homes) {
+  test(`${role} enters its permitted workspace through the guarded admin index`, async (t) => {
+    const f = fixture(t, role)
+    assert.deepEqual(await f.visit("/admin"), [target])
+    assert.deepEqual(await f.visit(target), [])
+    assert.equal(f.workspace(), workspace)
+    const items = buildAdminNavGroups({ ...getRoleCapabilities(role), isAdmin: role === "admin" }).flatMap(group => group.items)
+    assert.ok(items.some(item => item.url === target))
+    if (role === "admin" || role === "staff") assert.equal(items[0].url, target)
+    assert.ok(items.every(item => item.url !== "/admin/dashboard" && item.title !== "대시보드"))
   })
-  return { promise, resolve, reject }
 }
-const auth = (id = "a", role = "admin") => ({
-  user: { id },
-  session: { user: { id }, access_token: `token-${id}` },
-  role,
-  loading: false,
-  canAccessDashboard: true,
+test("a registration bookmark cannot grant assistants registration access", async (t) => {
+  const f = fixture(t, "assistant")
+  assert.deepEqual(await f.visit("/admin/registration?flow=completed"), ["/admin/word-retests"])
+  assert.equal(f.workspace(), undefined)
 })
-const summary = { generatedAt: "2026-09-22T01:00:00Z", groups: [] }
-test("workload refresh retains accepted data on error, isolates identity/filter and ignores old requests", async (t) => {
-  const { root } = dom(t)
-  let identity = auth(),
-    request,
-    state
-  const reads = []
-  const enqueue = () => {
-    const value = deferred()
-    reads.push(value)
-    return value.promise
-  }
-  const { useDashboardWorkload } = load(
-    "src/features/dashboard/use-dashboard-workload.ts",
-    new Map([
-      ["@/lib/supabase", { supabase: {} }],
-      ["@/providers/auth-provider", { useAuth: () => identity }],
-      [
-        "./workload-service.ts",
-        { readWorkloadSummary: enqueue, readWorkloadPage: enqueue },
-      ],
-    ]),
-  )
-  function Probe() {
-    const value = useDashboardWorkload(request)
-    useLayoutEffect(() => {
-      state = value
-    })
-    return null
-  }
-  const render = () => act(async () => root.render(createElement(Probe)))
-  await render()
-  assert.equal(state.loading, true)
-  await act(async () => reads[0].resolve(summary))
-  assert.equal(state.data, summary)
-  await act(async () => state.refresh())
-  await act(async () => reads[1].reject(new Error("offline")))
-  assert.equal(state.data, summary)
-  assert.match(state.error, /불러오지/)
-  await act(async () => state.refresh())
-  identity = auth("b")
-  await render()
-  assert.equal(state.data, null)
-  await act(async () => reads[2].resolve(summary))
-  assert.equal(state.data, null)
-  await act(async () => reads[3].resolve(summary))
-  assert.equal(state.data, summary)
-  request = { filter: { team: "영어팀" }, page: 1, pageSize: 10 }
-  await render()
-  assert.equal(state.data, null)
-  identity = auth("b", "teacher")
-  await render()
-  assert.equal(state.data, null)
-  await act(async () => reads[4].resolve({ rows: [{ title: "stale" }] }))
-  assert.equal(state.data, null)
+test("an anonymous registration bookmark returns through sign-in with the original query", async (t) => {
+  const f = fixture(t, null)
+  const path = "/admin/registration?flow=completed"
+  assert.deepEqual(await f.visit(path), [`/sign-in?next=${encodeURIComponent(path)}`])
+  assert.equal(f.workspace(), undefined)
 })
-test("automatic reads are throttled, paused in background and never overlap", async (t) => {
-  const { root, window } = dom(t)
-  let tick, state
-  let now = 100000
-  const originalNow = Date.now
-  Date.now = () => now
-  t.after(() => {
-    Date.now = originalNow
-  })
-  window.setInterval = (callback) => {
-    tick = callback
-    return 1
-  }
-  window.clearInterval = () => {}
-  let visible = "visible"
-  Object.defineProperty(document, "visibilityState", {
-    get: () => visible,
-    configurable: true,
-  })
-  const reads = []
-  const { useDashboardWorkload } = load(
-    "src/features/dashboard/use-dashboard-workload.ts",
-    new Map([
-      ["@/lib/supabase", { supabase: {} }],
-      ["@/providers/auth-provider", { useAuth: () => auth() }],
-      [
-        "./workload-service.ts",
-        {
-          readWorkloadSummary: () => {
-            const r = deferred()
-            reads.push(r)
-            return r.promise
-          },
-        },
-      ],
-    ]),
-  )
-  function Probe() {
-    const value = useDashboardWorkload()
-    useLayoutEffect(() => {
-      state = value
-    })
-    return null
-  }
-  await act(async () => root.render(createElement(Probe)))
-  assert.equal(reads.length, 1)
-  now += 60000
-  await act(async () => tick())
-  assert.equal(reads.length, 1)
-  await act(async () => reads[0].resolve(summary))
-  visible = "hidden"
-  now += 60000
-  await act(async () => tick())
-  assert.equal(reads.length, 1)
-  visible = "visible"
-  await act(async () => window.dispatchEvent(new Event("focus")))
-  assert.equal(reads.length, 2)
-  await act(async () => reads[1].resolve(summary))
-  await act(async () => window.dispatchEvent(new Event("focus")))
-  assert.equal(reads.length, 2)
-  assert.equal(state.loading, false)
+test("the former dashboard bookmark reaches the permitted home without rendering a link hub", async (t) => {
+  const f = fixture(t, "admin")
+  assert.deepEqual(await f.visit("/admin/dashboard"), ["/admin"])
+  assert.equal(document.querySelector('nav[aria-label="업무 바로가기"]'), null)
+  assert.deepEqual(await f.visit("/admin"), ["/admin/registration"])
+  assert.deepEqual(await f.visit("/admin/registration"), [])
+  assert.equal(f.workspace(), "registration")
 })

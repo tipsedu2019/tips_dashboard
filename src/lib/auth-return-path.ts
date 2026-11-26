@@ -1,4 +1,4 @@
-const DEFAULT_AUTH_RETURN_PATH = "/admin/dashboard"
+const DEFAULT_AUTH_RETURN_PATH = "/admin"
 const RETURN_PATH_ORIGIN = "https://auth-return.invalid"
 
 export function getAuthReturnPath(value: string | null) {

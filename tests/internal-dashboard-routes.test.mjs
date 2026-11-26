@@ -3,13 +3,35 @@ import { existsSync } from "node:fs";
 import test from "node:test";
 import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs";
 
-test("the root server page enters the internal dashboard", () => {
+test("the root server page enters the role-aware admin index", () => {
   const destinations = [];
   const { default: HomePage } = loadNotificationComponent("src/app/page.tsx", new Map([
     ["next/navigation", { redirect: (destination) => destinations.push(destination) }],
   ]));
   HomePage();
-  assert.deepEqual(destinations, ["/admin/dashboard"]);
+  assert.deepEqual(destinations, ["/admin"]);
+});
+
+test("the root middleware sends the incoming request to the same admin index", () => {
+  const { middleware } = loadNotificationComponent("middleware.ts", new Map([
+    ["next/server", { NextResponse: { redirect: url => url.href } }],
+  ]));
+  const url = "https://example.test/";
+  assert.equal(middleware({ url, nextUrl: new URL(url) }), "https://example.test/admin");
+});
+
+test("retired admin bookmarks resolve to the role-aware index", () => {
+  for (const route of [
+    "chat", "dashboard-2", "faqs", "mail", "manual", "pricing", "users", "settings/account",
+    "settings/appearance", "settings/billing", "settings/connections", "settings/user",
+  ]) {
+    const destinations = [];
+    const { default: Page } = loadNotificationComponent(`src/app/admin/${route}/page.tsx`, new Map([
+      ["next/navigation", { redirect: url => destinations.push(url) }],
+    ]));
+    Page();
+    assert.deepEqual(destinations, ["/admin"], route);
+  }
 });
 
 test("retired public addresses lead to the landing site without catching admin or API routes", async () => {
@@ -18,7 +40,7 @@ test("retired public addresses lead to the landing site without catching admin o
   ]));
   const redirects = await config.redirects();
   assert.deepEqual(redirects, [
-    { source: "/home", destination: "/admin/dashboard", permanent: true },
+    { source: "/home", destination: "/admin", permanent: true },
     ...["classes", "reviews", "results"].map((page) => ({
       source: `/${page}`, destination: `https://tipsedu.co.kr/${page}`, permanent: true,
     })),

@@ -48,14 +48,20 @@ for (const id of ids) for (const width of [1440, 390]) for (const name of routes
     return route.continue();
   });
   const page = await context.newPage();
-  await page.clock.setFixedTime(new Date(FIXED_NOW));
+  if (name === 'dashboard') await page.clock.install({ time: new Date(FIXED_NOW) });
+  else await page.clock.setFixedTime(new Date(FIXED_NOW));
   page.on('pageerror', err => entry.pageErrors.push(err.message));
   page.on('console', msg => { if (msg.type() === 'error') entry.consoleErrors.push(msg.text()); });
   try {
     await page.goto(base + entry.route);
     if (id === 'G') await page.waitForURL('**/sign-in?**');
     else if (name === 'students' && id !== 'C') await page.getByText(id === 'B' ? '합성긴이름학생구분용가나다라마바00' : '합성학생01', { exact: true }).filter({ visible: true }).first().waitFor({ timeout: 12000 });
-    else if (name === 'dashboard') { if (id === 'C') await page.getByText(/오늘.*없습니다/).waitFor(); else await page.getByText(id === 'B' ? '합성긴수업명'.repeat(12) : '합성학생01 레벨테스트', { exact: true }).filter({ visible: true }).first().waitFor(); }
+    else if (name === 'dashboard') {
+      await page.waitForURL(url => url.pathname === '/admin/registration');
+      await page.getByRole('heading', { level: 1, name: '등록', exact: true }).waitFor();
+      await page.getByText('문의 단계에 등록 업무가 없습니다.', { exact: true }).waitFor();
+      await page.clock.fastForward(61_000);
+    }
     else if (name === 'registration') await page.getByText('문의 단계에 등록 업무가 없습니다.', { exact: true }).waitFor();
     else if (name === 'class-schedule') await page.getByText('선택한 조건에 맞는 수업일정이 없습니다.', { exact: true }).waitFor();
     else if (name === 'statistics') await page.getByRole('region', { name: '통계 결과' }).locator('[aria-label="핵심 운영 지표"]').waitFor();
@@ -73,6 +79,12 @@ for (const id of ids) for (const width of [1440, 390]) for (const name of routes
       entry.studentPagingAndSearch = 'page2 -> zero search -> clear -> page1 restored';
     }
     await page.waitForLoadState('networkidle');
+    if (name === 'dashboard') {
+      const retiredRequests = entry.requests.filter(request =>
+        /\/(?:get_dashboard_daily_brief_v1|get_dashboard_workload_v1|list_dashboard_workload_page_v1)$/.test(request.path));
+      assert.deepEqual(retiredRequests, [], 'No dashboard widget requests from the legacy bookmark');
+      if (id === 'G') assert.equal(new URL(page.url()).searchParams.get('next'), entry.route);
+    }
     await page.waitForFunction(() => [...document.images].filter(image => image.getBoundingClientRect().width > 0).every(image => image.complete && image.naturalWidth > 0));
     entry.performance = await page.evaluate(() => ({ navigation: performance.getEntriesByType('navigation').map(entry => ({ duration: entry.duration, responseEnd: entry.responseEnd, domContentLoadedEventEnd: entry.domContentLoadedEventEnd })), resourceCount: performance.getEntriesByType('resource').length, transferredBytes: performance.getEntriesByType('resource').reduce((sum, entry) => sum + entry.transferSize, 0) }));
     entry.finalUrl = page.url();

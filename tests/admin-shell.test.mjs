@@ -197,7 +197,7 @@ test("legacy admin redirect routes do not keep template implementation files", a
     const pageSource = await readSource(`${pathname}/page.tsx`);
     const files = await listFiles(pathname);
 
-    assert.match(pageSource, /redirect\("\/admin\/dashboard"\)/);
+    assert.match(pageSource, /redirect\("\/admin"\)/);
     assert.deepEqual(files, [`${pathname}/page.tsx`]);
   }
 });
@@ -250,10 +250,15 @@ test("dashboard omits introductory briefing copy and redundant workspace heading
   assert.doesNotMatch(source, /운영 워크스페이스 바로가기/);
 });
 
-test("dashboard renders only the daily brief path instead of live statistics sources", async () => {
+test("the retired dashboard redirects without mounting statistics sources", async () => {
   const pageSource = await readSource("src/app/admin/dashboard/page.tsx");
+  for (const path of ["/admin", "/admin/dashboard"]) {
+    const { section, title } = resolveAdminWorkspaceMeta(path);
+    assert.deepEqual([section, title], ["운영 포털", "운영 포털"]);
+  }
 
-  assert.match(pageSource, /DashboardDailyBrief/);
+  assert.match(pageSource, /redirect\("\/admin"\)/);
+  assert.doesNotMatch(pageSource, /DashboardDailyBrief|DashboardWorkload/);
   assert.doesNotMatch(pageSource, /useTipsDashboardMetrics/);
   assert.doesNotMatch(pageSource, /SectionCards/);
   assert.doesNotMatch(pageSource, /get_dashboard_summary_sources_v1/);
@@ -518,28 +523,15 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /bucket\.classBreakdowns\?\.byGrade \|\| \[\]\)\.slice\(0, 5\)/);
 });
 
-test("dashboard metrics renders a cached summary before independently loading conflicts", async () => {
-  const source = await readSource("src/hooks/use-tips-dashboard-metrics.ts");
-
-  assert.match(source, /const DASHBOARD_SNAPSHOT_TIMEOUT_MS = 8_000/);
-  assert.match(source, /rpc\("get_dashboard_summary_sources_v1"\)/);
-  assert.match(source, /rpc\("get_dashboard_conflict_sources_v1",/);
-  assert.equal((source.match(/\.retry\(false\)/g) || []).length, 2);
-  assert.match(source, /DASHBOARD_SNAPSHOT_VERSION/);
-  assert.match(source, /const cacheScope = userId && role/);
-  assert.match(source, /dashboardSnapshotCache\s*\.load\(\s*cacheScope,\s*"summary"/);
-  assert.match(source, /dashboardSnapshotCache\s*\.load\(\s*cacheScope,\s*"conflict"/);
-  assert.match(source, /buildMetrics\(\{ classes: summary\.classes, students: summary\.students \}\)/);
-  assert.match(source, /attachDashboardClassSessionDates\(sourceData\.classes, conflict\.sessionDates\)/);
-  assert.match(source, /type ConflictSourceStatus = "loading" \| "ready" \| "error"/);
-  assert.match(source, /schedule: \{ status: "loading", error: "" \}/);
-  assert.match(source, /exam: \{ status: "loading", error: "" \}/);
-  assert.match(source, /retryCoreSources/);
-  assert.match(source, /retryConflictSources/);
-  assert.match(source, /setSummarySourceRevision\(\(current\) => current \+ 1\)/);
-  assert.match(source, /setConflictSourceRevision\(\(current\) => current \+ 1\)/);
-  assert.match(source, /setMetrics\(\(current\) => \(\{[\s\S]*\.\.\.current,[\s\S]*schedule: \{ status: "error"/);
-  assert.doesNotMatch(source, /\.from\(|readTable\(|academic_events: "\*"/);
+test("retired dashboard readers cannot be imported by the application", async () => {
+  for (const path of [
+    "src/hooks/use-tips-dashboard-metrics.ts",
+    "src/features/dashboard/dashboard-workload.tsx",
+    "src/features/dashboard/dashboard-daily-brief.tsx",
+    "src/features/dashboard/metrics.js",
+    "src/features/dashboard/snapshot-cache.js",
+    "src/features/dashboard/snapshot-sources.js",
+  ]) assert.equal(await pathExists(path), false, path);
 });
 
 test("dashboard renders academy-wide actionable conflict state before filters and metrics", async () => {
@@ -586,10 +578,7 @@ test("dashboard renders academy-wide actionable conflict state before filters an
 });
 
 test("dashboard keeps dense cards readable on mobile widths", async () => {
-  const [source, pageSource] = await Promise.all([
-    readSource("src/app/admin/dashboard/components/section-cards.tsx"),
-    readSource("src/app/admin/dashboard/page.tsx"),
-  ]);
+  const source = await readSource("src/app/admin/dashboard/components/section-cards.tsx");
 
   assert.match(source, /DISTRIBUTION_ROW_CLASS/);
   assert.match(source, /grid-cols-\[minmax\(3\.75rem,5\.25rem\)_minmax\(0,1fr\)_3\.25rem\]/);
@@ -609,7 +598,6 @@ test("dashboard keeps dense cards readable on mobile widths", async () => {
   assert.match(source, /min-w-0 max-w-full text-sm font-semibold leading-5/);
   assert.match(source, /grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center/);
   assert.doesNotMatch(source, /DashboardFilterMenu/);
-  assert.match(pageSource, /px-4 pb-5 sm:px-5 sm:pb-6 lg:px-6/);
 });
 
 test("lesson-design routes resolve to the actual design workspace title", async () => {
@@ -697,7 +685,7 @@ test("global shell controls use Korean action labels", async () => {
   assert.doesNotMatch(modeToggleSource, /Switch to/);
 
   assert.match(navUserSource, /계정 메뉴 열기/);
-  assert.match(appSidebarSource, /aria-label="대시보드 홈으로 이동"/);
+  assert.match(appSidebarSource, /aria-label="첫 화면으로 이동"/);
 });
 
 test("assistant navigation only exposes allowed operation surfaces", async () => {
