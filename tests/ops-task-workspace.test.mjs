@@ -4709,7 +4709,7 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "runPublicSmoke",
     'authMode: "public-smoke"',
     "home-alias-redirect",
-    "next=%2Fadmin%2Fdashboard",
+    'expectedReturnPath: "/admin/dashboard"',
     "admin-root-redirect",
     "admin-calendar-alias-redirect",
     "admin-manual-alias-redirect",

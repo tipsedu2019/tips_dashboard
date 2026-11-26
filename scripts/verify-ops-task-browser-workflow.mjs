@@ -123,7 +123,7 @@ const CORE_ADMIN_PUBLIC_SMOKE_ROUTES = [
     name: "protected-dashboard-redirect",
     expectedTexts: SIGN_IN_EXPECTED_TEXTS,
     expectedPath: "/sign-in",
-    expectedSearchIncludes: "next=%2Fadmin%2Fdashboard",
+    expectedReturnPath: "/admin/dashboard",
   },
   {
     path: "/admin/tasks?taskId=missing-task-for-smoke",
