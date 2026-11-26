@@ -199,9 +199,12 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-ai-agent-thread-replies-concurrency.mjs",
   "tests/probe-timetable-nullable-room-concurrency.mjs",
 ])
-const EXPECTED_PR_CI_PROBES = Object.freeze(EXPECTED_CI_PROBES.flatMap(path =>
-  path === "tests/probe-makeup-approval-collision-dto.mjs"
-    ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]))
+const EXPECTED_PR_CI_PROBES = Object.freeze([
+  "tests/probe-timetable-close-proof-phases.mjs",
+  ...EXPECTED_CI_PROBES.flatMap(path =>
+    path === "tests/probe-makeup-approval-collision-dto.mjs"
+      ? ["tests/probe-makeup-legacy-adoption-concurrency.mjs", path] : [path]),
+])
 
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
@@ -1451,7 +1454,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "b7eaa1de3620b7f486bb9fcf17ce9e8fd91820d4dfc491d21ab3a3fe38a0f923"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "6b36a398ad935eb2e8b1b50f6a680f7f4161fa3e06aa71a85157e34b57dae994"],
+    ["supabase-sql-review.yml", "acad64414ff47c6a77e7a41e3bf38cd69948be973dd3987d5a756035f1cb03d9"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {

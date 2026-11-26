@@ -1193,6 +1193,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     totalCount,
     sort: displayedSort,
     scope: displayedScope,
+    classListStatus,
     goToPage,
     setSort,
     loadDetail,
@@ -3589,6 +3590,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           totalCount={totalCount}
           sort={displayedSort}
           displayedScope={displayedScope}
+          classListStatus={classListStatus}
           onPageChange={goToPage}
           onSortChange={setSort}
           filterOptions={filterOptions}

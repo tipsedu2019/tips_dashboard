@@ -24,6 +24,8 @@ import type { ClassRosterPage } from "./class-enrollment-status-cell";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
+export type ClassListStatus = { requested: string | null; accepted: string | null };
+
 export type ManagementStat = {
   label: string;
   value: string;
@@ -818,7 +820,7 @@ export function useManagementRecords(
   const detailAuthorizationRef = useRef<{ owner: string } | null>(null);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
   const [metadataFailure, setMetadataFailure] = useState<{ owner: string; error: string } | null>(null);
-  const [snapshot, setSnapshot] = useState<(NumberedPageSnapshot<ManagementRow> & { authorizationScope: string; kind: ManagementKind }) | null>(null);
+  const [snapshot, setSnapshot] = useState<(NumberedPageSnapshot<ManagementRow> & { authorizationScope: string; kind: ManagementKind; classListStatus?: ClassListStatus }) | null>(null);
   const [metadataOwner, setMetadataOwner] = useState("");
   const controllerRef = useRef<ReturnType<typeof createNumberedPageController<ManagementRow>> | null>(null);
   const lastRequestKeyRef = useRef("");
@@ -912,9 +914,15 @@ export function useManagementRecords(
       },
       onChange: (next) => {
         if (!active) return;
-        setSnapshot({ ...next, authorizationScope, kind });
-        if (!next.loading && !next.error && next.scope && lastRequestKeyRef.current) {
-          const [requestScope, requestedPage, requestedSize] = JSON.parse(lastRequestKeyRef.current);
+        const [requestScope, requestedPage, requestedSize] = lastRequestKeyRef.current
+          ? JSON.parse(lastRequestKeyRef.current) as [string, number, number] : [];
+        // A failed request can still carry rows from the last successful status.
+        const classListStatus = kind === "classes" ? {
+          requested: requestScope ? JSON.parse(requestScope).filters.status : null,
+          accepted: next.scope ? JSON.parse(next.scope).filters.status : null,
+        } : undefined;
+        setSnapshot({ ...next, authorizationScope, kind, classListStatus });
+        if (!next.loading && !next.error && next.scope && requestScope) {
           if (requestedPage !== next.page) {
             lastRequestKeyRef.current = JSON.stringify([requestScope, next.page, requestedSize]);
             onQueryChangeRef.current?.({ page: next.page, sort: JSON.parse(next.scope).sort });
@@ -1044,6 +1052,7 @@ export function useManagementRecords(
     totalCount: displayed?.totalCount ?? null,
     sort: displayedSort,
     scope: displayed?.scope || owner,
+    classListStatus: displayed?.classListStatus,
     goToPage,
     setSort,
     loadDetail,

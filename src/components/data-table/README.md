@@ -92,7 +92,7 @@ Cache display references per accepted sale line for desktop and mobile, independ
 
 ## Inventory count composition
 
-Use the shared frame, toolbar, viewport, cells, mobile region, selection target and footer for both the count list and its separate history. Read all active books (`audit: "all"` for service compatibility) without recommended/pending/done/all audit controls or status badges. The feature retains its authoritative location, accepted server order, drafts, selection revisions, read-before-write and idempotency rules.
+Use the shared frame, toolbar, viewport, cells, mobile region, selection target and footer for both the count list and its separate history. Read all active books (`audit: "all"` for service compatibility) without recommended/pending/done/all audit controls or status badges. The desktop count table groups the accepted page once per normalized subject label, in first-seen subject order and server order within each subject; group counts cover that page only. The ungrouped mobile list retains server order. The feature retains its authoritative location, page boundaries, drafts, selection revisions, read-before-write and idempotency rules.
 
 `InventoryCountQuantityInput`, `InventoryCountSubmitButton` and `InventoryCountDifference` are shared by desktop and mobile. Keep zero as a valid count, distinguish a placeholder from a draft, and clear quantity and memo together. Both Enter and the visible submit action respect saving/schema-disabled states. Input and selection remain editable during pending work so the existing revision guards can preserve newer intent. Mobile selection uses the same state as the desktop table and enables the existing bulk workflow.
 
