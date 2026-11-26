@@ -2172,7 +2172,6 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const formCatalogGeneration = useRef(-1)
   const [offerListReservationRetry, setOfferListReservationRetry] = useState(false)
   const [contextAttempt, setContextAttempt] = useState(0)
-  const [contextState, setContextState] = useState<{ scope: string; context?: MakeupReservationContext; error?: string }>({ scope: "" })
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
   const [message, setMessage] = useState("")
@@ -2245,8 +2244,14 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     return { slots: uniqueSlots, eventRequestIds, requestIds, requestGenerations, invalidTargets }
   }, [pageState.rows, selectedDetailRequest, editingRequest, approvalRequest, requestDialogOpen, input, catalogData.academicEvents])
   const contextScope = JSON.stringify([actorScope, catalogGeneration, contextRequest, contextAttempt])
-  const contextError = contextState.scope === contextScope ? contextState.error : undefined
-  const matchingContext = contextState.scope === contextScope ? contextState.context : undefined
+  // Revisiting an interval starts a new check, even when its inputs match an earlier success.
+  const contextCheck = useMemo(() => (
+    catalogReady && role !== "teacher" ? JSON.parse(contextScope)[2] as typeof contextRequest : null
+  ), [catalogReady, contextScope, role])
+  const [contextResult, setContextResult] = useState<{ check: typeof contextRequest; context?: MakeupReservationContext; error?: string }>()
+  const currentResult = contextResult?.check === contextCheck ? contextResult : undefined
+  const contextError = currentResult?.error
+  const matchingContext = currentResult?.context
   const data: MakeupRequestWorkspaceData = useMemo(() => ({ ...catalogData, requests: pageState.rows, reservationContext: matchingContext, collisionContextReady: catalogReady && Boolean(matchingContext) }), [catalogData, pageState.rows, matchingContext, catalogReady])
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
   selectedClassIdRef.current = selectedClass?.id || ""
@@ -2312,17 +2317,21 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     return () => abort.abort()
   }, [requestDialogOpen, catalogGeneration])
   useEffect(() => {
-    if (role === "teacher" || !catalogReady) return
-    const abort = new AbortController(), scope = contextScope
-    if (JSON.parse(scope)[2].invalidTargets) {
-      setContextState({ scope, error: "예약 대상 일시를 확인할 수 없습니다. 신청서의 보강일시를 확인해 주세요." })
-      return () => abort.abort()
+    if (!contextCheck) return
+    if (contextCheck.invalidTargets) {
+      setContextResult({ check: contextCheck, error: "예약 대상 일시를 확인할 수 없습니다. 신청서의 보강일시를 확인해 주세요." })
+      return
     }
-    void readMakeupReservationContext({ ...JSON.parse(scope)[2], signal: abort.signal }).then((context) => {
-      if (!abort.signal.aborted && lifetime.current) setContextState({ scope, context })
-    }, (failure) => { if (!abort.signal.aborted && lifetime.current) setContextState({ scope, error: getMakeupActionErrorMessage(failure, "예약 충돌 정보를 불러오지 못했습니다.") }) })
+    const abort = new AbortController()
+    void readMakeupReservationContext({ ...contextCheck, signal: abort.signal }).then((context) => {
+      if (!abort.signal.aborted && lifetime.current) setContextResult({ check: contextCheck, context })
+    }, (failure) => {
+      if (!abort.signal.aborted && lifetime.current) {
+        setContextResult({ check: contextCheck, error: getMakeupActionErrorMessage(failure, "예약 충돌 정보를 불러오지 못했습니다.") })
+      }
+    })
     return () => abort.abort()
-  }, [contextScope, catalogReady, role])
+  }, [contextCheck])
   useEffect(() => {
     if (pageState !== latestPageState.current || !pageState.scope || pageState.loading || pageState.error) return
     const params = new URLSearchParams(window.location.search)
