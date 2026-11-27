@@ -5,10 +5,10 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { act, createElement, forwardRef } from "react"
-import { createRoot } from "react-dom/client"
 import ts from "typescript"
 import { createRegistrationCustomerMessageClient } from "../src/features/tasks/registration-customer-message-service.ts"
 import { formatRegistrationMessageTimestamp } from "../src/features/tasks/registration-customer-message-labels.ts"
+import * as customerMessageErrors from "../src/features/tasks/registration-customer-message-errors.ts"
 
 const require = createRequire(import.meta.url)
 const { JSDOM } = require("jsdom")
@@ -16,6 +16,13 @@ const { JSDOM } = require("jsdom")
 const dialogUrl = new URL("../src/features/tasks/registration-alimtalk-preview-dialog.tsx", import.meta.url)
 const sharedDialogUrl = new URL("../src/components/ui/dialog.tsx", import.meta.url)
 const fixturesUrl = new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url)
+
+// Initialize React DOM after JSDOM so its real input-event capability detection
+// sees the browser environment; administrator form checks use native events.
+async function createMountedRoot(container) {
+  const { createRoot } = await import("react-dom/client")
+  return createRoot(container)
+}
 
 async function sourceOrEmpty(url) {
   try {
@@ -41,28 +48,31 @@ async function loadMountedDialog() {
     return createElement("button", { ...props, ref }, children)
   })
   const Dialog = ({ open, children }) => open ? createElement("div", null, children) : null
-  const Wrapper = ({ children, ...props }) => {
+  const Wrapper = forwardRef(function MountedWrapper({ children, ...props }, ref) {
     delete props.overlayClassName
     delete props.showCloseButton
     delete props.onEscapeKeyDown
-    return createElement("div", props, children)
-  }
+    return createElement("div", { ...props, ref }, children)
+  })
+  const Content = forwardRef(function MountedContent(props, ref) {
+    return createElement(Wrapper, { ...props, ref, role: "dialog", tabIndex: -1, "data-slot": "dialog-content" })
+  })
+  const Title = forwardRef(function MountedTitle({ children, ...props }, ref) {
+    return createElement("h2", { ...props, ref, "data-slot": "dialog-title" }, children)
+  })
   const runtimeModule = { exports: {} }
   const localModules = new Map([
     ["@/components/ui/button", { Button }],
     ["@/components/ui/dialog", {
       Dialog,
       DialogClose: ({ children }) => children,
-      DialogContent: Wrapper,
+      DialogContent: Content,
       DialogDescription: Wrapper,
       DialogFooter: Wrapper,
       DialogHeader: Wrapper,
-      DialogTitle: Wrapper,
+      DialogTitle: Title,
     }],
-    ["./registration-customer-message-errors", {
-      getRegistrationCustomerMessageErrorMessage: (_error, fallback) => fallback,
-      getRegistrationCustomerMessageReadinessMessage: () => "발송 준비 상태를 확인해 주세요.",
-    }],
+    ["./registration-customer-message-errors", customerMessageErrors],
     ["./registration-customer-message-labels", { formatRegistrationMessageTimestamp }],
   ])
   const runtimeRequire = (specifier) => {
@@ -178,7 +188,7 @@ test("mounted observation dialog ignores a stale preview and one confirmation ge
   })
 
   try {
-    root = createRoot(dom.window.document.getElementById("root"))
+    root = await createMountedRoot(dom.window.document.getElementById("root"))
     await render("d6400000-0000-4000-8000-000000000002")
     await render("d6400000-0000-4000-8000-000000000003")
     await act(async () => {
@@ -437,3 +447,433 @@ test("등록 fixture도 입학 수업정보와 모든 문의하기 버튼을 실
   assert.match(source, /firstLessonLabel:\s*"8월 17일 월요일 오후 6:00–8:00"/)
   assert.equal((source.match(/host:\s*"tipsedu\.channel\.io"/g) || []).length, 7)
 })
+
+const RECOVERY_SOURCE_A = "d6400000-0000-4000-8000-000000000012"
+const RECOVERY_SOURCE_B = "d6400000-0000-4000-8000-000000000013"
+const RECOVERY_NOW = Date.parse("2026-10-29T08:00:00.000Z")
+const CONFLICT_CODE = "registration_customer_message_confirmation_conflict"
+
+function recoveryPreview(ordinal = 1, overrides = {}) {
+  return {
+    ...observationPreview(RECOVERY_SOURCE_A, `합성 수업 ${ordinal}`),
+    previewId: `d6400000-0000-4000-8000-${String(100 + ordinal).padStart(12, "0")}`,
+    expiresAt: new Date(RECOVERY_NOW + 60_000).toISOString(),
+    studentName: `합성 학생 ${ordinal}`,
+    ...overrides,
+  }
+}
+
+function recoveryReceipt(overrides = {}) {
+  return { ok: true, messageId: "d6400000-0000-4000-8000-000000000201", messageKind: "observation_booking",
+    currentStatus: "accepted", recipientLast4: "5678", confirmedByName: "합성 담당자",
+    confirmedAt: new Date(RECOVERY_NOW).toISOString(), updatedAt: new Date(RECOVERY_NOW).toISOString(),
+    canCheck: false, idempotent: false, ...overrides }
+}
+
+function recoveryHttpError(code, status = 409) {
+  return Response.json({ ok: false, code }, { status })
+}
+
+async function mountRecoveryDialog(t, { previews, sends = [], props: overrides = {} }) {
+  const Dialog = await loadMountedDialog()
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>")
+  const globalKeys = ["window", "document", "navigator", "crypto", "IS_REACT_ACT_ENVIRONMENT", "fetch"]
+  const descriptors = Object.fromEntries(globalKeys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  let now = RECOVERY_NOW
+  let keyNumber = 0
+  let timerNumber = 0
+  const timers = new Map()
+  const calls = { preview: [], send: [], other: [], external: 0 }
+  const previewQueue = [...previews]
+  const sendQueue = [...sends]
+  globalThis.window = dom.window
+  globalThis.document = dom.window.document
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator })
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: { randomUUID: () => `d6400000-0000-4000-8000-${String(300 + ++keyNumber).padStart(12, "0")}` } })
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.fetch = async () => { calls.external += 1; throw new Error("External transport forbidden") }
+  t.mock.method(Date, "now", () => now)
+  dom.window.setTimeout = (callback, delay = 0) => {
+    const id = ++timerNumber
+    timers.set(id, { callback, at: now + Number(delay) })
+    return id
+  }
+  dom.window.clearTimeout = id => timers.delete(id)
+  const client = createRegistrationCustomerMessageClient({
+    getAccessToken: async () => "synthetic-session",
+    fetch: async (url, init) => {
+      assert.equal(init.method, "POST")
+      const stage = url === "/api/solapi/registration/preview" ? "preview"
+        : url === "/api/solapi/registration/send" ? "send" : "other"
+      calls[stage].push({ body: JSON.parse(init.body), signal: init.signal })
+      assert.notEqual(stage, "other", `Unexpected synthetic action ${url}`)
+      const queue = stage === "preview" ? previewQueue : sendQueue
+      assert.ok(queue.length, `No synthetic ${stage} response remains`)
+      const next = await queue.shift()
+      if (next instanceof Error) throw next
+      if (next && Object.hasOwn(next, "throws")) throw next.throws
+      return next instanceof Response ? next : Response.json(next)
+    },
+  })
+  let props = { open: true, target: { messageKind: "observation_booking", sourceId: RECOVERY_SOURCE_A },
+    client, viewerRole: "staff", ...overrides }
+  const root = await createMountedRoot(dom.window.document.getElementById("root"))
+  const paint = () => root.render(createElement(Dialog, { ...props, onOpenChange(next) { props = { ...props, open: next }; paint() } }))
+  const flush = async () => act(async () => { await new Promise(resolve => setImmediate(resolve)) })
+  const button = label => [...dom.window.document.querySelectorAll("button")].find(node => node.textContent === label)
+  const click = async (label, times = 1) => {
+    const node = button(label)
+    assert.ok(node, `Expected button: ${label}`)
+    await act(async () => { for (let i = 0; i < times; i++) node.click(); await new Promise(resolve => setImmediate(resolve)) })
+  }
+  t.after(async () => {
+    await act(async () => root.unmount())
+    dom.window.close()
+    for (const key of globalKeys) {
+      if (descriptors[key]) Object.defineProperty(globalThis, key, descriptors[key])
+      else Reflect.deleteProperty(globalThis, key)
+    }
+    assert.equal(calls.external, 0)
+    assert.deepEqual(calls.other, [])
+  })
+  await act(async () => { paint(); await new Promise(resolve => setImmediate(resolve)) })
+  return {
+    calls, dom, button, click, flush,
+    text: () => dom.window.document.body.textContent,
+    async render(patch) { props = { ...props, ...patch }; await act(async () => { paint(); await new Promise(resolve => setImmediate(resolve)) }) },
+    async resolve(pending, value) { await act(async () => { pending.resolve(value); await pending.promise; await new Promise(resolve => setImmediate(resolve)) }) },
+    async advance(ms, runTimers = true) {
+      now += ms
+      if (runTimers) await act(async () => {
+        for (const [id, timer] of [...timers]) {
+          if (timer.at <= now) { timers.delete(id); timer.callback() }
+        }
+        await new Promise(resolve => setImmediate(resolve))
+      })
+    },
+  }
+}
+
+test("preview load failure offers one manual retry and never sends automatically", async t => {
+  const retry = controlledPromise()
+  const view = await mountRecoveryDialog(t, { previews: [new Error("synthetic preview failure"), retry.promise],
+    props: { target: { messageKind: "admission_application", sourceId: RECOVERY_SOURCE_A } } })
+  assert.match(view.text(), /미리보기를 불러오지 못했습니다/)
+  assert.equal(view.calls.preview.length, 1)
+  assert.equal(view.button("확인 후 발송").disabled, true)
+  await view.click("미리보기 다시 확인", 2)
+  assert.equal(view.calls.preview.length, 2, "Repeated click must share the in-flight retry")
+  assert.ok(view.calls.preview[1].signal instanceof AbortSignal)
+  assert.deepEqual(view.calls.preview[1].body, { messageKind: "admission_application", sourceId: RECOVERY_SOURCE_A })
+  assert.equal(view.calls.send.length, 0)
+  await view.resolve(retry, recoveryPreview(2, { messageKind: "admission_application" }))
+  assert.match(view.text(), /합성 학생 2/)
+  assert.doesNotMatch(view.text(), /미리보기를 불러오지 못했습니다/)
+  assert.equal(view.button("확인 후 발송").disabled, false)
+  assert.equal(view.calls.send.length, 0, "A new preview still requires a human confirmation click")
+})
+
+test("preview expiry displays its time and manual refresh replaces expired consent", async t => {
+  const initial = recoveryPreview()
+  const view = await mountRecoveryDialog(t, { previews: [initial, recoveryPreview(2, { expiresAt: new Date(RECOVERY_NOW + 120_000).toISOString() })] })
+  await view.advance(60_001)
+  const expiry = [...view.dom.window.document.querySelectorAll("time")].find(node => node.dateTime === initial.expiresAt)
+  assert.ok(expiry, "Expiry notice must expose the actual server-provided time")
+  assert.match(expiry.textContent, /17:01/)
+  assert.match(view.text(), /미리보기.*만료|만료.*미리보기/)
+  assert.equal(view.button("확인 후 발송").disabled, true)
+  assert.equal(view.calls.preview.length, 1, "Expiry never creates a preview automatically")
+  await view.click("미리보기 다시 확인")
+  assert.equal(view.calls.preview.length, 2)
+  assert.equal(view.calls.send.length, 0)
+  assert.equal(view.button("확인 후 발송").disabled, false)
+})
+
+test("confirmation checks the expiry at click time before a throttled timer runs", async t => {
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview()], sends: [recoveryReceipt()] })
+  assert.equal(view.button("확인 후 발송").disabled, false)
+  await view.advance(60_001, false)
+  await view.click("확인 후 발송")
+  assert.equal(view.calls.send.length, 0, "An enabled DOM button must not send a now-expired receipt")
+  assert.equal(view.calls.preview.length, 1)
+  assert.match(view.text(), /만료/)
+  assert.ok(view.button("미리보기 다시 확인"))
+})
+
+test("exact confirmation conflict refreshes once and only a new human click sends the new preview", async t => {
+  const refresh = controlledPromise()
+  const secondSend = controlledPromise()
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview(), refresh.promise],
+    sends: [recoveryHttpError(CONFLICT_CODE), secondSend.promise] })
+  await view.click("확인 후 발송", 2)
+  assert.equal(view.calls.send.length, 1)
+  assert.equal(view.calls.preview.length, 2, "Exact conflict must automatically fetch one replacement preview")
+  assert.equal(view.button("확인 후 발송")?.disabled ?? true, true)
+  await view.resolve(refresh, recoveryPreview(2))
+  assert.match(view.text(), /합성 학생 2/)
+  assert.equal(view.calls.send.length, 1)
+  await view.click("확인 후 발송", 2)
+  assert.equal(view.calls.send.length, 2)
+  assert.notEqual(view.calls.send[1].body.requestKey, view.calls.send[0].body.requestKey)
+  assert.equal(view.calls.send[1].body.previewId, recoveryPreview(2).previewId)
+  await view.resolve(secondSend, recoveryReceipt())
+  assert.match(view.text(), /SOLAPI 접수 완료/)
+  assert.equal(view.calls.preview.length, 2)
+})
+
+test("conflict replacement failure discards old consent and waits for a manual preview retry", async t => {
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview(), new Error("refresh failed"), recoveryPreview(3)],
+    sends: [recoveryHttpError(CONFLICT_CODE), recoveryReceipt()] })
+  await view.click("확인 후 발송")
+  assert.equal(view.calls.preview.length, 2)
+  assert.match(view.text(), /미리보기를 불러오지 못했습니다/)
+  assert.equal(view.button("확인 후 발송").disabled, true)
+  await view.flush()
+  assert.equal(view.calls.preview.length, 2, "A failed replacement must not create an automatic retry loop")
+  await view.click("미리보기 다시 확인", 2)
+  assert.equal(view.calls.preview.length, 3)
+  assert.equal(view.calls.send.length, 1)
+  await view.click("확인 후 발송")
+  assert.equal(view.calls.send[1].body.previewId, recoveryPreview(3).previewId)
+  assert.notEqual(view.calls.send[1].body.requestKey, view.calls.send[0].body.requestKey)
+})
+
+for (const [name, failure] of [
+  ["network rejection", new Error("Failed to fetch")],
+  ["prefixed conflict text", recoveryHttpError(`prefix:${CONFLICT_CODE}`)],
+  ["suffixed conflict text", recoveryHttpError(`${CONFLICT_CODE}:suffix`)],
+  ["non-Error conflict string", { throws: CONFLICT_CODE }],
+]) {
+  test(`${name} does not refresh or rotate the original confirmation key`, async t => {
+    const view = await mountRecoveryDialog(t, { previews: [recoveryPreview()], sends: [failure, recoveryReceipt()] })
+    await view.click("확인 후 발송")
+    assert.equal(view.calls.preview.length, 1)
+    assert.equal(view.calls.send.length, 1)
+    await view.click("확인 후 발송")
+    assert.equal(view.calls.preview.length, 1)
+    assert.equal(view.calls.send.length, 2)
+    assert.deepEqual(view.calls.send[1].body, view.calls.send[0].body, "Uncertain send outcome retains receipt and idempotency key")
+  })
+}
+
+test("target change aborts a manual retry and ignores its late preview", async t => {
+  const retry = controlledPromise()
+  const view = await mountRecoveryDialog(t, { previews: [new Error("first failed"), retry.promise, recoveryPreview(3)] })
+  await view.click("미리보기 다시 확인")
+  await view.render({ target: { messageKind: "observation_booking", sourceId: RECOVERY_SOURCE_B } })
+  assert.equal(view.calls.preview[1].signal.aborted, true)
+  assert.equal(view.calls.preview.length, 3)
+  await view.resolve(retry, recoveryPreview(2))
+  assert.match(view.text(), /합성 학생 3/)
+  assert.doesNotMatch(view.text(), /합성 학생 2/)
+  assert.equal(view.calls.send.length, 0)
+})
+
+test("closing and reopening invalidates a conflict refresh response and its prior confirmation", async t => {
+  const conflictRefresh = controlledPromise()
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview(), conflictRefresh.promise, recoveryPreview(3)],
+    sends: [recoveryHttpError(CONFLICT_CODE)] })
+  await view.click("확인 후 발송")
+  assert.equal(view.calls.preview.length, 2)
+  await view.click("돌아가기")
+  assert.equal(view.calls.preview[1].signal.aborted, true)
+  await view.render({ open: true })
+  assert.equal(view.calls.preview.length, 3)
+  await view.resolve(conflictRefresh, recoveryPreview(2))
+  assert.match(view.text(), /합성 학생 3/)
+  assert.doesNotMatch(view.text(), /합성 학생 2/)
+  assert.equal(view.calls.send.length, 1)
+})
+
+test("a stale send conflict after a target change cannot refresh the new target", async t => {
+  const oldSend = controlledPromise()
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview(), recoveryPreview(2)], sends: [oldSend.promise] })
+  await view.click("확인 후 발송")
+  await view.render({ target: { messageKind: "observation_booking", sourceId: RECOVERY_SOURCE_B } })
+  await view.resolve(oldSend, recoveryHttpError(CONFLICT_CODE))
+  assert.equal(view.calls.preview.length, 2)
+  assert.equal(view.calls.send.length, 1)
+  assert.match(view.text(), /합성 학생 2/)
+  assert.doesNotMatch(view.text(), /등록 수업 정보가 변경/)
+})
+
+test("an uncertain send stays on its original receipt when that preview later expires", async t => {
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview()], sends: [new Error("uncertain network outcome")] })
+  await view.click("확인 후 발송")
+  assert.equal(view.calls.send.length, 1)
+  await view.advance(60_001)
+  assert.equal(view.button("미리보기 다시 확인"), undefined, "Expiry must not rotate a receipt after an uncertain send")
+  assert.equal(view.button("확인 후 발송").disabled, true)
+  assert.equal(view.calls.preview.length, 1)
+  assert.equal(view.calls.send.length, 1)
+})
+
+test("a later exact conflict cannot erase an earlier uncertain send with the same request key", async t => {
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview()],
+    sends: [new Error("uncertain network outcome"), recoveryHttpError(CONFLICT_CODE), recoveryReceipt()] })
+  await view.click("확인 후 발송")
+  await view.click("확인 후 발송")
+  assert.equal(view.calls.preview.length, 1, "An earlier request may already have executed")
+  assert.equal(view.calls.send.length, 2)
+  assert.deepEqual(view.calls.send[1].body, view.calls.send[0].body)
+  assert.equal(view.button("미리보기 다시 확인"), undefined)
+  await view.click("확인 후 발송")
+  assert.equal(view.calls.send.length, 3)
+  assert.deepEqual(view.calls.send[2].body, view.calls.send[0].body)
+  assert.equal(view.calls.preview.length, 1)
+})
+
+test("an invalid receipt expiry is explained and requires manual preview replacement", async t => {
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview(1, { expiresAt: "not-a-date" }), recoveryPreview(2)] })
+  assert.match(view.text(), /유효 시간을 확인할 수 없습니다/)
+  assert.doesNotMatch(view.text(), /Invalid Date|not-a-date/)
+  assert.equal(view.button("확인 후 발송").disabled, true)
+  assert.equal(view.calls.preview.length, 1)
+  await view.click("미리보기 다시 확인")
+  assert.equal(view.calls.preview.length, 2)
+  assert.equal(view.button("확인 후 발송").disabled, false)
+  assert.equal(view.calls.send.length, 0)
+})
+
+test("a readiness-blocked preview without a receipt is not described as expired", async t => {
+  const preview = recoveryPreview(1, { previewId: null, expiresAt: null })
+  preview.readiness = { ...preview.readiness, sendAllowed: false, activationMode: "off", blockers: ["activation_off"] }
+  const view = await mountRecoveryDialog(t, { previews: [preview] })
+  assert.match(view.text(), /발송이 꺼져 있습니다/)
+  assert.doesNotMatch(view.text(), /만료|유효 시간을 확인할 수 없습니다/)
+  assert.equal(view.button("미리보기 다시 확인"), undefined)
+  assert.equal(view.button("확인 후 발송").disabled, true)
+  assert.equal(view.calls.preview.length, 1)
+  assert.equal(view.calls.send.length, 0)
+})
+
+test("manual retry keeps a focused loading action disabled and returns focus to the preview title", async t => {
+  const pending = controlledPromise()
+  const view = await mountRecoveryDialog(t, { previews: [new Error("load failed"), pending.promise] })
+  const retry = view.button("미리보기 다시 확인")
+  assert.ok(retry)
+  retry.focus()
+  await view.click("미리보기 다시 확인", 2)
+  assert.equal(view.calls.preview.length, 2)
+  assert.equal(view.button("미리보기 다시 확인").disabled, true)
+  await view.resolve(pending, recoveryPreview(2))
+  assert.equal(view.dom.window.document.activeElement.textContent, "알림톡 미리보기")
+  assert.notEqual(view.dom.window.document.activeElement, view.button("확인 후 발송"))
+  assert.equal(view.calls.send.length, 0)
+})
+
+test("same-target reopen resets controlled administrator recovery selections before any new action", async t => {
+  const latestMessage = { ...recoveryReceipt({ currentStatus: "unknown", canCheck: true }) }
+  delete latestMessage.ok
+  delete latestMessage.idempotent
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview(1, { latestMessage }), recoveryPreview(2, { latestMessage })],
+    props: { viewerRole: "admin" } })
+  const selects = [...view.dom.window.document.querySelectorAll("select")]
+  const inputs = [...view.dom.window.document.querySelectorAll("input")]
+  const inputValues = ["합성 복구 사유", "200", "합성 provider 확인", "2026-10-29T17:00", "synthetic-message", "synthetic-group"]
+  assert.equal(selects.length, 2)
+  assert.equal(inputs.length, inputValues.length)
+  const setValue = Object.getOwnPropertyDescriptor(view.dom.window.HTMLInputElement.prototype, "value").set
+  await act(async () => {
+    inputs.forEach((input, index) => {
+      setValue.call(input, inputValues[index])
+      input.dispatchEvent(new view.dom.window.Event("input", { bubbles: true }))
+      input.dispatchEvent(new view.dom.window.Event("change", { bubbles: true }))
+    })
+    selects[0].value = "failed_hold"
+    selects[0].dispatchEvent(new view.dom.window.Event("change", { bubbles: true }))
+    selects[1].value = "true"
+    selects[1].dispatchEvent(new view.dom.window.Event("change", { bubbles: true }))
+  })
+  await view.render({ canReleasePreSend: true })
+  assert.deepEqual([...view.dom.window.document.querySelectorAll("select")].map(node => node.value), ["failed_hold", "true"], "Exercise actual controlled React state before resetting")
+  assert.deepEqual([...view.dom.window.document.querySelectorAll("input")].map(node => node.value), inputValues, "Native input events must update actual controlled React state")
+  assert.equal(view.button("상태 확정").disabled, false, "All administrator evidence is actually populated before reset; never submit it")
+  await view.click("돌아가기")
+  await view.render({ open: true })
+  assert.deepEqual([...view.dom.window.document.querySelectorAll("select")].map(node => node.value), ["accepted", ""])
+  assert.equal([...view.dom.window.document.querySelectorAll("input")].every(node => node.value === ""), true)
+  assert.equal(view.button("상태 확정").disabled, true)
+  assert.equal(view.calls.preview.length, 2)
+  assert.equal(view.calls.send.length, 0)
+})
+
+test("HTTP 502 unknown-after-marker receipt preserves its idempotency key even after a later exact conflict", async t => {
+  // Match the existing route's unknownAfterMarker public SendResult, which has
+  // no error code even though requestJson rejects the non-2xx HTTP response.
+  const unknownAfterMarker = recoveryReceipt({ ok: false, currentStatus: "unknown", canCheck: false })
+  assert.equal(Object.hasOwn(unknownAfterMarker, "code"), false)
+  const view = await mountRecoveryDialog(t, { previews: [recoveryPreview()],
+    sends: [Response.json(unknownAfterMarker, { status: 502 }), recoveryHttpError(CONFLICT_CODE), recoveryReceipt()] })
+  await view.click("확인 후 발송")
+  assert.match(view.text(), /발송 요청을 처리하지 못했습니다/)
+  assert.equal(view.calls.preview.length, 1)
+  await view.click("확인 후 발송")
+  assert.equal(view.calls.preview.length, 1)
+  assert.deepEqual(view.calls.send[1].body, view.calls.send[0].body)
+  await view.click("확인 후 발송")
+  assert.deepEqual(view.calls.send[2].body, view.calls.send[0].body)
+  assert.equal(view.calls.preview.length, 1)
+  assert.equal(view.calls.send.length, 3)
+})
+
+for (const status of ["pending", "accepted", "unknown", "failed_hold", "duplicate_locked"]) {
+  test(`an expired preview with ${status} cannot offer a new-preview retry`, async t => {
+    const preview = recoveryPreview(1, { expiresAt: new Date(RECOVERY_NOW - 1).toISOString() })
+    if (status === "duplicate_locked") {
+      preview.readiness = { ...preview.readiness, sendAllowed: false, blockers: ["duplicate_locked"] }
+    } else {
+      const latestMessage = recoveryReceipt({ currentStatus: status, canCheck: ["pending", "unknown"].includes(status) })
+      delete latestMessage.ok
+      delete latestMessage.idempotent
+      preview.latestMessage = latestMessage
+    }
+    const view = await mountRecoveryDialog(t, { previews: [preview] })
+    assert.equal(view.button("미리보기 다시 확인"), undefined)
+    assert.doesNotMatch(view.text(), /미리보기가 만료되었습니다/)
+    assert.equal(view.calls.preview.length, 1)
+    assert.equal(view.calls.send.length, 0)
+  })
+}
+
+test("manual retry restores title focus after Radix moves the disabled action focus to dialog content", async t => {
+  const pending = controlledPromise()
+  const view = await mountRecoveryDialog(t, { previews: [new Error("load failed"), pending.promise] })
+  view.button("미리보기 다시 확인").focus()
+  await view.click("미리보기 다시 확인")
+  assert.equal(view.button("미리보기 다시 확인").disabled, true)
+  const content = view.dom.window.document.querySelector('[data-slot="dialog-content"]')
+  // Real Radix browser evidence shows this focus fallback when the retry button
+  // becomes disabled. The mounted harness reproduces that observed DOM state.
+  content.focus()
+  assert.equal(view.dom.window.document.activeElement === content, true)
+  await view.resolve(pending, recoveryPreview(2))
+  const title = view.dom.window.document.querySelector('[data-slot="dialog-title"]')
+  assert.equal(title.tagName, "H2")
+  assert.equal(view.dom.window.document.activeElement === title, true, "The completed retry must focus the preview title after dialog-content fallback")
+  assert.notEqual(view.dom.window.document.activeElement, view.button("확인 후 발송"))
+  assert.equal(view.calls.preview.length, 2)
+  assert.equal(view.calls.send.length, 0)
+})
+
+for (const destination of ["another dialog button", "an outside input"]) {
+  test(`manual retry preserves focus explicitly moved to ${destination}`, async t => {
+    const pending = controlledPromise()
+    const view = await mountRecoveryDialog(t, { previews: [new Error("load failed"), pending.promise] })
+    view.button("미리보기 다시 확인").focus()
+    await view.click("미리보기 다시 확인")
+    view.dom.window.document.querySelector('[data-slot="dialog-content"]').focus()
+    const nextFocus = destination === "another dialog button"
+      ? view.button("돌아가기") : view.dom.window.document.createElement("input")
+    if (destination === "an outside input") {
+      nextFocus.setAttribute("aria-label", "합성 외부 입력")
+      view.dom.window.document.body.append(nextFocus)
+    }
+    nextFocus.focus()
+    assert.equal(view.dom.window.document.activeElement === nextFocus, true)
+    await view.resolve(pending, recoveryPreview(2))
+    assert.equal(view.dom.window.document.activeElement === nextFocus, true, "A completed preview must not steal an explicitly moved focus")
+    assert.equal(view.calls.preview.length, 2)
+    assert.equal(view.calls.send.length, 0)
+  })
+}
