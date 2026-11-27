@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client"
 import ts from "typescript"
 import { createRegistrationCustomerMessageClient } from "../src/features/tasks/registration-customer-message-service.ts"
 import { formatRegistrationMessageTimestamp } from "../src/features/tasks/registration-customer-message-labels.ts"
+import * as customerMessageErrors from "../src/features/tasks/registration-customer-message-errors.ts"
 
 const require = createRequire(import.meta.url)
 const { JSDOM } = require("jsdom")
@@ -59,10 +60,7 @@ async function loadMountedDialog() {
       DialogHeader: Wrapper,
       DialogTitle: Wrapper,
     }],
-    ["./registration-customer-message-errors", {
-      getRegistrationCustomerMessageErrorMessage: (_error, fallback) => fallback,
-      getRegistrationCustomerMessageReadinessMessage: () => "발송 준비 상태를 확인해 주세요.",
-    }],
+    ["./registration-customer-message-errors", customerMessageErrors],
     ["./registration-customer-message-labels", { formatRegistrationMessageTimestamp }],
   ])
   const runtimeRequire = (specifier) => {
@@ -436,4 +434,123 @@ test("등록 fixture도 입학 수업정보와 모든 문의하기 버튼을 실
   assert.match(source, /classroomLabel:\s*"본관 301호"/)
   assert.match(source, /firstLessonLabel:\s*"8월 17일 월요일 오후 6:00–8:00"/)
   assert.equal((source.match(/host:\s*"tipsedu\.channel\.io"/g) || []).length, 7)
+})
+
+const TEMPLATE_VERIFICATION_NOTICE = "템플릿 상태 또는 내용을 확인하지 못했습니다. 관리팀에서 등록·승인 상태와 검증 결과를 확인해 주세요."
+
+async function withTemplateNoticeDialog({ blockers = [], previewError, sendError, role = "staff" }, inspect) {
+  const Dialog = await loadMountedDialog()
+  const dom = new JSDOM("<!doctype html><div id='root'></div>")
+  const keys = ["window", "document", "navigator", "IS_REACT_ACT_ENVIRONMENT", "fetch"]
+  const saved = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  const calls = []
+  const target = { messageKind: "observation_booking", sourceId: "d6400000-0000-4000-8000-000000000002" }
+  const preview = observationPreview(target.sourceId)
+  preview.readiness = { ...preview.readiness, sendAllowed: blockers.length === 0, blockers }
+  if (blockers.length) preview.previewId = null
+  const client = createRegistrationCustomerMessageClient({
+    getAccessToken: async () => "synthetic-token",
+    fetch: async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) })
+      assert.equal(init.method, "POST")
+      const isPreview = url === "/api/solapi/registration/preview"
+      assert.ok(isPreview || url === "/api/solapi/registration/send")
+      if (isPreview) assert.deepEqual(JSON.parse(init.body), target)
+      else assert.deepEqual(Object.keys(JSON.parse(init.body)).sort(), ["previewId", "requestKey"])
+      const code = isPreview ? previewError : sendError
+      assert.ok(isPreview || code, "send is allowed only in the explicit failure fixture")
+      return new Response(JSON.stringify(code ? { ok: false, code } : preview), {
+        status: code ? 409 : 200, headers: { "content-type": "application/json" },
+      })
+    },
+  })
+  globalThis.window = dom.window
+  globalThis.document = dom.window.document
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator })
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.fetch = async () => { throw new Error("real network forbidden") }
+  let root
+  try {
+    root = createRoot(dom.window.document.getElementById("root"))
+    await act(async () => {
+      root.render(createElement(Dialog, { open: true, onOpenChange: () => undefined, target, client, viewerRole: role }))
+      await new Promise((resolve) => setImmediate(resolve))
+    })
+    const confirm = [...dom.window.document.querySelectorAll("button")].find((button) => button.textContent === "확인 후 발송")
+    await inspect({ document: dom.window.document, confirm, calls })
+  } finally {
+    if (root) await act(async () => root.unmount())
+    dom.window.close()
+    for (const [key, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else Reflect.deleteProperty(globalThis, key)
+    }
+  }
+}
+
+test("template verification notice: blocked readiness stays blocked without claiming content drift", async () => {
+  await withTemplateNoticeDialog({ blockers: ["template_drift"] }, async ({ document, confirm, calls }) => {
+    assert.ok(document.body.textContent.includes(TEMPLATE_VERIFICATION_NOTICE))
+    assert.equal(confirm.disabled, true)
+    await act(async () => confirm.click())
+    assert.equal(calls.length, 1, "blocked readiness never sends or rechecks")
+    assert.equal(customerMessageErrors.getRegistrationCustomerMessageReadinessMessage(["template_drift", "template_drift"]), TEMPLATE_VERIFICATION_NOTICE)
+  })
+})
+
+for (const [code, expected] of [
+  ["registration_customer_message_template_drift", TEMPLATE_VERIFICATION_NOTICE],
+  ["registration_customer_message_provider_unavailable", "미리보기를 불러오지 못했습니다."],
+  ["unrecognized_synthetic_error", "미리보기를 불러오지 못했습니다."],
+]) {
+  test(`template verification notice: preview error ${code} preserves its alert and disabled action`, async () => {
+    await withTemplateNoticeDialog({ previewError: code }, async ({ document, confirm, calls }) => {
+      assert.equal(document.querySelector('[role="alert"]').textContent, expected)
+      assert.equal(confirm.disabled, true)
+      await act(async () => confirm.click())
+      assert.equal(calls.length, 1)
+    })
+  })
+}
+
+test("template verification notice: explicit mock send failure uses the same notice without automatic resend", async () => {
+  await withTemplateNoticeDialog({ sendError: "registration_customer_message_template_drift" }, async ({ document, confirm, calls }) => {
+    assert.equal(confirm.disabled, false)
+    assert.equal(calls.length, 1)
+    await act(async () => { confirm.click(); confirm.click(); await new Promise((resolve) => setImmediate(resolve)) })
+    assert.equal(document.querySelector('[role="alert"]').textContent, TEMPLATE_VERIFICATION_NOTICE)
+    assert.equal(calls.filter((call) => call.url.endsWith("/send")).length, 1)
+    assert.equal(calls.length, 2, "no automatic retry or preview refresh")
+    assert.equal(confirm.disabled, false, "preserve the existing post-error confirmation guard")
+  })
+})
+
+for (const [blocker, expected] of [
+  ["template_not_verified", "알림톡 템플릿 승인과 내용 확인이 필요합니다."],
+  ["activation_off", "이 종류의 알림톡 발송이 꺼져 있습니다. 관리자에게 문의해 주세요."],
+  ["role_not_authorized", "알림톡 발송은 원장·관리팀이 처리할 수 있습니다."],
+]) {
+  test(`template verification notice: unrelated ${blocker} remains unchanged and blocked`, async () => {
+    await withTemplateNoticeDialog({ blockers: [blocker] }, async ({ document, confirm, calls }) => {
+      assert.ok(document.body.textContent.includes(expected))
+      assert.equal(confirm.disabled, true)
+      await act(async () => confirm.click())
+      assert.equal(calls.length, 1)
+    })
+  })
+}
+
+test("template verification notice: admin preflight uses the same neutral copy and preserves other failures", async () => {
+  const url = new URL("../src/features/tasks/registration-customer-message-rollout-panel.tsx", import.meta.url)
+  const source = await readFile(url, "utf8")
+  const ast = ts.createSourceFile(url.pathname, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const errorFunction = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "readableError")
+  assert.ok(errorFunction)
+  const output = ts.transpileModule(errorFunction.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const readableError = vm.runInNewContext(`(${output})`, { Error, ...customerMessageErrors })
+  assert.equal(readableError(new Error("registration_customer_message_template_drift")), TEMPLATE_VERIFICATION_NOTICE)
+  assert.equal(readableError(new Error("registration_customer_message_provider_unavailable")), "SOLAPI 템플릿 상태를 확인할 수 없습니다.")
+  assert.equal(readableError(new Error("auth_required")), "관리자 로그인을 다시 확인해 주세요.")
+  assert.equal(readableError(new Error("input_invalid")), "테스트 등록 또는 메시지 식별값을 다시 확인해 주세요.")
+  assert.equal(readableError(new Error("unknown")), "운영 준비 요청을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.")
 })
