@@ -24,6 +24,8 @@ export type ManagementNumberedClass = RowBase & {
   kind: "classes"; name: string; subject: string; grade: string | null;
   schedule: string | null; teacherName: string | null; classroom: string | null;
   capacity: number | null; weeklyMinutes: number | null; fee: number | null; studentCount: number;
+  // Older servers omit this field. Absence is unknown, never a computed zero.
+  waitlistCount?: number;
 };
 export type ManagementNumberedTextbook = RowBase & {
   kind: "textbooks"; title: string; subject: string; publisher: string | null;
@@ -99,7 +101,8 @@ function isRow<K extends ManagementNumberedKind>(value: unknown, kind: K): value
     && ["grade", "school", "contact", "parentContact"].every((key) => isNullableText(value[key]));
   if (kind === "classes") return typeof value.name === "string" && typeof value.subject === "string"
     && ["grade", "schedule", "teacherName", "classroom"].every((key) => isNullableText(value[key]))
-    && ["capacity", "weeklyMinutes", "fee"].every((key) => isNullableNumber(value[key])) && isCount(value.studentCount);
+    && ["capacity", "weeklyMinutes", "fee"].every((key) => isNullableNumber(value[key])) && isCount(value.studentCount)
+    && (!Object.prototype.hasOwnProperty.call(value, "waitlistCount") || isCount(value.waitlistCount));
   return typeof value.title === "string" && typeof value.subject === "string" && isNullableText(value.publisher)
     && isNullableNumber(value.price) && isCount(value.activeClassCount);
 }

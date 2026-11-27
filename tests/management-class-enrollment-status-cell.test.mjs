@@ -379,3 +379,41 @@ test("class roster preview pagination: late completion after unmount cannot recr
     });
   }
 });
+
+test('#233: unknown waiting total is static text and never triggers a read', async () => {
+  await withRoster(async ui => {
+    for (const value of [undefined, null, '', ' ', -1, 1.5, 'invalid', NaN, Infinity, false, {}]) {
+      await ui.render({id:'class-1',raw:{registeredCount:0,waitlistCount:value},metrics:{studentCount:0,waitlistCount:value}});
+      assert.match(ui.container.textContent, /대기 인원 확인 불가/);
+      assert.equal(ui.container.querySelector('[aria-label^="대기 학생"]'), null);
+      assert.equal(ui.requests.length, 0);
+    }
+    await ui.render(rosterRow('class-1', 0, 0));
+    await ui.click('대기 학생 0명 보기');
+    assert.match(ui.text(), /대기 학생이 없습니다/);
+    assert.equal(ui.requests.length, 0);
+  });
+});
+
+test('#233: unknown transition cancels pending waiting UI and does not resurrect it on reentry', async () => {
+  await withRoster(async ui => {
+    await ui.clickTogether('대기 학생 7명 보기');
+    assert.equal(ui.requests.length, 1);
+    await ui.render({id:'class-1',raw:{registeredCount:35},metrics:{studentCount:35}});
+    await ui.resolve(0, rosterPage(rosterStudents(7, '대기')));
+    assert.match(ui.container.textContent, /대기 인원 확인 불가/);
+    assert.doesNotMatch(ui.container.textContent, /합성 대기/);
+    await ui.render(rosterRow('class-1', 35, 7));
+    await ui.click('대기 학생 7명 보기');
+    assert.equal(ui.requests.length, 2);
+    await ui.reject(1);
+    assertLocalRosterError(ui);
+    await ui.click('다시 시도');
+    assert.equal(ui.requests[2].cursor, null);
+    await ui.resolve(2, rosterPage(rosterStudents(7, '대기')));
+    assert.match(ui.text(), /7 \/ 7명/);
+    await ui.click('대기 학생 7명 보기');
+    await ui.click('대기 학생 7명 보기');
+    assert.equal(ui.requests.length, 3, 'accepted roster still cached on close/reopen');
+  });
+});

@@ -86,6 +86,10 @@ function getRosterCount(row: ManagementRow, mode: ClassRosterMode) {
   const value = mode === "registered"
     ? raw.registeredCount ?? raw.registered_count ?? row.metrics.studentCount
     : raw.waitlistCount ?? raw.waitlist_count ?? row.metrics.waitlistCount;
+  if (mode === "waitlist") {
+    const count = typeof value === "number" || (typeof value === "string" && value.trim()) ? Number(value) : NaN;
+    return Number.isSafeInteger(count) && count >= 0 ? count : undefined;
+  }
   const count = Number(value || 0);
   return Number.isFinite(count) ? Math.max(0, count) : 0;
 }
@@ -133,7 +137,8 @@ function ClassEnrollmentStatusPopover({
   };
 
   const load = async (mode: ClassRosterMode, cursor: string | null) => {
-    if (!onLoadRoster || pending.current[mode] || getRosterCount(row, mode) === 0) return;
+    const count = getRosterCount(row, mode);
+    if (!onLoadRoster || pending.current[mode] || count === undefined || count === 0) return;
     const revision = ++requests.current[mode];
     pending.current[mode] = true;
     setLoading((current) => ({ ...current, [mode]: true }));
@@ -164,7 +169,7 @@ function ClassEnrollmentStatusPopover({
   const handleOpenChange = (mode: ClassRosterMode, open: boolean) => {
     setOpenMode((current) => open ? mode : current === mode ? null : current);
     const count = getRosterCount(row, mode);
-    if (open && count > 0 && !loadedRosters[mode] && embeddedRosters[mode].length < count && !errors[mode]) {
+    if (open && count !== undefined && count > 0 && !loadedRosters[mode] && embeddedRosters[mode].length < count && !errors[mode]) {
       void load(mode, null);
     }
   };
@@ -178,6 +183,9 @@ function ClassEnrollmentStatusPopover({
     const label = mode === "registered" ? "등록" : "대기";
     const page = loadedRosters[mode];
     const count = getRosterCount(row, mode);
+    if (count === undefined) {
+      return <span className="px-2 text-xs text-muted-foreground">대기 인원 확인 불가</span>;
+    }
     const students = count > 0 ? sortClassStudentSummariesAscending(page?.rows ?? embeddedRosters[mode]) : [];
 
     return (
