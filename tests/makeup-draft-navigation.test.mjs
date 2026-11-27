@@ -31,6 +31,84 @@ test('request close keeps draft on cancel and discards only after confirmation',
   assert.equal(p.requests.some(r=>/create_makeup|transition_makeup/.test(r.name||'')),false);
 });
 
+const offerListRetry = '현재 목록의 예약 정보를 다시 확인할 수 있습니다.';
+const availableReservations = { data: { reservations: [], activeEventRequestIds: [] }, error: null };
+
+async function discardFailedReservationDraft(t) {
+  const p = await ready(t);
+  const initialList = p.context().at(-1);
+  assert.equal(initialList.args.p_slots.length, 1);
+  await act(async () => initialList.resolve(availableReservations));
+  await click('휴보강 신청');
+  await p.catalogs();
+  const emptyDraft = structuredClone(p.observed.input);
+  const slot = { id: 'discard-slot', date: '2026-09-03', startTime: '09:00', endTime: '10:00', classroom: 'B' };
+  await act(async () => p.observed.patch(input => ({ ...input, reason: '버릴 합성 초안', makeupSlots: [slot] })));
+  const failed = p.context().at(-1);
+  assert.equal(failed.args.p_slots.length, 2, 'the open draft has an additional reservation target');
+  await act(async () => failed.reject(new Error('synthetic draft reservation failure')));
+  assert.ok(document.querySelector('[role="dialog"]').contains(button('예약 다시 확인')));
+  await click('저장하지 않고 닫기');
+  assert.ok(confirm());
+  await click('변경사항 버리기');
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.deepEqual(p.observed.input, emptyDraft);
+  assert.equal(document.body.textContent.includes(offerListRetry), false, 'the pending list lookup takes precedence');
+  const currentList = p.context().at(-1);
+  assert.notEqual(currentList, initialList);
+  assert.deepEqual(currentList.args, initialList.args, 'discarding the draft removes its slot from the lookup');
+  return { p, currentList };
+}
+
+async function recoverListError(p, failedList) {
+  assert.match(document.body.textContent, /예약 충돌 정보를 불러오지 못했습니다/);
+  assert.equal(document.body.textContent.includes(offerListRetry), false);
+  assert.ok(button('예약 다시 확인').closest('[role="alert"]'));
+  await click('예약 다시 확인');
+  await p.catalogs();
+  const retry = p.context().at(-1);
+  assert.notEqual(retry, failedList);
+  assert.deepEqual(retry.args, failedList.args);
+  await act(async () => retry.resolve(availableReservations));
+  assert.equal(button('예약 다시 확인'), undefined);
+  assert.equal(document.body.textContent.includes(offerListRetry), false, 'a successful ordinary retry does not revive the one-time action');
+  assert.equal(p.observed.input.reason, '');
+  assert.equal(p.requests.some(request => /create_makeup|resubmit_makeup/.test(request.name || '')), false);
+}
+
+for (const outcome of ['success', 'failure']) {
+  test(`discarding a failed reservation draft leaves a one-time retry for the current list: ${outcome}`, async t => {
+    const { p, currentList } = await discardFailedReservationDraft(t);
+    await act(async () => currentList.resolve(availableReservations));
+    assert.ok(document.body.textContent.includes(offerListRetry), 'the list offers to recheck its own reservations');
+    const action = button('예약 다시 확인');
+    assert.ok(action, 'the current list keeps an explicit retry after the failed draft was discarded');
+    assert.doesNotMatch(document.body.textContent, /예약 충돌 정보를 불러오지 못했습니다/);
+    await act(async () => action.click());
+    assert.equal(document.body.textContent.includes(offerListRetry), false);
+    await p.catalogs();
+    const retry = p.context().at(-1);
+    assert.notEqual(retry, currentList);
+    assert.deepEqual(retry.args, currentList.args);
+
+    if (outcome === 'success') {
+      await act(async () => retry.resolve(availableReservations));
+      assert.doesNotMatch(document.body.textContent, /예약 충돌 정보 확인 중|예약 충돌 정보를 불러오지 못했습니다/);
+      assert.equal(document.body.textContent.includes(offerListRetry), false);
+      assert.equal(button('예약 다시 확인'), undefined);
+    } else {
+      await act(async () => retry.reject(new Error('synthetic manual list reservation failure')));
+      await recoverListError(p, retry);
+    }
+  });
+}
+
+test('a failed list reservation read immediately after discard uses the ordinary retry once', async t => {
+  const { p, currentList } = await discardFailedReservationDraft(t);
+  await act(async () => currentList.reject(new Error('synthetic initial list reservation failure')));
+  await recoverListError(p, currentList);
+});
+
 test('quick search intent and unload protect a request until explicitly discarded', async t => {
   const p=await ready(t);await click('휴보강 신청');
   await act(async()=>p.observed.patch(value=>({...value,reason:'미저장 사유'})));

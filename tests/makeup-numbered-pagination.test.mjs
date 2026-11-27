@@ -485,7 +485,10 @@ test('context errors retain approval safety, explicit retry succeeds and old con
   const failed = p.context().at(-1); await act(async () => failed.reject(new Error('CONTEXT FAILURE')));
   assert.match(document.body.textContent, /예약 충돌 정보를 불러오지 못했습니다/);
   assert.ok([...document.querySelectorAll('button')].filter((b) => b.textContent.trim()==='승인').every((b) => b.disabled));
-  await act(async () => button('예약 다시 확인').click()); await p.catalogs();
+  const beforeRetry = p.requests.length;
+  await act(async () => button('예약 다시 확인').click());
+  assert.deepEqual(p.requests.slice(beforeRetry).map(request => request.table).sort(), ['academic_events', 'classes', 'classroom_catalogs']);
+  await p.catalogs();
   const retry = p.context().at(-1); assert.notEqual(retry, failed);
   await act(async () => retry.resolve({ data: { reservations: [], activeEventRequestIds: [] }, error: null }));
   assert.ok([...document.querySelectorAll('button')].some((b) => b.textContent.trim()==='승인' && !b.disabled));
@@ -493,6 +496,89 @@ test('context errors retain approval safety, explicit retry succeeds and old con
   await act(async () => p.finish(p.numbered().at(-1), 112, { rows: Array.from({length:10}, (_,i) => row(i+11,{ canDecideSubject:true, makeupStartAt:'2026-09-02T00:00:00Z',makeupEndAt:'2026-09-02T01:00:00Z' })) }));
   assert.ok([...document.querySelectorAll('button')].filter((b) => b.textContent.trim()==='승인').every((b) => b.disabled));
 });
+test('open makeup request retries its failed reservation read without losing the draft or accepting a stale result', async t => {
+  const p = await setup(t, { clock: '2026-08-31T00:00:00Z' });
+  await act(async () => p.finish(p.numbered()[0], 0));
+  await act(async () => button('휴보강 신청').click());
+  const dialog = document.querySelector('[role="dialog"]');
+  const catalogs = { ...createCatalogRows({ role: 'admin' }), classroom_catalogs: [{ name: 'A' }, { name: 'B' }] };
+  await act(async () => {
+    for (const request of p.requests.filter(request => request.table)) {
+      request.resolve({ data: catalogs[request.table] || [], error: null });
+    }
+  });
+
+  const openOptions = async trigger => {
+    await act(async () => trigger.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    return [...document.querySelectorAll('[role="option"]')];
+  };
+  for (const [field, label] of [['subject', '영어'], ['teacher', '담당'], ['class', '고1 영어']]) {
+    const options = await openOptions(dialog.querySelector('#makeup-' + field));
+    const option = options.find(node => node.textContent.trim() === label);
+    assert.ok(option, label);
+    await act(async () => option.click());
+  }
+  const slot = { id: 'draft-slot', date: '2026-09-03', startTime: '09:00', endTime: '11:00', classroom: 'A' };
+  await act(async () => p.observed.patch(input => ({ ...input, reason: '합성 보강 사유', makeupSlots: [slot] })));
+  const older = p.context().at(-1);
+  await act(async () => p.observed.patch(input => ({ ...input, makeupSlots: [{ ...slot, endTime: '10:00' }] })));
+  const failed = p.context().at(-1);
+  assert.notDeepEqual(older.args.p_slots, failed.args.p_slots);
+  const draft = structuredClone(p.observed.input);
+  const submit = button('상신');
+  await act(async () => failed.reject(new Error('synthetic reservation failure')));
+  assert.equal(submit.disabled, true);
+  await act(async () => submit.click());
+  assert.equal(p.requests.some(request => /create_makeup|resubmit_makeup/.test(request.name || '')), false);
+
+  const retry = [...dialog.querySelectorAll('button')].find(node => node.textContent.trim() === '예약 다시 확인');
+  assert.ok(retry, 'the open request dialog must contain its own reservation retry button');
+  assert.match(dialog.textContent, /예약 충돌 정보를 불러오지 못했습니다/);
+  const reads = p.requests.length;
+  await act(async () => retry.click());
+  const repeated = p.context().at(-1);
+  assert.notEqual(repeated, failed);
+  assert.deepEqual(repeated.args, failed.args);
+  assert.deepEqual(p.requests.slice(reads).map(request => request.name || request.table), ['get_makeup_reservation_context_v1']);
+  assert.equal(submit.disabled, true);
+  assert.deepEqual(p.observed.input, draft);
+
+  const resolveWithCollision = (request, room) => {
+    const { startAt, endAt } = request.args.p_slots[0];
+    request.resolve({ data: { reservations: [{ id: id(120), status: 'completed', className: '가상 예약',
+      makeupStartAt: startAt, makeupEndAt: endAt, makeupClassroom: room, makeupSlots: [] }], activeEventRequestIds: [] }, error: null });
+  };
+  await act(async () => resolveWithCollision(repeated, 'B'));
+  assert.equal(submit.disabled, false, 'room A is free and the otherwise-complete draft can be submitted');
+  await act(async () => resolveWithCollision(older, 'A'));
+  assert.equal(submit.disabled, false, 'late response cannot replace recovered room availability');
+  assert.equal(document.querySelector('[role="dialog"]'), dialog);
+  assert.doesNotMatch(dialog.textContent, /예약 다시 확인|예약 충돌 정보를 불러오지 못했습니다/);
+  assert.deepEqual(p.observed.input, draft);
+  assert.equal(dialog.querySelector('#makeup-reason').value, draft.reason);
+  assert.deepEqual(['subject', 'teacher', 'class'].map(field => dialog.querySelector('#makeup-' + field).textContent), ['영어', '담당', '고1 영어']);
+  const rooms = await openOptions(dialog.querySelector('[aria-label="보강일시 1 강의실"]'));
+  assert.deepEqual(rooms.map(node => [node.textContent.trim(), node.getAttribute('aria-disabled') === 'true']),
+    [['A · 빈 강의실', false], ['B · 충돌', true]]);
+  await act(async () => rooms[0].click());
+
+  // The reported equal-time input fails local interval validation before either RPC.
+  const beforeInvalid = p.requests.length;
+  await act(async () => p.observed.patch(input => ({ ...input, makeupSlots: [{ ...slot, endTime: slot.startTime }] })));
+  const invalidRetry = button('예약 다시 확인');
+  assert.ok(invalidRetry && dialog.contains(invalidRetry));
+  await act(async () => invalidRetry.click());
+  assert.equal(p.requests.length, beforeInvalid);
+  assert.equal(submit.disabled, true);
+  assert.equal(p.observed.input.makeupSlots[0].endTime, '09:00');
+  assert.equal(dialog.querySelector('#makeup-reason').value, draft.reason);
+  await act(async () => p.observed.patch(input => ({ ...input, makeupSlots: [{ ...slot, endTime: '10:30' }] })));
+  const corrected = p.context().at(-1);
+  assert.notDeepEqual(corrected.args.p_slots, repeated.args.p_slots);
+  await act(async () => resolveWithCollision(corrected, 'B'));
+  assert.equal(submit.disabled, false);
+});
+
 test('required collision catalog failure cannot become empty confirmed availability', async (t) => {
   const p = await setup(t, { search:'?view=approvalPending' }); await act(async () => p.finish(p.numbered()[0]));
   const catalog = p.requests.find((r) => r.table==='academic_events'); await act(async () => catalog.resolve({data:null,error:{code:'42501',message:'CATALOG DENIED'}}));
@@ -660,17 +746,76 @@ test('unmaterializable accepted request target is an explicit disabled state, ne
  assert.ok([...document.querySelectorAll('button')].filter(b=>b.textContent.trim()==='승인').every(b=>b.disabled));
 });
 
-test('draft time change aborts old context while room changes reuse complete all-room evidence',async(t)=>{
- const p=await setup(t,{search:'?view=approvalPending'});await act(async()=>p.finish(p.numbered()[0],0));await p.catalogs();
- await act(async()=>button('휴보강 신청').click());const rows=createCatalogRows({role:'admin'});
- await act(async()=>{for(const r of p.requests.filter(r=>r.table).slice(3))r.resolve({data:rows[r.table]||[],error:null});});
- const input={...createInput,cancelDate:'',makeupSlots:[{id:'draft',date:'2026-09-01',startTime:'09:00',endTime:'10:00',classroom:'A'}]};
- await act(async()=>p.observed.patch(()=>input));const old=p.context().at(-1);assert.equal(button('상신').disabled,true);
- await act(async()=>p.observed.patch(v=>({...v,makeupSlots:[{...v.makeupSlots[0],date:'2026-09-02'}]})));const current=p.context().at(-1);assert.notEqual(old,current);assert.equal(old.signal.aborted,true);
- await act(async()=>old.resolve({data:{reservations:[],activeEventRequestIds:[]},error:null}));assert.equal(button('상신').disabled,true);
- await act(async()=>current.resolve({data:{reservations:[{id:id(777),status:'completed',className:'다른 방',makeupStartAt:'2026-09-02T00:00:00Z',makeupEndAt:'2026-09-02T01:00:00Z',makeupClassroom:'B',makeupSlots:[]}],activeEventRequestIds:[]},error:null}));
- assert.equal(button('상신').disabled,false);const count=p.context().length;
- await act(async()=>p.observed.patch(v=>({...v,makeupSlots:[{...v.makeupSlots[0],classroom:'B'}]})));assert.equal(p.context().length,count);assert.equal(button('상신').disabled,true);
+test('draft time changes require fresh reservation results, including a return to a previously checked time', async t => {
+ const p = await setup(t, { search: '?view=approvalPending' });
+ await act(async () => p.finish(p.numbered()[0], 0));
+ await p.catalogs();
+ const beforeOpen = p.requests.length;
+ await act(async () => button('휴보강 신청').click());
+ const rows = createCatalogRows({ role: 'admin' });
+ await act(async () => {
+   for (const read of p.requests.slice(beforeOpen).filter(request => request.table)) {
+     read.resolve({ data: rows[read.table] || [], error: null });
+   }
+ });
+ const input = { ...createInput, cancelDate: '', makeupSlots: [{ id: 'draft', date: '2026-09-01', startTime: '09:00', endTime: '10:00', classroom: 'A' }] };
+ await act(async () => p.observed.patch(() => input));
+ const old = p.context().at(-1);
+ assert.equal(button('상신').disabled, true);
+ await act(async () => p.observed.patch(v => ({ ...v, makeupSlots: [{ ...v.makeupSlots[0], date: '2026-09-02' }] })));
+ const current = p.context().at(-1);
+ assert.notEqual(old, current);
+ assert.equal(old.signal.aborted, true);
+ const free = { data: { reservations: [], activeEventRequestIds: [] }, error: null };
+ await act(async () => old.resolve(free));
+ assert.equal(button('상신').disabled, true);
+ const roomBCollision = { data: { activeEventRequestIds: [], reservations: [{
+   id: id(777), status: 'completed', className: '다른 방', makeupStartAt: '2026-09-02T00:00:00Z',
+   makeupEndAt: '2026-09-02T01:00:00Z', makeupClassroom: 'B', makeupSlots: [],
+ }] }, error: null };
+ await act(async () => current.resolve(roomBCollision));
+ const dialog = document.querySelector('[role="dialog"]');
+ const submit = button('상신');
+ assert.equal(submit.disabled, false, 'room A was checked and free');
+ const changeEndTime = async (label) => {
+   const trigger = dialog.querySelector('button[aria-label^="보강일시 1 종료시각:"]');
+   await act(async () => trigger.click());
+   const list = document.querySelector('[role="listbox"][aria-label="보강일시 1 종료시각"]');
+   const option = [...list.querySelectorAll('[role="option"]')].find(node => node.textContent.trim() === label);
+   assert.ok(option, label);
+   const before = p.context().length;
+   await act(async () => option.click());
+   assert.equal(p.context().length, before + 1);
+   return p.context().at(-1);
+ };
+
+ const changed = await changeEndTime('오전 11:00');
+ assert.notDeepEqual(changed.args.p_slots, current.args.p_slots);
+ assert.equal(submit.disabled, true);
+ const revisited = await changeEndTime('오전 10:00');
+ assert.deepEqual(revisited.args.p_slots, current.args.p_slots);
+ assert.equal(submit.disabled, true, 'prior success at 10:00 cannot enable submission during its new check');
+ assert.match(document.body.textContent, /예약 충돌 정보 확인 중/);
+ assert.equal(changed.signal.aborted, true);
+ await act(async () => changed.resolve(free));
+ assert.equal(submit.disabled, true, 'obsolete successful read cannot enable submission');
+ await act(async () => revisited.reject(new Error('synthetic read failure')));
+ assert.equal(submit.disabled, true);
+ assert.match(document.body.textContent, /예약 충돌 정보를 불러오지 못했습니다/);
+ assert.equal(document.querySelector('[role="dialog"]'), dialog);
+ assert.equal(dialog.querySelector('#makeup-reason').value, input.reason);
+ assert.equal(p.observed.input.makeupSlots[0].classroom, 'A');
+
+ const recovery = await changeEndTime('오전 11:00');
+ assert.deepEqual(recovery.args.p_slots, changed.args.p_slots);
+ assert.equal(submit.disabled, true);
+ await act(async () => recovery.resolve(roomBCollision));
+ assert.equal(submit.disabled, false, 'current successful check confirms room A is free');
+ const count = p.context().length;
+ await act(async () => p.observed.patch(v => ({ ...v, makeupSlots: [{ ...v.makeupSlots[0], classroom: 'B' }] })));
+ assert.equal(p.context().length, count, 'the current check covers both rooms');
+ assert.equal(submit.disabled, true, 'room B is occupied');
+ assert.ok(p.requests.every(request => !request.name || /^(list|get)_/.test(request.name)), 'only read RPCs were requested');
 });
 
 test('actual refund mutation retains complete-purpose reads then refreshes and clamps accepted page',async(t)=>{
