@@ -2155,6 +2155,11 @@ test("mounted registration application accepts only its canonical observation bo
     )
     assert.equal(dialog.props.open, true)
     assert.deepEqual(dialog.props.target, { messageKind: "observation_booking", sourceId: observationId })
+    assert.deepEqual(dialog.props.caseSubjects, {
+      taskId,
+      target: { messageKind: "observation_booking", sourceId: observationId },
+      tracks: [{ id: trackId, taskId, subject: "영어" }],
+    }, "The observation dialog receives the saved case context separately from its booking target")
 
     editor.props.onOpenCustomerMessage({ messageKind: "observation_booking", sourceId: unknownObservationId })
     view = hookHarness.render(mounted.RegistrationApplication, props)
@@ -5668,4 +5673,117 @@ test("failed observation reads retry on selection and permission revocation reje
     assert.match(collectMountedRegistrationText(view).join(" "), /최근 적합 청강/)
     hookHarness.flushEffects()
   } finally { hookHarness.cleanup() }
+})
+
+async function mountRegistrationCaseSubjects(t) {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({ hookHarness, loadManagerDetail: async () => null, loadFeedback: async () => null })
+  const taskId = "7c300000-0000-4000-8000-000000000001"
+  const tracks = ["수학", "영어"].map((subject, index) => ({
+    id: `7c300000-0000-4000-8000-00000000000${index + 2}`, taskId, subject,
+    status: "inquiry", workflowStatus: "inquiry", workflowRevision: 1,
+    directorProfileId: "7c300000-0000-4000-8000-000000000009",
+    observationAttemptCount: 0, observationSummaryVisible: false, migrationReviewRequired: false, legacy: false, waitingKind: null,
+  }))
+  const task = { id: taskId, type: "registration", title: "합성 등록", studentName: "합성 학생", registration: null }
+  const appointments = ["level_test", "visit_consultation"].map((kind, index) => ({
+    id: `7c300000-0000-4000-8000-00000000000${index + 4}`, taskId, kind,
+    scheduledAt: "2026-11-02T09:00:00.000Z", status: "scheduled", notificationRevision: 1,
+    place: "합성 장소", createdAt: "2026-10-29T00:00:00.000Z", updatedAt: "2026-10-29T00:00:00.000Z",
+  }))
+  const calls = []
+  const props = {
+    task, detail: { task, commonRevision: 1, tracks, appointments, levelTests: [], consultations: [], enrollments: [], admissionBatches: [] },
+    focusTrackId: tracks[1].id, viewerId: "synthetic-manager", viewerRole: "staff", subjectCapabilities: [],
+    onFocusTrack: () => calls.push("focus"), onReload: async () => calls.push("reload"), onWarning: () => calls.push("warning"),
+    customerMessageClient: { preview: () => calls.push("preview"), send: () => calls.push("send") },
+    observationRuntime: { available: false, runtimeVersion: 0 }, closeAction: null,
+  }
+  const globals = new Map(["window", "document", "HTMLElement"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  globalThis.HTMLElement = class HTMLElement {}
+  globalThis.window = { matchMedia: () => ({ matches: true }), requestAnimationFrame: () => 1, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById: () => null }
+  t.after(() => {
+    hookHarness.cleanup()
+    for (const [key, descriptor] of globals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+    assert.deepEqual(calls, [], "Passing current case labels must not cause preview, send, reload, or subject navigation")
+  })
+  const render = next => { const view = hookHarness.render(mounted.RegistrationApplication, next); hookHarness.flushEffects(); return view }
+  const dialog = view => findMountedRegistrationElement(view, node => node.type === mounted.RegistrationAlimtalkPreviewDialog, "case message dialog")
+  const editor = view => {
+    const shell = findMountedRegistrationElement(view, node => node.type === mounted.RegistrationApplicationShell, "case application shell")
+    return findMountedRegistrationElement(shell.props.levelTest, node => node.type === mounted.RegistrationAppointmentEditor, "case booking entry")
+  }
+  return { props, tracks, appointments, render, dialog, editor }
+}
+
+test("mounted booking scope uses all saved case subjects across tabs and saved additions or removals", async t => {
+  const { props, tracks, appointments, render, dialog, editor } = await mountRegistrationCaseSubjects(t)
+  const target = { messageKind: "level_test_booking", sourceId: appointments[0].id }
+  let view = render(props)
+  editor(view).props.onOpenCustomerMessage(target)
+  view = render(props)
+  const expected = {
+    taskId: props.task.id, target,
+    tracks: [tracks[1], tracks[0]].map(({ id, taskId, subject }) => ({ id, taskId, subject })),
+  }
+  assert.equal(dialog(view).props.open, true)
+  assert.deepEqual(dialog(view).props.target, target)
+  assert.deepEqual(dialog(view).props.caseSubjects, expected, "Use the saved full case projection, not the selected subject or appointment source")
+
+  const switched = { ...props, focusTrackId: tracks[0].id }
+  view = render(switched)
+  assert.deepEqual(dialog(view).props.caseSubjects, expected, "Selecting the other subject must not narrow case scope")
+  assert.deepEqual(dialog(view).props.target, target)
+
+  const added = { ...tracks[0], id: "7c300000-0000-4000-8000-000000000006", subject: "과학" }
+  const withAdded = { ...switched, detail: { ...props.detail, tracks: [...tracks, added] } }
+  view = render(withAdded)
+  assert.deepEqual(dialog(view).props.caseSubjects, { ...expected, tracks: [...expected.tracks, { id: added.id, taskId: added.taskId, subject: added.subject }] })
+  const withRemoved = { ...withAdded, detail: { ...withAdded.detail, tracks: [tracks[0], added] } }
+  view = render(withRemoved)
+  assert.deepEqual(dialog(view).props.caseSubjects, { ...expected, tracks: [tracks[0], added].map(({ id, taskId, subject }) => ({ id, taskId, subject })) })
+  assert.deepEqual(dialog(view).props.target, target, "Changing saved case subjects must not replace the booking target")
+})
+
+test("mounted booking scope preserves target, role, and execution-window guards", async t => {
+  const { props, appointments, render, dialog, editor } = await mountRegistrationCaseSubjects(t)
+  const target = { messageKind: "visit_consultation_booking", sourceId: appointments[1].id }
+  let view = render(props)
+  editor(view).props.onOpenCustomerMessage(target)
+  view = render(props)
+  assert.equal(dialog(view).props.open, true)
+  assert.deepEqual(dialog(view).props.caseSubjects?.target, target)
+  assert.deepEqual(dialog(view).props.target, target)
+
+  for (const deniedRole of ["teacher", "assistant"]) {
+    view = render({ ...props, viewerRole: deniedRole })
+    assert.equal(dialog(view).props.open, false)
+    assert.equal(dialog(view).props.target, null)
+    assert.equal(editor(view).props.canOpenCustomerMessage, false)
+    assert.equal(editor(view).props.readOnly, true)
+  }
+  view = render({ ...props, detail: { ...props.detail, appointments: [] } })
+  assert.equal(dialog(view).props.open, false, "A removed booking cannot remain an active preview target")
+  assert.equal(dialog(view).props.target, null)
+
+  const otherTask = { ...props.task, id: "7c300000-0000-4000-8000-000000000010" }
+  view = render({ ...props, task: otherTask, detail: { ...props.detail, task: otherTask, appointments: [], tracks: props.detail.tracks.map(track => ({ ...track, taskId: otherTask.id })) } })
+  assert.equal(dialog(view).props.open, false, "An old booking must not acquire the next case's context")
+  assert.equal(dialog(view).props.target, null)
+
+  view = render({ ...props, detail: { ...props.detail, collectionWindows: {
+    scheduledAppointments: { loadedCount: 30, totalCount: 31, overflow: true },
+    currentEnrollments: { loadedCount: 0, totalCount: 0, overflow: false },
+  } } })
+  assert.equal(editor(view).props.canOpenCustomerMessage, false)
+  assert.equal(editor(view).props.readOnly, true)
+  view = render(props)
+  editor(view).props.onOpenCustomerMessage({ messageKind: "level_test_booking", sourceId: appointments[1].id })
+  view = render(props)
+  assert.equal(dialog(view).props.open, false, "Adding display context must not relax the appointment-kind check")
+  assert.equal(dialog(view).props.target, null)
 })
