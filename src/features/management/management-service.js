@@ -1769,6 +1769,11 @@ export function createManagementService(options = {}) {
       const operationalFields = ["status", "teacher", "teacherName", "teacher_name", "schedule", "room", "classroom"];
       if (operationalFields.some((key) => Object.hasOwn(record, key))) {
         const patch = stripPayloadFields(payload, ["id", "student_ids", "waitlist_ids"]);
+        if (options.preserveTextbooks) {
+          // A bulk status edit does not own textbook fields, even if the list row contains them.
+          delete patch.textbook_ids;
+          delete patch.textbook_usage;
+        }
         const body = JSON.stringify({ classId: payload.id, patch });
         const requestKey = options.requestKey || operationalRequestKeys.get(body) || generateId();
         operationalRequestKeys.set(body, requestKey);
