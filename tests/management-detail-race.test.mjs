@@ -34,7 +34,7 @@ function loadPage(fixture, navigation, componentOverrides = []) {
     ["./management-data-table", { ManagementDataTable: ({ actions, rows }) => createElement("div", null,
       createElement("button", { onClick: actions.onCreate }, "수업 등록"),
       actions.onBulkUpdateRows && createElement("button", { onClick: async () => {
-        const result = await actions.onBulkUpdateRows(rows, { field: "grade", value: "중2" });
+        const result = await actions.onBulkUpdateRows(rows, fixture.bulkChange ?? { field: "grade", value: "중2" });
         fixture.bulkResults?.push(result);
       } }, "검수 일괄 수정"),
       actions.onBulkDeleteRows && createElement("button", { onClick: () => actions.onBulkDeleteRows(rows) }, "검수 삭제 요청"),
@@ -1861,6 +1861,44 @@ test("bulk update owns the same mutation slot as detail save and can retry after
   await ui.click("검수 일괄 수정");
   assert.equal(ui.mutations.length, 2);
   await act(async () => ui.mutations[1].resolve({ id: "student-a" }));
+});
+
+test("bulk class status changes leave server textbook assignments and usage untouched", async t => {
+  const writes = [];
+  let updateClass;
+  const ui = await setup(t, { configureFixture: fixture => {
+    fixture.bulkChange = { field: "status", value: "개강 준비" };
+    fixture.bindProduction = load => {
+      const { createManagementService } = load(new URL("src/features/management/management-service.js", repo));
+      fixture.service.updateClass = updateClass = createManagementService({
+        supabase: withRpcQueryControls({ async rpc(name, args) {
+          if (name === "get_class_schedule_defaults_v1") {
+            return { data: { storageMode: args.p_class_id === fixture.rows[0].id ? "normalized" : "legacy" }, error: null };
+          }
+          assert.equal(name, "update_class_operational_v1");
+          writes.push(structuredClone(args.p_patch));
+          return { data: { classRow: { id: args.p_class_id } }, error: null };
+        } }),
+        probeRegistrationRuntime: async () => ({ mode: "ready" }),
+        refreshPublicClassesCache: async () => ({ status: "complete" }),
+      }).updateClass;
+    };
+    fixture.rows[0].raw.textbook_ids = ["40000000-0000-4000-8000-000000000001"];
+    fixture.rows[0].raw.textbook_usage = { "40000000-0000-4000-8000-000000000001": { startDate: "2026-11-01", endDate: "2026-11-30" } };
+  } });
+  await ui.click("검수 일괄 수정");
+  assert.equal(writes.length, 2);
+  for (const patch of writes) {
+    assert.equal(patch.status, "개강 준비");
+    assert.equal(Object.hasOwn(patch, "textbook_ids"), false);
+    assert.equal(Object.hasOwn(patch, "textbook_usage"), false);
+  }
+  await updateClass({
+    id: "class-a", name: "합성 수업", subject: "영어", status: "수강",
+    textbook_ids: [], textbook_usage: {},
+  }, { scheduleOwnership: "normalized" });
+  assert.deepEqual(writes[2].textbook_ids, []);
+  assert.deepEqual(writes[2].textbook_usage, {});
 });
 
 test("create submit rejects duplicate and competing mutations and releases its slot on failure", async t => {

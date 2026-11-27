@@ -100,7 +100,7 @@ type ManagementServiceClient = {
   updateStudent: (record: Record<string, unknown>) => Promise<unknown>;
   deleteStudent: (id: string) => Promise<unknown>;
   createClass: (record: Record<string, unknown>, options: { candidateMembershipContext?: ClassFormReferences; groupIds?: string[] }) => Promise<unknown>;
-  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized"; resolveScheduleOwnership?: boolean; confirmCloseResult?: { isCurrent: () => boolean; onChecking?: () => void } }) => Promise<unknown>;
+  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized"; resolveScheduleOwnership?: boolean; preserveTextbooks?: boolean; confirmCloseResult?: { isCurrent: () => boolean; onChecking?: () => void } }) => Promise<unknown>;
   deleteClass: (id: string) => Promise<unknown>;
   createTextbook: (record: Record<string, unknown>) => Promise<unknown>;
   updateTextbook: (record: Record<string, unknown>) => Promise<unknown>;
@@ -2644,7 +2644,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       const outcomes = await Promise.allSettled(rows.map(async (row) => {
         const payload = compact({ [change.field]: value }, kind, row);
         if (kind === "students") return service.updateStudent(payload);
-        if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences, resolveScheduleOwnership: true });
+        if (kind === "classes") return service.updateClass(payload, {
+          candidateMembershipContext: classFormReferences,
+          resolveScheduleOwnership: true,
+          preserveTextbooks: change.field === "status",
+        });
         return service.updateTextbook(payload);
       }));
       if (!isCurrent()) return false;
