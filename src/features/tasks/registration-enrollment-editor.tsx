@@ -1181,6 +1181,7 @@ export function RegistrationAdmissionPanel({
             type="button"
             variant="outline"
             size="form"
+            data-registration-message-entry="admission_application"
             onClick={() => onOpenCustomerMessage({ messageKind: "admission_application", sourceId: taskId })}
           >
             입학신청서 알림톡
