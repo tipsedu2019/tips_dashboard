@@ -13,6 +13,33 @@ function record(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+// Only explicitly zoned ISO instants in known date fields are display dates.
+// Preserve invalid/ambiguous values instead of guessing or rolling Feb 30 over.
+export function formatRegistrationHistoryDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) return value;
+  const [, year, month, day, hour, minute, second] = match.map(Number);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > monthDays[month - 1]
+    || hour > 23 || minute > 59 || second > 59) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : HISTORY_DATE_FORMATTER.format(parsed);
+}
+
+const SNAPSHOT_DATE_KEYS = new Set([
+  "scheduledAt", "oldScheduledAt", "startedAt", "completedAt", "invoiceSentAt", "paymentConfirmedAt",
+]);
+
 function uniqueSubjects(values) {
   return sortAcademicSubjects(values);
 }
@@ -334,7 +361,8 @@ function snapshotDescription(event) {
     }
   }
   for (const key of snapshotKeys) {
-    const value = displayValue(metadata[key]);
+    const raw = displayValue(metadata[key]);
+    const value = SNAPSHOT_DATE_KEYS.has(key) ? formatRegistrationHistoryDate(raw) : raw;
     if (value) parts.push(`${SNAPSHOT_LABELS[key]}: ${value}`);
   }
   for (const row of list(metadata.rows).map(record)) {
@@ -808,7 +836,7 @@ export function buildRegistrationSubjectHistory(detail = {}) {
       occurredAt: null,
       subjects: subjectsForAppointment(text(appointment.id)),
       title: appointment.kind === "visit_consultation" ? "방문상담 예약" : "레벨테스트 예약",
-      description: [text(appointment.scheduledAt), text(appointment.place), displayValue(appointment.status)].filter(Boolean).join(" · "),
+      description: [formatRegistrationHistoryDate(text(appointment.scheduledAt)), text(appointment.place), displayValue(appointment.status)].filter(Boolean).join(" · "),
       metadata: {
         appointmentId: appointment.id,
         scheduledAt: appointment.scheduledAt,
